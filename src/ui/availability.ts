@@ -157,10 +157,24 @@ export function useAvailability() {
           if (upErr || !up) { setStatus('error'); return; }
           const synced: AvailSlot[] = up.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur })).sort(byTime);
           setSlots(synced);
+          // Counted off what came BACK, for the same reason the rows are: these
+          // were just written with deviceZone(), which is null on a handset
+          // that cannot name its zone, and assuming zero here would claim a
+          // week is generating when it is not.
+          setZoneless(up.filter((r: any) => r.tz == null).length);
           try { AsyncStorage.setItem(KEY, JSON.stringify(synced)); } catch { /* the slots are correct this session either way */ }
           setStatus('ready');
         } else {
           // Server confirmed: this coach genuinely has no availability set.
+          //
+          // Zero, not null. `zoneless` starts null meaning "not counted", and
+          // leaving it there on a read that SUCCEEDED and returned nothing made
+          // zoneState() answer 'unknown' — so a brand new coach opening the
+          // sheet was told their weekly hours "could not be read in full",
+          // over a read that was perfectly fine. An empty week reported as an
+          // unread one is precisely the confusion slotGeneration.ts exists to
+          // refuse, committed by the module that imports it.
+          setZoneless(0);
           setStatus('ready');
         }
       } catch { if (!cancelled) setStatus('error'); /* offline: local copy stands, and now says so */ }

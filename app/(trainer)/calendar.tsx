@@ -520,6 +520,10 @@ export default function TrainerSchedule() {
   const [avDays, setAvDays] = useState<number[]>([1]);
   const [avFrom, setAvFrom] = useState(7);
   const [avTo, setAvTo] = useState(19);
+  // Quarter-hour precision on both ends. Whole hours alone cannot express
+  // 06:30–19:30, which is an ordinary gym day and was simply unreachable.
+  const [avFromMin, setAvFromMin] = useState(0);
+  const [avToMin, setAvToMin] = useState(0);
   const [avDur, setAvDur] = useState(60);
   const [avBusy, setAvBusy] = useState(false);
   /* ── Standing appointments ────────────────────────────────────────────────
@@ -714,9 +718,17 @@ export default function TrainerSchedule() {
   };
 
   // ── the stretch, and what it would do ─────────────────────────────────────
-  const rangeInput: RangeInput = { days: avDays, fromMin: avFrom * 60, toMin: avTo * 60, durationMin: avDur };
-  const rangeRefusal = rangeBlocker(rangeInput);
-  const rangeSlots = rangeRefusal ? [] : expandRange(rangeInput);
+  const rangeInput: RangeInput = {
+    days: avDays,
+    fromMin: avFrom * 60 + avFromMin,
+    toMin: avTo * 60 + avToMin,
+    durationMin: avDur,
+  };
+  // What the coach already holds, so the ceiling is on the WEEK rather than
+  // on one gesture. Zero under an unread week: claiming they are near a limit
+  // on the strength of a list we could not read is the wrong way to be wrong.
+  const rangeRefusal = rangeBlocker(rangeInput, availKnown ? availSlots.length : 0);
+  const rangeSlots = rangeRefusal ? [] : expandRange(rangeInput, availKnown ? availSlots.length : 0);
   // Split against the week the coach already has, so re-entering a morning they
   // already offer is counted and skipped rather than refused row by row by the
   // unique index. Under an unread week `availSlots` is empty for want of a read,
@@ -2510,17 +2522,27 @@ export default function TrainerSchedule() {
               </ScrollView>
 
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
                 {HOURS.map((h) => (
                   <Chip key={'af' + h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={avFrom === h}
                     onPress={() => { setAvFrom(h); if (avTo <= h) setAvTo(Math.min(24, h + 1)); }} />
                 ))}
               </ScrollView>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {[0, 15, 30, 45].map((m) => (
+                  <Chip key={'afm' + m} t={t} label={`:${String(m).padStart(2, '0')}`} on={avFromMin === m} onPress={() => setAvFromMin(m)} />
+                ))}
+              </ScrollView>
 
               <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Until</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
-                {HOURS.filter((h) => h > avFrom).concat([24]).map((h) => (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
+                {HOURS.filter((h) => h >= avFrom).concat([24]).map((h) => (
                   <Chip key={'at' + h} t={t} label={hourLabel(h)} on={avTo === h} onPress={() => setAvTo(h)} />
+                ))}
+              </ScrollView>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {[0, 15, 30, 45].map((m) => (
+                  <Chip key={'atm' + m} t={t} label={`:${String(m).padStart(2, '0')}`} on={avToMin === m} onPress={() => setAvToMin(m)} />
                 ))}
               </ScrollView>
 
@@ -2547,9 +2569,18 @@ export default function TrainerSchedule() {
                 <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{rangeLeftover}</Text>
               ) : null}
 
-              <Ghost
+              {/* A Cta and not a Ghost, and this is a correction rather than a
+                  preference. The sheet has two actions — save this stretch,
+                  then open the next four weeks from it — and the SECOND was
+                  the big primary button at the bottom while the first was a
+                  low-contrast Ghost in the middle of a scroll view. So the
+                  obvious thing to press after filling the form in was the one
+                  that refuses with "No availability set. Add at least one
+                  weekly slot first", which is a true sentence and a useless
+                  one when the times are typed in directly above it. */}
+              <Cta
                 label={avBusy ? 'Adding…' : rangeRefusal ? 'Check the times above' : addButtonLabel(rangeSplit.fresh.length, rangeSplit.duplicates)}
-                icon="plus"
+                wide
                 onPress={() => { void addRange(); }}
               />
             </>) : (<>
@@ -2575,7 +2606,22 @@ export default function TrainerSchedule() {
             </>)}
           </ScrollView>
           <View style={{ height: sp.lg }} />
-          <Cta label="Generate Open Slots · Next 4 Weeks" wide onPress={generateSlots} />
+          {/* Step two, and it looks like step two now. A coach with no weekly
+              hours cannot generate anything — `generateSlots` refuses on
+              exactly that — so offering it as the loudest control on the sheet
+              was inviting the press that fails. Under that state it drops to a
+              Ghost and says what has to happen first, which is the sentence
+              the alert used to deliver after the fact. */}
+          {availKnown && availSlots.length === 0 ? (
+            <>
+              <Ghost label="Generate Open Slots · Next 4 Weeks" onPress={generateSlots} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, textAlign: 'center' }}>
+                Add your hours above first — there is nothing to open yet.
+              </Text>
+            </>
+          ) : (
+            <Cta label="Generate Open Slots · Next 4 Weeks" wide onPress={generateSlots} />
+          )}
           <View style={{ height: sp.sm }} />
           <Ghost label="Done" onPress={() => setAvailOpen(false)} />
         </View>

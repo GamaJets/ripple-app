@@ -3,7 +3,7 @@
 import {
   rangeSlotCount, rangeBlocker, expandRange, remainderNote,
   splitAgainstExisting, addButtonLabel, rangeSummary, addOutcome,
-  MAX_RANGE_SLOTS, MAX_DURATION_MIN, type RangeInput,
+  MAX_WEEK_SLOTS, LARGEST_POSSIBLE_WEEK, MAX_DURATION_MIN, type RangeInput,
 } from './availabilityRange';
 
 const errors: string[] = [];
@@ -86,16 +86,90 @@ ok(rangeBlocker({ ...base, durationMin: MAX_DURATION_MIN + 1 })!.includes('end t
 ok(rangeBlocker({ ...base, toMin: H(24) + 1 })!.includes('inside one day'), 'past midnight is refused');
 ok(rangeBlocker({ ...base, gapMin: -5 })!.includes('cannot be negative'), 'a negative gap is refused');
 
-// The cap. Seven days of 07:00–19:00 in quarters is 336, which is past it.
+// The cap, which an earlier version of this file got wrong in the direction
+// that matters: it refused seven days of 07:00-19:00 in quarter-hours, which is
+// 336 slots and an entirely ordinary thing for a busy coach to offer.
 {
   const huge: RangeInput = { days: [0, 1, 2, 3, 4, 5, 6], fromMin: H(7), toMin: H(19), durationMin: 15 };
-  eq(rangeSlotCount(huge), 336, 'a full week of quarters is 336 slots');
-  const b = rangeBlocker(huge)!;
-  ok(b.includes('336'), 'the refusal says how many it would have been');
-  ok(b.includes(String(MAX_RANGE_SLOTS)), 'and what the limit is');
-  // The same week at half-hours is 168 and is allowed — the cap is about the
-  // read cap on the table, not a judgement about working hours.
-  eq(rangeBlocker({ ...huge, durationMin: 30 }), null, 'the same week at 30 minutes is fine');
+  eq(rangeSlotCount(huge), 336, 'a full week of 07:00-19:00 quarters is 336 slots');
+  eq(rangeBlocker(huge), null, 'and it is ALLOWED — this is a real week, not an abuse');
+  eq(expandRange(huge).length, 336, 'and all 336 come out');
+
+  // The true physical maximum, and the invariant that keeps the cap honest: if
+  // anybody ever lowers MAX_WEEK_SLOTS below what a week can hold, this goes red
+  // rather than a coach discovering it.
+  eq(LARGEST_POSSIBLE_WEEK, 672, 'seven days of 24h in quarters is 672 slots');
+  ok(LARGEST_POSSIBLE_WEEK < MAX_WEEK_SLOTS,
+    'the largest week that can exist fits under the cap, so no legal combination is ever refused');
+  const everything: RangeInput = { days: [0, 1, 2, 3, 4, 5, 6], fromMin: 0, toMin: H(24), durationMin: 15 };
+  eq(rangeSlotCount(everything), LARGEST_POSSIBLE_WEEK, 'and the widest possible range produces exactly that');
+  eq(rangeBlocker(everything), null, 'which is still allowed');
+
+  // The cap is on the WEEK, not on one gesture, so it counts what is held.
+  ok(rangeBlocker(huge, 900)!.includes('1236'), 'a range on top of a nearly-full week names the total it would reach');
+}
+
+/* ── every combination a person can actually pick ───────────────────────────
+ *
+ * The bar is "any and every possible combination", so this sweeps the whole
+ * control surface rather than sampling it: every day-set size, every quarter-
+ * hour start, every quarter-hour end after it, and every session length the
+ * sheet offers. Nothing in here may throw, and nothing that is a legal pick may
+ * be refused for a reason other than not fitting one session.
+ */
+{
+  const DURS = [15, 30, 45, 60, 90];
+  const QUARTERS: number[] = [];
+  for (let m = 0; m <= 24 * 60; m += 15) QUARTERS.push(m);
+
+  let checked = 0;
+  let refusedForFit = 0;
+  const unexpected: string[] = [];
+
+  for (const dayCount of [1, 3, 7]) {
+    const days = [0, 1, 2, 3, 4, 5, 6].slice(0, dayCount);
+    for (const from of QUARTERS) {
+      for (const to of QUARTERS) {
+        if (to <= from) continue;
+        for (const dur of DURS) {
+          checked++;
+          const r: RangeInput = { days, fromMin: from, toMin: to, durationMin: dur };
+          let b: string | null;
+          try { b = rangeBlocker(r); } catch (e) { unexpected.push(`threw on ${HHMM_(from)}-${HHMM_(to)}/${dur}: ${String(e)}`); continue; }
+          if (b === null) {
+            // A permitted range must produce at least one slot, every slot must
+            // end inside the window, and the count must agree with the list.
+            const slots = expandRange(r);
+            if (slots.length === 0) { unexpected.push(`allowed but produced nothing: ${HHMM_(from)}-${HHMM_(to)}/${dur} x${dayCount}`); continue; }
+            if (slots.length !== rangeSlotCount(r)) { unexpected.push(`count disagreed with list: ${HHMM_(from)}-${HHMM_(to)}/${dur}`); continue; }
+            for (const sl of slots) {
+              const start = sl.hour * 60 + sl.minute;
+              if (start < from || start + dur > to) {
+                unexpected.push(`slot outside the window: ${HHMM_(from)}-${HHMM_(to)}/${dur} produced ${HHMM_(start)}`);
+                break;
+              }
+            }
+          } else if (/not long enough for one/.test(b)) {
+            // The only legitimate refusal in this sweep: the window is shorter
+            // than one session. Everything else would be a bug.
+            refusedForFit++;
+            if (to - from >= dur) unexpected.push(`refused for fit but ${to - from} >= ${dur}: ${HHMM_(from)}-${HHMM_(to)}`);
+          } else {
+            unexpected.push(`refused for an unexpected reason (${HHMM_(from)}-${HHMM_(to)}/${dur} x${dayCount}): ${b}`);
+          }
+        }
+      }
+    }
+  }
+
+  ok(checked > 60_000, `the sweep is exhaustive — checked ${checked} combinations`);
+  ok(refusedForFit > 0, 'and some windows really are too short for one session');
+  eq(unexpected.slice(0, 3).join(' | '), '',
+    `every day/time/length combination behaves — ${unexpected.length} did not`);
+}
+
+function HHMM_(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 }
 
 /* ── re-entering times you already offer ────────────────────────────────── */

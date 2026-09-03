@@ -59,22 +59,31 @@ export interface RangeInput {
 }
 
 /**
- * The most slots one range may create.
+ * The most availability rows a coach may hold in total.
  *
- * Not arbitrary. `trainer_availability` is read under `capLimit()` with the
- * comment that a weekly grid is "seven days by twenty-four hours … 168 slots at
- * the absolute most" — which was true when a slot was an hour and is not true
- * at fifteen minutes: seven days of 07:00–23:00 in quarters is 448. The read is
- * capped, so a coach who blows past it gets a `partial` week and a screen that
- * correctly refuses to call it whole.
+ * This is `ROW_CAP` from src/lib/rowCap.ts, restated as a number rather than
+ * imported so this module stays free of the read layer — and it is the only
+ * ceiling that is real. `trainer_availability` is read under that cap, so a
+ * week past it comes back `partial` and the screen correctly refuses to call
+ * it whole.
  *
- * 300 is chosen to sit under that comfortably while being far more than any
- * real week: 07:00–19:00 every day at fifteen minutes is 336, which this
- * refuses, and at thirty minutes is 168, which it allows. A coach genuinely
- * offering three hundred quarter-hours a week is describing a diary no person
- * keeps, and is better told so than silently given a truncated one.
+ * The first version of this file capped ONE RANGE at 300, reasoning from a
+ * comment that called 168 slots "the absolute most". That was wrong in the
+ * direction that matters: seven days of 07:00-19:00 in quarter-hours is 336,
+ * which is an entirely ordinary thing for a busy coach to offer, and it was
+ * refused outright.
+ *
+ * The largest week that can physically exist is seven days of twenty-four
+ * hours in quarter-hours: 672. That is comfortably under 1000, so NO legal
+ * combination of days, times and lengths can breach this. It is kept as a
+ * backstop against a caller passing nonsense, not as a limit anybody meets.
  */
-export const MAX_RANGE_SLOTS = 300;
+export const MAX_WEEK_SLOTS = 1000;
+
+/** The largest week that can exist: 7 days x 24h in quarter-hours. Asserted in
+ *  the tests as being under MAX_WEEK_SLOTS, so the cap can never start
+ *  refusing a real week without a test going red. */
+export const LARGEST_POSSIBLE_WEEK = 7 * 24 * 4;
 
 /** The longest a single session may be. Beyond this the coach has almost
  *  certainly typed the end time into the duration box. */
@@ -112,7 +121,7 @@ export function rangeSlotCount(r: RangeInput): number {
  * Every one of these is a refusal a coach can act on, and each names the number
  * that is wrong rather than saying "invalid".
  */
-export function rangeBlocker(r: RangeInput): string | null {
+export function rangeBlocker(r: RangeInput, alreadyHeld = 0): string | null {
   const days = new Set(r.days);
   if (days.size === 0) return 'Pick at least one day.';
   for (const d of days) {
@@ -138,9 +147,13 @@ export function rangeBlocker(r: RangeInput): string | null {
   }
   const n = rangeSlotCount(r);
   if (n === 0) return 'That range produces no slots.';
-  if (n > MAX_RANGE_SLOTS) {
-    return `That would add ${n} slots at once, which is more than this will do in one go (${MAX_RANGE_SLOTS}). `
-      + 'Add fewer days at a time, or make the sessions longer.';
+  // Counted against what the coach ALREADY holds, because the ceiling is on the
+  // week and not on one gesture. Unreachable for any real week — see the note
+  // on MAX_WEEK_SLOTS — and kept so a caller passing nonsense is refused with a
+  // sentence rather than silently writing a week nothing can read whole.
+  if (alreadyHeld + n > MAX_WEEK_SLOTS) {
+    return `That would take your weekly hours to ${alreadyHeld + n} slots, and Repple cannot read a week longer than ${MAX_WEEK_SLOTS} in one go. `
+      + 'Make the sessions longer, or remove some hours you no longer offer.';
   }
   return null;
 }
@@ -151,8 +164,8 @@ export function rangeBlocker(r: RangeInput): string | null {
  * Returns an empty array for anything `rangeBlocker` refuses, so a caller that
  * forgets to check gets nothing rather than something wrong.
  */
-export function expandRange(r: RangeInput): RangeSlot[] {
-  if (rangeBlocker(r)) return [];
+export function expandRange(r: RangeInput, alreadyHeld = 0): RangeSlot[] {
+  if (rangeBlocker(r, alreadyHeld)) return [];
   const step = r.durationMin + Math.max(0, r.gapMin ?? 0);
   const out: RangeSlot[] = [];
   for (const dow of [...new Set(r.days)].sort((a, b) => a - b)) {
