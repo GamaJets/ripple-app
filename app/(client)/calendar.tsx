@@ -104,7 +104,7 @@ import { fetchPlannedDays, savePlannedDay, clearPlannedDay, PLAN_NOTE_MAX } from
 import { keptOnPhoneNote, planExpiry } from '../../src/lib/recordQueue';
 import { useOutbox } from '../../src/ui/outbox';
 import { useToast } from '../../src/ui/toast';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import type { IconName } from '../../src/ui/Icon';
 // `refundSession` and `reofferSlot` moved with the cancellation into
 // `cancelBookedSession` (src/ui/sessions.tsx), so that My Bookings runs the same
@@ -114,6 +114,7 @@ import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPush, sendPushChecked } from '../../src/ui/pushNotifications';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { useThreadPeerName } from '../../src/ui/messaging';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -209,7 +210,7 @@ export default function Calendar() {
   // `policyStatus === 'error'` is NOT "no fee": the warning below says the
   // policy could not be read, which is a different sentence and a different
   // thing to do about it.
-  const { policy: cancelPolicy, status: policyStatus } = useCancellationPolicy();
+  const { policy: cancelPolicy, status: policyStatus, reload: reloadPolicy } = useCancellationPolicy();
   // Slots of this coach that somebody ELSE holds. They are invisible to the
   // sessions store by design (RLS shows a client their own sessions and their
   // coach's open ones), so waiting for one was not previously expressible.
@@ -228,7 +229,7 @@ export default function Calendar() {
   // ways out of it, live on app/(client)/standing.tsx, because "cancel this one"
   // and "stop this repeating" are different acts with different prices and a
   // row on a calendar has nowhere to say so.
-  const { series: standingSeries, status: standingStatus } = useRecurringSeries();
+  const { series: standingSeries, status: standingStatus, reload: reloadStanding } = useRecurringSeries();
   const standingCount = standingSeries.filter((s) => s.active).length;
   // Same rule this screen already applies to the workout log and to planned
   // days (`logKnown`, `planStatus`), applied at last to the sessions themselves.
@@ -267,13 +268,6 @@ export default function Calendar() {
   // logged training looked empty here while Activity listed all of it. Same log,
   // same day, same words — see `logDetail` above.
   const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
-  // This screen tells the member to pull down in two places — "pull down to
-  // refresh and pick another time" when a slot is taken from under them, and
-  // "nothing has been cancelled — pull down to refresh" when the sessions read
-  // fails — and until now pulling down did nothing at all. Every read those two
-  // sentences are about is refreshed here: the diary, the waiting lists, the
-  // late-cancellation charges and the training log.
-  const pull = usePullToRefresh(useCallback(() => { refresh(); reloadWait(); reloadFees(); reloadLog(); }, [refresh, reloadWait, reloadFees, reloadLog]));
   // Deliberately NOT read from useCoachProfile(). That provider loads the
   // SIGNED-IN user's own `trainers` row, and a client has no row in `trainers`
   // — so on this app it never loads, and `sessionFee` sits at its initial 0
@@ -335,6 +329,15 @@ export default function Calendar() {
   // trained. Every "0 workouts" defect this app has shipped came from treating
   // those two answers as the same one — see src/ui/loadStatus.ts.
   const logKnown = logStatus !== 'error';
+  // And the stronger gate, for the two places that make a CLAIM about a day
+  // rather than explaining a failure. `logKnown` above answers "should the
+  // 'we couldn't read your log' notice be up", which is an error question and
+  // is right as it stands. It is not the right gate for "there is nothing on
+  // this day" or "you did not train on the day you planned to": under
+  // 'loading' the log is empty because it has not arrived, and under 'partial'
+  // a session on this very day may be one of the rows past the cap. Both were
+  // being read as an empty day. See src/ui/loadStatus.ts.
+  const logWhole = isWhole(logStatus);
   const logByDay = new Map<string, WorkoutEntry[]>();
   for (const e of log) { const k = dayKey(e.t); (logByDay.get(k) ?? logByDay.set(k, []).get(k)!).push(e); }
 
@@ -397,7 +400,7 @@ export default function Calendar() {
   const selPlan = plansByCell.get(selKey) ?? null;
   const dayNote = [
     selDaySessions.length ? `${selDaySessions.length} slot${selDaySessions.length === 1 ? '' : 's'}` : null,
-    logKnown && selDayLog.length ? `${selDayLog.length} logged` : null,
+    logWhole && selDayLog.length ? `${selDayLog.length} logged` : null,
     // Named as planned rather than counted with the rest. "3" covering a slot,
     // a workout and an intention would be the header itself blurring the line
     // the whole feature is about.
@@ -411,6 +414,21 @@ export default function Calendar() {
   // rather than the generic auto program, because a conflict raised against a
   // plan their coach never wrote is worse than no conflict at all.
   const assigned = useAssignedPrograms();
+  // This screen tells the member to pull down in two places — "pull down to
+  // refresh and pick another time" when a slot is taken from under them, and
+  // "nothing has been cancelled — pull down to refresh" when the sessions read
+  // fails.
+  //
+  // The gesture existed and asked for four of the seven reads: the diary, the
+  // waiting lists, the late-cancellation charges and the training log. The
+  // cancellation policy every fee on this screen is quoted from, the standing
+  // series the month grid marks, and the assigned plan the day panel shows were
+  // all outside it — so pulling brought back the slots and left the plan, the
+  // standing bookings and the notice period exactly where they were.
+  const pull = usePullToRefresh(useCallback(() => {
+    void refresh(); reloadWait(); reloadFees(); reloadLog();
+    reloadPolicy(); void reloadStanding(); assigned.reload();
+  }, [refresh, reloadWait, reloadFees, reloadLog, reloadPolicy, reloadStanding, assigned]));
   const solo = cd.coachingMode === 'solo';
   const coachProgram = assigned.getProgram(cd.id);
   const planUnknown = !solo && assigned.status === 'error' && coachProgram == null;
@@ -426,7 +444,11 @@ export default function Calendar() {
   const selScheduled = program && selWeekday != null ? scheduledFocus(blk.days, selWeekday) : undefined;
   const selConflict = planConflict(selPlan?.type ?? null, selScheduled);
   const coming = upcomingPlans(plans, todayISO);
-  const selOutcome = selPlan ? planOutcome(selPlan.type, selISO, todayISO, logKnown ? selDayLog.length > 0 : null) : null;
+  // `logWhole`, not `logKnown`: null is "we cannot say whether they trained",
+  // and `false` is the app telling somebody they did not do the thing they
+  // planned. On a log still loading, or one truncated past the row cap, the
+  // second of those is a sentence we have no standing to write.
+  const selOutcome = selPlan ? planOutcome(selPlan.type, selISO, todayISO, logWhole ? selDayLog.length > 0 : null) : null;
 
   function shiftMonth(delta: number) {
     let m = viewMonth + delta, y = viewYear;
@@ -772,6 +794,33 @@ export default function Calendar() {
               We couldn’t read your coach’s cancellation policy, so we can’t tell you whether cancelling would cost you anything. Cancelling still works — check with your coach what their notice period and fee are.
             </Flag>
           ) : null}
+          {/* ── the hour the coach never opened ──────────────────────────
+              Everything above this line is the coach's published slots, and
+              until now that was the whole of what a client could do here: if
+              the hour they wanted was not on the grid, there was nothing to
+              tap. The product owner's report was exactly that — "not able to
+              book a session or send a request for a booking".
+
+              Offered whatever the read said, and deliberately so. The one
+              member who most needs this is the one looking at "No open slots
+              yet", and that sentence is drawn from a count that may not have
+              come back at all; hiding the way out behind `open.length === 0`
+              would put it behind a figure this screen sometimes cannot read.
+              The note beside it changes with what is known, the button does
+              not.
+
+              It is NOT a second way to book. `book(s)` above is the only path
+              that takes a slot, draws a credit and confirms anything; this asks
+              a question that holds nothing — see src/lib/sessionRequests.ts. */}
+          <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+            <Ghost label="Ask for a Time" icon="calendar" onPress={() => router.push('/(client)/request-session')} />
+          </View>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {sessionsCountable && open.length > 0
+              ? 'None of these suit? Ask your coach for a different time. Asking doesn’t book anything.'
+              : 'Ask your coach for a time that isn’t here yet. Asking doesn’t book anything — they have to say yes.'}
+          </Text>
+
           {mine.length > 0 ? (
             <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
               <Ghost label="Add to Calendar" icon="calendar"
@@ -829,11 +878,11 @@ export default function Calendar() {
         <Section>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.lg }}>
             <Pressable onPress={() => shiftMonth(-1)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Previous month" style={{ padding: 4 }}>
-              <Icon name="back" size={18} color={t.ink2} />
+              <Icon name={BACK_ICON} size={18} color={t.ink2} />
             </Pressable>
             <Text style={{ ...ty.head, color: t.ink }}>{MON[viewMonth]} {viewYear}</Text>
             <Pressable onPress={() => shiftMonth(1)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Next month" style={{ padding: 4 }}>
-              <Icon name="chevron" size={18} color={t.ink2} />
+              <Icon name={FORWARD_ICON} size={18} color={t.ink2} />
             </Pressable>
           </View>
           <View style={{ flexDirection: 'row', marginBottom: sp.sm }}>
@@ -877,7 +926,7 @@ export default function Calendar() {
                         at seven marks is already at the width a 7-column grid
                         leaves on the narrowest phone. */}
                     {dayPlan ? (
-                      <View style={{ position: 'absolute', top: 3, right: 5, width: 8, height: 8, borderRadius: 4, borderWidth: hairline * 3, borderColor: PLAN_RING, backgroundColor: 'transparent' }} />
+                      <View style={{ position: 'absolute', top: 3, end: 5, width: 8, height: 8, borderRadius: 4, borderWidth: hairline * 3, borderColor: PLAN_RING, backgroundColor: 'transparent' }} />
                     ) : null}
                     <View style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: isSel ? t.brand : 'transparent', borderWidth: isToday && !isSel ? hairline : 0, borderColor: t.brand }}>
                       <Text style={{ ...value(14), color: isSel ? t.brandInk : isToday ? t.ink : t.ink2 }}>{d}</Text>
@@ -1016,11 +1065,42 @@ export default function Calendar() {
               day" was being said over a day that may hold the member's booked
               session — and this sentence goes on to explain the grey dot for
               slots that are not being drawn either. The warning in Availability
-              above is what stands in its place. */}
-          {logKnown && sessionsKnown && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
+              above is what stands in its place.
+
+              Both gates were `!== 'error'`, and that is the same defect one
+              status further along. On the FIRST FRAME neither read has landed,
+              so a member opening this screen on the morning of their session
+              was told the day was empty before the app had asked — and a
+              member who reads that does not conclude the network is slow, they
+              conclude they were never booked in, and they do not turn up. The
+              loading line below stands in its place; `isWhole` also excludes
+              'partial', where the session or the workout on this day may be
+              one of the rows that did not come back. */}
+          {logWhole && sessionsCountable && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Icon name="calendar" size={24} color={t.ink3} />
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Nothing on this day. Days with a grey dot have open slots you can book; a coloured dot is a workout you logged, and a hollow ring is a day you planned.</Text>
+            </View>
+          ) : null}
+
+          {/* What stands where "Nothing on this day" used to stand too early.
+              A day that looks empty because the reads have not landed says so,
+              rather than either asserting emptiness or leaving a heading over
+              nothing at all. Only when there is genuinely nothing to draw yet:
+              a day with a session on it needs no line about the reading. */}
+          {!(logWhole && sessionsCountable) && logStatus !== 'error' && sessionsStatus !== 'error'
+            && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
+            <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
+              <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center' }}>
+                {logStatus === 'loading' || sessionsStatus === 'loading'
+                  ? 'Reading this day…'
+                  // Named as the one that was actually cut short, not as both.
+                  // Telling a member their calendar is truncated when it is
+                  // their training log points them at the wrong read.
+                  : sessionsStatus === 'partial'
+                    ? 'There is more in your calendar than we can read in one go, so this day can’t be called empty. Anything booked on it is still booked.'
+                    : 'You have more training logged than we can read in one go, so this day can’t be called empty. Nothing is missing from your log.'}
+              </Text>
             </View>
           ) : null}
 
@@ -1185,7 +1265,7 @@ export default function Calendar() {
                     <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{planDayLabel(p.dateISO)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{DAY_TYPE_LABEL[p.type]}{p.note ? ` · ${p.note}` : ''}</Text>
                   </View>
-                  <Icon name="chevron" size={16} color={t.ink3} />
+                  <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                 </Pressable>
               </View>
             ))
@@ -1263,7 +1343,7 @@ export default function Calendar() {
                     explanation beside it is the thing this fix exists to avoid. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{coachNote ?? 'Tap to see their profile'}</Text>
               </View>
-              <Icon name="chevron" size={16} color={t.ink3} />
+              <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
             </View>
           </Card>
 

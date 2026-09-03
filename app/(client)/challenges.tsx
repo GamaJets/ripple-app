@@ -303,7 +303,7 @@ export default function Challenges() {
                     </Text>
                     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                       <Text style={{ ...value(15), color: t.ink }}>{scoreText(sheet.metric, r.score)}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 3 }}>{sheet.unit}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginStart: 3 }}>{sheet.unit}</Text>
                     </View>
                   </View>
                 </View>

@@ -26,11 +26,15 @@ import {
   OVERRIDE_PREFIX, RESCAN_MINUTES, OPEN_VISIT_HOURS,
   readPending, addPending, dropPending, partitionPending, pendingNote, pendingKey,
   PENDING_CAP, PENDING_HOURS,
-  type Visit, type AdmissionMembership, type PendingCheckIn,
+  type Visit, type AdmissionMembership, type PendingDoorWrite,
 } from './gymVisits';
 import { rotaCost, shiftBlocker, type Shift } from './gymRota';
 import { buildSegments, reachBlocker, willTruncateInbox, deliveryNote, segmentCsv, LAPSING_DAYS, UNSEEN_DAYS, type SegmentMember } from './gymReach';
 import { parseTags, tagsText, isReachable, contactLine, isEmptyPatch, type GymMemberRecord } from './gymMembers';
+import { passBlocker, spendable, type GymPass } from './gymPasses';
+import { buildRollCall, emergencyLine, escapeHtml, rollCallHtml } from './rollCall';
+import { noteBlocker, newestFirst, withLegacy, noteAttribution, MAX_NOTE, type MemberNote } from './memberNotes';
+import { loggingNote } from './gymBroadcastLog';
 import { inviteMessage, inviteSubject, inviteMailto, bulkInviteMailto } from './memberInvites';
 
 const errors: string[] = [];
@@ -512,9 +516,10 @@ const mem = (id: string, status: string, lastSeenDays: number | null): SegmentMe
 // record the gym's attendance, fill rate and retention are all built on.
 {
   const NOW = Date.parse('2026-06-15T09:00:00Z');
-  const q = (over: Partial<PendingCheckIn>): PendingCheckIn => ({
-    id: 'q1', tenantId: 't1', memberId: 'm1', memberName: 'Sara', passId: null, classId: null,
-    enteredAtIso: '2026-06-15T08:55:00Z', queuedAt: NOW, tries: 1, refusedWhy: null, ...over,
+  const q = (over: Partial<PendingDoorWrite>): PendingDoorWrite => ({
+    id: 'q1', tenantId: 't1', kind: 'in', memberId: 'm1', memberName: 'Sara',
+    passId: null, classId: null, visitId: null,
+    atIso: '2026-06-15T08:55:00Z', queuedAt: NOW, tries: 1, refusedWhy: null, ...over,
   });
 
   ok(pendingKey('t1') !== pendingKey('t2'),
@@ -526,22 +531,22 @@ const mem = (id: string, status: string, lastSeenDays: number | null): SegmentMe
   ok(!readPending('{oh dear').read,
     'a store that will not parse is UNREAD — a desk told the queue is empty stops looking');
   eq(readPending('{oh dear').items.length, 0, 'and hands back nothing rather than guessing');
-  eq(readPending(JSON.stringify([{ id: 'x', tenantId: 't1', enteredAtIso: 'not a date' }])).items.length, 0,
+  eq(readPending(JSON.stringify([{ id: 'x', tenantId: 't1', atIso: 'not a date' }])).items.length, 0,
     'an item with no usable arrival time is dropped: the time is the whole reason a replay is honest');
 
   const round = readPending(JSON.stringify([q({})]));
-  eq(round.items[0].enteredAtIso, '2026-06-15T08:55:00Z', 'the minute they walked in survives the round trip');
+  eq(round.items[0].atIso, '2026-06-15T08:55:00Z', 'the minute they walked in survives the round trip');
 
   // Order and the cap.
-  const two = addPending(addPending([], q({ id: 'b', enteredAtIso: '2026-06-15T08:50:00Z' })),
-                         q({ id: 'a', enteredAtIso: '2026-06-15T08:40:00Z' }));
+  const two = addPending(addPending([], q({ id: 'b', atIso: '2026-06-15T08:50:00Z' })),
+                         q({ id: 'a', atIso: '2026-06-15T08:40:00Z' }));
   eq(two.map((i) => i.id).join(','), 'a,b', 'the queue is in arrival order, so the log reads the way the morning happened');
   eq(addPending([q({ id: 'a' })], q({ id: 'a', memberName: 'Sara O' }))[0].memberName, 'Sara O',
     'the same id replaces rather than duplicating');
 
-  let many: PendingCheckIn[] = [];
+  let many: PendingDoorWrite[] = [];
   for (let i = 0; i < PENDING_CAP + 5; i++) {
-    many = addPending(many, q({ id: `i${String(i).padStart(3, '0')}`, enteredAtIso: new Date(NOW - (PENDING_CAP + 5 - i) * 60_000).toISOString() }));
+    many = addPending(many, q({ id: `i${String(i).padStart(3, '0')}`, atIso: new Date(NOW - (PENDING_CAP + 5 - i) * 60_000).toISOString() }));
   }
   eq(many.length, PENDING_CAP, 'the queue is a front desk during an outage, not a data store');
   eq(many[many.length - 1].id, `i${String(PENDING_CAP + 4).padStart(3, '0')}`,
@@ -552,7 +557,7 @@ const mem = (id: string, status: string, lastSeenDays: number | null): SegmentMe
 
   // Age. A visit from yesterday written into today's log is a stranger in
   // "Inside now".
-  const old = q({ id: 'old', enteredAtIso: new Date(NOW - (PENDING_HOURS + 1) * 3600_000).toISOString() });
+  const old = q({ id: 'old', atIso: new Date(NOW - (PENDING_HOURS + 1) * 3600_000).toISOString() });
   const split = partitionPending([q({ id: 'new' }), old], NOW);
   eq(split.live.map((i) => i.id).join(','), 'new', `an arrival older than ${PENDING_HOURS} hours is not today’s`);
   eq(split.lapsed.map((i) => i.id).join(','), 'old',
@@ -566,6 +571,186 @@ const mem = (id: string, status: string, lastSeenDays: number | null): SegmentMe
   const stuck = pendingNote([q({ id: 'a' }), q({ id: 'b', refusedWhy: 'Their membership was cancelled.' })]) ?? '';
   ok(stuck.includes('1 arrival is') && stuck.includes('refused by the gym'),
     'one waiting on the network and one refused by the record are two different sentences, because they need two different actions');
+}
+
+/* ── what a pass is good for ──────────────────────────────────────────────── */
+//
+// The one that lost money on every occurrence. /door redeemed on "this member
+// holds it and it is live" and read nothing else, so a personal-training block
+// was spent by its holder walking through the turnstile: the member's credit
+// gone, the coach's paid hour gone with it, and every screen afterwards showing
+// a record both parties would read as correct.
+{
+  const pass = (over: Partial<GymPass>): GymPass => ({
+    id: 'p1', passTypeId: 'pt1', passTypeName: 'Ten sessions', kind: 'pack',
+    covers: 'pt', holderId: 'm1', holderName: 'Sara', hostMemberId: null,
+    issuedOn: '2026-06-01', expiresOn: null, usesTotal: 10, usesSpent: 0,
+    paidCents: 90000, currency: 'AED', note: null, ...over,
+  });
+  const TODAY = '2026-06-15';
+
+  ok(passBlocker(pass({}), { spendOn: 'visit', today: TODAY }) !== null,
+    'a PT pack cannot be spent at the door — this is the whole defect');
+  ok(!spendable(pass({}), 'visit', TODAY),
+    'and the button that spends it is not offered');
+  ok((passBlocker(pass({}), { spendOn: 'visit', today: TODAY }) ?? '').includes('coach'),
+    'the refusal says what the pass is actually for, so the desk does the right thing next');
+  eq(passBlocker(pass({}), { spendOn: 'pt', today: TODAY }), null,
+    'and the same pass pays for the thing it was sold for');
+
+  eq(passBlocker(pass({ covers: 'visit' }), { spendOn: 'visit', today: TODAY }), null,
+    'an ordinary day pass still opens the door');
+  ok(passBlocker(pass({ covers: 'visit' }), { spendOn: 'pt', today: TODAY }) !== null,
+    'and it does not pay for an hour with a coach');
+
+  // UNKNOWN is not 'visit'. This is the case where guessing spends somebody's
+  // hour by accident: a null coverage means the pass type could not be read.
+  ok(passBlocker(pass({ covers: null }), { spendOn: 'visit', today: TODAY }) !== null,
+    'a pass whose type could not be read is never spent — unknown is not "an ordinary pass"');
+  ok(passBlocker(pass({ covers: null }), { spendOn: 'pt', today: TODAY }) !== null,
+    'in either direction');
+
+  // Coverage is answered before the count, because it is true whatever the
+  // count says and it is the sentence that changes what the desk does next.
+  const spent = pass({ usesSpent: 10 });
+  ok((passBlocker(spent, { spendOn: 'visit', today: TODAY }) ?? '').includes('coach'),
+    'a spent PT pack refused at the door says "personal training", not "no visits left" — the second sends the desk to sell another of the wrong thing');
+  ok((passBlocker(spent, { spendOn: 'pt', today: TODAY }) ?? '').includes('no sessions left'),
+    'and when it IS the right kind, the count is the answer');
+
+  ok(passBlocker(pass({ covers: 'visit', expiresOn: '2026-06-14' }), { spendOn: 'visit', today: TODAY }) !== null,
+    'an expired pass is still refused');
+  eq(passBlocker(pass({ covers: 'visit', expiresOn: TODAY }), { spendOn: 'visit', today: TODAY }), null,
+    'and a pass expiring today is good today — turning somebody away on the last day of their pack is a complaint, not a policy');
+}
+
+/* ── the departure that happened while the wifi was down ──────────────────── */
+//
+// Arrivals were queued and check-outs were not, so the same two-minute drop
+// that one half of the screen survived left the gym believing everybody who
+// left during it was still in the building — in the evacuation headcount, and
+// out of the average stay.
+{
+  const NOW = Date.parse('2026-06-15T09:00:00Z');
+  const out = (over: Partial<PendingDoorWrite>): PendingDoorWrite => ({
+    id: 'o1', tenantId: 't1', kind: 'out', memberId: 'm1', memberName: 'Sara',
+    passId: null, classId: null, visitId: 'v1',
+    atIso: '2026-06-15T08:55:00Z', queuedAt: NOW, tries: 1, refusedWhy: null, ...over,
+  });
+
+  const both = readPending(JSON.stringify([
+    { id: 'a', tenantId: 't1', enteredAtIso: '2026-06-15T08:40:00Z' },
+    out({ id: 'b' }),
+  ]));
+  eq(both.items.length, 2, 'a queue written by the older build still reads');
+  eq(both.items.find((i) => i.id === 'a')?.kind, 'in',
+    'and its rows are arrivals, which is what they are — bumping the key would have thrown away what a desk was holding mid-outage');
+  eq(both.items.find((i) => i.id === 'a')?.atIso, '2026-06-15T08:40:00Z',
+    'the minute they walked in survives the rename');
+  eq(both.items.find((i) => i.id === 'b')?.visitId, 'v1', 'a departure carries the visit it closes');
+
+  eq(readPending(JSON.stringify([{ id: 'x', tenantId: 't1', kind: 'out', atIso: '2026-06-15T08:55:00Z' }])).items.length, 0,
+    'a departure with no visit to close is not admitted — it would flush for ever against nothing');
+
+  const note = pendingNote([out({})]) ?? '';
+  ok(note.includes('check-out is held'), 'a held departure is counted as one');
+  ok(note.includes('over-counting'),
+    'and the note says what it costs: until it lands, the gym still has that person inside');
+  const mixed = pendingNote([
+    { ...out({ id: 'i', kind: 'in', visitId: null }) },
+    out({ id: 'o' }),
+  ]) ?? '';
+  ok(mixed.includes('1 arrival is') && mixed.includes('1 check-out is'),
+    'an arrival and a departure are two sentences, because they cost two different things');
+}
+
+/* ── the roll call ────────────────────────────────────────────────────────── */
+//
+// "The figure somebody would read out in an evacuation" existed only on a
+// tablet inside the building, on a device that needs wifi.
+{
+  const rec = (over: Partial<{ emergencyName: string | null; emergencyPhone: string | null; medicalNote: string | null }> = {}) => ({
+    emergencyName: 'Ada', emergencyPhone: '050 111 2222', medicalNote: null, ...over,
+  });
+
+  eq(emergencyLine(rec()), 'Ada — 050 111 2222', 'both halves read as one line');
+  eq(emergencyLine(rec({ emergencyPhone: null })), 'Ada', 'one half is still worth printing');
+  eq(emergencyLine(rec({ emergencyName: null, emergencyPhone: null })), null,
+    'and nothing recorded is null, so the sheet prints its own words rather than an empty cell');
+  eq(emergencyLine(null), null, 'a member with no record at all has no line');
+
+  const inside = [
+    { memberId: 'm2', memberName: 'Ben', enteredAt: '2026-06-15T08:50:00Z' },
+    { memberId: 'm1', memberName: 'Sara', enteredAt: '2026-06-15T07:10:00Z' },
+    { memberId: null, memberName: null, enteredAt: '2026-06-15T08:00:00Z' },
+  ];
+  const records = new Map([['m1', rec({ medicalNote: 'asthma — inhaler in her bag' })]]);
+
+  const r = buildRollCall({ gymName: 'Iron Yard', inside, records, openFromEarlierDays: 2, nowIso: '2026-06-15T09:00:00Z' });
+  eq(r.people.map((p) => p.name ?? '?').join(','), 'Sara,?,Ben',
+    'oldest arrival first — the person who has been in longest is the furthest from the door');
+  eq(r.people[0].medical, 'asthma — inhaler in her bag', 'the note the floor needs is on the line');
+  eq(r.people[2].emergency, null, 'a member with no record printed as nothing recorded, not as a blank');
+  ok(r.caveats[0].includes('snapshot'),
+    'the first line is always what this paper is — a roll call with no time on it is read as current all evening');
+  ok(r.caveats.some((c) => c.includes('could not put a name')),
+    'and the unnamed visit is counted and explained rather than dropped');
+  ok(r.caveats.some((c) => c.includes('NOT on this list')),
+    'visits open from an earlier day are said out loud, because they are rows nobody closed rather than people in the building');
+
+  const unread = buildRollCall({ gymName: null, inside, records: null, openFromEarlierDays: 0 });
+  ok(unread.caveats.some((c) => c.includes('UNKNOWN')),
+    'a sheet of blank emergency contacts must say whether the gym has none or the read failed');
+  eq(unread.people[0].emergency, null, 'and it prints none of them rather than guessing');
+
+  const html = rollCallHtml(buildRollCall({
+    gymName: '<script>', records: null, openFromEarlierDays: 0,
+    inside: [{ memberId: null, memberName: 'O\'Neill & <b>Sons</b>', enteredAt: '2026-06-15T08:00:00Z' }],
+  }));
+  ok(!html.includes('<script>'), 'a gym name is printed, never executed');
+  ok(html.includes('&lt;b&gt;Sons&lt;/b&gt;'), 'and a member called <b> prints as their name');
+  eq(escapeHtml('a&b'), 'a&amp;b', 'the ampersand goes first, or every other entity is double-escaped');
+}
+
+/* ── notes that do not overwrite themselves ───────────────────────────────── */
+{
+  const n = (over: Partial<MemberNote>): MemberNote => ({
+    id: 'n1', memberId: 'm1', body: 'Complained about the 6am.',
+    writtenAt: '2026-03-01T10:00:00Z', writtenBy: 'u1', writtenByName: 'Tim', legacy: false, ...over,
+  });
+
+  ok(noteBlocker('   ') !== null, 'an empty note records nothing and is refused before it is written');
+  eq(noteBlocker('renewing in June'), null, 'a note is a note');
+  ok((noteBlocker('x'.repeat(MAX_NOTE + 1)) ?? '').includes(String(MAX_NOTE)),
+    'and one that is too long says by how much, because it cannot be trimmed and re-edited afterwards');
+
+  const sorted = newestFirst([n({ id: 'a', writtenAt: '2026-03-01T10:00:00Z' }), n({ id: 'b', writtenAt: '2026-06-01T10:00:00Z' })]);
+  eq(sorted.map((x) => x.id).join(','), 'b,a', 'newest first, which is the order the desk reads them in');
+  const undated = newestFirst([n({ id: 'a', writtenAt: null }), n({ id: 'b' })]);
+  eq(undated.map((x) => x.id).join(','), 'b,a',
+    'a note with no date sorts to the bottom rather than pushing this morning off the top');
+
+  const withOld = withLegacy([n({})], 'm1', 'rang about the direct debit');
+  eq(withOld.length, 2, 'the line that was there before is kept, not migrated and not deleted');
+  eq(withOld[withOld.length - 1].legacy, true, 'it is the oldest entry');
+  eq(withOld[withOld.length - 1].writtenAt, null,
+    'and it carries no date, because the record’s updated_at is the last time ANY field changed and using it would invent one');
+  eq(withLegacy([n({})], 'm1', '   ').length, 1, 'a member with no old note gets no empty entry');
+
+  ok(noteAttribution(withOld[1]).includes('before notes were kept'),
+    'the unattributed line says so rather than being dressed up as somebody’s entry');
+  ok(noteAttribution(n({ writtenByName: null })).includes('account has since gone'),
+    'and an author whose account was deleted is named as that, not as nobody');
+}
+
+/* ── a broadcast that leaves a record ─────────────────────────────────────── */
+{
+  eq(loggingNote(null), null, 'a send that was recorded says nothing extra');
+  const said = loggingNote('relation "gym_broadcast_sends" does not exist') ?? '';
+  ok(said.includes('went out'),
+    'a logging failure never reads as a send failure — an owner told nothing was posted will send it twice');
+  ok(said.includes('who it went to'),
+    'and it says exactly what was lost, which is the recipient list nothing else keeps');
 }
 
 if (errors.length) {

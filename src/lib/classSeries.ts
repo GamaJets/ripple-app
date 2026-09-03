@@ -44,7 +44,12 @@
 // the members who booked the old one turn up an hour out. `setDate(d + 7)`
 // keeps the wall-clock hour and lets the date do the offset, which is what
 // "same time next week" means to everybody who is not a computer. The suite
-// runs under three timezones (`test:zones`) because of lines like this one.
+// runs under six timezones (`test:zones`) because of lines like this one.
+//
+// `daysLater` and `atTimeOfDay` are the same rule applied to the other thing a
+// coach does to a class's date: correcting one that was typed in at the wrong
+// time. They live here rather than on the screen so there is one place this
+// arithmetic is written and one place it is asserted.
 //
 // Pure — no supabase, no react-native, no clock of its own. `now` is passed in.
 import { num } from './format';
@@ -122,6 +127,46 @@ export function weeksLater(iso: string, weeks: number): string | null {
   if (!Number.isFinite(d.getTime())) return null;
   const out = new Date(d.getTime());
   out.setDate(out.getDate() + 7 * weeks);
+  return out.toISOString();
+}
+
+/**
+ * The same wall-clock time, `days` days later — or earlier, for a negative
+ * count.
+ *
+ * The sibling of `weeksLater`, and here for the same reason it is: a class
+ * typed in on the wrong day is corrected by nudging the date, and a nudge made
+ * by adding 86,400,000ms moves a 6pm class to 5pm or 7pm across a clocks
+ * change. `setDate` moves the calendar and leaves the clock alone, which is
+ * what "same time, a day later" means to everybody who is not a computer.
+ */
+export function daysLater(iso: string, days: number): string | null {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  if (!Number.isFinite(days)) return null;
+  const out = new Date(d.getTime());
+  out.setDate(out.getDate() + Math.trunc(days));
+  return out.toISOString();
+}
+
+/**
+ * The same calendar day, at a different time of day.
+ *
+ * The other half of correcting a class that was typed in wrong: `daysLater`
+ * moves the date and keeps the clock, this keeps the date and moves the clock.
+ * Local hours, because a timetable is read in the room it is taught in.
+ *
+ * Out-of-range values are brought back onto the clock rather than rolled into
+ * the next day — a stepper that wraps 23 to 24 must not silently move a class
+ * to tomorrow, which is a class the members who booked it cannot find.
+ */
+export function atTimeOfDay(iso: string, hour: number, minute: number): string | null {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  const h = Number.isFinite(hour) ? ((Math.trunc(hour) % 24) + 24) % 24 : 0;
+  const m = Number.isFinite(minute) ? ((Math.trunc(minute) % 60) + 60) % 60 : 0;
+  const out = new Date(d.getTime());
+  out.setHours(h, m, 0, 0);
   return out.toISOString();
 }
 

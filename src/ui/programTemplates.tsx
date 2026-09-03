@@ -14,7 +14,7 @@
 // The writes had the mirror problem: both were fire-and-forget with empty
 // rejection handlers, so a template rejected by the server sat in the list for
 // the rest of the session and vanished on the next launch.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { buildProgram, type Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -68,6 +68,10 @@ interface TemplatesValue {
    *  starter cannot be deleted — see `removeTemplateFrom` — and a screen needs
    *  to know that before it draws a control that would fail. */
   isStarter: (id: string) => boolean;
+  /** Read the library again. Under 'error' the three starters are all a coach
+   *  can see and their own templates are missing without being missing, so a
+   *  screen that lists them needs a way to ask a second time. */
+  reload: () => void;
 }
 
 const Ctx = createContext<TemplatesValue | null>(null);
@@ -77,6 +81,8 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
   const [templates, setTemplates] = useState<ProgramTemplate[]>(() => seed());
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`, beside `authRev` in the read below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -117,7 +123,12 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   /**
    * Who is signed in, asked at the moment of the write.
@@ -263,7 +274,7 @@ export function ProgramTemplatesProvider({ children }: { children: ReactNode }) 
   };
   const removeTemplate = async (id: string): Promise<boolean> => (await removeTemplateFrom(id)).ok;
 
-  const value = useMemo(() => ({ templates, status, saveTemplate, saveTemplateTo, removeTemplate, removeTemplateFrom, isStarter }), [templates, status, uid]);
+  const value = useMemo(() => ({ templates, status, saveTemplate, saveTemplateTo, removeTemplate, removeTemplateFrom, isStarter, reload }), [templates, status, uid, reload]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

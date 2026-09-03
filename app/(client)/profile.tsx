@@ -14,7 +14,7 @@
 // stats line under the name ignored all of it and printed "cm" and "kg"
 // regardless. Both now go through src/lib/units.ts, and the unit itself is the
 // account's (src/ui/settings.tsx), the same one the Settings screen sets.
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Image, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -31,10 +31,12 @@ import { useClientData, type CoachingMode } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, heightIn as heightAs, heightParts, heightLabel, heightToCm, plain, convertedNote, readNumber, type WeightUnit, type LengthUnit } from '../../src/lib/units';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { COACHING_MODE_LABEL, COACHING_MODE_NOTE, type Goal, type Diet } from '../../src/lib/types';
 import { monthNamesShort, fmtFullDay } from '../../src/lib/format';
 import { localDate } from '../../src/lib/localDate';
+import { FORWARD_ICON, turn } from '../../src/ui/direction';
 
 const GOALS: { id: Goal; label: string }[] = [
   { id: 'fatloss', label: 'Fat Loss' },
@@ -58,13 +60,49 @@ const VISIBLE = 5;
 const YEARS = Array.from({ length: 100 }, (_, i) => 1926 + i);
 const daysIn = (m: number, y: number) => new Date(y, m + 1, 0).getDate();
 
-function Wheel({ items, index, onChange, t }: { items: string[]; index: number; onChange: (i: number) => void; t: Theme }) {
+/**
+ * One column of the date-of-birth picker.
+ *
+ * ── It only answered to a flick ───────────────────────────────────────────
+ *
+ * `onMomentumScrollEnd` was the whole of it. Momentum is what a FLICK produces:
+ * let go while still moving and the list coasts, and the event fires when it
+ * stops. Drag the column slowly to the year you want and let go — which is what
+ * anybody does when they are aiming at one item rather than scrolling — and
+ * there is no momentum, so no momentum-end, so `onChange` never fired. The
+ * wheel visibly sat on 1971 and the sheet still held whatever it opened on, and
+ * Save wrote that. A date of birth is not a preference: it is what
+ * `ageFromDob` feeds to the heart-rate zones, so the failure lands on the one
+ * screen that asks somebody to push their heart rate.
+ *
+ * `onScrollEndDrag` is the missing half — the event for a drag that ends
+ * without coasting. Both are handled, and both go through the same reader, so a
+ * flick and a drag cannot disagree about where the column landed. A drag that
+ * DOES coast fires the drag end first and the momentum end after, with the same
+ * final offset, so the second call is the same answer rather than a different
+ * one.
+ *
+ * ── And a route that is not a gesture at all ──────────────────────────────
+ *
+ * Each row is a button now. A scroll wheel is invisible to a screen reader as a
+ * control — there is nothing to activate, only content that moves — and it is
+ * awkward for anybody with a tremor or one usable hand. The rows are already
+ * 44pt tall (`ITEM_H`), so tapping one is a target that meets
+ * src/lib/a11y.ts without anything moving.
+ */
+function Wheel({ items, index, onChange, t, label }: {
+  items: string[]; index: number; onChange: (i: number) => void; t: Theme;
+  /** What this column is — "Day", "Month", "Year" — so a tappable row can say
+   *  "Year 1971" rather than announcing a bare number in a row of three. */
+  label: string;
+}) {
   const ref = useRef<ScrollView>(null);
   const placed = useRef(false);
   // Line the wheel up with the current value the first time it has a size.
   // A mount-time scrollTo lands on a ScrollView with no layout yet and is
   // silently dropped, which left every wheel parked on its first item.
   const place = () => { if (placed.current) return; placed.current = true; ref.current?.scrollTo({ y: index * ITEM_H, animated: false }); };
+  const landedOn = (y: number) => onChange(Math.max(0, Math.min(items.length - 1, Math.round(y / ITEM_H))));
   return (
     <View style={{ flex: 1, height: ITEM_H * VISIBLE }}>
       <ScrollView
@@ -72,14 +110,22 @@ function Wheel({ items, index, onChange, t }: { items: string[]; index: number; 
         showsVerticalScrollIndicator={false}
         snapToInterval={ITEM_H}
         decelerationRate="fast"
-        onMomentumScrollEnd={(e) => onChange(Math.max(0, Math.min(items.length - 1, Math.round(e.nativeEvent.contentOffset.y / ITEM_H))))}
+        onMomentumScrollEnd={(e) => landedOn(e.nativeEvent.contentOffset.y)}
+        onScrollEndDrag={(e) => landedOn(e.nativeEvent.contentOffset.y)}
         onContentSizeChange={place}
         contentContainerStyle={{ paddingVertical: ITEM_H * 2 }}
        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {items.map((it, i) => (
-          <View key={i} style={{ height: ITEM_H, alignItems: 'center', justifyContent: 'center' }}>
+          <Pressable
+            key={i}
+            onPress={() => { onChange(i); ref.current?.scrollTo({ y: i * ITEM_H, animated: true }); }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: i === index }}
+            accessibilityLabel={`${label} ${it}`}
+            style={{ height: ITEM_H, alignItems: 'center', justifyContent: 'center' }}
+          >
             <Text style={{ ...(i === index ? value(21) : ty.body), color: i === index ? t.ink : t.ink3 }}>{it}</Text>
-          </View>
+          </Pressable>
         ))}
       </ScrollView>
     </View>
@@ -119,9 +165,9 @@ function DobPicker({ iso, onClose, onSave, t }: { iso: string; onClose: () => vo
         <View style={{ position: 'relative' }}>
           <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }} />
           <View style={{ flexDirection: 'row' }}>
-            <Wheel items={days} index={dayIdx} onChange={setD} t={t} />
-            <Wheel items={months} index={m} onChange={setM} t={t} />
-            <Wheel items={YEARS.map(String)} index={y} onChange={setY} t={t} />
+            <Wheel items={days} index={dayIdx} onChange={setD} t={t} label="Day" />
+            <Wheel items={months} index={m} onChange={setM} t={t} label="Month" />
+            <Wheel items={YEARS.map(String)} index={y} onChange={setY} t={t} label="Year" />
           </View>
         </View>
       </View>
@@ -252,6 +298,14 @@ export default function Profile() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
+  const coachNutrition = useCoachNutrition();
+  // The client's own record — name, dob, height, goal, injuries, weight and the
+  // scan history behind it — plus whatever their coach has adjusted on top. A
+  // profile read that failed left every field on this screen at its default
+  // with no way to ask again.
+  const pull = usePullToRefresh(useCallback(() => {
+    cd.reload(); void coachNutrition.reload();
+  }, [cd.reload, coachNutrition]));
 
   const pickPhoto = async (fromCamera: boolean) => {
     if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'set your photo'))) return;
@@ -379,7 +433,7 @@ export default function Profile() {
   };
 
   const age = ageFromDob(cd.dob);
-  const _adj = useCoachNutrition().get(cd.id);
+  const _adj = coachNutrition.get(cd.id);
   // No weight, no target. This used to run on the 70 kg / 20% placeholder and
   // present the result as the client's own daily calorie and protein target.
   const macros = (cd.weightKg != null && cd.bodyFatPct != null)
@@ -452,7 +506,7 @@ export default function Profile() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header: who you are. No hero — a profile has no live metric ─── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
@@ -478,7 +532,7 @@ export default function Profile() {
                 )}
               </View>
             )}
-            <View style={{ position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: radius.pill, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ position: 'absolute', bottom: -2, end: -2, width: 22, height: 22, borderRadius: radius.pill, backgroundColor: t.surface, borderWidth: hairline, borderColor: t.ring, alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="camera" size={12} color={t.ink2} />
             </View>
           </Pressable>
@@ -592,7 +646,7 @@ export default function Profile() {
               <Pressable onPress={() => setCollapsed((p) => ({ ...p, [g.title]: !gc }))} accessibilityRole="button" accessibilityLabel={(gc ? 'Expand ' : 'Collapse ') + g.title}
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: gc ? 0 : sp.sm }}>
                 <Text style={{ ...ty.micro, color: t.ink3 }}>{g.title}</Text>
-                <View style={{ transform: [{ rotate: gc ? '0deg' : '90deg' }] }}><Icon name="chevron" size={13} color={t.ink3} /></View>
+                <View style={{ transform: [{ rotate: turn(gc ? 0 : 90) }] }}><Icon name={FORWARD_ICON} size={13} color={t.ink3} /></View>
               </Pressable>
               {!gc ? g.items.map((h) => (
                 <ListRow key={h.route} icon={HUB_ICON[h.route] || 'chevron'} title={h.label} note={h.note}

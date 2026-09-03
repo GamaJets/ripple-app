@@ -21,6 +21,7 @@ import {
   DEFAULT_NOTIFY_PREFS, prefsFromStored, type NotifyCategory, type NotifyPrefs,
 } from '../lib/notifyPrefs';
 import { setNotifyPrefsLatch } from '../lib/notifyPrefsLatch';
+import { useAuthRevision } from './authRevision';
 
 const KEY = 'repple.notifyPrefs';
 
@@ -38,6 +39,7 @@ interface Value {
 const Ctx = createContext<Value | null>(null);
 
 export function NotifyPrefsProvider({ children }: { children: ReactNode }) {
+  const authRev = useAuthRevision();
   const [prefs, setPrefs] = useState<NotifyPrefs>(DEFAULT_NOTIFY_PREFS);
   const [loaded, setLoaded] = useState(false);
 
@@ -57,7 +59,15 @@ export function NotifyPrefsProvider({ children }: { children: ReactNode }) {
       setLoaded(true);
     })();
     return () => { cancelled = true; };
-  }, []);
+    // Re-read on every change of signed-in account, not once per mount. These
+    // preferences are one person's answers under a device-local key, and
+    // signing out now clears that key (src/lib/signOutState.ts) — so without
+    // this the CLEARED preferences would go on being applied from memory for
+    // the rest of the session, and the next person to sign in on the handset
+    // would still be under the previous member's quiet hours until the app was
+    // killed. Re-reading finds nothing and seeds the defaults, latch first,
+    // exactly as it does at launch.
+  }, [authRev]);
 
   const write = useCallback((next: NotifyPrefs) => {
     // Latch, state, then storage — in that order and deliberately. A member who

@@ -46,7 +46,7 @@
 // Dates go through src/lib/localDate.ts. `scans.taken_at` is a bare postgres
 // DATE, and the axis labels here used to be `new Date(iso).getDate()` — UTC
 // midnight, which is the day before for every client west of Greenwich.
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -60,6 +60,7 @@ import {
   dayLabel, todayISO, type BodyReading,
 } from '../../src/lib/bodyFigures';
 import { useGoalTracker } from '../../src/ui/goalTracker';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { goalOfKind, goalOnBody } from '../../src/lib/goalOnBody';
 import { Rule, Section, SectionHead, Ghost, Notice, Spark } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -108,7 +109,10 @@ export default function BodyTrends() {
   // whole subject is those figures moving — had never read. `useGoalTracker`
   // was imported by exactly two screens in the app and neither of them was a
   // body screen.
-  const { goals, status: goalStatus } = useGoalTracker();
+  const { goals, status: goalStatus, reload: reloadGoals } = useGoalTracker();
+  // The scan history the curves are drawn from, and the targets drawn over
+  // them. Both are server reads and both can fail on their own.
+  const pull = usePullToRefresh(useCallback(() => { cd.reload(); reloadGoals(); }, [cd.reload, reloadGoals]));
   const scans = useMemo(() => [...(cd.scans || [])].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt)), [cd.scans]);
   const today = todayISO();
   const G = layout.gutter;
@@ -153,7 +157,7 @@ export default function BodyTrends() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -282,7 +286,7 @@ export default function BodyTrends() {
                   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
                     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                       <Text style={{ ...value(26), color: t.ink }}>{last}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 3 }}>{unit}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginStart: 3 }}>{unit}</Text>
                     </View>
                     {delta !== 0 ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>

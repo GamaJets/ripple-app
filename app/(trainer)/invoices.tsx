@@ -52,16 +52,19 @@ import { shareDoc, pdfExportAvailable } from '../../src/lib/exportShare';
 import {
   coachInvoiceDoc, invoiceShareBlurb, invoiceBlockers, invoiceNumber, invoiceDayLabel,
   invoiceBook, money, kindLabel, ageingBook, invoiceAge, chaseBlocker, chaseHistoryLine,
-  BUCKET_TITLE, AGEING_IS_YOUR_OWN_RECORD, INVOICE_DUE_NOT_A_TERM, plusDays,
+  settleBlocker, settleDayBlocker, chaseFromBlocker, chaseFromDayBlocker,
+  BUCKET_TITLE, AGEING_IS_YOUR_OWN_RECORD, INVOICE_DUE_NOT_A_TERM, CHASE_FROM_IS_NOT_A_DUE_DATE, plusDays,
   type AgeBucket,
   type CoachInvoice, type InvoiceDraft, type InvoiceKind,
 } from '../../src/lib/coachInvoice';
 import { minorMoney } from '../../src/lib/coachMoney';
 import {
   fetchMyInvoices, fetchInvoiceIssuer, fetchInvoiceCurrency, issueInvoice, voidInvoice, remindInvoice,
+  settleInvoice, setInvoiceChaseFrom,
   type InvoiceCurrency,
 } from '../../src/ui/coachInvoices';
 import { useMyCoachLogo } from '../../src/ui/coachLogo';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { currencyGapLine, currencyGapOfStatus } from '../../src/lib/currencyGap';
 
@@ -111,6 +114,24 @@ export default function Invoices() {
   // present two at once from the same parent.
   const [voidTarget, setVoidTarget] = useState<CoachInvoice | null>(null);
   const [voidReason, setVoidReason] = useState('');
+  // The invoice being recorded as settled, the day the coach says the money
+  // arrived, and how it arrived. Its own three pieces of state and its own
+  // modal for the reason `voidTarget` has one — check-runtime-traps flags
+  // sibling modals whose `visible` expressions share an identifier, because iOS
+  // will not present two at once from the same parent.
+  //
+  // The day defaults to TODAY and not to the due date. A default of the due
+  // date would be this app deciding when somebody's money arrived, which is the
+  // one fact on this sheet that only the coach knows; today is the day they are
+  // standing in and is what they will most often mean, and it is a starting
+  // value in an editable box rather than a claim.
+  const [settleTarget, setSettleTarget] = useState<CoachInvoice | null>(null);
+  const [settleDay, setSettleDay] = useState('');
+  const [settleNote, setSettleNote] = useState('');
+  // The invoice getting a chase date, and the day typed for it. Empty clears
+  // it, which puts the invoice back on the undated list.
+  const [chaseTarget, setChaseTarget] = useState<CoachInvoice | null>(null);
+  const [chaseDay, setChaseDay] = useState('');
 
   const load = useCallback(async () => {
     const [list, who, cur] = await Promise.all([fetchMyInvoices(), fetchInvoiceIssuer(), fetchInvoiceCurrency()]);
@@ -124,6 +145,15 @@ export default function Invoices() {
   // screen and comes back should see it. `load` has no dependencies, so this
   // re-runs on focus and at no other time.
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  // Four reads: the invoices, the issuer name and the currency `load` fetches
+  // alongside them, the roster the client names come from, and the logo on
+  // the letterhead. An invoice is a document handed to somebody, so the parts
+  // of it are refreshed together or not at all — an amount from one read
+  // under a currency from another is a figure a coach would be held to.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(), roster.refresh(), Promise.resolve(logo.reload())]),
+    [load, roster, logo],
+  ));
 
   const book = useMemo(() => invoiceBook(rows, status), [rows, status]);
 
@@ -281,6 +311,87 @@ export default function Invoices() {
     Alert.alert(`Chased invoice ${invoiceNumber(inv.seq)}`, told);
   };
 
+  /**
+   * Record that one was paid.
+   *
+   * ── The only door out that does not deface a paid document ──────────────
+   *
+   * Before part 660 a coach whose client actually paid a 'requested' invoice
+   * had two options and both were wrong. Leave it: it stays on every chase
+   * list, in the outstanding figure, and part 613's nightly pass tells them
+   * four times over two months to chase money they already have. Or void it,
+   * which prints THIS INVOICE HAS BEEN VOIDED across a document that was paid
+   * in full — and `INVOICE_VOID_NOTICE` says a voided invoice "is not a record
+   * of a charge that stands", which is a lie about a charge that stood and was
+   * settled.
+   *
+   * Nothing here edits the document. `kind` still says what it said; the
+   * settlement is a new fact recorded beside it and printed as the issuer's own
+   * word, exactly as `kind` is.
+   */
+  const openSettle = (inv: CoachInvoice) => {
+    const blocked = settleBlocker(inv);
+    if (blocked) { Alert.alert('Nothing to settle', blocked); return; }
+    setSettleTarget(inv);
+    setSettleDay(today);
+    setSettleNote('');
+  };
+
+  const doSettle = async () => {
+    if (!settleTarget || busy) return;
+    const bad = settleDayBlocker(settleTarget, settleDay.trim(), today);
+    if (bad) { Alert.alert('Not that day', bad); return; }
+    setBusy(true);
+    const res = await settleInvoice(settleTarget.id, settleDay.trim(), settleNote.trim() || null);
+    setBusy(false);
+    if (!res.ok) { Alert.alert('Not recorded', res.error || 'Nothing changed.'); return; }
+    const no = invoiceNumber(settleTarget.seq);
+    setSettleTarget(null);
+    setSettleDay('');
+    setSettleNote('');
+    await load();
+    // The client is deliberately not told, and it is said out loud rather than
+    // left to be discovered — a coach who assumes a receipt went out will not
+    // send one. See `settleInvoice` for why: a settlement is the coach agreeing
+    // with something the client already knows they did.
+    Alert.alert(
+      `Invoice ${no} recorded as settled`,
+      'It is off your chase lists and out of the outstanding figure. Nobody has been told — send them the document again if you want them to have a copy that says it was paid.',
+    );
+  };
+
+  /**
+   * Set or clear the day the coach means to start chasing one that carries no
+   * due date.
+   *
+   * NOT adding a due date, and the sheet says so in the coach's own words
+   * before they type anything. `due_on` is on the document, is immutable, and
+   * stays that way; this is a note about the coach's own list that appears on
+   * no artefact anybody else ever sees.
+   */
+  const openChaseFrom = (inv: CoachInvoice) => {
+    const blocked = chaseFromBlocker(inv);
+    if (blocked) { Alert.alert('Nothing to set', blocked); return; }
+    setChaseTarget(inv);
+    setChaseDay(inv.chaseFrom ?? today);
+  };
+
+  const doChaseFrom = async (clear: boolean) => {
+    if (!chaseTarget || busy) return;
+    const day = clear ? '' : chaseDay.trim();
+    if (!clear) {
+      const bad = chaseFromDayBlocker(chaseTarget, day);
+      if (bad) { Alert.alert('Not that day', bad); return; }
+    }
+    setBusy(true);
+    const res = await setInvoiceChaseFrom(chaseTarget.id, day || null);
+    setBusy(false);
+    if (!res.ok) { Alert.alert('Not changed', res.error || 'Nothing changed.'); return; }
+    setChaseTarget(null);
+    setChaseDay('');
+    await load();
+  };
+
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
   const G = layout.gutter;
 
@@ -311,11 +422,21 @@ export default function Invoices() {
         {blocked ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{blocked}</Text>
         ) : (
-          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm, flexWrap: 'wrap' }}>
             <Pressable onPress={() => { void onChase(inv); }} hitSlop={8} accessibilityRole="button"
               accessibilityLabel={`Chase invoice ${invoiceNumber(inv.seq)}`} disabled={busy}
               style={{ paddingVertical: sp.xs }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>Chase it</Text>
+            </Pressable>
+            {/* The action this list existed without. Everything on it is
+                something the coach is asking for, and until part 660 there was
+                no way to say it had arrived — so a paid invoice stayed here for
+                ever, or was voided, which stamps THIS INVOICE HAS BEEN VOIDED
+                across a document that was paid in full. */}
+            <Pressable onPress={() => openSettle(inv)} hitSlop={8} accessibilityRole="button"
+              accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
+              style={{ paddingVertical: sp.xs }}>
+              <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
             </Pressable>
             <Pressable onPress={() => { void send(inv); }} hitSlop={8} accessibilityRole="button"
               accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)} again`} style={{ paddingVertical: sp.xs }}>
@@ -323,6 +444,45 @@ export default function Invoices() {
             </Pressable>
           </View>
         )}
+      </View>
+    );
+  };
+
+  /**
+   * One invoice on the undated list: the ones carrying no due date at all.
+   *
+   * Its own row rather than `agedRow`, because the one thing to do about these
+   * is not the one thing to do about a late invoice. They are in no figure and
+   * on no chase list, and until part 660 that was permanent — the screen said
+   * so and offered nothing. What it offers now is the coach's own note of when
+   * to start chasing, which is not a due date and says so.
+   */
+  const undatedRow = (inv: CoachInvoice, ageLine: string) => {
+    const amount = money(inv);
+    return (
+      <View key={inv.id} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
+          <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{invoiceNumber(inv.seq)}</Text>
+          <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{inv.billTo}</Text>
+          <Text style={{ ...ty.body, ...numeric, color: t.ink }}>{amount ?? DASH}</Text>
+        </View>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{ageLine}</Text>
+        <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm, flexWrap: 'wrap' }}>
+          <Pressable onPress={() => openChaseFrom(inv)} hitSlop={8} accessibilityRole="button"
+            accessibilityLabel={`Set a day to chase invoice ${invoiceNumber(inv.seq)} from`} disabled={busy}
+            style={{ paddingVertical: sp.xs }}>
+            <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>Chase it from…</Text>
+          </Pressable>
+          <Pressable onPress={() => openSettle(inv)} hitSlop={8} accessibilityRole="button"
+            accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
+            style={{ paddingVertical: sp.xs }}>
+            <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
+          </Pressable>
+          <Pressable onPress={() => { void send(inv); }} hitSlop={8} accessibilityRole="button"
+            accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)} again`} style={{ paddingVertical: sp.xs }}>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Send again</Text>
+          </Pressable>
+        </View>
       </View>
     );
   };
@@ -348,7 +508,7 @@ export default function Invoices() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
@@ -462,6 +622,31 @@ export default function Invoices() {
                 </Flag>
               ) : null}
             </View>
+          ) : ageing.overdue.length || ageing.upcoming.length ? (
+            /* Outstanding invoices exist and NOT ONE of them could be
+               denominated.
+
+               The branch below used to be the only alternative to a pot, so a
+               coach whose outstanding invoices all carry no currency was told
+               "nothing you have issued is still being asked for" directly above
+               the list of them, banded by how late each one is. `sumTaken`
+               builds a pot per currency and an invoice with none goes to
+               `unlabelled` instead — which is a real state, because part 138's
+               currency column is NOT NULL but `toInvoice` reads a blank one as
+               null, and a coach with a single unlabelled invoice has an empty
+               `pots` array and something very much outstanding.
+
+               A count of the invoices, and no figure, because there is no
+               figure: an amount with no currency beside it is not an amount of
+               money. The two lists below say which ones they are. */
+            <View>
+              <Text style={{ ...ty.label, color: t.ink }}>
+                {ageing.overdue.length + ageing.upcoming.length} invoice{ageing.overdue.length + ageing.upcoming.length === 1 ? ' is' : 's are'} still being asked for, and no total can be stated for {ageing.overdue.length + ageing.upcoming.length === 1 ? 'it' : 'them'}.
+              </Text>
+              <Flag style={{ marginTop: sp.sm }}>
+                {ageing.overdue.length + ageing.upcoming.length === 1 ? 'It has' : 'They have'} no currency recorded, so {ageing.overdue.length + ageing.upcoming.length === 1 ? 'the amount on it is' : 'the amounts on them are'} not an amount of any money and nothing here adds up. {ageing.overdue.length + ageing.upcoming.length === 1 ? 'It is' : 'They are'} listed below, and the document {ageing.overdue.length + ageing.upcoming.length === 1 ? 'itself carries' : 'themselves carry'} no figure either.
+              </Flag>
+            </View>
           ) : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nothing you have issued is still being asked for. Every read came back in full, so this is your record rather than a failure.
@@ -493,6 +678,22 @@ export default function Invoices() {
           <Section>
             <SectionHead title="Not Yet Due" />
             {ageing.upcoming.map(({ invoice, age }) => agedRow(invoice, age.line))}
+          </Section>
+        ) : null}
+
+        {/* The ones with no date of any kind on them.
+            `ageingBook` has always separated these — they are neither chased
+            nor safe — and the screen carried only `undatedNote`, a sentence
+            saying they were outside every figure and every list. So a coach's
+            whole back catalogue was described and never shown, and there was
+            nothing to do about any of it. They are listed now, and each one
+            carries the two acts that were missing: say the coach means to start
+            chasing it from a day, or say it was paid. */}
+        {ageing.undated.length ? (
+          <Section>
+            <SectionHead title="No Due Date On Them" note="In no figure above and on no list of what is late" />
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{CHASE_FROM_IS_NOT_A_DUE_DATE}</Text>
+            {ageing.undated.map(({ invoice, age }) => undatedRow(invoice, age.line))}
           </Section>
         ) : null}
 
@@ -551,6 +752,19 @@ export default function Invoices() {
                     accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)}`} style={{ paddingVertical: sp.xs }}>
                     <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Send</Text>
                   </Pressable>
+                  {/* Offered on every row that can take it, not only on the
+                      ageing lists: a coach scrolling their whole book is the
+                      person most likely to find the one they were paid for
+                      three weeks ago. `settleBlocker` is the same reader the
+                      sheet and the server both use, so the control is absent
+                      exactly where the act would be refused. */}
+                  {!settleBlocker(inv) ? (
+                    <Pressable onPress={() => openSettle(inv)} hitSlop={8} accessibilityRole="button"
+                      accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
+                      style={{ paddingVertical: sp.xs }}>
+                      <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
+                    </Pressable>
+                  ) : null}
                   {!inv.voidedAt ? (
                     <Pressable onPress={() => { setVoidTarget(inv); setVoidReason(''); }} hitSlop={8} accessibilityRole="button"
                       accessibilityLabel={`Void invoice ${invoiceNumber(inv.seq)}`} style={{ paddingVertical: sp.xs }}>
@@ -756,6 +970,97 @@ export default function Invoices() {
                   disabled={!voidReason.trim() || busy} onPress={() => { void doVoid(); }} />
               </View>
             </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── RECORDING THAT ONE WAS PAID ──────────────────────────────────────
+          A sheet rather than `Alert.prompt`, which exists only on iOS — a
+          control that silently does nothing on Android is exactly the dead
+          button this codebase keeps finding. Its own `visible` identifier for
+          the same reason the void sheet has one. */}
+      <Modal visible={!!settleTarget} animationType="slide" transparent onRequestClose={() => setSettleTarget(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
+            <Text style={{ ...ty.title, color: t.ink }}>
+              Invoice {settleTarget ? invoiceNumber(settleTarget.seq) : ''} was paid?
+            </Text>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
+              This records your own statement that the money arrived. Nothing about the document changes — it still says what it said when you issued it — and this is written once: if the money later goes back out, that is a refund or a chargeback and it happened on its own day.
+            </Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day it arrived (YYYY-MM-DD)</Text>
+            <TextInput value={settleDay} onChangeText={setSettleDay}
+              placeholder={today} placeholderTextColor={t.ink3} autoCapitalize="none" autoCorrect={false}
+              accessibilityLabel="The day the money arrived" style={inp} />
+            {/* The refusal, live, rather than after the tap. Both ends are
+                refused and neither is corrected: a day before the invoice is a
+                typo that would sort to the top of a ledger, and a day after
+                today is money recorded as arriving before it has. */}
+            {settleTarget && settleDay.trim() && settleDayBlocker(settleTarget, settleDay.trim(), today) ? (
+              <Flag style={{ marginTop: sp.sm }}>{settleDayBlocker(settleTarget, settleDay.trim(), today)}</Flag>
+            ) : null}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>How it arrived (optional)</Text>
+            <TextInput value={settleNote} onChangeText={setSettleNote}
+              placeholder="Bank transfer" placeholderTextColor={t.ink3}
+              accessibilityLabel="How the money arrived" style={inp} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              Printed on the document if you send it again, in your own words. Nothing reads it for anything.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+              <View style={{ flex: 1 }}>
+                <Cta label="Cancel" tone={t.surface2} wide onPress={() => { setSettleTarget(null); setSettleDay(''); setSettleNote(''); }} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Cta label={busy ? 'Recording…' : 'Record it'} wide
+                  disabled={busy || !settleTarget || !!settleDayBlocker(settleTarget, settleDay.trim(), today)}
+                  onPress={() => { void doSettle(); }} />
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── THE DAY TO START CHASING ONE FROM ────────────────────────────────
+          Not a due date, and the sheet says so before the coach types
+          anything. `due_on` is on the document and cannot move; this is the
+          coach's note about their own list and reaches nobody else. */}
+      <Modal visible={!!chaseTarget} animationType="slide" transparent onRequestClose={() => setChaseTarget(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
+            <Text style={{ ...ty.title, color: t.ink }}>
+              Chase invoice {chaseTarget ? invoiceNumber(chaseTarget.seq) : ''} from
+            </Text>
+            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{CHASE_FROM_IS_NOT_A_DUE_DATE}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day (YYYY-MM-DD)</Text>
+            <TextInput value={chaseDay} onChangeText={setChaseDay}
+              placeholder={today} placeholderTextColor={t.ink3} autoCapitalize="none" autoCorrect={false}
+              accessibilityLabel="The day to start chasing this invoice from" style={inp} />
+            {chaseTarget && chaseDay.trim() && chaseFromDayBlocker(chaseTarget, chaseDay.trim()) ? (
+              <Flag style={{ marginTop: sp.sm }}>{chaseFromDayBlocker(chaseTarget, chaseDay.trim())}</Flag>
+            ) : null}
+            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+              <View style={{ flex: 1 }}>
+                <Cta label="Cancel" tone={t.surface2} wide onPress={() => { setChaseTarget(null); setChaseDay(''); }} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Cta label={busy ? 'Saving…' : 'Set it'} wide
+                  disabled={busy || !chaseTarget || !chaseDay.trim() || !!chaseFromDayBlocker(chaseTarget, chaseDay.trim())}
+                  onPress={() => { void doChaseFrom(false); }} />
+              </View>
+            </View>
+            {/* Clearing is its own act and is offered plainly. It puts the
+                invoice back on the undated list, which is where it was before
+                anybody made a plan for it — not a failure state and not a
+                deletion of anything. */}
+            {chaseTarget?.chaseFrom ? (
+              <Pressable onPress={() => { void doChaseFrom(true); }} disabled={busy} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel="Clear the day to chase this invoice from"
+                style={{ paddingVertical: sp.md, alignItems: 'center' }}>
+                <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.ink2 }}>
+                  Clear it — put this one back on the undated list
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         </KeyboardAvoidingView>
       </Modal>

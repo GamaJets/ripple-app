@@ -15,11 +15,21 @@
 // ── Why the age is elapsed and not calendar ───────────────────────────────
 //
 // "Yesterday" and "this morning" are calendar words, and a calendar needs a
-// timezone the gym does not have (see the timezone item on the roadmap: there
-// is no `tenants.timezone`, so "the gym's own day" currently means the reader's
-// laptop). Elapsed time needs none of that: eleven minutes ago is eleven
-// minutes ago in Kiritimati and in Midway, and it is also the thing an owner
-// actually wants to know about a takings figure.
+// timezone. Elapsed time needs none: eleven minutes ago is eleven minutes ago
+// in Kiritimati and in Midway, and it is also the thing an owner actually wants
+// to know about a takings figure.
+//
+// That was written when there was nowhere to keep a gym's zone at all. There is
+// now — `tenants.timezone`, supabase/parts/710 — and it does NOT change the
+// paragraph above. Elapsed is still the right answer for "is this number
+// current", and it is still the only answer available to a gym that has not set
+// a zone, which is every gym today. What the zone buys is one extra clause on
+// the end of the same sentence: `fetchedNote` can now say what the clock ON THE
+// GYM'S OWN WALL said at the moment of the read, which is the thing an owner
+// standing at that wall can check. It is added, never substituted, and it is
+// omitted entirely when there is no zone rather than filled in from the phone —
+// the phone's hour is the hour of whoever is holding it, and on this screen
+// that is frequently not the gym.
 //
 // ── Why 'unknown' is not 'online' ─────────────────────────────────────────
 //
@@ -28,6 +38,7 @@
 // would be an invention — so the copy here says WHEN and stays quiet about
 // whether, exactly as `src/lib/reachability.ts` does one level down.
 import type { Reach } from './reachability';
+import { gymTimeLabel } from './gymZone';
 
 /** One minute, one hour, one day, in ms. Named so the arithmetic below reads. */
 const MIN = 60_000;
@@ -91,18 +102,30 @@ export function isStale(at: number | null, now: number, ttlMs: number = STALE_MS
  *                               and they will not change until there is signal.
  *   · read + online/unknown   → when. On 'unknown' it must not claim either
  *                               way about the connection.
+ *
+ * `zone` is the gym's own IANA zone (`tenants.timezone`) and is OPTIONAL in the
+ * strong sense: every caller that passes nothing gets exactly the sentence it
+ * got before, and every caller that passes a zone gets the same sentence with
+ * the gym's own wall clock appended. Passing the reader's zone here would be a
+ * lie in the one place this file exists to stop one — see the header — so the
+ * argument is documented as the GYM's and a caller with only a device zone
+ * passes null.
  */
-export function fetchedNote(at: number | null, now: number, reach: Reach): string {
+export function fetchedNote(at: number | null, now: number, reach: Reach, zone?: string | null): string {
   if (at == null) {
     return reach === 'offline'
       ? 'Not read yet, and this phone cannot reach us — nothing on this screen is your gym’s.'
       : 'Reading…';
   }
   const age = agePhrase(Math.max(0, now - at));
+  // Null for no zone, an unresolvable zone and an unreadable instant alike —
+  // three nothings that all mean "do not put an hour on screen".
+  const clock = gymTimeLabel(at, zone ?? null);
+  const at_ = clock ? `, at ${clock} at the gym` : '';
   if (reach === 'offline') {
-    return `Offline — read ${age}. Nothing here will change until there is signal.`;
+    return `Offline — read ${age}${at_}. Nothing here will change until there is signal.`;
   }
-  return `Read ${age}`;
+  return `Read ${age}${at_}`;
 }
 
 /**
@@ -116,4 +139,34 @@ export function fetchedNote(at: number | null, now: number, reach: Reach): strin
 export function fetchedNeedsMark(at: number | null, now: number, reach: Reach, ttlMs: number = STALE_MS): boolean {
   if (reach === 'offline') return true;
   return isStale(at, now, ttlMs);
+}
+
+/**
+ * One stamp for a screen fed by several reads: the OLDEST of them.
+ *
+ * A screen that shows three providers' figures under one "Read 2 minutes ago"
+ * is making a claim about all three, so the claim has to be true of the worst
+ * of them. Taking the newest — which is what a single `useEffect` on whichever
+ * status happened to be destructured first does — labels a figure read an hour
+ * ago with the age of the one read a moment ago, which is the exact defect this
+ * file exists to stop: an unlabelled figure read as current, now with a
+ * confident wrong label on it instead of none.
+ *
+ * A source that has never come back contributes `null`, and one null makes the
+ * whole thing null: `fetchedNote` then says "Reading…" rather than putting an
+ * age on a screen where part of what is displayed has never been read at all.
+ * Callers with a source that is genuinely optional should leave it out rather
+ * than pass its null.
+ *
+ * No arguments at all is null for the same reason — there is nothing to be the
+ * age of.
+ */
+export function oldestFetch(...ats: (number | null)[]): number | null {
+  if (ats.length === 0) return null;
+  let out = Infinity;
+  for (const a of ats) {
+    if (a == null) return null;
+    if (a < out) out = a;
+  }
+  return out;
 }

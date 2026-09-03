@@ -81,6 +81,13 @@ ok(/GBP 30/.test(late), 'and quotes what that path costs, in the currency it is 
 const noCcy = rescheduleRefusalLine(refusal('inside_notice', { noticeHours: 24, fee: 30, currency: null }), '7:00 am');
 ok(!/[$£€]/.test(noCcy), 'a fee with no currency is never given a symbol');
 ok(/30/.test(noCcy), 'though the figure itself is still stated');
+// And the figure alone is not enough in a SENTENCE. booking.ts states the rule
+// — "a slot may print the figure alone; a sentence may not" — and this is the
+// sentence a member reads immediately before deciding to cancel and rebook.
+ok(/ask them what that amount is in/.test(noCcy),
+  'and a bare figure in a sentence carries the clause saying nobody set a currency');
+ok(!/ask them what that amount is in/.test(late),
+  'while a stated currency adds no such clause');
 
 // A policy that applies with no amount behind it quotes nothing at all.
 const unpriced = rescheduleRefusalLine(refusal('inside_notice', { noticeHours: 24, fee: null, currency: 'GBP' }), '7:00 am');

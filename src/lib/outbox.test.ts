@@ -155,7 +155,7 @@ const UID = '11111111-1111-1111-1111-111111111111';
 // about it — which is the whole failure these sentences were written for, so it
 // is asserted rather than trusted.
 {
-  eq(OUTBOX_KINDS.length, 6, 'the list has one entry per kind in the union');
+  eq(OUTBOX_KINDS.length, 9, 'the list has one entry per kind in the union');
   for (const k of OUTBOX_KINDS) {
     ok(isOutboxKind(k), `${k} is recognised coming back off the disk`);
     const n = kindNoun(k);
@@ -165,6 +165,31 @@ const UID = '11111111-1111-1111-1111-111111111111';
   }
   eq(outboxNote(0, 'message'), null, 'nothing waiting draws no line at all');
   ok(!isOutboxKind('booking'), 'and a booking is still not a kind — see the header for why');
+  // The newest kind, named the way the member would name it. A coach's waiver
+  // accepted with no signal is the one whose sentence gets read at a door.
+  ok(isOutboxKind('coach-doc-accept'), 'a coach document acceptance survives the round trip through storage');
+  eq(kindNoun('coach-doc-accept').one, 'signed document', 'and it is a signed document to the member, not an acceptance row');
+  ok((outboxNote(1, 'coach-doc-accept') ?? '').includes('not sent yet'), 'the waiting line does not claim the coach has it');
+  // A body scan. It was named in the file's own list of writes that may NOT
+  // wait, under "anything carrying a file" — and a scan write carries none: six
+  // columns of numbers, and the photograph of the printout never leaves the
+  // phone. The member typed those numbers off a sheet standing in a corner of a
+  // gym with no signal, and the alternative to a queue was typing them again.
+  ok(isOutboxKind('scan'), 'a body scan survives the round trip through storage');
+  eq(kindNoun('scan').one, 'body scan', 'and it is a body scan to the member, not a scans row');
+  ok((outboxNote(1, 'scan') ?? '').includes('not sent yet'), 'the waiting line does not claim it is on their record');
+  // Asking a coach for an hour they have not opened. It sits one line under the
+  // exclusion that appears to forbid it — "BOOKING A CLASS OR A PT SLOT" — and
+  // the header argues at length why the scarcity that clause is about does not
+  // exist here: nothing is held, so there is no seat for anybody to take first.
+  // Both halves are asserted, because the day somebody reads the exclusion
+  // literally and deletes this kind, the member in a basement gym loses what
+  // they typed.
+  ok(isOutboxKind('session-request'), 'a session request survives the round trip through storage');
+  ok(!isOutboxKind('booking'), 'while a booking is still not a kind, which is the distinction the header draws');
+  eq(kindNoun('session-request').one, 'session request', 'and it is a request to the member, never a booking');
+  ok(!/book/i.test(outboxNote(1, 'session-request') ?? ''), 'the waiting line never uses the word book');
+  ok(!/book/i.test(lapsedNote('session-request')), 'and neither does the one that says it did not go');
 }
 
 if (errors.length) {

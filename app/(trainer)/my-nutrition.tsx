@@ -54,7 +54,8 @@
 // would fork them. And it never invents a calorie target: `macrosFor` needs a
 // measured weight and body fat, and a target built on figures nobody measured
 // is the placeholder body this codebase has spent a long time removing.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -101,9 +102,11 @@ import { num } from '../../src/lib/format';
  */
 type FoodLogHome = 'checking' | 'stores' | 'no-record' | 'unknown';
 
-function useFoodLogHome(): FoodLogHome {
+function useFoodLogHome(): { home: FoodLogHome; reload: () => void } {
   const rev = useAuthRevision();
   const [home, setHome] = useState<FoodLogHome>(USE_SUPABASE ? 'checking' : 'stores');
+  // Bumped by `reload`, beside `rev` below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     // Backend off: the provider's in-memory store IS the record, and it takes
@@ -129,9 +132,17 @@ function useFoodLogHome(): FoodLogHome {
       }
     })();
     return () => { cancelled = true; };
-  }, [rev]);
+  }, [rev, nonce]);
 
-  return home;
+  // 'unknown' is a refused read, not an account without a profile, and until
+  // now it stuck for the session — the form above it stays held for as long
+  // as it does.
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setHome('checking');
+    setNonce((n) => n + 1);
+  }, []);
+
+  return { home, reload };
 }
 
 /** How many search hits fit above the fold without pushing the form off it. */
@@ -142,8 +153,24 @@ export default function MyNutrition() {
   const router = useRouter();
   const fl = useFoodLog();
   const cd = useClientData();
-  const wToday = useWearables().today;
-  const home = useFoodLogHome();
+  const wearables = useWearables();
+  const wToday = wearables.today;
+  const { home, reload: reloadHome } = useFoodLogHome();
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * A trainer tracks their own eating on the client hooks, so this screen
+   * reads what the client app reads: the food log, the profile and scans
+   * behind the targets, whether this account has a row to store a meal on at
+   * all, and the wearable that supplies the day's burn.
+   *
+   * All of them, because a target is the profile's figures and the log's
+   * total set against each other — refreshing one half would print a
+   * remaining-for-today built out of two different moments. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    Promise.resolve(fl.reload()), Promise.resolve(cd.reload()),
+    Promise.resolve(reloadHome()), wearables.syncAll(),
+  ]), [fl, cd, reloadHome, wearables]));
 
   // An empty log under 'error' means "we could not read it", which is a
   // different sentence from "you have not eaten". Under 'partial' the rows are
@@ -305,7 +332,7 @@ export default function MyNutrition() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
           {/* ── header. Whose day this is, said before anything else ──────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>

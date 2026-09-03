@@ -29,11 +29,13 @@ import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { isoDate } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   fetchPlans, fetchMemberships, fetchPayments, createMembership,
   setMembershipStatus, recordPayment, summarise, money,
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * Today, on the CALENDAR THE PERSON IS STANDING IN.
@@ -166,6 +168,10 @@ export default function OwnerMembers() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // `load` reads all three of this screen's sources together — plans,
+  // memberships and the thirty-day payments — so the gesture asks for all three.
+  const pull = usePullToRefresh(load);
+
   const loaded = rows !== null;
   const list = rows ?? [];
   const sum = useMemo(() => summarise(payments, list, plans), [payments, list, plans]);
@@ -291,10 +297,11 @@ export default function OwnerMembers() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
+            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Members</Text>
         </View>

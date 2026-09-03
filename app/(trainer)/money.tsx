@@ -132,6 +132,7 @@ import {
 } from '../../src/lib/coachPayouts';
 import { receiptsTaken, receiptsEmptyLine, RECEIPT_MAY_DOUBLE_COUNT, type CoachReceipt } from '../../src/lib/coachReceipts';
 import { fetchMyCosts } from '../../src/ui/coachCosts';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { costsTaken, costsEmptyLine, COSTS_ARE_NEVER_NETTED, type CoachCost } from '../../src/lib/coachCosts';
 import {
   clientValue, rankByValue, currenciesIn, unattributedReceipts, unattributedLine,
@@ -176,6 +177,9 @@ export default function CoachMoney() {
   const [costs, setCosts] = useState<{ rows: CoachCost[]; status: LoadStatus }>({ rows: [], status: 'loading' });
 
   const fees = useLateCancelCharges();
+  // Pulled out because the hook hands back a fresh object each render while
+  // the callback inside it is stable.
+  const reloadFees = fees.reload;
 
   const load = useCallback(async () => {
     const [p, r, sub, inv, cr, ca, docs, rec, pay, cost] = await Promise.all([
@@ -208,6 +212,16 @@ export default function CoachMoney() {
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  // Eleven reads: `load` is ten of them in one `Promise.all` and the late
+  // cancellation charges are the eleventh. All of them, and nothing less —
+  // this screen adds strands into totals, and `ledger()` withholds a total
+  // the moment any strand is short. A refresh that moved some of the strands
+  // would produce a total whose parts came from different minutes, which is
+  // worse than a stale one because nothing about it looks wrong.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(), reloadFees()]),
+    [load, reloadFees],
+  ));
 
   /* ── coming in ─────────────────────────────────────────────────────────── */
 
@@ -421,7 +435,7 @@ export default function CoachMoney() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
@@ -499,6 +513,15 @@ export default function CoachMoney() {
                 ? `${issued.count} issued — your own statement of a charge, never a payment receipt`
                 : 'Issue a document for what somebody paid you, including cash and transfers'}
             onPress={() => router.push('/(trainer)/invoices')} />
+          {/* The document this whole screen is the working copy of.
+              app/(trainer)/statement.tsx existed and was reachable from the
+              profile hub and from search, and from nowhere on the Money screen
+              — so a coach standing on the page that holds every figure it is
+              built from had no way to get to it, and the one moment they want
+              it is the moment they are looking at their takings. */}
+          <ListRow icon="chart" title="Statement of Record"
+            note="What this app recorded in a year or a quarter, to hand to an accountant — never a tax return"
+            onPress={() => router.push('/(trainer)/statement')} />
         </Section>
 
         <Rule />

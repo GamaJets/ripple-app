@@ -28,15 +28,18 @@
 //
 // Everything on this screen comes from src/lib/intake.ts, which holds that rule
 // and has a test that fails if anything here starts ranking people.
-import { View, Text, ScrollView } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
-import { isQueryableId } from '../../src/lib/clientDrift';
+import { useRoster } from '../../src/ui/roster';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { useClientIntake } from '../../src/ui/intake';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   READINESS_NOT_ADVICE, READINESS_SEE_A_DOCTOR, TIME_WINDOWS, TRAINING_KINDS,
   TRAINING_PLACES, TRAINING_YEARS, WORK_KINDS, intakeLine, readinessDisclosed,
@@ -54,16 +57,43 @@ const labelOf = (list: { id: string; label: string }[], id: string | null): stri
 export default function ClientIntakeScreen() {
   const t = useTheme();
   const router = useRouter();
+  const r = useRoster();
   const params = useLocalSearchParams<{ clientId?: string; name?: string }>();
-  const id = typeof params.clientId === 'string' && params.clientId ? params.clientId : null;
-  const fullName = typeof params.name === 'string' ? params.name : '';
+  const param = typeof params.clientId === 'string' && params.clientId ? params.clientId : null;
+  // Seeded from the param, so the way in from a client's own screen is
+  // unchanged, and falling back to a picker when there is none — the same shape
+  // as client-report.tsx and client-nutrition.tsx. Without one this screen was
+  // unreachable from Explore, because a row that opens it with no client would
+  // have led to a page saying nobody was named.
+  const [picked, setPicked] = useState<string | null>(param);
+  const id = picked;
+  const client = useMemo(() => r.roster.find((c) => c.id === id) ?? null, [r.roster, id]);
+  const fullName = client?.name ?? (typeof params.name === 'string' ? params.name : '') ?? '';
   const who = (fullName || 'They').split(' ')[0];
 
-  // A client typed in by hand has no user account and no uuid, so nothing
-  // server-backed is asked for them and the screen says why rather than showing
-  // an empty form. Same guard as every other per-client screen.
-  const queryable = !!id && isQueryableId(id);
+  // A client typed in by hand has a `coach_clients` row and no user account, so
+  // nothing server-backed is asked for them and the screen says why rather than
+  // showing an empty form.
+  //
+  // This was `isQueryableId(id)` alone, on the belief that a hand-added client
+  // carries an id the phone invented and Postgres would refuse. It does not:
+  // `coach_clients.id` is uuid DEFAULT gen_random_uuid(), so from the first
+  // round trip onward the guard passed, the read ran, it came back with zero
+  // rows and no error, and this screen told the coach that somebody who has
+  // never been given the app had not filled in their intake. That is an
+  // accusation about a person manufactured out of a read that was never
+  // entitled to an answer. The roster is the only thing that knows which table
+  // the row came from, so it is asked. See src/lib/clientRecord.ts.
+  const queryable = clientIsQueryable(id, client?.handAdded);
   const ci = useClientIntake(USE_SUPABASE && queryable ? id : null);
+  // Two reads: the intake itself, and the roster this screen gets the client's
+  // name and hand-added standing from — the second decides whether the first
+  // is even asked for. The client fills this in on their own phone, so the
+  // only way a coach learns they finished it is by asking again.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([Promise.resolve(ci.reload()), r.refresh()]),
+    [ci, r],
+  ));
   const intake = ci.intake;
 
   const disclosed = readinessDisclosed(intake);
@@ -81,9 +111,10 @@ export default function ClientIntakeScreen() {
       </View>
     ) : null;
 
-  const unasked = !id
-    ? 'No client was named in the link that opened this screen, so nothing was read.'
-    : !USE_SUPABASE
+  // No `!id` branch any more: with nobody chosen the screen shows the picker
+  // below rather than a sentence about a link. Every branch here is about a
+  // client who HAS been named.
+  const unasked = !USE_SUPABASE
       ? 'This build is running without the server, and an intake belongs to the client and lives on it. There is no local copy of somebody else’s to fall back on.'
       : !queryable
         ? `${who} was added by hand and has no Repple account yet, so there is nothing to read. Their intake starts existing when they join.`
@@ -91,7 +122,7 @@ export default function ClientIntakeScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -103,11 +134,40 @@ export default function ClientIntakeScreen() {
           </View>
         </View>
 
-        {/* Four outcomes a naive screen would render identically, and they mean
+        {/* Only where the coach chose on this screen. Arriving from a client's
+            own page, the way back is Back — a second control that undoes the
+            navigation would be two answers to one gesture. */}
+        {id && !param ? (
+          <View style={{ alignItems: 'flex-start', marginTop: sp.md }}>
+            <Ghost label="Someone Else" onPress={() => setPicked(null)} />
+          </View>
+        ) : null}
+
+        {/* Nobody chosen. The same picker client-report.tsx shows, and for the
+            same reason: this screen is reachable from Explore with no params,
+            and a coach who searched "intake" must land on something they can
+            use rather than on a sentence about a missing link. */}
+        {!id ? (
+          <Section>
+            <SectionHead title="Whose intake?" />
+            {r.status === 'error' ? (
+              <Flag>Your client list could not be read, so this is not a list of everyone you coach.</Flag>
+            ) : null}
+            {r.roster.map((c) => (
+              <Pressable key={c.id} onPress={() => setPicked(c.id)} accessibilityRole="button" accessibilityLabel={c.name}
+                style={{ paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
+                <Text style={{ ...ty.body, color: t.ink }}>{c.name}</Text>
+              </Pressable>
+            ))}
+            {!r.roster.length && r.status === 'ready' ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>You have nobody on your book yet.</Text>
+            ) : null}
+          </Section>
+        ) : /* Four outcomes a naive screen would render identically, and they mean
             different things. `intakeLine` owns which sentence, so this screen
             and the row on their profile cannot come to disagree about whether
-            somebody has filled in a form. */}
-        {unasked ? (
+            somebody has filled in a form. */
+        unasked ? (
           <Section>
             <Flag tone={t.ink3}>{unasked}</Flag>
           </Section>

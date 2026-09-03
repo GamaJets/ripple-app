@@ -403,6 +403,12 @@ export default function Onboarding() {
           {INJURY_AREAS.filter((a) => a.id !== 'other').map((a) => { const on = injAreas.includes(a.id); return (
             <Pill key={a.id} on={on} label={a.label} onPress={() => setInjAreas((prev) => (on ? prev.filter((x) => x !== a.id) : [...prev, a.id]))} />); })}
         </View>
+        {/* rtl-ok: a navigation PATH inside an English sentence — "the screen
+            called X, and inside it the thing called Y". The separator belongs to
+            the sentence, not to the layout: dropping FORWARD_CHAR into it would
+            put a mirrored chevron in the middle of an unmirrored English clause,
+            which is worse than leaving it. When the catalogue is translated the
+            whole sentence moves and the separator goes with it. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{injAreas.length > 0 ? 'You can add severity, notes, and mark these recovered anytime in Me › Injuries & Limitations.' : 'Nothing to declare? Leave this blank — you can add them later in Me › Injuries.'}</Text>
       </View>
     ),

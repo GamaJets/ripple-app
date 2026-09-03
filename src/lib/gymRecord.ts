@@ -429,6 +429,33 @@ export interface OnlineOrder {
   /** Whether a `gym_payments` row names this order — see part 480. False on a
    *  paid order is money Stripe took that this ledger does not have. */
   inLedger: boolean;
+
+  /* ── the refund half, added by supabase/parts/800 ────────────────────────
+   *
+   * `refundedCents` is what STRIPE says went back on this order's charge, a
+   * running total it assigns rather than adds. `reversedCents` is what the
+   * LEDGER has actually taken off — the sum over every `gym_payments` row
+   * whose `reverses_payment_id` names this order's payment.
+   *
+   * Both, rather than a flag, because the exception `onlineOrderProblem`
+   * raises from them clears itself the moment somebody records the missing
+   * correction by hand. Stripe does not redeliver an event it has already
+   * answered with a 200, so nothing would ever come back to clear a flag.
+   */
+
+  /** `gym_orders.refunded_cents`. NULL means Stripe has never mentioned a
+   *  refund on this charge, which is a different fact from zero. */
+  refundedCents: number | null;
+  /** `gym_orders.refunded_currency`, upper case, or NULL when Stripe stated
+   *  none. Not defaulted to `currency`: a refund whose currency disagrees with
+   *  the payment it reverses is refused rather than netted, and this is the
+   *  column that says what the disagreement was. */
+  refundedCurrency: string | null;
+  /** What the ledger has taken off this order's payment, in minor units and
+   *  positive. Zero when nothing has been reversed. */
+  reversedCents: number;
+  /** `gym_orders.refund_note` — why the webhook could not mirror a refund. */
+  refundNote: string | null;
 }
 
 /**
@@ -465,7 +492,7 @@ export async function fetchOnlineOrders(
   const rows = await readAll<any>(
     (from, to) => sb
       .from('gym_orders')
-      .select('id, member_id, kind, status, amount_cents, currency, failure_note, paid_at')
+      .select('id, member_id, kind, status, amount_cents, currency, failure_note, paid_at, refunded_cents, refunded_currency, refund_note')
       .eq('tenant_id', tenantId)
       .in('status', ['paid', 'failed'])
       .gte('paid_at', sinceISO)
@@ -493,6 +520,52 @@ export async function fetchOnlineOrders(
   // is about — every order it could not confirm would be drawn as an exception.
   const inLedger = new Set(paid.map((p: any) => p.gym_order_id));
 
+  // ── what the ledger has taken back off those sales ────────────────────────
+  //
+  // A third read rather than a fourth column, because a reversal is a ROW —
+  // supabase/parts/180 settled that and its header argues it at length. So
+  // "how much has been refunded against this sale" is a SUM over rows pointing
+  // at the payment, and it is asked here rather than in Postgres for the same
+  // reason `inLedger` is: an aggregate embed is a thing this module cannot
+  // assert without a live database, in exchange for nothing.
+  //
+  // Keyed by PAYMENT id and then mapped back to the order, because
+  // `reverses_payment_id` names the payment and the reversal deliberately
+  // carries no `gym_order_id` of its own — part 480's unique index allows one
+  // row per order, and the sale row has already taken it.
+  //
+  // Paged and chunked exactly as the read above is, and for the same reason:
+  // `reverses_payment_id` is a foreign key rather than a unique one, so a
+  // chunk can legitimately answer with more rows than it had ids.
+  const paymentToOrder = new Map<string, string>();
+  for (const p of paid as any[]) if (p?.id && p?.gym_order_id) paymentToOrder.set(String(p.id), String(p.gym_order_id));
+
+  const reversals = paymentToOrder.size
+    ? await readByIds<any>(
+        [...paymentToOrder.keys()],
+        (chunk, from, to) => sb
+          .from('gym_payments')
+          .select('id, reverses_payment_id, amount_cents')
+          .eq('tenant_id', tenantId)
+          .in('reverses_payment_id', chunk)
+          .order('id', { ascending: true })
+          .range(from, to),
+        'the refunds recorded against those online sales',
+      )
+    : [];
+
+  // Absolute, because a reversal is stored negative and this figure is compared
+  // against Stripe's `amount_refunded`, which is positive. Adding the signed
+  // value would make every comparison read as though nothing had been reversed.
+  const reversedByOrder = new Map<string, number>();
+  for (const v of reversals as any[]) {
+    const orderId = paymentToOrder.get(String(v?.reverses_payment_id ?? ''));
+    if (!orderId) continue;
+    const cents = Number(v?.amount_cents);
+    if (!Number.isFinite(cents)) continue;
+    reversedByOrder.set(orderId, (reversedByOrder.get(orderId) ?? 0) + Math.abs(cents));
+  }
+
   const names = await namesFor(sb, rows.map((r: any) => r.member_id).filter(Boolean));
   return rows.map((r: any) => ({
     id: r.id,
@@ -505,6 +578,15 @@ export async function fetchOnlineOrders(
     failureNote: r.failure_note ?? null,
     paidAt: r.paid_at ?? null,
     inLedger: inLedger.has(r.id),
+    // NULL is preserved rather than coerced to 0. "Stripe has never mentioned a
+    // refund" and "Stripe refunded nothing" are different facts, and
+    // `onlineOrderProblem` raises nothing on either — but a screen that later
+    // wants to say "refunded, in full, and correctly recorded" needs to be able
+    // to tell them apart.
+    refundedCents: Number.isFinite(r.refunded_cents) ? r.refunded_cents : null,
+    refundedCurrency: r.refunded_currency ?? null,
+    reversedCents: reversedByOrder.get(r.id) ?? 0,
+    refundNote: r.refund_note ?? null,
   }));
 }
 

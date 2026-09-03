@@ -45,6 +45,10 @@ export interface CoachExercisesApi {
    */
   remember: (name: string, group?: string) => Promise<boolean>;
   forget: (name: string) => Promise<boolean>;
+  /** Read the saved names again. Under 'error' the list is empty because the
+   *  read failed, not because the coach has saved nothing — the picker says
+   *  so, and this is how it stops saying it. */
+  reload: () => void;
 }
 
 const byName = (a: CoachExercise, b: CoachExercise) => a.name.localeCompare(b.name);
@@ -54,6 +58,8 @@ export function useCoachExercises(): CoachExercisesApi {
   const [saved, setSaved] = useState<CoachExercise[]>([]);
   const [status, setStatus] = useState<CoachExerciseStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [uid, setUid] = useState<string | null>(null);
+  // Bumped by `reload`, beside `authRev` in the read below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -95,7 +101,16 @@ export function useCoachExercises(): CoachExercisesApi {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  /** A name the coach typed a moment ago is held optimistically and is NOT
+   *  merged by the read below — it assigns — so a refresh drops an optimistic
+   *  name whose write never landed. That is the honest outcome: the name was
+   *  never saved, and the list is supposed to be what the server holds. */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   const remember = useCallback(async (name: string, group = ''): Promise<boolean> => {
     const nm = name.trim();
@@ -123,5 +138,5 @@ export function useCoachExercises(): CoachExercisesApi {
     } catch { return false; }
   }, [uid]);
 
-  return { saved, status, remember, forget };
+  return { saved, status, remember, forget, reload };
 }

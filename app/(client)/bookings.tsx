@@ -39,6 +39,9 @@ import { coachPackLines, gymPtLines, chooseRoute, creditsLeft, payingLines, ledg
   clientLedgerLine, bookingCreditNote, type CreditSession } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
+// One definition of "today, locally", shared with the membership screen and
+// with the pass code itself — see the note on `todayISO` below.
+import { todayIso } from '../../src/lib/memberRecord';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { useReachability } from '../../src/ui/reachability';
@@ -106,8 +109,8 @@ type Item = { id: string; kind: 'class' | 'pt'; title: string; sub: string; star
 export default function Bookings() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, myStatus, status: classStatus, cancel: cancelClass, cachedNote: classCachedNote } = useClasses();
-  const { sessions, status: sessionStatus, releaseSession, cancelMyBooking, rescheduleMyBooking, cachedNote: sessionCachedNote } = useSessions();
+  const { classes, myStatus, status: classStatus, cancel: cancelClass, cachedNote: classCachedNote, refresh: refreshClasses } = useClasses();
+  const { sessions, status: sessionStatus, releaseSession, cancelMyBooking, rescheduleMyBooking, cachedNote: sessionCachedNote, refresh: refreshSessions } = useSessions();
   // Whether this phone can reach us. It decides the second half of every
   // failure sentence on this screen.
   const reach = useReachability();
@@ -116,7 +119,7 @@ export default function Bookings() {
   // once already — see the long note above `Item` — and a hardcoded 24 hours in
   // one of them was how a coach's 48-hour policy would have gone unmentioned
   // here and mentioned there.
-  const { policy: cancelPolicy } = useCancellationPolicy();
+  const { policy: cancelPolicy, reload: reloadPolicy } = useCancellationPolicy();
   // What this member is waiting for. `session_waitlist_client_r` shows them
   // their own row and nobody else's, so a position can only come from the
   // server: read from the app the queue is a set of one and everybody is first.
@@ -125,7 +128,20 @@ export default function Bookings() {
   // way to ask again was the Try Again button inside the failure notice, and
   // there is no such button on a screen that merely went stale. Pull to refresh
   // is the gesture people already try — see src/ui/pullToRefresh.tsx.
-  const pull = usePullToRefresh(useCallback(() => { reloadWait(); }, [reloadWait]));
+  //
+  // It asked for the WAITLIST and nothing else. Everything this screen is
+  // actually about — the classes booked, the PT sessions, the cancellation
+  // policy printed beside each one, and the packs and passes paying for them —
+  // was left at whatever the first read returned, so a member who cancelled on
+  // another device pulled this screen down and watched the booking stay. Six
+  // reads make this screen and the gesture now asks for all six.
+  const pull = usePullToRefresh(useCallback(() => {
+    reloadWait();
+    void refreshClasses();
+    void refreshSessions();
+    reloadPolicy();
+    setEntitlementTick((n) => n + 1);
+  }, [reloadWait, refreshClasses, refreshSessions, reloadPolicy]));
   // Either read failing makes this list a fragment, and a fragment must not be
   // announced as "you have nothing booked" — the member then turns up to
   // nothing, or fails to turn up to something.
@@ -157,6 +173,10 @@ export default function Bookings() {
   const [packs, setPacks] = useState<PackBalance | null | undefined>(undefined);
   const [ptPasses, setPtPasses] = useState<PtPassRow[] | null | undefined>(undefined);
   const [credits, setCredits] = useState<CreditSession[] | null | undefined>(undefined);
+  /** Bumped by the pull. These three were read once at mount and never again —
+   *  on a TAB, which stays mounted for the life of the app, so a pack drawn
+   *  down this morning was still shown at its old balance tonight. */
+  const [entitlementTick, setEntitlementTick] = useState(0);
   useEffect(() => {
     let live = true;
     (async () => {
@@ -165,14 +185,23 @@ export default function Bookings() {
       setPacks(p); setPtPasses(g); setCredits(c);
     })();
     return () => { live = false; };
-  }, []);
+  }, [entitlementTick]);
 
   // The day a gym pass has to be live on, taken locally: a pass expires on a
   // date at the gym, not at an instant in UTC.
-  const todayISO = useMemo(() => {
-    const d = new Date(); const z = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
-  }, []);
+  //
+  // Recomputed on every render rather than memoised on an empty dependency
+  // array. `useMemo(..., [])` froze "today" at the moment this screen mounted,
+  // and this screen is a TAB — it stays mounted for the life of the app. So a
+  // phone left open overnight, which is most phones, went on filtering passes
+  // against yesterday: a pass that expired at midnight stayed listed as paying
+  // for a session the gym would refuse at the door.
+  // app/(client)/membership.tsx argues the identical point about the identical
+  // value — "the screen can be open across midnight, and a membership that
+  // expired at 00:00 should not still read Active because the component has not
+  // re-rendered for a new day" — and the two are the same question about the
+  // same member at the same desk.
+  const todayISO = todayIso(new Date());
   const coachLines = useMemo(() => (packs === undefined ? null : coachPackLines(packs?.lines ?? null)), [packs]);
   const gymLines = useMemo(() => (ptPasses === undefined ? null : gymPtLines(ptPasses, todayISO)), [ptPasses, todayISO]);
   const creditRoute = useMemo(
@@ -400,9 +429,42 @@ export default function Bookings() {
     );
   };
 
+  /**
+   * Everything the member has actually BOOKED, as calendar events.
+   *
+   * ── What this used to export ─────────────────────────────────────────────
+   *
+   * `items` includes the classes this member is on the WAITLIST for — that is
+   * what `waitlist: st === 'waitlist'` is for, and the row draws a dot and
+   * offers "Leave" rather than "Cancel" because of it. This function mapped the
+   * whole list. So a place in a queue was written into the member's real
+   * calendar, on their phone, as an event at a time, indistinguishable from the
+   * spin class they hold a seat for — and calendar entries outlive the app:
+   * once it is in there nothing here ever corrects it, and a member who is
+   * never offered the place turns up for a class they were never in.
+   *
+   * The heading two hundred lines down states the rule this broke, about the
+   * other kind of queue: "A PT waitlist is not a booking and is never listed as
+   * one." A class waitlist is not a different kind of thing.
+   *
+   * So the export is confirmed bookings only, and it SAYS how many places were
+   * left out rather than dropping them silently — a member who exports four
+   * rows and finds three in their calendar is owed the reason.
+   */
   const addToCalendar = async () => {
-    if (items.length === 0) return;
-    const evts: IcsEvent[] = items.map((it) => ({
+    const booked = items.filter((it) => !it.waitlist);
+    const queued = items.length - booked.length;
+    if (booked.length === 0) {
+      Alert.alert(
+        'Nothing to add',
+        queued > 0
+          ? `You are in the queue for ${queued} ${queued === 1 ? 'class' : 'classes'} and have nothing booked. A place in a queue is not a booking, so it is not written into your calendar — if one comes to you, it appears here as a booking and you can add it then.`
+          : 'You have nothing booked yet, so there is nothing to add to your calendar.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    const evts: IcsEvent[] = booked.map((it) => ({
       start: it.startsAt,
       durationMin: it.durationMin || 60,
       title: `${appName} · ${it.title}`,
@@ -410,6 +472,13 @@ export default function Bookings() {
       notes: it.sub,
     }));
     await shareIcs(buildIcs(evts, `${appName} — My bookings`), 'my-bookings.ics', 'Add to calendar');
+    if (queued > 0) {
+      Alert.alert(
+        'Your bookings, not your queues',
+        `${booked.length} booked ${booked.length === 1 ? 'session is' : 'sessions are'} in the file. The ${queued} ${queued === 1 ? 'place' : 'places'} you are waiting for ${queued === 1 ? 'is' : 'are'} not — a queue is not a booking, and a calendar entry saying otherwise would still be there long after the class had run.`,
+        [{ text: 'OK' }],
+      );
+    }
   };
 
   const G = layout.gutter;

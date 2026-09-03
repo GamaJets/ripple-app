@@ -36,7 +36,7 @@
 // (`src/theme/scale`): eleven bordered boxes became hairline-separated sections,
 // payroll became the screen's one hero figure, and the Georgia serif header and
 // the 12.5/11.5px font sizes are gone.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -60,6 +60,8 @@ import {
 // one label. Local midnight, not UTC's — see the header of monthEnd.ts.
 import { monthWindow, monthKeyOf } from '../../src/lib/monthEnd';
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 type Range = 'week' | 'month' | 'season';
 const RANGES: [Range, string][] = [['week', 'This week'], ['month', 'This month'], ['season', 'Season']];
@@ -234,8 +236,11 @@ export default function OwnerClassAnalytics() {
   /** Bumped by the Refresh control. A counter, so two taps are two reads. */
   const [tick, setTick] = useState(0);
   /** When the attendance read landed, and whether one is in flight. */
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [attendanceAt, setAttendanceAt] = useState<number | null>(null);
   const [reading, setReading] = useState(false);
+  /** And when the pay rates did. The payroll column on this screen is those two
+   *  reads multiplied together, so one stamp over it has to be the older. */
+  const [payAt, setPayAt] = useState<number | null>(null);
 
   useEffect(() => {
     let on = true;
@@ -248,7 +253,7 @@ export default function OwnerClassAnalytics() {
     classSummary(from, to)
       // The stamp moves on a read that LANDED. A refused one leaves it where it
       // was, because what is on screen is still the earlier read's.
-      .then((r) => { if (on) { setRows(r); setFetchedAt(Date.now()); } })
+      .then((r) => { if (on) { setRows(r); setAttendanceAt(Date.now()); } })
       // A bare .then left a rejection unhandled and the screen showing whatever
       // it had. There is nothing to show after a failed read, so say so.
       .catch((e) => { reportError('classAnalytics.summary', e); if (on) setRows(null); })
@@ -265,15 +270,32 @@ export default function OwnerClassAnalytics() {
   useEffect(() => {
     let on = true;
     if (!tenantId) { setPay(null); setPaid(null); return; }
-    fetchTrainerPay(supabase, tenantId)
-      .then((p) => { if (on) setPay(p); })
-      .catch((e) => { reportError('classAnalytics.trainerPay', e); if (on) setPay(null); });
-    fetchClassPay(supabase, tenantId)
-      .then((p) => { if (on) setPaid(p); })
-      .catch((e) => { reportError('classAnalytics.classPay', e); if (on) setPaid(null); });
+    // Both halves have to land for the stamp to move: the payroll column needs
+    // the rates AND the lines already raised, and a stamp set by whichever
+    // resolved first would claim an age for the other one. Each keeps its own
+    // failure — a null `pay` is what the flag below reads as "the rates could
+    // not be read", and rates are the one thing on this screen that must not
+    // survive a refusal, because somebody pays against them.
+    Promise.all([
+      fetchTrainerPay(supabase, tenantId)
+        .then((p) => { if (on) setPay(p); })
+        .catch((e) => { reportError('classAnalytics.trainerPay', e); if (on) setPay(null); throw e; }),
+      fetchClassPay(supabase, tenantId)
+        .then((p) => { if (on) setPaid(p); })
+        .catch((e) => { reportError('classAnalytics.classPay', e); if (on) setPaid(null); throw e; }),
+    ])
+      .then(() => { if (on) setPayAt(Date.now()); })
+      .catch(() => { /* both halves have already reported and cleared themselves */ });
     return () => { on = false; };
   }, [tenantId, payTick]);
   const reload = () => setPayTick((n) => n + 1);
+  /** One line over the two reads, and it is the age of the older. */
+  const fetchedAt = oldestFetch(attendanceAt, payAt);
+  /** Attendance and pay, both. The Refresh button beside the stamp and the pull
+   *  gesture run the same pair — a screen half-refreshed under one stamp is the
+   *  thing the stamp exists to prevent. */
+  const refreshAll = useCallback(() => { setTick((n) => n + 1); setPayTick((n) => n + 1); }, []);
+  const pull = usePullToRefresh(refreshAll);
 
   const loaded = rows !== null;
   const list = rows ?? [];
@@ -472,7 +494,7 @@ export default function OwnerClassAnalytics() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -482,8 +504,7 @@ export default function OwnerClassAnalytics() {
             {/* Attendance and payroll both. The pay reload rides along, because
                 an owner pressing one control expects the whole screen to be
                 current afterwards, not half of it. */}
-            <Fetched at={fetchedAt} busy={reading}
-              onRefresh={() => { setTick((n) => n + 1); setPayTick((n) => n + 1); }} />
+            <Fetched at={fetchedAt} busy={reading} onRefresh={refreshAll} />
           </View>
         </View>
 

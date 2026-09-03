@@ -36,6 +36,7 @@
 // has been opened. The database cannot check that; nothing about scrolling is
 // visible to it, so the app is the only place it can be true.
 import { useCallback, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Alert, Pressable, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -119,6 +120,10 @@ export default function ClientGymAgreementsScreen() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
+  // The gym's paperwork and which of it this member has signed — one read, and
+  // the same one the screen already runs when it comes into focus.
+  const pull = usePullToRefresh(load);
+
   function expand(a: MemberAgreement) {
     const next = open === a.id ? null : a.id;
     setOpen(next);
@@ -174,7 +179,7 @@ export default function ClientGymAgreementsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

@@ -102,7 +102,7 @@
 // their coach sent. Under 'error' an empty list means we could not find out —
 // NOT that the coach has sent nothing — which is the distinction
 // src/ui/loadStatus.ts exists to keep.
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -172,6 +172,16 @@ interface AnnValue {
   status: LoadStatus;
   /** How many of `announcements` have not reached the server. */
   unsent: number;
+  /**
+   * Read the list again.
+   *
+   * The effect below runs on the auth revision and on nothing else, so a read
+   * that failed stayed failed for the life of the session: app/(client)/notices.tsx
+   * printed "Try again in a moment" with nothing on the screen to try again
+   * with, and the only way to ask a second time was to kill the app. A notice
+   * is what a gym uses to say it is closed tomorrow.
+   */
+  reload: () => void;
 }
 const Ctx = createContext<AnnValue | null>(null);
 
@@ -190,6 +200,11 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const [announcements, setAnnsState] = useState<Announcement[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`, and read by the one effect below alongside the auth
+  // revision. A counter rather than a re-entrant async function: the effect
+  // already has a `cancelled` flag and a cleanup, so re-running it is the one
+  // path that cannot leave two reads racing to set the same status.
+  const [readRev, setReadRev] = useState(0);
 
   // See the note in wellness.tsx: every mutation writes the ref and the state
   // together, so an insert resolving seconds later merges into the list as it
@@ -417,7 +432,15 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); /* offline: the cached list stands, and now says so */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readRev]);
+
+  /** Ask again. Puts the status back to 'loading' first, so a screen showing a
+   *  failure says it is retrying rather than sitting on the old sentence while
+   *  the read runs. */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setReadRev((n) => n + 1);
+  }, []);
 
   const post = async (kind: NoticeKind, body: string, push: boolean): Promise<PostResult> => {
     const b = body.trim().slice(0, MAX_BODY);
@@ -440,7 +463,7 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   const mine = useMemo(() => announcements.filter((a) => a.mine), [announcements]);
 
   return (
-    <Ctx.Provider value={{ announcements, latest, latestGym, mine, addAnnouncement, addGymAnnouncement, status, unsent }}>
+    <Ctx.Provider value={{ announcements, latest, latestGym, mine, addAnnouncement, addGymAnnouncement, status, unsent, reload }}>
       {children}
     </Ctx.Provider>
   );

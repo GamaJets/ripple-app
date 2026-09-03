@@ -96,11 +96,37 @@ export const NAV: NavItem[] = [
   // payment that arrived — and on Revenue you only READ it back. Naming this
   // one for what you do here leaves Revenue free to mean the analysis.
   { href: '/money', label: 'Plans & payments', roles: ['owner'], context: 'gym' , group: 'Money' },
+  // Directly under it because it is the OTHER half of the same question. Plans
+  // & payments is what the desk took; this is what members paid on their own
+  // phones, through the gym's own Stripe account — money `payments` does not
+  // contain. `gym_orders` had been written by the checkout function since
+  // supabase/parts/281 and read by nobody but the buyer, so a gym taking card
+  // money online had no order list at all: no way to see what sold, no way to
+  // find a receipt at the desk, and no sight of an order Stripe charged for and
+  // this product failed to grant.
+  { href: '/orders', label: 'Online orders', roles: ['owner'], context: 'gym' , group: 'Money' },
   // Revenue is the analysis behind the capture above, and accounting is what
   // leaves the building for somebody else to file. Analytics is the only screen
   // here that answers "which way is this moving" rather than "what is true now".
   { href: '/revenue', label: 'Revenue', roles: ['owner'], context: 'gym' , group: 'Money' },
+  // Directly under Revenue because it is the same ledger pointed the other way,
+  // and because until it existed this product held no outgoing at all except
+  // what it settles with its trainers: no rent, no power, no cleaner, no music
+  // licence, no insurance, no accountant. The only profit-and-loss a gym had
+  // was eight numbers typed into one AsyncStorage key on one phone.
+  //
+  // Owner only, and more firmly than most: a 'staff' cost line carries what the
+  // gym pays the people who are not on Payroll, and a trainer reading their
+  // colleagues' pay off a costs table is a disclosure the gym never made. The
+  // page and the database each refuse the role independently.
+  { href: '/costs', label: 'Costs', roles: ['owner'], context: 'gym' , group: 'Money' },
   { href: '/accounting', label: 'Accounting', roles: ['owner'], context: 'gym' , group: 'Money' },
+  // After Accounting because it is the same records assembled for somebody
+  // outside the building, and for a period nothing else in this console could
+  // produce: /accounting and /close are both monthly, and a return is filed for
+  // a quarter in most regimes that have one. It states no tax figure and says
+  // so at the top — see the header of the page.
+  { href: '/tax', label: 'Tax', roles: ['owner'], context: 'gym' , group: 'Money' },
   { href: '/analytics', label: 'Analytics', roles: ['owner'], context: 'gym' , group: 'System' },
   // Beside the money screens because it is the same ledger read from the other
   // side: those are what came in, this is what goes out to the people who

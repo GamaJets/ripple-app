@@ -178,7 +178,7 @@ export default function NotificationPrefs() {
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            These choices are kept on this phone. If you use the app on a second phone, that one has its own answers.
+            These choices are kept on this phone, and only this phone. If you use the app on a second phone, that one has its own answers — and signing out clears these, so the next person to sign in here starts from the defaults rather than yours.
           </Text>
         </Section>
 

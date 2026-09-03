@@ -43,7 +43,8 @@
 // no fuzzy fallback. Here a near-miss would tell a coach they have filmed a
 // movement they have not — so the slug set below is tested with Set.has and
 // never with a scan for containment.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -54,6 +55,7 @@ import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Ghost, PartialRead, F
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
+import { matchesSearch, fallbackTag } from '../../src/lib/catalogueLocale';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { useAuth } from '../../src/ui/auth';
@@ -79,6 +81,7 @@ import {
 import { liftIn } from '../../src/lib/units';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { type LoadStatus } from '../../src/ui/loadStatus';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 
 const ALL = 'All';
@@ -151,7 +154,15 @@ export default function TrainerLibrary() {
      `rosterStatus` and the aggregate's own status are held separately and
      BOTH gate every figure — a coach told "3 of 40 are stalled" off a roster
      that came back short is acting on a denominator that is not their book. */
-  const { roster, status: rosterStatus } = useRoster();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  // Three reads: the movement catalogue, the clips attached to it, and the
+  // roster the per-client grant lines are written from. The clip column is a
+  // statement ABOUT a catalogue row, so refreshing one without the other
+  // could say "no clip of yours" against a row read at a different moment.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([reload(), reloadVideos(), refreshRoster()]),
+    [reload, reloadVideos, refreshRoster],
+  ));
   const coachUnit = useSettings().weightUnit;
   const [askedFor, setAskedFor] = useState<string | null>(null);
   const [rosterRows, setRosterRows] = useState<RosterExerciseRow[] | null>(null);
@@ -226,7 +237,10 @@ export default function TrainerLibrary() {
   // Signed in one request rather than one per row — see useCatalogueThumbs.
   const term = q.trim().toLowerCase();
   const list = useMemo(
-    () => rows.filter((r) => inGroup(r.group, group) && (term === '' || r.name.toLowerCase().includes(term))),
+    // Both names — see matchesSearch() in src/lib/catalogueLocale.ts. A coach
+    // who learned the movement in English and a coach reading the German
+    // library must find the same row from the same box.
+    () => rows.filter((r) => inGroup(r.group, group) && matchesSearch(term, r.name, r.display)),
     [rows, group, term],
   );
   useEffect(() => { setShown(PAGE); }, [term, group]);
@@ -294,7 +308,7 @@ export default function TrainerLibrary() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
-        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={goBack} />
@@ -429,13 +443,16 @@ export default function TrainerLibrary() {
                         <Pressable
                           onPress={() => router.push({ pathname: '/(trainer)/exercise', params: { name: r.name, from: 'trainerLibrary' } })}
                           accessibilityRole="button"
-                          accessibilityLabel={[r.name, r.group ? cap(r.group) : null, note].filter(Boolean).join('. ')}
+                          accessibilityLabel={[r.display.text, r.group ? cap(r.group) : null, note].filter(Boolean).join('. ')}
                           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                           <ExerciseThumb uri={thumbFor(r)} t={t} size={44} />
                           <View style={{ flex: 1 }}>
-                            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>
+                            {/* `r.name` stays the identity — it is what this
+                                row navigates by and what a programme stores.
+                                Only the label moves. */}
+                            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.display.text}</Text>
                             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                              {r.group ? cap(r.group) : 'Muscle group not recorded'}
+                              {[r.group ? cap(r.group) : 'Muscle group not recorded', fallbackTag(r.display)].filter(Boolean).join(' · ')}
                             </Text>
                           </View>
                           {note ? (
@@ -451,7 +468,7 @@ export default function TrainerLibrary() {
                               <Text style={{ ...ty.caption, color: t.ink2 }}>{note}</Text>
                             </View>
                           ) : null}
-                          <Icon name="chevron" size={16} color={t.ink3} />
+                          <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                         </Pressable>
 
                         {/* ── who on the book is stalled on this one ────────

@@ -4,12 +4,14 @@
 // instructions for nearly every movement, so loading it whole to show one
 // screen would pull roughly a megabyte to render a page about a single lift —
 // on a phone, on mobile data, to display twelve lines of text.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { exerciseSlug } from '../lib/exerciseId';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
+import { useCatalogueTranslations, useExerciseTranslation } from './catalogueTranslations';
+import { displayName, displayDescription, fallbackNote, type DisplayString } from '../lib/catalogueLocale';
 import type { LoadStatus } from './loadStatus';
 
 export interface ExerciseDetail {
@@ -148,8 +150,26 @@ export function useExerciseDetail(name: string | null | undefined) {
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
-  return { detail, status, signedOut, reload: load };
+
+  // ── the name and description the SCREEN shows ───────────────────────────
+  //
+  // `detail.name` stays the English identity — it is what the id is the slug
+  // of, what a programme stores, and what gets written back when this screen
+  // logs a set. `display` is the reader's own language, and it says which
+  // language each string is actually in so the screen can mark an English one
+  // instead of passing it off as a translation. See src/lib/catalogueLocale.ts.
+  const { byId, locale } = useExerciseTranslation(detail?.id ?? id);
+  const display = useMemo(() => {
+    if (!detail) return null;
+    const name = displayName(detail.name, detail.id, byId, locale);
+    const description = displayDescription(detail.description, detail.id, byId, locale);
+    return { name, description, note: fallbackNote(name, description) };
+  }, [detail, byId, locale]);
+
+  return { detail, display, status, signedOut, reload: load };
 }
+
+type RawCatalogueRow = Omit<CatalogueRow, 'display'>;
 
 export interface CatalogueRow {
   id: string;
@@ -166,6 +186,15 @@ export interface CatalogueRow {
   /** Which catalogue the thumbnail belongs to, so it resolves against the
    *  right host. Same reason frameUrls takes it. */
   source: string | null;
+  /**
+   * The name to PUT ON SCREEN, in the reader's language where we have it.
+   *
+   * `name` above is untouched and stays the identity: it is what the id is the
+   * slug of, what the builder writes into a programme, and what the exercise
+   * screen is opened with. A list that navigated by `display.text` would send a
+   * German reader to a movement called "Kniebeuge", which resolves to nothing.
+   */
+  display: DisplayString;
 }
 
 /**
@@ -189,7 +218,10 @@ export interface CatalogueRow {
  */
 export function useExerciseCatalogue() {
   const authRev = useAuthRevision();
-  const [rows, setRows] = useState<CatalogueRow[]>([]);
+  // One request for the whole language, not one per row — see
+  // src/ui/catalogueTranslations.ts. An English reader asks for nothing.
+  const { byId: translations, locale } = useCatalogueTranslations();
+  const [rows, setRows] = useState<RawCatalogueRow[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
   /** True when an empty catalogue is a permissions answer rather than a real
    *  one — the read policy is `to authenticated`, and a signed-out session is
@@ -245,5 +277,14 @@ export function useExerciseCatalogue() {
   }, [authRev]);
 
   useEffect(() => { void load(); }, [load]);
-  return { rows, status, signedOut, reload: load };
+
+  // Merged here rather than in each screen: five screens read this hook, and a
+  // list that fell back to English on its own would be a fifth place for the
+  // "is this actually translated" question to be answered differently.
+  const shown = useMemo(
+    () => rows.map((r) => ({ ...r, display: displayName(r.name, r.id, translations, locale) })),
+    [rows, translations, locale],
+  );
+
+  return { rows: shown, status, signedOut, reload: load };
 }

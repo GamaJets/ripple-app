@@ -26,7 +26,7 @@
 // screen has to remember to validate it and no two screens can validate it
 // differently. `parsePlan` returning null means the column held nothing this
 // build understands; `status` is still what says whether it was read at all.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { CoachAdjust } from '../lib/nutrition';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -63,6 +63,10 @@ interface CoachNutritionValue {
    *  confirmed a row — a PostgREST write that matched nothing resolves with no
    *  error at all, so the returned row is the only proof it landed. */
   setPlan: (clientId: string, plan: CoachMealPlan) => Promise<boolean>;
+  /** Read the adjustments again. Under 'error' every get() null means unknown,
+   *  and the screens above then have to withhold the coach's plan entirely —
+   *  so there has to be a way to ask a second time. */
+  reload: () => void;
 }
 
 const Ctx = createContext<CoachNutritionValue | null>(null);
@@ -72,6 +76,8 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
   const [map, setMap] = useState<Record<string, NutritionAdjust>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`, beside `authRev` in the read below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -111,7 +117,16 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); /* stay in-memory, but say so */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  /** The read is a MERGE rather than an assignment, which is what makes this
+   *  safe over an optimistic adjustment: a change the coach just made and the
+   *  server has not yet returned is not dropped by the answer to a query that
+   *  was sent before it. */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   const get = (clientId: string) => map[clientId] ?? null;
   const setAdjust = async (clientId: string, patch: Partial<NutritionAdjust>): Promise<boolean> => {
@@ -194,7 +209,7 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
     } catch (e) { reportError('coachNutrition.setPlan', e, { clientId }); return false; }
   };
 
-  return <Ctx.Provider value={{ get, status, setAdjust, clear, setPlan }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ get, status, setAdjust, clear, setPlan, reload }}>{children}</Ctx.Provider>;
 }
 
 export function useCoachNutrition(): CoachNutritionValue {

@@ -41,11 +41,22 @@
 //     Nothing in this app may move money on a device's word alone, and a
 //     replayed purchase is the classic double charge.
 //
-//   · ANYTHING CARRYING A FILE. A photo, a scan, an injury document. The queue
-//     holds JSON in AsyncStorage; the file lives in a cache directory the OS is
-//     free to empty, so a queued upload is an intent whose subject may not
-//     exist by the time it runs. src/ui/messaging.ts therefore queues text and
-//     refuses to queue an attachment, and says which.
+//   · ANYTHING CARRYING A FILE. A photo, an injury document. The queue holds
+//     JSON in AsyncStorage; the file lives in a cache directory the OS is free
+//     to empty, so a queued upload is an intent whose subject may not exist by
+//     the time it runs. src/ui/messaging.ts therefore queues text and refuses
+//     to queue an attachment, and says which.
+//
+//     This clause used to name a body scan alongside them, and that was a
+//     misreading of what a scan write IS. `clientData.addScan` inserts six
+//     columns — the date, the two weights, the body-fat percentage, the muscle
+//     mass and a source string — and does not touch storage at all. The
+//     photograph of the printout is held on the phone for the member's own
+//     reference and is never uploaded, so there is no file for a cache sweep to
+//     take. A scan is numbers about the member's own body: not scarce, no money
+//     in it, and it says the same thing whenever it lands. That is 'scan'
+//     below, and it is why the one screen that says "try again in a moment"
+//     over a member's InBody printout no longer has to.
 //
 // Everything left is a write about the member's own record that says the same
 // thing whenever it lands. Those are the ones in here.
@@ -70,6 +81,68 @@
 // see `planExpiry` — and comes back through `partitionLapsed` to be said out
 // loud rather than written.
 //
+// ── The fourth that was left out, and the sentence that admits it ─────────
+//
+// Accepting the paperwork a COACH asks a member to sign — a studio waiver, a
+// par-form, the house rules for a rented unit (app/(client)/coach-documents.tsx,
+// supabase/parts/135). It was a bare insert with nothing behind it: the write
+// failed, an alert said "That acceptance was not saved", and the member's tap
+// was gone. That is 'coach-doc-accept' below.
+//
+// It passes the admission rule above on every clause. It is not scarce —
+// nobody else can take a member's own acceptance of their own coach's
+// document, and there is no seat to lose. It costs nothing. It carries no
+// file: the DOCUMENT is a file and it is not going anywhere, the intent is a
+// reference to a row that is already on the server, so nothing here depends on
+// a cache directory surviving. And it says the same thing whenever it lands:
+// the person read the waiver and agreed to it, and `accepted_at` is when the
+// row is written either way.
+//
+// It has no expiry, and that is the deliberate part. A day-plan lapses because
+// the day passes; an acceptance is not about a day. A member who accepts their
+// coach's waiver in a basement studio with no signal has accepted it, and the
+// worst outcome of a late write is a coach seeing the signature an hour later.
+// The outcome of no queue at all is the one this table exists to stop: they are
+// turned away from a session they have paid for, at the door, for paperwork
+// they completed.
+//
+// Replay is safe because the primary key is (document_id, client_id). A second
+// send of one the server already has comes back 23505, which classifyWrite
+// reads as a refusal and drops — and the handler in src/ui/recordOutbox.ts
+// treats that particular refusal as what it plainly is: the row is there.
+//
+// ── The fifth, which is the one the exclusion list appears to forbid ──────
+//
+// ASKING A COACH FOR A TIME THEY HAVE NOT OPENED ('session-request',
+// supabase/parts/740, src/lib/sessionRequests.ts). The first exclusion above
+// says "BOOKING A CLASS OR A PT SLOT" may not wait, and a reader skimming this
+// list would stop there. The reason that clause gives is what settles it, and it
+// is about scarcity rather than about the subject: "A seat is a scarce thing
+// somebody else can take. Queueing the intent means telling a member 'we will
+// book you when you have signal', and forty minutes later the class is full and
+// they have arranged their evening around a place they never had."
+//
+// A request is the precise opposite of that, by construction. Nothing is held,
+// so there is no seat for anybody to take first; nobody else is competing for
+// it, because it is addressed to one coach and names one member; and it cannot
+// fill up, because a request confers nothing at all until the coach answers.
+// The sentence the member reads while it waits — "1 session request saved on
+// this phone and not sent yet" — promises exactly what will happen, which is the
+// test the booking clause fails and this one passes. It costs nothing, part 740
+// draws no credit and raises no charge for one. And it carries no file.
+//
+// It has an expiry, and it is the second kind here to need one. A request asks
+// for a specific hour and `answer_session_request` refuses to accept one whose
+// hour has gone — so an intent surfacing after that hour is a question nobody
+// can answer, and sending it would put a dead row in a coach's queue. The
+// expiry is the requested hour itself (`sessionRequestExpiry`), the same
+// boundary the server enforces and the same boundary the member's screen
+// states, so all three agree without any of them being told by the others.
+//
+// What the member is NOT told is that their coach has been asked, because their
+// coach has not been. `lapsedNote('session-request')` is the sentence for the
+// intent that waited too long, and it says plainly that nothing reached anyone.
+//
 // ── The one that is handled somewhere else, deliberately ──────────────────
 //
 // An injury disclosure is not a kind here, and that is not an omission. It is
@@ -93,7 +166,8 @@ import { LOCAL_PREFIX } from './wellnessSync';
  */
 export type OutboxKind =
   | 'message' | 'measurement' | 'pt-approval'
-  | 'goal' | 'day-plan' | 'glucose';
+  | 'goal' | 'day-plan' | 'glucose' | 'coach-doc-accept' | 'scan'
+  | 'session-request';
 
 /**
  * The same kinds as a list, for a caller that has to walk them.
@@ -105,7 +179,8 @@ export type OutboxKind =
  * failure mode of the sentences this list exists to draw.
  */
 export const OUTBOX_KINDS: readonly OutboxKind[] = [
-  'message', 'measurement', 'pt-approval', 'goal', 'day-plan', 'glucose',
+  'message', 'measurement', 'pt-approval', 'goal', 'day-plan', 'glucose', 'coach-doc-accept', 'scan',
+  'session-request',
 ];
 
 export interface OutboxItem {
@@ -284,6 +359,19 @@ export function kindNoun(kind: OutboxKind): { one: string; many: string } {
     case 'goal': return { one: 'goal', many: 'goals' };
     case 'day-plan': return { one: 'planned day', many: 'planned days' };
     case 'glucose': return { one: 'blood sugar reading', many: 'blood sugar readings' };
+    // Not "acceptance", which is the table's word for it. The member signed
+    // something their coach gave them, and that is what the sentence has to say
+    // back to them for it to mean anything at the studio door.
+    case 'coach-doc-accept': return { one: 'signed document', many: 'signed documents' };
+    // What the member calls it. "Body composition" is the coach's phrase and
+    // "a scans row" is the table's; the thing they did was stand on a machine
+    // at their gym and photograph the printout.
+    case 'scan': return { one: 'body scan', many: 'body scans' };
+    // "Request" is the table's word and it is also the member's, because the
+    // whole design of the feature is that this is a QUESTION and not a booking.
+    // Naming it anything warmer here would be the first place the distinction
+    // started to blur, on the one screen that says the words have not been sent.
+    case 'session-request': return { one: 'session request', many: 'session requests' };
   }
 }
 

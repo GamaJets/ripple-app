@@ -2917,6 +2917,12 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     events: sliceReady([]), purchases: sliceReady([]),
     memberRecords: sliceReady([]), agreements: sliceReady([]),
     signatures: sliceReady([]), documents: sliceReady([]),
+    // And the five of the round after that: the order book, the closed months,
+    // the payroll adjustments, the accident book and the reconciliation marks.
+    // Stated for the same reason as the twelve above — this fixture is the
+    // tripwire that makes adding a part to EXPORT_PARTS a compile error.
+    orders: sliceReady([]), closes: sliceReady([]), adjustments: sliceReady([]),
+    equipmentLog: sliceReady([]), reconciles: sliceReady([]),
   };
 
   // ── escaping: the assertion the whole file stands on ──

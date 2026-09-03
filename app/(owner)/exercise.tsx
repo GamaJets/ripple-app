@@ -21,7 +21,7 @@
 // question. Rows imported before RepDB carry no description, and those show
 // nothing — never a filler sentence, because a fabricated description of a lift
 // is a fabricated fact about a product somebody is buying.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -31,12 +31,14 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { FRAMES_ARE_UNHOSTED, demoCaption } from '../../src/lib/exerciseMedia';
 import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 import { catalogueValue as cap } from '../../src/lib/format';
 import { supabase } from '../../src/lib/supabase';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
+import { BACK_ICON } from '../../src/ui/direction';
 
 
 export default function OwnerExercise() {
@@ -45,7 +47,7 @@ export default function OwnerExercise() {
   const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
-  const { detail, status } = useExerciseDetail(name);
+  const { detail, display, status, reload } = useExerciseDetail(name);
 
   // Gated on the licence recorded against the row, not on anything this screen
   // knows: an evaluation asset from a CC BY-NC preview bundle renders while
@@ -56,6 +58,9 @@ export default function OwnerExercise() {
   // movement must resolve its pictures the same way, and a picture that fails
   // to resolve is a silent empty box rather than an error anybody sees.
   const { frames, animUrl, animCacheKey } = useExerciseMedia(detail);
+  // The movement itself is the read. The media below is derived from the row
+  // this hook returns, so re-reading it re-resolves the demo too.
+  const pull = usePullToRefresh(useCallback(() => { void reload(); }, [reload]));
   const caption = demoCaption(detail?.source, frames.length);
 
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]
@@ -64,13 +69,20 @@ export default function OwnerExercise() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
           <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
-            <Icon name="back" size={20} color={t.ink} />
+            <Icon name={BACK_ICON} size={20} color={t.ink} />
           </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{detail?.name || name || 'Exercise'}</Text>
+          {/* The owner sees the catalogue in their own language too, and on
+              this screen the marker below is doing a second job: it is how an
+              owner reviewing the German library can see, movement by movement,
+              what is still English. */}
+          <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
         </View>
+        {display?.note ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{display.note}</Text>
+        ) : null}
 
         {/* ── the demonstration ─────────────────────────────────────────── */}
         {status === 'loading' ? (
@@ -123,11 +135,11 @@ export default function OwnerExercise() {
         {detail ? (
           <>
             {/* ── what it is ───────────────────────────────────────────── */}
-            {detail.description ? (
+            {display?.description ? (
               <>
                 <Rule />
                 <Section>
-                  <Text style={{ ...ty.body, color: t.ink }}>{detail.description}</Text>
+                  <Text style={{ ...ty.body, color: t.ink }}>{display.description.text}</Text>
                 </Section>
               </>
             ) : null}

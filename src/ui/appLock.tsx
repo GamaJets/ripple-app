@@ -116,9 +116,18 @@ export function AppLockProvider({ signedIn, children }: { signedIn: boolean; chi
   }, []);
 
   // Signing out drops the lock; signing in re-arms it for the next time away.
+  //
+  // And it drops the PREFERENCE with it, not just the current state. Signing
+  // out clears `repple.appLock.enabled` from the device (src/lib/signOutState.ts)
+  // because it is one person's answer stored under a key with no account in it;
+  // leaving `enabled` true in memory afterwards would leave the next person to
+  // sign in on this handset — within the same session, before any relaunch —
+  // holding a lock armed by somebody who has gone. The read above is
+  // deliberately once-per-launch, so this is the only place that correction can
+  // be made.
   useEffect(() => {
     if (!hydrated.current) return;
-    if (!signedIn) setState('open');
+    if (!signedIn) { setState('open'); setEnabledState(false); }
   }, [signedIn]);
 
   useEffect(() => {

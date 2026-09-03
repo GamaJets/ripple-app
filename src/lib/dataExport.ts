@@ -80,6 +80,27 @@ export function saveFileFailure(blocker: string | null): string {
 export const EXPORT_ROW_NOTE = 'Your records, your money, your bookings and a list of your files';
 
 /**
+ * What the COACH's export file is called.
+ *
+ * The same argument `MY_DATA_FILENAME` in src/lib/gdpr.ts makes, applied to the
+ * other half of the account: app/(trainer)/settings.tsx wrote
+ * 'repple-coach-my-data.json' as a literal, so a coach at a white-labelled
+ * chain saved a file named after a company they do not deal with — and the name
+ * is what they will search their downloads for in two years.
+ *
+ * `brandId` is the registry key, which is lowercase and hyphenated and is
+ * therefore already a safe filename on every platform. Taken as an argument
+ * rather than read here so this module stays pure and the sentence is
+ * assertable without a build's brand loaded.
+ */
+export function coachDataFilename(brandId: string): string {
+  const id = (brandId || '').trim();
+  // Never an empty prefix. A file called '-coach-my-data.json' looks broken and
+  // sorts to the top of a downloads folder under no name at all.
+  return `${id || 'my'}-coach-my-data.json`;
+}
+
+/**
  * What happens to the FILES when an account is deleted.
  *
  * Every clause is a fact about this implementation, and the awkward one is

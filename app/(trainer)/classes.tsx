@@ -22,7 +22,7 @@
 //   · `addClass` resolves false when the insert never reached `gym_classes`,
 //     and the alert said "Class added" either way. A class that exists on the
 //     coach's phone alone is on nobody's timetable and cannot be booked.
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -31,14 +31,17 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { CLASS_KINDS, branchesFrom, type GymClass } from '../../src/lib/classesMock';
 import {
-  duplicatePlan, duplicateBrief, duplicateBlocker, duplicateOutcome,
+  atTimeOfDay, daysLater, duplicatePlan, duplicateBrief, duplicateBlocker, duplicateOutcome,
+  weeksLater,
 } from '../../src/lib/classSeries';
 // The quarter-hour grid, taken from the module that owns it rather than
 // written out again here. app/(trainer)/calendar.tsx makes the argument on
 // `MINUTES`: one list, stated once, so the pickers cannot drift apart.
 import { SERIES_MINUTES } from '../../src/lib/recurring';
+import { fmtClock, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 // ── Editing a class from the phone ────────────────────────────────────────
 //
 // These eight writes have existed in src/lib/gymSchedule.ts since part 195 and
@@ -56,9 +59,34 @@ import {
 } from '../../src/lib/gymSchedule';
 import { supabase } from '../../src/lib/supabase';
 
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const timeLabel = (iso: string) => { const d = new Date(iso); let h = d.getHours(); const m = d.getMinutes(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`; };
-const dayShort = (iso: string) => { const d = new Date(iso); const t = new Date(); if (d.toDateString() === t.toDateString()) return 'Today'; return `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
+// The weekday name, the date order and the clock were all this file's own, and
+// all three were English and British. `DOW` was a hardcoded array; the fallback
+// wrote `${d.getDate()}/${d.getMonth() + 1}`, which a coach in the United
+// States reads month-first — "Wed 9/12" is 9 December here and 12 September
+// there — and `timeLabel` hand-built a 12-hour clock with no 24-hour form at
+// all, so a coach in Berlin scheduling a class read "7pm".
+//
+// This is the same defect the four client booking screens had removed from them
+// (see the header of app/(client)/classes.tsx) recurring on the coach's side,
+// on the screen where the date and time are TYPED IN rather than read back: a
+// day chip somebody misreads here writes a class onto the timetable at the
+// wrong time, and every member who books it turns up on the wrong evening.
+//
+// All three are the reader's now. `fmtRelativeDay` also answers "Tomorrow",
+// which the local helper never did.
+
+/**
+ * How far the Manage sheet lets a coach nudge a class's date, in days either
+ * side of the day it is currently on.
+ *
+ * A week each way and not a date picker. What this control is for is correcting
+ * something that was typed in wrong — the wrong evening, the wrong hour — and a
+ * class that belongs in a different month is a different class, added from the
+ * form above. A fortnight of chips is also a row a thumb can reach the end of.
+ */
+const MOVE_DAYS = [-7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7];
+const timeLabel = (iso: string) => fmtTime(iso);
+const dayShort = (iso: string) => fmtRelativeDay(iso);
 
 export default function TrainerClasses() {
   const t = useTheme();
@@ -69,6 +97,9 @@ export default function TrainerClasses() {
   // a free week does not turn up to teach. Under 'partial' the classes shown
   // are real but the far end of the schedule is missing.
   const { classes, addClass, countsKnown, status, refresh } = useClasses();
+  // One source, and the booking counts on these rows move without this coach
+  // doing anything — a member books or drops a class from their own phone.
+  const pull = usePullToRefresh(useCallback(() => { refresh(); }, [refresh]));
 
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState<string>(CLASS_KINDS[0]);
@@ -120,6 +151,22 @@ export default function TrainerClasses() {
   const [mCap, setMCap] = useState(16);
   const [mDur, setMDur] = useState(45);
   const [mReason, setMReason] = useState('');
+  /* ── the field the sheet could not change ───────────────────────────────
+   *
+   * `saveEdits` built a patch of title, instructor, room, capacity and duration
+   * and never `startsAt` — which `updateClass` has accepted since part 195. So a
+   * class typed in at 6am instead of 6pm, or put on the Wednesday instead of the
+   * Tuesday, could only be fixed by calling it off and typing it again, which
+   * strands every booking on the row that gets deleted.
+   *
+   * Held as an offset in days from the class's own date plus an hour and a
+   * minute, rather than as a whole new instant: what a coach is doing is
+   * correcting a time, and a date picker that started from today would be
+   * offering to move a class they were only trying to shift by an hour.
+   */
+  const [mDayOff, setMDayOff] = useState(0);
+  const [mHour, setMHour] = useState(18);
+  const [mMinute, setMMinute] = useState(0);
   /** Whether an edit or a call-off applies to this occurrence or to every later
    *  one in its series. Only offered when the row actually belongs to a series;
    *  a one-off has `seriesId` null and the two verbs would be the same button. */
@@ -135,6 +182,35 @@ export default function TrainerClasses() {
     setMDur(c.durationMin);
     setMReason('');
     setMSeries(false);
+    // Seeded from the class as it stands, so opening the sheet and saving
+    // without touching the time changes nothing about the time.
+    const at = new Date(c.startsAt);
+    setMDayOff(0);
+    setMHour(Number.isFinite(at.getTime()) ? at.getHours() : 18);
+    setMMinute(Number.isFinite(at.getTime()) ? at.getMinutes() : 0);
+  };
+
+  /**
+   * Where the class would start after the corrections in the sheet, or null
+   * when its own date cannot be read.
+   *
+   * Both steps go through src/lib/classSeries.ts rather than through millisecond
+   * arithmetic here: nudging the date by 86,400,000ms moves a 6pm class to 5pm
+   * across a clocks change, which is the defect the Repeat loop on this same
+   * screen had.
+   */
+  const movedStart = (c: GymClass): string | null => {
+    const shifted = daysLater(c.startsAt, mDayOff);
+    return shifted ? atTimeOfDay(shifted, mHour, mMinute) : null;
+  };
+
+  /** True when the sheet is actually asking to move the class. An unchanged
+   *  time is left out of the patch entirely — `updateClass` writes only the
+   *  keys it is given, and re-writing the same instant is a change nobody made
+   *  that shows up in the row's history. */
+  const startChanged = (c: GymClass): boolean => {
+    const next = movedStart(c);
+    return !!next && next !== new Date(c.startsAt).toISOString();
   };
 
   /** The one place a write's failure becomes a sentence. Every function in
@@ -154,18 +230,34 @@ export default function TrainerClasses() {
   };
 
   const saveEdits = (c: GymClass) => {
-    const patch = {
+    const patch: {
+      title: string; instructor: string; room: string; capacity: number;
+      durationMin: number; startsAt?: string;
+    } = {
       title: mTitle.trim() || c.title,
       instructor: mInstructor.trim(),
       room: mRoom.trim(),
       capacity: mCap,
       durationMin: mDur,
     };
+    // The correction this sheet could not make. Only for THIS class — see the
+    // series branch below, which strips it and says why.
+    const moved = movedStart(c);
+    if (moved && startChanged(c)) patch.startsAt = moved;
     // Below what is already booked is refused here rather than by the server:
     // `gym_classes.capacity` has no such constraint, and a class of 12 dropped
     // to 8 with 12 people in it turns four members into an over-sell nobody
     // decided on. Withheld under an unread count, because "8 booked" is exactly
     // the figure `countsKnown` says may be a zero standing in for a failed read.
+    // A class moved behind the coach is on nobody's timetable and cannot be
+    // booked, and everybody already in it is left holding a place at a time
+    // that has been and gone. Said under the control as well, because a Save
+    // that silently will not commit reads as a broken button.
+    if (patch.startsAt && Date.parse(patch.startsAt) <= Date.now()) {
+      Alert.alert('That time has already passed',
+        `${patch.title} would start ${dayShort(patch.startsAt)} at ${timeLabel(patch.startsAt)}, which is behind you. Members cannot book a class in the past, and the ones who already booked this would be holding a place at a time that has gone. Pick a time that is still ahead.`);
+      return;
+    }
     if (countsKnown && patch.capacity < c.booked) {
       Alert.alert('Capacity is below the bookings',
         `${c.booked} ${c.booked === 1 ? 'person has' : 'people have'} already booked this class, so it cannot hold ${patch.capacity}. Cancel a booking first, or leave the capacity where it is.`);
@@ -176,11 +268,17 @@ export default function TrainerClasses() {
       // occurrence by the same offset; setting them all to one instant would
       // stack twelve classes on one Tuesday evening. gymSchedule.ts refuses to
       // accept `startsAt` here for exactly that reason.
+      //
+      // The time control is not drawn under "This And Later", so a coach
+      // cannot get here having set one — but the key is taken off the patch
+      // rather than trusted to be absent, because the alternative is a silent
+      // type error the day somebody reorders this sheet.
+      const { startsAt: _movedForSeries, ...seriesPatch } = patch;
       void (async () => {
         if (mBusy) return;
         setMBusy(true);
         try {
-          const n = await updateSeriesFrom(supabase, c.seriesId as string, c.startsAt, patch);
+          const n = await updateSeriesFrom(supabase, c.seriesId as string, c.startsAt, seriesPatch);
           setManage(null);
           refresh();
           Alert.alert('Series updated', `${n} ${n === 1 ? 'class' : 'classes'} from this one onward ${n === 1 ? 'was' : 'were'} changed. Classes that have already run are untouched, because they are the gym's record of what happened.`);
@@ -190,7 +288,13 @@ export default function TrainerClasses() {
       })();
       return;
     }
-    void runWrite('Class updated', `${patch.title} was changed.`, () => updateClass(supabase, c.id, patch));
+    // The move is named in the confirmation, because it is the one edit here
+    // that changes where members have to be and when. Everything else changes
+    // what the row says about a class they are already coming to.
+    const done = patch.startsAt
+      ? `${patch.title} now starts ${dayShort(patch.startsAt)} at ${timeLabel(patch.startsAt)}. Everyone who booked it keeps their place — tell them, because moving a class does not notify anybody.`
+      : `${patch.title} was changed.`;
+    void runWrite('Class updated', done, () => updateClass(supabase, c.id, patch));
   };
 
   const callOff = (c: GymClass) => {
@@ -272,9 +376,20 @@ export default function TrainerClasses() {
       const nm = title.trim(); const br = branch.trim();
       const when = `${dayShort(startIso())} ${timeLabel(startIso())}`;
       let saved = 0;
+      const firstIso = base.toISOString();
       for (let w = 0; w < weeks; w++) {
-        const d = new Date(base.getTime() + w * 7 * 86400000);
-        if (await addClass({ title: nm, kind, instructor: instructor.trim() || 'Coach', branch: br, room: room.trim(), startsAt: d.toISOString(), durationMin: dur, capacity: cap })) saved++;
+        // Weeks added on the CALENDAR, not on the clock. This was
+        // `base.getTime() + w * 7 * 86400000`, which src/lib/classSeries.ts
+        // names as wrong twice a year and already exports `weeksLater` to
+        // replace: a 6pm class repeated across a daylight-saving boundary
+        // lands at 5pm or 7pm, and the members who booked it turn up an hour
+        // out. The whole of Repeat ×4/×8/×12 went through that one line.
+        const at = weeksLater(firstIso, w);
+        // Unreachable while `base` parses, which `startIso` guarantees — but
+        // the loop must not write `undefined` as a start if it ever stops
+        // being true, because that is a class nobody can find.
+        if (!at) continue;
+        if (await addClass({ title: nm, kind, instructor: instructor.trim() || 'Coach', branch: br, room: room.trim(), startsAt: at, durationMin: dur, capacity: cap })) saved++;
       }
       // The form is only cleared on a clean save. Clearing it after a refusal
       // throws away everything the coach typed and leaves them nothing to
@@ -360,7 +475,7 @@ export default function TrainerClasses() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
@@ -420,7 +535,7 @@ export default function TrainerClasses() {
 
           <Text style={[lbl, { marginTop: sp.md }]}>Day</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
-            {[0, 1, 2, 3, 4, 5, 6].map((o) => { const d = new Date(); d.setDate(d.getDate() + weekOff * 7 + o); return chip(weekOff === 0 && o === 0 ? 'Today' : `${DOW[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`, dayOff === o, () => setDayOff(o)); })}
+            {[0, 1, 2, 3, 4, 5, 6].map((o) => { const d = new Date(); d.setDate(d.getDate() + weekOff * 7 + o); return chip(fmtRelativeDay(d.toISOString()), dayOff === o, () => setDayOff(o)); })}
           </ScrollView>
 
           {/* All twenty-four, for the reason the calendar screen gives on
@@ -428,7 +543,7 @@ export default function TrainerClasses() {
               when training happens, and 5am to 10pm excluded the 4am opener
               and the late shift. */}
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-            {stepper('Start hour', `${hour % 12 || 12}${hour >= 12 ? 'pm' : 'am'}`, () => setHour((h) => (h + 23) % 24), () => setHour((h) => (h + 1) % 24))}
+            {stepper('Start hour', fmtClock(hour, 0), () => setHour((h) => (h + 23) % 24), () => setHour((h) => (h + 1) % 24))}
             {stepper('Minutes', String(dur), () => setDur((d) => (d > 15 ? d - 15 : d)), () => setDur((d) => (d < 90 ? d + 15 : d)))}
             {stepper('Capacity', String(cap), () => setCap((c) => (c > 4 ? c - 1 : c)), () => setCap((c) => c + 1))}
           </View>
@@ -442,7 +557,7 @@ export default function TrainerClasses() {
                     about what they are choosing. */}
                 <Pressable onPress={() => setMinute(m)} accessibilityRole="button"
                   accessibilityState={{ selected: m === minute }}
-                  accessibilityLabel={`${hour % 12 || 12}:${String(m).padStart(2, '0')}${hour >= 12 ? 'pm' : 'am'}`}
+                  accessibilityLabel={fmtClock(hour, m)}
                   style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === minute ? t.brand : t.surface2 }}>
                   <Text style={{ ...ty.label, fontWeight: m === minute ? '500' : '400', color: m === minute ? t.brandInk : t.ink2 }}>
                     :{String(m).padStart(2, '0')}
@@ -650,6 +765,71 @@ export default function TrainerClasses() {
                       {manage.booked} booked. Capacity cannot go below that.
                     </Text>
                   ) : null}
+
+                  {/* ── when it starts ─────────────────────────────────────
+                      The field this sheet did not have. A class typed in at
+                      6am instead of 6pm could only be called off and retyped,
+                      and calling it off strands every booking on the row that
+                      goes. Offered for THIS class only: `updateSeriesFrom`
+                      refuses a start time by design, because setting a whole
+                      series to one instant stacks twelve classes on one
+                      evening. */}
+                  {mSeries && manage.seriesId ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                      The start time is not offered for a whole series. Every occurrence would be set to the same instant, which stacks the term on one evening — move one class at a time, with This Class selected.
+                    </Text>
+                  ) : (
+                    <>
+                      <Text style={[lbl, { marginTop: sp.lg }]}>Day</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
+                        {MOVE_DAYS.map((o) => {
+                          const at = daysLater(manage.startsAt, o);
+                          if (!at) return null;
+                          return chip(o === 0 ? `${dayShort(at)} · as typed` : dayShort(at), mDayOff === o, () => setMDayOff(o));
+                        })}
+                      </ScrollView>
+
+                      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+                        {stepper('Start hour', `${mHour % 12 || 12}${mHour >= 12 ? 'pm' : 'am'}`,
+                          () => setMHour((h) => (h + 23) % 24), () => setMHour((h) => (h + 1) % 24))}
+                      </View>
+
+                      <Text style={[lbl, { marginTop: sp.md }]}>Start time</Text>
+                      <View style={{ flexDirection: 'row', gap: 7 }}>
+                        {SERIES_MINUTES.map((m) => (
+                          <View key={m} style={{ flex: 1 }}>
+                            <Pressable onPress={() => setMMinute(m)} accessibilityRole="button"
+                              accessibilityState={{ selected: m === mMinute }}
+                              accessibilityLabel={`${mHour % 12 || 12}:${String(m).padStart(2, '0')}${mHour >= 12 ? 'pm' : 'am'}`}
+                              style={{ paddingVertical: sp.sm, borderRadius: radius.pill, alignItems: 'center', backgroundColor: m === mMinute ? t.brand : t.surface2 }}>
+                              <Text style={{ ...ty.label, fontWeight: m === mMinute ? '500' : '400', color: m === mMinute ? t.brandInk : t.ink2 }}>
+                                :{String(m).padStart(2, '0')}
+                              </Text>
+                            </Pressable>
+                          </View>
+                        ))}
+                      </View>
+                      {/* Three different things to say, and only one of them at
+                          a time. A move into the past is the one that matters:
+                          a class behind the coach is on nobody's timetable and
+                          cannot be booked, and its bookings go with it. */}
+                      {startChanged(manage) ? (
+                        Date.parse(movedStart(manage) as string) <= Date.now() ? (
+                          <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+                            That puts the class in the past, where nobody can book it and everybody who already has is left holding a place at a time that has been and gone. Pick a time that is still ahead.
+                          </Text>
+                        ) : (
+                          <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+                            Moves from {dayShort(manage.startsAt)} {timeLabel(manage.startsAt)} to {dayShort(movedStart(manage) as string)} {timeLabel(movedStart(manage) as string)}. Bookings, check-ins and the waiting list all move with it, and nobody is notified — tell them yourself.
+                          </Text>
+                        )
+                      ) : (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                          Starts {dayShort(manage.startsAt)} at {timeLabel(manage.startsAt)}. Change any of these to move it; saving without touching them leaves the time exactly as it is.
+                        </Text>
+                      )}
+                    </>
+                  )}
 
                   {/* Only for a row that belongs to something. A one-off has no
                       series, and a series of one makes these two verbs the same

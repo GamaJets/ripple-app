@@ -30,12 +30,13 @@
 // work. See src/lib/trainerSessions.ts for why that is the right key rather
 // than a convenient one.
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag, Ghost, Cta, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
@@ -60,6 +61,33 @@ import {
   stateCounts, type SessionFilter,
 } from '../../src/lib/sessionFilter';
 import { appLocale } from '../../src/lib/locale';
+// A day on this screen is a day in the coach's own life. `startsAt.slice(0, 10)`
+// is the UTC date of a row this screen renders in local time — see `byDay`.
+import { isoDay } from '../../src/lib/weekStart';
+import { localDate } from '../../src/lib/localDate';
+// ── Answering a request for an hour the coach never opened ────────────────
+//
+// This screen is where a coach settles what has already happened. The requests
+// queue is the opposite — what has not happened yet, and cannot until they
+// answer — and it is here rather than on a screen of its own for one reason: a
+// request stops meaning anything the moment its hour arrives (src/lib/
+// sessionRequests.ts · EXPIRY_RULE), so it has to be somewhere a working coach
+// already opens. A screen nobody visits is where a time-limited question goes
+// to lapse.
+//
+// It is drawn ABOVE the marking queue and separated by its own heading,
+// because the two lists are answers to different questions and the harm in
+// running them together is that "4 to mark" and "2 asking" become one number
+// that means neither.
+import { fetchCoachRequests, answerRequest, type CoachRequest } from '../../src/ui/sessionRequests';
+import {
+  COACH_ACCEPT_RULE, OUTCOME_LABEL, REQUEST_NOTE_MAX, answerRefusalNote,
+  answeredConfirmation, coachQueue, coachQueueNote,
+} from '../../src/lib/sessionRequests';
+import { sendPushChecked } from '../../src/ui/pushNotifications';
+import { USE_SUPABASE } from '../../src/lib/config';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * The four outcomes, in the order a person would consider them.
@@ -100,6 +128,22 @@ const when = (iso: string) => {
   });
 };
 
+/**
+ * The hour a request is about, written out — or null when it cannot be read.
+ *
+ * Deliberately NOT `when` above, which answers a dash. A dash is the right
+ * answer in a slot under a label and the wrong one as the subject of a
+ * sentence: "Say yes to — ?" is what `check:prose` exists to stop. A request
+ * whose hour will not parse is not drawn at all.
+ */
+const requestWhen = (iso: string): string | null => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString(appLocale(), {
+    weekday: 'long', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+  });
+};
+
 /** The mark beside a past session. A 6pt dot; the words stay in ink beside it,
  *  because `crit`/`warn`/`good` are marks in this app and never text colour. */
 const stateTone = (t: Theme, s: PastState): string => {
@@ -119,11 +163,31 @@ const dayOnly = (iso: string) => {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 };
 
-/** Group by calendar day so a trainer can clear a whole day at once. */
+/**
+ * Group by calendar day so a trainer can clear a whole day at once.
+ *
+ * ── The day is the coach's own, not the UTC one ──────────────────────────
+ *
+ * This was `s.startsAt.slice(0, 10)`, which is the UTC date of a timestamp that
+ * every row on this screen RENDERS in local time. West of Greenwich the two
+ * disagree for every evening session: a coach in Los Angeles saw "6:30 PM" on a
+ * row filed under tomorrow, under a heading naming a day they had not worked
+ * yet. The whole-day mark buttons then acted on that set — so "everyone on
+ * Tuesday went ahead" marked Monday evening and Tuesday morning, and the
+ * sessions those outcomes belonged to were left in the queue holding payroll up.
+ *
+ * `isoDay` from src/lib/weekStart.ts is the local `YYYY-MM-DD` this app already
+ * uses everywhere a day is a day in somebody's life, and `localDate` reads it
+ * back without a timezone moving it. The label is the same day the rows say.
+ */
 function byDay(sessions: PtSession[]): { day: string; label: string; rows: PtSession[] }[] {
   const m = new Map<string, PtSession[]>();
   for (const s of sessions) {
-    const day = s.startsAt.slice(0, 10);
+    const at = new Date(s.startsAt);
+    // A row whose start will not parse is not filed under today: that would put
+    // it in a day a coach then marks wholesale. It gets its own bucket, sorted
+    // to the end, and is still markable one row at a time.
+    const day = Number.isFinite(at.getTime()) ? isoDay(at) : '';
     const list = m.get(day);
     if (list) list.push(s); else m.set(day, [s]);
   }
@@ -131,17 +195,25 @@ function byDay(sessions: PtSession[]): { day: string; label: string; rows: PtSes
     .sort((a, b) => b[0].localeCompare(a[0]))   // most recent day first
     .map(([day, rows]) => ({
       day,
-      label: new Date(day + 'T12:00:00Z').toLocaleDateString(undefined, {
-        weekday: 'long', day: 'numeric', month: 'long',
-      }),
+      label: dayHeading(day),
       rows: rows.sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
     }));
+}
+
+/** The heading over a day's rows, in the reader's own locale. */
+function dayHeading(day: string): string {
+  const d = localDate(day);
+  if (!d) return 'Date not readable';
+  return d.toLocaleDateString(appLocale(), { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
 export default function TrainerSessions() {
   const t = useTheme();
   const router = useRouter();
-  const { tenant } = useTenant();
+  const { tenant, refresh: refreshTenantRaw } = useTenant();
+  // Wrapped so the refresh list below is all promises. `useTenant().refresh`
+  // bumps a tick and returns nothing.
+  const refreshTenant = useCallback(async () => { refreshTenantRaw(); }, [refreshTenantRaw]);
   // ── who these sessions belong to ──────────────────────────────────────────
   //
   // The coach, by `trainer_id` — NOT the gym, by `tenant_id`.
@@ -272,6 +344,94 @@ export default function TrainerSessions() {
   }, [uid, authLoading]);
 
   useEffect(() => { void load(MARK_WINDOW_DAYS); }, [load]);
+
+  /* ── what the coach has been ASKED, as opposed to what they delivered ─────
+   *
+   * Its own state and its own read, deliberately not folded into `load`. The
+   * marking queue is `sessions`; this is `session_requests`, a different table
+   * with different policies, and a failure in either must not be reported as a
+   * failure in the other — a coach told "could not be read" over an empty
+   * requests list would stop looking, and the thing they stopped looking at is
+   * a client waiting for an answer.
+   */
+  const [reqs, setReqs] = useState<CoachRequest[] | null>(null);
+  const [reqStatus, setReqStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [reqNamesRead, setReqNamesRead] = useState(true);
+  const [answering, setAnswering] = useState<string | null>(null);
+  /** The coach's words on a decline, keyed by request. Optional — a coach who
+   *  declines without explaining has still given an answer, and a box that
+   *  demanded a reason would collect full stops typed to get past it. */
+  const [declineNote, setDeclineNote] = useState<Record<string, string>>({});
+
+  const loadRequests = useCallback(async () => {
+    const out = await fetchCoachRequests();
+    setReqs(out.rows);
+    setReqStatus(out.status);
+    setReqNamesRead(out.namesRead);
+  }, []);
+  useEffect(() => { void loadRequests(); }, [loadRequests]);
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Both reads, and they stay two reads: the marking queue is `sessions` and
+   * the requests are `session_requests`, different tables with different
+   * policies, and one failing must not be reported as the other failing. The
+   * gesture asks for both because the coach pulling it down wants the screen
+   * to be right, not one half of it.
+   *
+   * Both are written from somewhere else: a client asking for an hour, and a
+   * session falling into the marking window because time passed. */
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(MARK_WINDOW_DAYS), loadRequests(), refreshTenant()]),
+    [load, loadRequests, refreshTenant],
+  ));
+
+  /**
+   * Say yes or no.
+   *
+   * Nothing is checked here before calling. The clash has to be tested inside
+   * the same transaction as the write or it is a test against a calendar that
+   * can change underneath it, and `answer_session_request` does exactly that,
+   * behind `select … for update` on the request row — so one question cannot
+   * become two sessions however many devices answer it. Every refusal comes
+   * back named, and `answerRefusalNote` is the one place it becomes a sentence.
+   */
+  async function answer(r: CoachRequest, accept: boolean) {
+    const when = requestWhen(r.startsAt);
+    if (!when) return;
+    // A courtesy, not the guarantee. Two taps in the same frame both pass this,
+    // and so do two handsets — which is exactly why the guarantee is the
+    // `select … for update` inside `answer_session_request` and not here. What
+    // this saves is the second alert.
+    if (answering) return;
+    setAnswering(r.id);
+    const words = (declineNote[r.id] ?? '').trim() || null;
+    const res = await answerRequest(r.id, accept, accept ? null : words);
+    setAnswering(null);
+    await loadRequests();
+    if (!res.ok) {
+      Alert.alert('Not answered', answerRefusalNote(res.reason, res.className));
+      return;
+    }
+    setDeclineNote((p) => { const next = { ...p }; delete next[r.id]; return next; });
+    // The accepted session belongs on the coach's own calendar too, and that
+    // list is read by a different provider on a different screen. Nothing here
+    // writes to it: the row is in `sessions`, and the calendar's live
+    // subscription is what picks it up.
+    const push = await sendPushChecked(
+      [r.clientId],
+      accept ? 'Your session is on' : 'About that time',
+      accept ? `Your coach said yes to ${when}.` : `Your coach can’t do ${when}.`,
+      { route: '/(client)/request-session' },
+      'bookings',
+    );
+    const lines = [answeredConfirmation(accept, when)];
+    if (!push.ok) {
+      lines.push('We couldn’t send them a notification, so they may not see this until they open the app.');
+    }
+    Alert.alert(accept ? 'Session created' : 'Answered', lines.join('\n\n'), [{ text: 'OK' }]);
+  }
+
 
   const loaded = queue !== null;
   const rows = queue ?? [];
@@ -459,10 +619,11 @@ export default function TrainerSessions() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
+            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Mark Sessions</Text>
         </View>
@@ -481,12 +642,123 @@ export default function TrainerSessions() {
 
         <Rule />
 
+        {/* ── asked, and not yet answered ─────────────────────────────────
+            A client can now ask for an hour this coach never opened
+            (supabase/parts/740). It is a QUESTION and not a booking: nothing is
+            held, no credit has moved, and accepting is the only thing anywhere
+            in the app that turns one into a session.
+
+            It sits above the marking queue and under its own heading. The two
+            lists answer different questions — what has happened, and what has
+            not happened yet — and running them together would produce one
+            number that means neither.
+
+            Drawn whenever there is something to answer or something to say
+            about why there is not. Loading, failed and empty are three
+            different sentences, because an unread queue rendered as "nobody is
+            asking" is a client left waiting for an answer their coach was told
+            did not exist. */}
+        {USE_SUPABASE ? (
+          <Section>
+            <SectionHead title="Session Requests"
+              note={reqs && isWhole(reqStatus) ? (coachQueueNote(coachQueue(reqs).length) ?? 'Nothing waiting') : undefined} />
+
+            {reqStatus === 'error' ? (
+              <Flag tone={t.warn}>
+                Requests could not be read, so this is not a list of what your clients have asked for.
+                Anyone waiting on you is still waiting — check again when you have signal.
+              </Flag>
+            ) : reqStatus === 'loading' ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>Reading what your clients have asked for.</Text>
+            ) : (() => {
+              const pending = coachQueue(reqs ?? []);
+              if (!pending.length) {
+                return (
+                  <Text style={{ ...ty.label, color: t.ink3 }}>
+                    Nobody is asking for a time right now. A client can ask for an hour you have not
+                    opened, and it will appear here.
+                  </Text>
+                );
+              }
+              return (
+                <>
+                  {reqStatus === 'partial' ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                      There are more requests than fitted in one read, so this is the soonest of them
+                      rather than all of them.
+                    </Flag>
+                  ) : null}
+                  {/* A name that could not be READ is not a client with no
+                      name. Said once, above the rows, rather than a dash on
+                      each of them. */}
+                  {!reqNamesRead ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                      Your clients’ names could not be read, so the requests below say when rather than
+                      who. The times are right and you can still answer them.
+                    </Flag>
+                  ) : null}
+                  {pending.map((r, i) => {
+                    const rWhen = requestWhen(r.startsAt);
+                    if (!rWhen) return null;
+                    const mine = answering === r.id;
+                    return (
+                      <View key={r.id}>
+                        {i ? <Rule /> : null}
+                        <View style={{ paddingVertical: sp.md }}>
+                          <Text style={{ ...ty.micro, color: t.ink3 }}>{OUTCOME_LABEL.asked}</Text>
+                          <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: 2 }}>
+                            {r.clientName ? `${r.clientName} · ${rWhen}` : rWhen}
+                          </Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                            {r.durationMin} min
+                          </Text>
+                          {r.note ? (
+                            <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>They said: {r.note}</Text>
+                          ) : null}
+
+                          <TextInput
+                            value={declineNote[r.id] ?? ''}
+                            onChangeText={(v) => setDeclineNote((p) => ({ ...p, [r.id]: v }))}
+                            placeholder="If you say no, tell them why (optional)"
+                            placeholderTextColor={t.ink3}
+                            maxLength={REQUEST_NOTE_MAX}
+                            accessibilityLabel="A reason, if you say no"
+                            style={{
+                              ...ty.caption, color: t.ink, backgroundColor: t.surface2,
+                              borderRadius: radius.sm, borderWidth: hairline, borderColor: t.ring,
+                              paddingHorizontal: sp.md, paddingVertical: sp.sm, marginTop: sp.md, minHeight: 44,
+                            }}
+                          />
+
+                          <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, alignItems: 'center' }}>
+                            <Cta label={mine ? 'Saving…' : 'Yes'} onPress={() => { void answer(r, true); }}
+                              disabled={mine} a11yLabel={`Say yes to ${rWhen}`} />
+                            <Ghost label="No" onPress={() => { void answer(r, false); }}
+                              a11yLabel={`Say no to ${rWhen}`} />
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                  <Notice kicker="WHAT YES DOES" title="It creates the session" note={COACH_ACCEPT_RULE} />
+                </>
+              );
+            })()}
+          </Section>
+        ) : null}
+
+        <Rule />
+
         {loaded && rows.length > 0 ? (
           <Section>
             <KpiRow items={[
               { label: 'Sessions', value: fig(rows.length) },
               { label: 'Days', value: fig(allDays.length) },
-              { label: 'Oldest', value: allDays.length ? allDays[allDays.length - 1].day.slice(5) : '—' },
+              // `.slice(5)` off a local `YYYY-MM-DD`, which is what `byDay` now
+              // keys on. The last bucket may be the unreadable-date one, whose
+              // key is the empty string — a dash there is the right answer, and
+              // an empty slot would look like a rendering fault.
+              { label: 'Oldest', value: fig(allDays.length ? (allDays[allDays.length - 1].day.slice(5) || null) : null) },
             ]} />
           </Section>
         ) : null}

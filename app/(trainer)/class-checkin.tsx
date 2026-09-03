@@ -42,7 +42,7 @@
 // called it 12 and quietly replaced a real rate mid-keystroke. And an empty box
 // after a FAILED read says why it is empty, rather than looking like a coach
 // who has never set one. src/lib/coachPrefs.ts holds those rules, under test.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -57,8 +57,11 @@ import { fetchCoachPrefs, saveCoachPrefs } from '../../src/lib/coachPrefsStore';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useAuth } from '../../src/ui/auth';
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, flushResultLine, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
+import {
+  floorPendingNote, flushResultLine, keptOfflineLine, refusedLine, registerVisibilityLine,
+} from '../../src/lib/floorQueue';
 import { countRegister, registerArc, registerLine } from '../../src/lib/classRegister';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 export default function ClassCheckin() {
   const t = useTheme();
@@ -85,6 +88,9 @@ export default function ClassCheckin() {
   // screen is used standing in a studio, which is where the signal is worst.
   const auth = useAuth();
   const queue = useFloorQueue(auth.user?.id ?? null);
+  // Pulled out because the hook hands back a fresh object each render while the
+  // callback inside it is stable.
+  const flushQueue = queue.flush;
   // Send what this phone is still carrying, now. The queue is also emptied on
   // the app's own two triggers (signal back, app foregrounded) through the
   // registry in src/lib/offlineQueue.ts; this is the one a coach can press.
@@ -121,21 +127,20 @@ export default function ClassCheckin() {
   // The rate the coach has already set, read once. `fetchCoachPrefs` reports
   // its own failure rather than returning a bare null, so an empty box after a
   // refused read can say so instead of looking like a coach who never set one.
-  useEffect(() => {
-    let on = true;
-    fetchCoachPrefs().then(
-      ({ prefs, status }) => {
-        if (!on) return;
-        setRateStatus(status);
-        if (status === 'ready') {
-          rateRead.current = true;
-          if (!touched.current) setRate(rateText(prefs.classRate));
-        }
-      },
-      () => { if (on) setRateStatus('error'); },
-    );
-    return () => { on = false; };
+  const loadRate = useCallback(async () => {
+    setRateStatus('loading');
+    try {
+      const { prefs, status } = await fetchCoachPrefs();
+      setRateStatus(status);
+      if (status === 'ready') {
+        rateRead.current = true;
+        // Still guarded on `touched`. A refresh must not yank the box out from
+        // under a coach who is mid-type any more than the first read may.
+        if (!touched.current) setRate(rateText(prefs.classRate));
+      }
+    } catch { setRateStatus('error'); }
   }, []);
+  useEffect(() => { void loadRate(); }, [loadRate]);
 
   // Saved as the coach stops typing rather than on every keystroke, and the
   // timer is cleared on unmount so a half-typed rate cannot land after the
@@ -173,17 +178,45 @@ export default function ClassCheckin() {
     savePending.current = setTimeout(() => persistRate(text), 700);
   };
 
-  useEffect(() => {
-    let on = true;
-    // The rejection handler is not decoration: without it a thrown read would
-    // leave `loading` true forever, and "Loading roster…" is at least honest,
-    // where a silent unhandled rejection is not.
-    classRoster(classId).then(
-      (r) => { if (on) { setRoster(r); setReadFailed(r === null && !unlinked); setLoading(false); } },
-      () => { if (on) { setReadFailed(!unlinked); setLoading(false); } },
-    );
-    return () => { on = false; };
-  }, [classId]);
+  // The rejection handler is not decoration: without it a thrown read would
+  // leave `loading` true forever, and "Loading roster…" is at least honest,
+  // where a silent unhandled rejection is not.
+  // `loading` is deliberately NOT set back to true here. It starts true and is
+  // cleared by the first read; a refresh that raised it again would replace a
+  // register the coach is reading off in front of a room with "Loading
+  // roster…", which is the one thing worse than a slightly old count.
+  const loadRoster = useCallback(async () => {
+    try {
+      const r = await classRoster(classId);
+      setRoster(r);
+      setReadFailed(r === null && !unlinked);
+    } catch {
+      // The rows already on screen are left alone. A failed re-read is not a
+      // class that emptied — `readFailed` is what says the count is unknown,
+      // and blanking the register a coach is standing in front of would be the
+      // worse of the two mistakes by a distance.
+      setReadFailed(!unlinked);
+    } finally { setLoading(false); }
+  }, [classId, unlinked]);
+  useEffect(() => { void loadRoster(); }, [loadRoster]);
+
+  /* ── pull to refresh ─────────────────────────────────────────────────────
+   *
+   * This screen is used standing in a studio with the worst signal in the
+   * building, and the register it draws is written by members booking and
+   * dropping the class on their own phones right up to the door. A coach whose
+   * roster read failed on the way in was left with "could not be read" and no
+   * way to ask again while the room filled up.
+   *
+   * The queued check-ins are flushed too. They are the ticks a trainer is PAID
+   * on, they are sitting on this handset, and the gesture a coach reaches for
+   * when they want the screen to be right about the room should not leave them
+   * on it. `flush` is the same call the "Send" button makes and it is safe to
+   * repeat — an empty queue sends nothing. */
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([loadRoster(), loadRate(), flushQueue()]),
+    [loadRoster, loadRate, flushQueue],
+  ));
 
   // Whether there is a roster to count at all. Without this the two counts
   // below are computed over `[]` and come out as 0 — and the hero then prints a
@@ -263,7 +296,7 @@ export default function ClassCheckin() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
@@ -403,10 +436,22 @@ export default function ClassCheckin() {
 
         <Rule />
 
+        {/* Who can see the ticks that have just been made.
+
+            This said "Your gym owner sees attendance per class for payroll and
+            class analytics" unconditionally — including while the queue above
+            was holding every one of them on this phone. That is rule 1 in
+            src/lib/floorQueue.ts broken on the register a trainer is PAID from,
+            and it is the worse of the two sentences on screen because it is the
+            calm one: the banner said the ticks were waiting and this footnote
+            said the gym had them, and a person believes the footnote.
+
+            `registerVisibilityLine` has the three answers, and the third of
+            them is that a queue which could not be READ cannot say either. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
           {unlinked
             ? 'Nothing on this screen is being saved — it was not told which class it is checking in.'
-            : 'Check-ins are saved as you tap. Your gym owner sees attendance per class for payroll and class analytics.'}
+            : registerVisibilityLine(queue.unsent, queue.queueRead)}
         </Text>
 
       </ScrollView>

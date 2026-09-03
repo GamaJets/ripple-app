@@ -36,7 +36,7 @@
 // On failure the caller is told `false` and keeps what the coach typed, so the
 // text is still in the box to try again with. See the Save handler in
 // app/(trainer)/dashboard.tsx.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -66,6 +66,9 @@ interface NotesValue {
   addNote: (clientId: string, body: string) => Promise<boolean>;
   /** True only once the row is gone from the server. */
   removeNote: (clientId: string, id: string) => Promise<boolean>;
+  /** Read the notes again. Under 'error' an empty list is unknown, and the
+   *  reading that gets a coach to write the same note twice. */
+  reload: () => void;
 }
 
 const Ctx = createContext<NotesValue | null>(null);
@@ -75,6 +78,8 @@ export function CoachNotesProvider({ children }: { children: ReactNode }) {
   const [map, setMap] = useState<Record<string, Note[]>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`, beside `authRev` in the read below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -125,7 +130,15 @@ export function CoachNotesProvider({ children }: { children: ReactNode }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  /** The read MERGES into the map rather than replacing it, so an entry
+   *  written optimistically while a refresh was in flight is not dropped by
+   *  the answer to a query that was sent before it. */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   const getNotes = (clientId: string) => map[clientId] ?? [];
 
@@ -203,7 +216,7 @@ export function CoachNotesProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ getNotes, status, addNote, removeNote }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ getNotes, status, addNote, removeNote, reload }}>{children}</Ctx.Provider>
   );
 }
 

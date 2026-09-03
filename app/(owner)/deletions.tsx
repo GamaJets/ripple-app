@@ -43,6 +43,8 @@ import type { Theme } from '../../src/theme/tokens';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /** A row of `pending_deletions`. Nulls are kept as nulls — see `fig`. */
 interface Pending {
@@ -98,6 +100,7 @@ export default function OwnerDeletions() {
 
   const [pending, setPending] = useState<Pending[] | null>(null);   // null = not loaded yet
   const [log, setLog] = useState<Actioned[] | null>(null);          // null = not loaded yet
+  const [logFailed, setLogFailed] = useState(false);                // the audit read itself failed
   const [failed, setFailed] = useState(false);                      // the queue read itself failed
   const [busy, setBusy] = useState<string | null>(null);            // subject id being actioned
   /** When the QUEUE last came back. The audit log fails independently and does
@@ -140,7 +143,14 @@ export default function OwnerDeletions() {
       setFetchedAt(Date.now());
     } else {
       reportError('deletions.fetch', q.status === 'rejected' ? q.reason : q.value.error);
-      setPending(null);
+      // The rows are NOT cleared. Before this screen had a pull-to-refresh the
+      // only re-reads were the Try Again button and the one after a deletion,
+      // and either could turn a queue an owner was working through into an
+      // empty screen. A refusal on the second read tells you nothing about the
+      // first: what is on screen is still what the last good read returned, the
+      // stamp above still says when that was, and the flag below says this
+      // attempt failed. Blanking it would replace a true old list with a false
+      // new one on the screen whose whole subject is a statutory deadline.
       setFailed(true);
     }
 
@@ -152,13 +162,20 @@ export default function OwnerDeletions() {
         actionedAt: r.actioned_at ?? null,
         note: r.note ?? null,
       })));
+      setLogFailed(false);
     } else {
       reportError('deletions.log', l.status === 'rejected' ? l.reason : l.value.error);
-      setLog(null);
+      // Same as the queue above: a refused re-read does not take away the
+      // history the last good one returned.
+      setLogFailed(true);
     }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  // `load` reads both halves of this screen — the queue and the audit log — so
+  // the gesture the hero names asks for both.
+  const pull = usePullToRefresh(load);
 
   const loaded = pending !== null;
   const queue = pending ?? [];
@@ -217,10 +234,11 @@ export default function OwnerDeletions() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
+            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Deletion Requests</Text>
         </View>
@@ -236,9 +254,9 @@ export default function OwnerDeletions() {
           note={failed
             // Said "pull to retry" over a ScrollView with no RefreshControl, so
             // the one instruction on the most consequential line of this screen
-            // did nothing. The retry that does exist is the button in the queue
-            // below; this points at it rather than at a dead gesture.
-            ? 'The queue could not be read. This is NOT an all-clear — try again below.'
+            // did nothing. The gesture is real now, and so is the button in the
+            // queue below — both run the same read.
+            ? 'The queue could not be read. This is NOT an all-clear — pull down or try again below.'
             : !loaded
             ? 'Reading the queue…'
             : queue.length === 0
@@ -272,10 +290,11 @@ export default function OwnerDeletions() {
         <Section>
           <SectionHead title={loaded && queue.length ? `The queue · ${queue.length}` : 'The queue'} />
           {failed ? (
-            <View>
+            <View style={{ marginBottom: loaded && queue.length ? sp.md : 0 }}>
               <Flag tone={t.crit}>
-                Could not read the queue. Nobody has been cleared — this screen simply does not
-                know who is waiting, which is not the same as nobody waiting.
+                {loaded
+                  ? 'Could not read the queue just now. What is below is the last read that came back — the stamp at the top says when. Nobody new has been cleared.'
+                  : 'Could not read the queue. Nobody has been cleared — this screen simply does not know who is waiting, which is not the same as nobody waiting.'}
               </Flag>
               <Pressable
                 onPress={() => { void load(); }}
@@ -286,14 +305,21 @@ export default function OwnerDeletions() {
                 <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Try Again</Text>
               </Pressable>
             </View>
-          ) : !loaded ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
+          ) : null}
+          {!loaded ? (
+            // Nothing has ever come back. Under `failed` the flag above has
+            // already said why, so this does not add "Loading…" underneath it.
+            failed ? null : <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : queue.length === 0 ? (
+            // "The outcome you want" is a claim about a read that succeeded, so
+            // it is withheld when the most recent one did not.
+            failed ? null : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nothing to action. Nobody at this gym has asked to be deleted, so no clock is
               running — an empty queue here is the outcome you want, not a screen that failed
               to load.
             </Text>
+            )
           ) : queue.map((p, i) => {
             const tone = toneFor(t, p.daysRemaining);
             const working = busy === p.subjectId;
@@ -337,16 +363,20 @@ export default function OwnerDeletions() {
 
         <Section>
           <SectionHead title="Already Actioned" note={log?.length ? `${log.length} recorded` : undefined} />
-          {log === null ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
+          {logFailed ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: log?.length ? sp.md : 0 }}>
               The record could not be read just now. Deletions you have already carried out are
               still logged — this is a display problem, not a missing history.
+              {log?.length ? ' What is below is the last read that came back.' : ''}
             </Text>
-          ) : log.length === 0 ? (
+          ) : null}
+          {log === null ? null : log.length === 0 ? (
+            logFailed ? null : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nothing actioned yet. Every deletion you carry out is recorded here — the person is
               gone, the record that they asked and when you did it is not.
             </Text>
+            )
           ) : log.map((r, i) => (
             <View key={r.id}>
               {i > 0 ? <Rule /> : null}

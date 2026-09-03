@@ -32,12 +32,16 @@
 // The client app names its coach through `useThreadPeerName`
 // (src/lib/threadPeer.ts), which reads `clients.trainer_id` and then that id's
 // profile and no other. It is the right source there. This one never is.
-import { createContext, useContext, useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
 import { reportError } from '../lib/reportError';
+// Whether the autosave actually landed. Until this module the write ended
+// `.then(() => {}, () => {})` and the screen could not tell a saved profile
+// from a refused one — see that file's header.
+import { IDLE_SAVE, markPending, afterWrite, type SaveStatus } from '../lib/profileSave';
 import {
   resolveTrainerAccess,
   mayReadTrainerProfile,
@@ -65,6 +69,8 @@ interface MyTrainerProfileValue extends TrainerProfileFields {
   /** Null clears the rate. It is not the same as 0, which is a rate. */
   setSessionFee: (v: number | null) => void;
   setListed: (v: boolean) => void;
+  /** Whether the last autosave landed. See src/lib/profileSave.ts. */
+  save: SaveStatus;
   /**
    * Claim a public-page address and switch the page on or off, in one call.
    *
@@ -81,6 +87,10 @@ interface MyTrainerProfileValue extends TrainerProfileFields {
    * grant (part 340 §4), so there is no other route to them from here.
    */
   publishPage: (handle: string, on: boolean) => Promise<PublishResult>;
+  /** Read `profiles` and `trainers` again. Flushes a pending edit first — see
+   *  the docstring on the implementation for why that ordering is not
+   *  optional. */
+  reload: () => Promise<void>;
 }
 
 const Ctx = createContext<MyTrainerProfileValue | null>(null);
@@ -138,6 +148,11 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
   // physical rather than advisory: the two rows this reads are the SIGNED-IN
   // user's, so on those apps there is no request whose result could be mistaken
   // for a coach's name or a coach's face, because no request is made.
+  // Bumped by `reload` below. In the dependency array of the read effect so a
+  // refresh goes back through the one read this provider has, rather than
+  // growing a second one that would have to repeat every assignment rule in it.
+  const [readNonce, setReadNonce] = useState(0);
+
   useEffect(() => {
     if (!hydrated || !USE_SUPABASE || VARIANT !== 'trainer') return;
     let cancelled = false;
@@ -207,7 +222,7 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
       fetchReal();
     });
     return () => { cancelled = true; sub.subscription.unsubscribe(); };
-  }, [hydrated]);
+  }, [hydrated, readNonce]);
 
   // Push edits back to the server. Debounced so typing in a text field doesn't fire
   // a write per keystroke. Update-only (never inserts): the trainer row is created
@@ -216,18 +231,88 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
   // Gated on `mine` as well as on `uid`, so a build that is not the coach app can
   // never write these columns for the signed-in user — the same reason it does
   // not read them.
+  const [save, setSave] = useState<SaveStatus>(IDLE_SAVE);
+  // The values the next write should carry, kept in a ref so the flush below
+  // can fire without being in anybody's dependency array.
+  const latest = useRef({ name, photo, tagline, bio, offers, specialties, sessionFee, listed, uid });
+  latest.current = { name, photo, tagline, bio, offers, specialties, sessionFee, listed, uid };
+  // Whether there is an edit that has not reached the server. Cleared only by a
+  // write that came back OK, so a failed one stays dirty and gets flushed again.
+  const dirty = useRef(false);
+
+  /**
+   * Write, and report what happened.
+   *
+   * Both statements are awaited together and BOTH must succeed. `profiles`
+   * holds the name and avatar and `trainers` holds everything else, so a screen
+   * that reported success on the first alone would tell a coach their bio was
+   * saved on the strength of their name having been.
+   */
+  const flush = useCallback(async (): Promise<void> => {
+    const v = latest.current;
+    if (!USE_SUPABASE || !v.uid || !mine) return;
+    try {
+      const [a, b] = await Promise.all([
+        supabase.from('profiles').update({ full_name: v.name, avatar: v.photo }).eq('id', v.uid),
+        supabase.from('trainers').update({
+          bio: v.bio, tagline: v.tagline, offers: v.offers,
+          specialties: v.specialties, session_fee: v.sessionFee, listed: v.listed,
+        }).eq('id', v.uid),
+      ]);
+      const err = a.error ?? b.error ?? null;
+      if (err) {
+        // Left dirty on purpose: the values are still only on this handset, and
+        // the next edit or the unmount flush should try them again.
+        setSave((prev) => afterWrite(prev, false, Date.now(), err.message));
+        return;
+      }
+      dirty.current = false;
+      setSave((prev) => afterWrite(prev, true, Date.now()));
+    } catch (e) {
+      reportError('coachProfile.persist', e);
+      setSave((prev) => afterWrite(prev, false, Date.now(), null));
+    }
+  }, [mine]);
+
   useEffect(() => {
     if (!USE_SUPABASE || !uid || !hydrated || !synced || !mine) return;
-    const timer = setTimeout(() => {
-      try {
-        supabase.from('profiles').update({ full_name: name, avatar: photo }).eq('id', uid).then(() => {}, () => {});
-        supabase.from('trainers').update({
-          bio, tagline, offers, specialties, session_fee: sessionFee, listed,
-        }).eq('id', uid).then(() => {}, () => {});
-      } catch (e) { reportError('coachProfile.persist', e); }
-    }, 600);
+    dirty.current = true;
+    setSave(markPending);
+    const timer = setTimeout(() => { void flush(); }, 600);
     return () => clearTimeout(timer);
-  }, [name, photo, tagline, bio, offers, specialties, sessionFee, listed, uid, hydrated, synced, mine]);
+  }, [name, photo, tagline, bio, offers, specialties, sessionFee, listed, uid, hydrated, synced, mine, flush]);
+
+  // ── the write that used to be cancelled on the way out ────────────────────
+  //
+  // The debounce cleanup above is `clearTimeout`, and React runs it on unmount
+  // as well as on every dependency change. So a coach who changed a setting and
+  // left the screen inside 600ms had the write cancelled — never attempted, and
+  // nothing on screen had suggested anything was in flight.
+  //
+  // Mount-only, so its cleanup runs ONLY on unmount and cannot defeat the
+  // debounce. Fired without awaiting because a component coming apart cannot be
+  // held open; the request outlives it either way, and `dirty` means this is
+  // reached only when there is something that has genuinely not landed.
+  useEffect(() => () => { if (dirty.current) void flush(); }, [flush]);
+
+  /**
+   * Read the profile and the trainers row again.
+   *
+   * The pending edit is FLUSHED FIRST, and this is the whole subtlety. The read
+   * below assigns `bio`, `tagline`, `session_fee` and the rest in both
+   * directions — that is deliberate, and it is what lets a cleared rate stay
+   * cleared — so a re-read that landed on top of a debounced edit still sitting
+   * in `latest` would take the coach's typing back off the screen and out of
+   * the app. Writing it first means the values the server hands back are the
+   * coach's own. A failed flush leaves `dirty` set, so nothing is lost that was
+   * not already at risk, and the re-read is still worth doing: it is how a
+   * refused read gets a second chance.
+   */
+  const reload = useCallback(async (): Promise<void> => {
+    if (dirty.current) await flush();
+    setSynced(false);
+    setReadNonce((n) => n + 1);
+  }, [flush]);
 
   useEffect(() => { if (!hydrated || !mine) return; AsyncStorage.setItem('repple.coachProfile', JSON.stringify({ name, photo, tagline, bio, offers, specialties, sessionFee, listed })).catch(() => {}); }, [hydrated, mine, name, photo, tagline, bio, offers, specialties, sessionFee, listed]);
 
@@ -292,9 +377,11 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
       setSpecialties: mine ? setSpecialties : off,
       setSessionFee: mine ? setSessionFee : off,
       setListed: mine ? setListed : off,
+      save,
       publishPage,
+      reload,
     };
-  }, [access, mine, name, photo, tagline, bio, offers, specialties, sessionFee, listed, publicHandle, publicPage, publishPage]);
+  }, [access, mine, name, photo, tagline, bio, offers, specialties, sessionFee, listed, publicHandle, publicPage, publishPage, save, reload]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

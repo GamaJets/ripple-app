@@ -76,6 +76,7 @@ import {
 } from '../../src/ui/joinCode';
 import { worstStatus } from '../../src/ui/loadStatus';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const DASH = '—';
 
@@ -181,6 +182,14 @@ export default function TrainerAdSpend() {
   const loadOrganic = useCallback(async () => { setOrganic(await fetchOrganicCodes()); }, []);
   useEffect(() => { void loadOrganic(); }, [loadOrganic]);
 
+  // Three reads, all of them: the spend, the code returns and the organic set.
+  // Refreshing the spend alone would leave the currency comparison below
+  // running half on the new figures and half on the old.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(), loadOrganic()]),
+    [load, loadOrganic],
+  ));
+
   const toggleOrganic = async (id: string, next: boolean) => {
     const r = await setCodeOrganic(id, next);
     if (!r.ok) { setOrganicMsg(r.reason); return; }
@@ -199,7 +208,7 @@ export default function TrainerAdSpend() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>

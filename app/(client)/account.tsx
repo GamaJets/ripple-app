@@ -11,6 +11,15 @@
 // lost the account, because the reset email is the only way back in and it
 // goes to the address they no longer have.
 //
+// ── And the one a password change does NOT do ──────────────────────────────
+//
+// It does not sign anybody else out. That is Supabase's behaviour, not a
+// choice: a refresh token per session, untouched by `updateUser({ password })`.
+// This screen used to state it and leave it there — on the screen Explore
+// routes the keyword "hacked" to, where the person reading has exactly one
+// question. The alert now offers `endOtherSessions`, which keeps this phone's
+// session and ends every other one, and reports honestly when it could not.
+//
 // ── Two screens' worth of care, for two different reasons ──────────────────
 //
 // The PASSWORD form asks for the current password even though Supabase does
@@ -31,6 +40,7 @@
 // into, and every field is cleared on success. No password reaches
 // reportError, AsyncStorage, or a log line.
 import { useCallback, useEffect, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -42,8 +52,9 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import {
-  MIN_PASSWORD, changeEmail, changePassword, emailProblem, passwordProblem, pendingEmail,
+  MIN_PASSWORD, changeEmail, changePassword, emailProblem, endOtherSessions, passwordProblem, pendingEmail,
 } from '../../src/lib/accountSecurity';
+import { END_ALIGN } from '../../src/ui/direction';
 
 /** Have we read the account's own state, and what did it say. `'failed'` is
  *  kept apart from `null` for the reason settings.tsx keeps them apart: a read
@@ -96,6 +107,11 @@ export default function Account() {
   }, []);
   useEffect(() => { void loadPending(); }, [loadPending]);
 
+  // Whether an email change is still waiting to be confirmed is the one server
+  // read on this screen, and it is the one a member comes back to check after
+  // opening the link in their inbox.
+  const pull = usePullToRefresh(loadPending);
+
   /* ── the password form ──────────────────────────────────────────────────── */
 
   // These three live for exactly as long as the form does. Nothing outside this
@@ -128,8 +144,40 @@ export default function Account() {
       }
       wipePassword();
       setPwNote(null);
+      // ── The offer this screen owed and did not make ────────────────────
+      //
+      // A password change evicts nobody. Supabase issues a refresh token per
+      // session and leaves the others alone, so a handset somebody else is
+      // holding stays signed in to this account — with the member's messages,
+      // injuries and scans in it — until that session's own token expires. The
+      // alert said exactly that and then stopped, on the screen Explore routes
+      // the keyword "hacked" to. Somebody who arrives here has one question,
+      // and the app knew the answer.
+      //
+      // Offered rather than done. Most password changes are housekeeping, and
+      // signing a member out of their own tablet uninvited is its own small
+      // harm. `endOtherSessions` keeps THIS session — see the note on it.
       Alert.alert('Password changed',
-        'Your new password is in place. You are still signed in on this phone; anywhere else you are signed in stays signed in until that session expires.');
+        'Your new password is in place. Anywhere else you are signed in stays signed in until that session expires — including any phone or tablet you no longer have.',
+        [
+          { text: 'Leave them', style: 'cancel' },
+          {
+            text: 'Sign out everywhere else',
+            onPress: async () => {
+              const out = await endOtherSessions(supabase.auth);
+              // Both outcomes are said. "We could not do it" is the one that
+              // matters here: a member who believes they have evicted somebody
+              // and has not is worse off than one who knows they must ring
+              // support.
+              Alert.alert(
+                out.ok ? 'Signed out everywhere else' : 'Still signed in elsewhere',
+                out.ok
+                  ? 'Every other phone, tablet and browser signed in to this account has been signed out. This phone stays signed in, and your new password is what gets any of them back.'
+                  : `${out.note} Your password HAS been changed, so nothing new can sign in — but a device already signed in may still be. Try again in a moment.`,
+              );
+            },
+          },
+        ]);
     } finally { setPwBusy(false); }
   };
 
@@ -176,7 +224,7 @@ export default function Account() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
-        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -196,7 +244,7 @@ export default function Account() {
           <SectionHead title="Email Address" />
           <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingBottom: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
             <Text style={{ ...ty.label, color: t.ink3 }}>On your account</Text>
-            <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>
+            <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: END_ALIGN }} numberOfLines={1}>
               {/* `|| null` and not the empty string `email` already is: `fig('')` is the
                   empty string, so an unread address left this slot blank under its
                   label — indistinguishable from an account with no email at all.

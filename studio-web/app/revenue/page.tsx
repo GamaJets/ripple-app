@@ -48,6 +48,7 @@ import { assertWhole, capLimit } from '@lib/rowCap';
 // holds the rule that an amount with no currency on it is a hole in the total
 // rather than a zero.
 import { sumTaken, combineTaken, minorMoney, type Taken } from '@lib/coachMoney';
+import { Banner } from '@/components/Banner';
 
 /** The cash window. Ninety days is a quarter: long enough that a month with one
  *  odd week does not read as a trend, short enough to still be this year's gym. */
@@ -1314,16 +1315,6 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
       </div>
       {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
     </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
   );
 }
 

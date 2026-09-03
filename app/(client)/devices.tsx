@@ -44,9 +44,19 @@ import { awaitingNote, liveFootnote, permissionsNote } from '../../src/lib/weara
 // separately and contradict each other in front of the same client.
 import { forgetLink, linkFor, useLinkRevision } from '../../src/lib/wearableLinkLedger';
 import { formatSleepHours, recentNights, type SleepRead } from '../../src/lib/sleepMerge';
+import { fmtDay, fmtTime } from '../../src/lib/format';
+// Distance in the member's own unit. See src/lib/distance.ts for why it is
+// derived from the length unit rather than being a third pill in Settings.
+import { distanceLabel, distanceUnitFor, metresLabel } from '../../src/lib/distance';
+import { useSettings } from '../../src/ui/settings';
+// HRV as a trend against the member's own baseline, which is the only way this
+// app is allowed to print it — src/lib/wearables/types.ts states that rule on
+// the field itself, and this screen was breaking it.
+import { useDeviceHrv } from '../../src/ui/deviceHrv';
+import { hrvBuildingLine, hrvTrendLine } from '../../src/lib/hrvTrend';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
-type MetricKey = 'kcal' | 'hr' | 'steps' | 'source';
+type MetricKey = 'kcal' | 'hr' | 'hrv' | 'steps' | 'source';
 
 /**
  * What to say about an import that did not land in the log.
@@ -79,22 +89,37 @@ function ago(ts?: number): string {
  const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
  return Math.floor(h / 24) + 'd ago';
 }
-function wkDate(iso: string): string {
- const d = new Date(iso);
- return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
-}
-/** "Mon 25/8 · 18:30" — a session needs its time of day, not just its date:
- *  two sessions on one day are two different things to write. */
+/** "Mon 25 Aug · 18:30" — a session needs its time of day, not just its date:
+ *  two sessions on one day are two different things to write.
+ *
+ *  This was a private `wkDate` that built the weekday out of a hardcoded
+ *  English array and then wrote `${d.getDate()}/${d.getMonth() + 1}`, which is
+ *  the exact pattern src/lib/format.ts records removing from five other files:
+ *  the weekday is in a language the reader may not have, and "25/8" is 25
+ *  August here and nothing at all in the United States, where it reads as a
+ *  month of 25. It is interpolated into the list of sessions about to be
+ *  written into Apple Health and into every failure line under it, so being
+ *  wrong about which day it is means writing a workout onto the wrong one.
+ *
+ *  `fmtDay` and `fmtTime` are the shared answer, in the reader's own locale and
+ *  their own clock. The NaN guard stays: it is the only thing between an
+ *  unparseable timestamp and the string "Invalid Date · NaN:NaN" appearing in
+ *  the middle of a list of things about to be written. */
 function sessionWhen(iso: string): string {
  const d = new Date(iso);
  if (!isFinite(d.getTime())) return '—';
- return `${wkDate(iso)} · ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+ return `${fmtDay(iso)} · ${fmtTime(iso)}`;
 }
 
 export default function Devices() {
  const t = useTheme();
  const router = useRouter();
  const w = useWearables();
+ // The unit every distance on this screen is read out in. Derived from the
+ // length unit rather than asked for again — see src/lib/distance.ts.
+ const du = distanceUnitFor(useSettings().lengthUnit);
+ // Tonight's HRV and the member's own baseline for it.
+ const hrv = useDeviceHrv();
  // Re-render whenever the server proves something new about any device — a
  // token dying, a scope being refused, or a reconnect clearing both. Without
  // this the screen would go on showing whatever it decided on mount, which is
@@ -114,7 +139,7 @@ export default function Devices() {
  //     said "Your training log has no sessions yet, so there is nothing to
  //     write" — a flat claim about the member's whole log, from a read that had
  //     failed.
- const { log, status: logStatus, logWorkouts, setSessionMins } = useWorkoutLog();
+ const { log, status: logStatus, logWorkouts, setSessionMins, reload: reloadLog } = useWorkoutLog();
  const logWhole = isWhole(logStatus);
  const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
  const appleReady = !!apple && apple.isAvailable();
@@ -134,7 +159,14 @@ export default function Devices() {
  // Every figure on this screen comes off a device that can stop answering, and
  // the only way to ask again was to leave the screen and come back. Pull to
  // refresh is the gesture people already try; see src/ui/pullToRefresh.tsx.
- const pull = usePullToRefresh(useCallback(() => { w.syncAll(); }, [w]));
+ // The watch sync was the whole of it. The HRV panel is its own read of
+ // `hrv_nights`, and whether an imported session is already in the log is read
+ // off the training log — so a member could pull this screen, watch the sync
+ // spinner, and still be shown last night's HRV and a session marked
+ // un-imported that they imported an hour ago.
+ const pull = usePullToRefresh(useCallback(() => {
+   void w.syncAll(); void hrv.reload(); reloadLog();
+ }, [w, hrv.reload, reloadLog]));
  // Null, not false, when the log is not whole: "we cannot tell" is a third
  // answer and the row below renders it as one rather than as "not logged yet".
  const alreadyLogged = (sm: WorkoutSample): boolean | null =>
@@ -291,6 +323,40 @@ export default function Devices() {
   forgetLink(p.meta.id);
  };
 
+ /**
+  * Ask first, because this deletes measurements.
+  *
+  * The control that called `onDisconnect` was labelled "Connected". It read as
+  * a status pill — that is what the word is, everywhere else on this screen and
+  * in the rest of the app — and it was one tap, with no question, into
+  * `w.disconnect`, which runs a `.delete()` against `device_sleep_nights` for
+  * that provider. So a member tapping what looked like a state indicator to see
+  * what it said destroyed every night that device had measured, with no
+  * warning, no confirmation and no undo. `app/(client)/injuries.tsx` states the
+  * house rule: "Delete now has an <Alert> in front of it, like every other
+  * destructive action in this app."
+  *
+  * The alert names what goes, because "are you sure?" over a row of six devices
+  * does not say which one and does not say what is at stake. It is deliberately
+  * specific about the two different things that happen — the connection ends
+  * AND the nights are removed — since only the first is what the word
+  * "disconnect" promises.
+  *
+  * `Alert` and not a toast: src/ui/toast.tsx is for a thing that can be undone
+  * by doing it again, and reconnecting the watch does not bring the nights
+  * back.
+  */
+ const confirmDisconnect = (p: WearableProvider) => {
+  Alert.alert(
+   `Disconnect ${p.meta.name}?`,
+   `${BRAND.label} will stop reading from ${p.meta.name}, and the nights it measured are removed from your record here — your readiness will be built from whatever else you have. Nothing is deleted in the ${p.meta.name} app itself, and reconnecting starts a fresh record rather than bringing these nights back.`,
+   [
+    { text: 'Keep It', style: 'cancel' },
+    { text: 'Disconnect', style: 'destructive', onPress: () => { void onDisconnect(p); } },
+   ],
+  );
+ };
+
  // Connected means the shared state machine says so — never the remembered flag
  // on its own. A device whose token the server has told us is dead does not
  // belong in this list, however firmly AsyncStorage remembers connecting it.
@@ -331,7 +397,11 @@ export default function Devices() {
  // totalKcal counts as a live reading too. WHOOP publishes only that, so
  // testing activeKcal alone hid the whole panel from every WHOOP user the
  // moment its energy stopped being filed under the wrong name.
- const showLive = connected.length > 0 && (w.today.activeKcal != null || w.today.totalKcal != null || w.today.heartRateAvg != null || w.today.steps != null);
+ // HRV counts as a live reading too, and for the same reason totalKcal was
+ // added: a WHOOP-only member whose day has not been scored yet still has last
+ // night's variability, and hiding the whole panel would hide the one figure
+ // their device actually published.
+ const showLive = connected.length > 0 && (w.today.activeKcal != null || w.today.totalKcal != null || w.today.heartRateAvg != null || w.today.steps != null || hrv.tonight != null);
 
  const devicesWord = connected.length === 1 ? 'device' : 'devices';
  // The panel below is gated on ANY provider being connected, and its empty
@@ -346,11 +416,31 @@ export default function Devices() {
  // Derived from the catalogue now — see src/lib/wearables/liveNotes.ts, which
  // is where the reasoning and the test live.
  const connectedMeta = connected.map((p) => p.meta);
+ /**
+  * Which device a figure on the Live row came from.
+  *
+  * Hoisted out of the energy block below, where it used to live, because every
+  * figure on that row needs it and not only the calories. `w.today` picks ONE
+  * device per field — see the notes on the roll-up in src/ui/wearables.tsx —
+  * and a figure whose source has been dropped cannot be checked against the
+  * vendor's own app by the person it is about, which is the complaint the sleep
+  * section four rules down already answers in as many words.
+  */
+ const named = (key: 'activeKcal' | 'totalKcal' | 'heartRateAvg' | 'steps') =>
+  connected.find((p) => typeof w.metrics[p.meta.id]?.[key] === 'number')?.meta.name ?? 'your device';
+ /**
+  * The line above the Live row when what is on it is not a current reading.
+  *
+  * Null while everything is answering, so an ordinary day carries no banner.
+  * 'loading' is not warned about — a first read still in flight is not a stale
+  * figure, and the row is empty under it anyway.
+  */
+ const staleNote = w.todayStatus === 'error'
+  ? `These are the last figures we had, not a current reading — ${connected.length === 1 ? 'your device' : 'one of your devices'} could not be reached just now. Pull down to try again.`
+  : null;
  // Active where a device gives it, whole-day otherwise, and never one label on
  // the other's number.
  const energy: { kcal: number | null; kind: 'active' | 'total'; from: string } = (() => {
-  const named = (key: 'activeKcal' | 'totalKcal') =>
-   connected.find((p) => typeof w.metrics[p.meta.id]?.[key] === 'number')?.meta.name ?? 'your device';
   if (typeof w.today.activeKcal === 'number') return { kcal: w.today.activeKcal, kind: 'active', from: named('activeKcal') };
   if (typeof w.today.totalKcal === 'number') return { kcal: w.today.totalKcal, kind: 'total', from: named('totalKcal') };
   return { kcal: null, kind: 'active', from: 'your device' };
@@ -371,8 +461,27 @@ export default function Devices() {
     ? `Your whole day's energy from ${energy.from}, resting metabolism included — which is most of it. Your calorie target already accounts for an ordinary day, so this is not extra food to eat.`
     : `Energy above resting from ${energy.from} — the part that is actually exercise. Your calorie target already accounts for an ordinary day's movement.`,
  },
- hr: { ico: 'heart', title: 'Average Heart Rate', value: `${num(w.today.heartRateAvg)} bpm`, blurb: 'The mean of today’s heart-rate samples from your watch. During a workout, live heart rate is written into that session.' },
- steps: { ico: 'trending', title: 'Steps', value: num(w.today.steps), blurb: 'Total steps today across your connected devices. A simple daily-movement signal that complements your training.' },
+ // "from your watch", singular and named, because that is now what it is. The
+ // roll-up used to average this field across every connected device and this
+ // blurb described the result as "the mean of today's samples" — of two
+ // devices' means, which is a number neither watch recorded and neither
+ // vendor's app will agree with.
+ hr: { ico: 'heart', title: 'Average Heart Rate', value: `${num(w.today.heartRateAvg)} bpm`, blurb: `The mean of today’s heart-rate samples from ${named('heartRateAvg')}. Where two devices both measured today, this is the fuller of the two readings and not an average of them — no device recorded an average. During a workout, live heart rate is written into that session.` },
+ hrv: {
+  ico: 'heart',
+  title: 'Heart Rate Variability',
+  value: hrv.tonight ? `${hrv.tonight.ms} ms` : fig(null),
+  // The whole content of this figure is the comparison, so the blurb leads
+  // with why a bare number was worth nothing.
+  blurb: hrv.tonight == null
+   ? 'No connected device has reported HRV. WHOOP and Oura publish it; Apple Health carries it only if something on your phone writes it there.'
+   : `${hrv.trend
+     ? hrvTrendLine(hrv.trend)
+     : hrv.status === 'error'
+      ? 'Your earlier nights could not be read just now, so there is nothing to compare tonight with.'
+      : hrvBuildingLine(hrv.nightsKept)}\n\nHRV is not comparable between people — 40 ms is an excellent night for one person and a warning for another — so ${BRAND.label} only ever shows yours against your own nights. Measured by ${hrv.tonight.sourceName}, as RMSSD in milliseconds, which is what your vendor's own app shows.`,
+ },
+ steps: { ico: 'trending', title: 'Steps', value: num(w.today.steps), blurb: `Today's steps from ${named('steps')} — the device that counted the most of them, not the sum of two devices counting the same walk twice. A simple daily-movement signal that complements your training.` },
  source: { ico: 'clock', title: 'Connected Sources', value: `${connected.length} ${connected.length === 1 ? 'device' : 'devices'}`, blurb: connected.map((p) => `• ${p.meta.name}`).join('\n') || 'No devices connected yet.' },
  };
 
@@ -397,11 +506,18 @@ export default function Devices() {
     label={energy.kind === 'total' ? 'Energy Today' : 'Active Today'}
     figure={num(energy.kcal)}
     unit="kcal"
+    // The staleness goes in the hero's own note as well as in the flag below,
+    // because this is the figure the label calls "Active Today" — the one a
+    // member reads and closes the screen on. A four-hour-old number under that
+    // label, with the admission a section further down, is the admission in the
+    // wrong place.
     note={energy.kcal == null
      ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
-     : energy.kind === 'total'
-      ? `Whole day from ${energy.from}, rest included · already inside your calorie target.`
-      : `Energy above rest, from ${energy.from} · already inside your calorie target.`}
+     : w.todayStatus === 'error'
+      ? `Last figure we had from ${energy.from} — it has not synced since, so it is not today's total yet.`
+      : energy.kind === 'total'
+       ? `Whole day from ${energy.from}, rest included · already inside your calorie target.`
+       : `Energy above rest, from ${energy.from} · already inside your calorie target.`}
     onPress={() => setDetail('kcal')}
    />
 
@@ -409,11 +525,37 @@ export default function Devices() {
 
    <Section>
     <SectionHead title="Live Today" note={`${connected.length} ${devicesWord}`} onPress={() => setDetail('source')} />
+    {/* Whether these figures are today's, or the last ones we had.
+        `src/ui/wearables.tsx` kept the metrics through a failed sync — which is
+        right, a watch that could not be reached did not un-burn the morning —
+        and said nothing, so a stalled figure and a quiet afternoon looked
+        identical. It says now. Nothing is withheld: the numbers are real, they
+        are just not current, and that is a different sentence from either
+        "live" or "unknown". */}
+    {staleNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote}</Flag> : null}
     <ListRow icon="heart" title="Average Heart Rate"
-     note={w.today.heartRateAvg == null ? awaitingNote('heartRate', connectedMeta) : `${num(w.today.heartRateAvg)} bpm across today's samples`}
+     note={w.today.heartRateAvg == null ? awaitingNote('heartRate', connectedMeta) : `${num(w.today.heartRateAvg)} bpm across today's samples, from ${named('heartRateAvg')}`}
      onPress={() => setDetail('hr')} />
+    {/* HRV, as a trend against the member's own nights and never as a bare
+        number. src/lib/wearables/types.ts states that rule on the field itself
+        — "40 ms is excellent for one member and a red flag for another" — and
+        this screen used to print `62 ms HRV` off the last sync and keep
+        nothing, so there was no history for it to be a trend against and could
+        not have been. The nights are kept now (supabase/parts/720). */}
+    {hrv.tonight ? (
+     <ListRow icon="heart" title="Heart Rate Variability"
+      note={hrv.trend
+       ? `${hrv.tonight.ms} ms from ${hrv.tonight.sourceName} · ${hrvTrendLine(hrv.trend)}`
+       : hrv.status === 'error'
+        // The reading is real; what could not be read is the history behind it.
+        // Said plainly, because "no baseline yet" would be a claim about the
+        // member's own record made off a read that failed.
+        ? `${hrv.tonight.ms} ms from ${hrv.tonight.sourceName} · your earlier nights could not be read, so there is nothing to compare it with just now.`
+        : `${hrv.tonight.ms} ms from ${hrv.tonight.sourceName} · ${hrvBuildingLine(hrv.nightsKept)}`}
+      onPress={() => setDetail('hrv')} />
+    ) : null}
     <ListRow icon="trending" title="Steps"
-     note={w.today.steps == null ? awaitingNote('steps', connectedMeta) : `${num(w.today.steps)} today`}
+     note={w.today.steps == null ? awaitingNote('steps', connectedMeta) : `${num(w.today.steps)} today, from ${named('steps')}`}
      onPress={() => setDetail('steps')} />
     <ListRow icon="clock" title="Connected Sources"
      note={connected.map((p) => p.meta.name).join(' · ')}
@@ -472,7 +614,12 @@ export default function Devices() {
         }}>
          <View style={{ flex: 1 }}>
           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{sm.activity}</Text>
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{[wkDate(sm.start), `${sm.mins} min`, sm.distanceKm ? `${sm.distanceKm} km` : null, sm.kcal ? `${num(sm.kcal)} kcal` : null].filter(Boolean).join(' · ')}</Text>
+          {/* The distance a watch recorded, in the unit the member measures
+              distance in. It arrives from every provider in kilometres — that
+              is what `WorkoutSample.distanceKm` means — and was printed with
+              "km" after it whatever the phone was set to, so a runner in Dallas
+              read their five miles as 8.05. */}
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{[fmtDay(sm.start), `${sm.mins} min`, sm.distanceKm ? distanceLabel(sm.distanceKm, du) : null, sm.kcal ? `${num(sm.kcal)} kcal` : null].filter(Boolean).join(' · ')}</Text>
          </View>
          {/* Three answers, not two. `done === null` means the training log
              could not be read whole, so we do not know whether this workout is
@@ -615,7 +762,12 @@ export default function Devices() {
          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.activityLabel}</Text>
          <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
           {[sessionWhen(p.t), `${fig(Math.round(p.seconds / 60))} min`,
-            p.distanceMeters != null ? `${(p.distanceMeters / 1000).toFixed(2)} km` : null,
+            // The plan carries metres, because that is what HealthKit takes.
+            // What is PRINTED here is the member's own unit: this line is the
+            // preview of what is about to be written into their Health app, and
+            // "8.05 km" over a run they logged as five miles reads as the app
+            // about to write down something they did not do.
+            p.distanceMeters != null ? metresLabel(p.distanceMeters, du) : null,
             p.kcal != null ? `${num(p.kcal)} kcal` : null,
            ].filter(Boolean).join(' · ')}
          </Text>
@@ -743,8 +895,19 @@ export default function Devices() {
         // pressing it changes nothing and pressing it repeatedly is what this
         // tester spent four reports doing.
         <Cta label="Reconnect" onPress={() => onConnect(p)} />
-       ) : on || blocked ? (
-        <Ghost label={on ? 'Connected' : 'Unavailable'} onPress={() => (on ? onDisconnect(p) : onConnect(p))} />
+       ) : on ? (
+        // "Disconnect", not "Connected". A button says what pressing it does;
+        // the state is already on this row twice over, in the brand-coloured
+        // dot beside the name and in the live figures underneath. Labelling a
+        // destructive action with the state it undoes is how somebody taps it
+        // to find out what it means — see `confirmDisconnect`.
+        <Ghost label="Disconnect"
+         a11yLabel={`Disconnect ${p.meta.name}, and remove the nights it measured`}
+         onPress={() => confirmDisconnect(p)} />
+       ) : blocked ? (
+        // Unchanged: an unavailable provider's button re-attempts the connect,
+        // which is the only thing there is to do about it.
+        <Ghost label="Unavailable" onPress={() => onConnect(p)} />
        ) : (
         <Cta label="Connect" onPress={() => onConnect(p)} />
        )}

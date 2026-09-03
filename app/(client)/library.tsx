@@ -39,6 +39,7 @@
 // it does not, rather than closing on a set that exists on this phone alone.
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
+import { matchesSearch, fallbackTag } from '../../src/lib/catalogueLocale';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -69,6 +70,7 @@ import { liftLabel, readLift } from '../../src/lib/units';
 import { bodyweightSetLabel } from '../../src/lib/bodyweightSets';
 import { frameUrls } from '../../src/lib/exerciseMedia';
 import { signMedia, needsSigning } from '../../src/ui/signedMedia';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 export default function Library() {
  const toast = useToast();
@@ -86,12 +88,15 @@ export default function Library() {
  // way to ask again was the Try Again button inside the failure notice, and
  // there is no such button on a screen that merely went stale. Pull to refresh
  // is the gesture people already try — see src/ui/pullToRefresh.tsx.
- const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
  // The catalogue, which is a different thing from the clips and was never on
  // this screen. 917 movements exist; nought clips do. A screen called Exercise
  // Library that could only ever show the second was empty for every client on
  // the platform, and said "No clips yet" as though that were the whole story.
  const cat = useExerciseCatalogue();
+ // Both halves. The gesture asked for the CLIPS alone, so a member whose
+ // catalogue read had failed — which is most of this screen's rows — pulled it
+ // down and got the same empty list back with the same sentence under it.
+ const pull = usePullToRefresh(useCallback(() => { reload(); void cat.reload(); }, [reload, cat.reload]));
  // Rendered in pages. 917 <ListRow>s mounted at once is a visibly janky scroll
  // on an older phone, and nobody reads past the first screenful anyway.
  const [catShown, setCatShown] = useState(50);
@@ -142,7 +147,10 @@ export default function Library() {
  // than filtering one and leaving the other showing everything.
  const catList = cat.rows.filter((e) =>
   (group === 'All' || (e.group || '').trim().toLowerCase() === group.toLowerCase()) &&
-  (term === '' || e.name.toLowerCase().includes(term))
+  // Both names. A member whose phone is in German sees "Kniebeuge" and must be
+  // able to type it; the same member reading a programme their coach wrote in
+  // English must be able to type "Back Squat" and land on the same row.
+  matchesSearch(term, e.name, e.display)
  );
  useEffect(() => { setCatShown(50); }, [term, group]);
 
@@ -421,7 +429,7 @@ export default function Library() {
          <Pressable
           onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: e.name, from: 'clientLibrary' } })}
           accessibilityRole="button"
-          accessibilityLabel={e.name}
+          accessibilityLabel={e.display.text}
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
          >
           <View style={{ width: 52, height: 52, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
@@ -435,12 +443,19 @@ export default function Library() {
            )}
           </View>
           <View style={{ flex: 1 }}>
-           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{e.name}</Text>
+           {/* The reader's language where we have it. `e.name` is untouched
+               and is still what the row navigates by — the exercise screen
+               resolves a movement by the slug of its ENGLISH name. */}
+           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{e.display.text}</Text>
            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
-            {[e.group, e.equipment ? cap(e.equipment) : null].filter(Boolean).join(' · ')}
+            {/* The marker is on the row and not only on the detail screen,
+                because in a list of six hundred an unmarked English name among
+                German ones simply reads as the German name. Null, and so
+                absent, for a reader whose language the catalogue is in. */}
+            {[e.group, e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' · ')}
            </Text>
           </View>
-          <Icon name="chevron" size={15} color={t.ink3} />
+          <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
          </Pressable>
         </View>
         );

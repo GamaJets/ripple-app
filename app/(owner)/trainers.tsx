@@ -8,7 +8,7 @@
 //
 // Inviting is kept because it is the one action here that was always real: it
 // writes a `trainer_invites` row the invitee accepts in their own app.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -18,6 +18,8 @@ import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag, Notice, fig
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePlatformTrainers, type GymTrainer } from '../../src/ui/trainers';
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { parseEmail } from '../../src/lib/csvImport';
@@ -35,12 +37,12 @@ export default function OwnerTrainers() {
   // Every branch that says something about the roster now asks this first.
   const trainersUnread = trainersStatus === 'error';
   const trainersUnknown = loading || trainersUnread;
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
   // The gym's own currency (`tenants.currency`, part 99), not the operating
   // record's fallback. Null while the tenant is unread, and gymMoney falls back
   // for exactly that window.
   const cur = tenant?.currency ?? null;
-  const { sent: sentInvites, sendTrainerInvite, revokeTrainerInvite } = useTrainerInvites();
+  const { sent: sentInvites, status: invitesStatus, sendTrainerInvite, revokeTrainerInvite, reload: reloadInvites } = useTrainerInvites();
   const [invOpen, setInvOpen] = useState(false);
   const [invEmail, setInvEmail] = useState('');
   // The invite sheet reports its own outcome rather than closing on hope. See
@@ -56,8 +58,23 @@ export default function OwnerTrainers() {
    * current — `refresh()` puts it back to 'loading' and an error leaves it at
    * 'error', so a failed retry cannot move the stamp.
    */
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  useEffect(() => { if (trainersStatus === 'ready') setFetchedAt(Date.now()); }, [trainersStatus]);
+  const [trainersAt, setTrainersAt] = useState<number | null>(null);
+  useEffect(() => { if (trainersStatus === 'ready') setTrainersAt(Date.now()); }, [trainersStatus]);
+  // The other two reads this screen renders: the gym (whose currency every money
+  // line here is denominated in) and the invitations under "Pending Invites".
+  const [tenantAt, setTenantAt] = useState<number | null>(null);
+  useEffect(() => { if (tenantStatus === 'ready') setTenantAt(Date.now()); }, [tenantStatus]);
+  const [invitesAt, setInvitesAt] = useState<number | null>(null);
+  useEffect(() => { if (invitesStatus === 'ready') setInvitesAt(Date.now()); }, [invitesStatus]);
+  /** One line over three reads, and it is the age of the oldest. Stamping the
+   *  newest would put a fresh age on a roster nobody had re-read. */
+  const fetchedAt = oldestFetch(trainersAt, tenantAt, invitesAt);
+  /** Everything on this screen, read again. The Refresh button beside the stamp
+   *  and the pull gesture run the same thing — the pending invitations were the
+   *  half with no way to be asked for at all, so an invitation accepted in the
+   *  coach's app sat here as "Pending" until the app was killed. */
+  const refreshAll = useCallback(() => { refresh(); refreshTenant(); reloadInvites(); }, [refresh, refreshTenant, reloadInvites]);
+  const pull = usePullToRefresh(refreshAll);
 
   // The sheet closes when the invitation is ON THE SERVER, and not before.
   //
@@ -101,12 +118,12 @@ export default function OwnerTrainers() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching staff</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Trainers</Text>
-          <Fetched at={fetchedAt} onRefresh={refresh} busy={loading} />
+          <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
         </View>
 
         {/* Sessions delivered leads, because it is the number that moves. */}

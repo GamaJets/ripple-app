@@ -71,7 +71,8 @@
 // them this file's to edit, any one of which a call-site check would have been
 // forgotten at. src/ui/settings.tsx carries the long note.
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Alert, Pressable, TextInput } from 'react-native';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { View, Text, ScrollView, Alert, Pressable, TextInput, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -79,15 +80,22 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, ListRow, Ghost, Flag, fig } from '../../src/ui/kit';
 import { useSettings } from '../../src/ui/settings';
 import { convertedNote } from '../../src/lib/units';
-import { sp, layout, hairline, type as ty, radius } from '../../src/theme/scale';
+import { sp, layout, hairline, type as ty, radius, elevation } from '../../src/theme/scale';
 import { BuildInfo } from '../../src/ui/BuildInfo';
 import { useAuth } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { lockSettingNote } from '../../src/lib/appLock';
 import { useTenant } from '../../src/ui/tenant';
 import { CURRENCY_CHOICES, setCurrencyLine, WHY_NOT_A_REPRICE, type SetCurrencyOutcome } from '../../src/lib/coachCurrency';
-import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion, fetchDeletionRequestedAt } from '../../src/lib/gdpr';
-import { shareTextFile } from '../../src/lib/exportShare';
+import {
+  exportMyDataDetailed, readMyFile, requestAccountDeletion, withdrawAccountDeletion,
+  fetchDeletionRequestedAt, type ExportFile,
+} from '../../src/lib/gdpr';
+import { fileShareBlocker, shareBinaryFile, shareTextFile } from '../../src/lib/exportShare';
+import { BRAND } from '../../src/lib/brands';
+import {
+  coachDataFilename, fileSizeLabel, filesRowNote, incompleteExportLine, saveFileFailure,
+} from '../../src/lib/dataExport';
 import { reportError } from '../../src/lib/reportError';
 import { parseCooldown, cooldownText, cooldownNote, MIN_NUDGE_COOLDOWN, MAX_NUDGE_COOLDOWN } from '../../src/lib/coachPrefs';
 import { fetchCoachPrefs, saveCoachPrefs } from '../../src/lib/coachPrefsStore';
@@ -96,7 +104,7 @@ import { useChannelPrefs, setChannel } from '../../src/ui/coachNotify';
 import {
   COACH_CHANNELS, channelState, channelsNote,
   CHANNEL_UNKNOWN_LABEL, CHANNEL_MASTER_NOTE, CHANNEL_STILL_RECORDED,
-  CHANNEL_QUIET_COST, CHANNEL_ACCOUNT_WIDE,
+  CHANNEL_ACCOUNT_WIDE, CHANNEL_LOCAL_NOTE,
 } from '../../src/lib/coachNotify';
 import { useQuietHours, saveQuietHours } from '../../src/ui/quietHours';
 import {
@@ -104,13 +112,14 @@ import {
   zoneMovedNote, QUIET_HELD_NOT_DELAYED, QUIET_ZONE_NOTE, QUIET_ORDER_NOTE,
   type QuietHours,
 } from '../../src/lib/quietHours';
+import { END_ALIGN } from '../../src/ui/direction';
 
 /** A label and its value. `value` is already a string — see `fig`. */
 function Line({ t, label, value, first }: { t: Theme; label: string; value: string; first?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.label, color: t.ink3 }}>{label}</Text>
-      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>{value}</Text>
+      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: END_ALIGN }} numberOfLines={1}>{value}</Text>
     </View>
   );
 }
@@ -471,7 +480,7 @@ export default function TrainerSettings() {
             const ok = await withdrawAccountDeletion();
             if (!ok) {
               reportError('trainerSettings.withdraw', new Error('withdraw_account_deletion did not clear the request'));
-              Alert.alert('Not withdrawn', 'Your deletion request is still in place — nothing has changed. Check your connection and try again, or email support@repplefitness.com from the address on your account.');
+              Alert.alert('Not withdrawn', `Your deletion request is still in place — nothing has changed. Check your connection and try again, or email ${BRAND.supportEmail} from the address on your account.`);
               return;
             }
             // Re-read rather than assume: what shows next comes from the row.
@@ -485,6 +494,43 @@ export default function TrainerSettings() {
 
   useEffect(() => { void loadPending(); }, [loadPending]);
 
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Four server reads sit behind this screen and each one has a state where
+   * an unread answer looks exactly like a real one: the notification channels
+   * (an empty muted set is "everything on"), the quiet-hours window and
+   * whether the server enforces it, the gym row, and whether a deletion
+   * request is pending — the last being the one a coach comes back to this
+   * screen specifically to check.
+   *
+   * The units and the app lock are not in here. Both live on this handset,
+   * this screen is the only thing that writes them, and there is no other copy
+   * for a refresh to go and find. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    loadPending(), Promise.resolve(channels.reload()),
+    Promise.resolve(quiet.reload()), Promise.resolve(refreshTenant()),
+  ]), [loadPending, channels, quiet, refreshTenant]));
+
+  /**
+   * The manifest the last export produced, or null before there has been one.
+   *
+   * `exportMyDataDetailed` has returned `files` since the day it was written and
+   * this screen took `res.json` and threw the rest away — so a coach's
+   * photographs, their message attachments and any injury document of their own
+   * were the one part of their record they could not get back, on the screen
+   * whose whole purpose is getting it back. The member's side of the app
+   * (app/(client)/settings.tsx) has had this since the manifest existed.
+   *
+   * Held rather than re-fetched, so the row below lists exactly what the file
+   * they just saved says they have. `complete` is kept beside it because a
+   * count over a short read is the same defect as `"workouts": []` over a
+   * refused one — `filesRowNote` refuses to state one.
+   */
+  const [files, setFiles] = useState<ExportFile[] | null>(null);
+  const [filesComplete, setFilesComplete] = useState(true);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [savingPath, setSavingPath] = useState<string | null>(null);
+
   const exportData = async () => {
     if (exporting) return;
     setExporting(true);
@@ -497,22 +543,53 @@ export default function TrainerSettings() {
       // why those tables are filtered by hand instead of left to RLS.
       const res = await exportMyDataDetailed({ coach: true });
       const json = res.json;
-      await shareTextFile(json, 'repple-coach-my-data.json', 'application/json', 'Export my data');
+      // The filename comes from the brand rather than from a literal, the same
+      // argument `MY_DATA_FILENAME` makes for the member's half: a coach at a
+      // white-labelled chain saving 'repple-coach-my-data.json' has been handed
+      // a file named after a company they do not deal with.
+      await shareTextFile(json, coachDataFilename(BRAND.id), 'application/json', 'Export my data');
+      // The manifest, so the files can be saved from the row below. Kept
+      // whether or not the export was complete, along with WHETHER it was.
+      setFiles(res.files);
+      setFilesComplete(res.complete);
       if (!res.complete) {
         // A partial export handed over silently is the same failure one level
-        // up: somebody deletes their account believing they have a copy.
-        Alert.alert(
-          'That copy is incomplete',
-          `${res.failed.length} part${res.failed.length === 1 ? '' : 's'} of your record could not be read `
-          + `(${res.failed.map((f) => f.table).join(', ')}). The file has been saved and says so inside, `
-          + 'but do not treat it as a full copy, and do not delete your account on the strength of it. '
-          + 'Try again in a moment, or email support@repplefitness.com.',
-        );
+        // up: somebody deletes their account believing they have a copy. The
+        // parts are NAMED rather than counted, and the sentence is the one the
+        // member's screen shows, from src/lib/dataExport.ts — two wordings for
+        // one fact is how they come to disagree.
+        Alert.alert('That copy is incomplete',
+          incompleteExportLine(res.failed.map((f) => f.table), BRAND.supportEmail));
       }
     } catch (e) {
       reportError('trainerSettings.export', e);
       Alert.alert('Export failed', 'Nothing was exported. Check your connection and try again.');
     } finally { setExporting(false); }
+  };
+
+  /**
+   * Hand one of the coach's own files to the share sheet.
+   *
+   * One at a time, and that is not a limitation being apologised for: the share
+   * sheet takes one file, and a message attachment can be 64 MB of video
+   * (supabase/parts/124), so a bundle assembled in memory is a crash at the
+   * exact moment somebody is taking their last copy.
+   *
+   * `shareBinaryFile` reports whether it actually landed, and a silent success
+   * would be somebody believing they have saved something they have not.
+   */
+  const saveFile = async (f: ExportFile) => {
+    if (savingPath) return;
+    setSavingPath(f.path);
+    try {
+      const b64 = await readMyFile(f.bucket, f.path);
+      if (!b64) { Alert.alert('Not saved', saveFileFailure(fileShareBlocker())); return; }
+      // The object key's last segment — the name this app chose at upload, and
+      // already safe on every platform, so nothing here has to invent one.
+      const name = f.path.split('/').pop() || 'file';
+      const ok = await shareBinaryFile(b64, name, 'application/octet-stream', 'Save this file');
+      if (!ok) Alert.alert('Not saved', saveFileFailure(fileShareBlocker()));
+    } finally { setSavingPath(null); }
   };
 
   const signOut = () => {
@@ -567,7 +644,7 @@ export default function TrainerSettings() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -640,13 +717,21 @@ export default function TrainerSettings() {
               to stop 11pm chat pings also stopped hearing that a client's card
               was declined, and would not turn it back on.
 
-              These five are a SERVER preference, because every coach-directed
-              notification is remote — sent by a client's handset, by a trigger,
-              or by an edge function — and a device-local switch would read
-              "off" while the banner kept arriving. The filter is applied in
-              supabase/functions/send-push and notify-message, where the
+              The first five are a SERVER preference, because those
+              notifications are remote — sent by a client's handset, by a
+              trigger, or by an edge function — and a device-local switch would
+              read "off" while the banner kept arriving. The filter is applied
+              in supabase/functions/send-push and notify-message, where the
               recipients are resolved. src/lib/coachNotify.ts carries the whole
               argument.
+
+              The sixth, Your Own Book, is the one thing on this list that is
+              not somebody else doing something — an unmarked session, an
+              overdue invoice, a client who has stopped — so there is no trigger
+              to hang it on and this phone works it out. The ANSWER still lives
+              in the same table, so it follows the coach between phones; only
+              the place it is applied differs, and `CoachChannelDef.local` is
+              what says which is which.
 
               An unread preference is NOT "opted in": a switch whose value has
               not been read draws in neither position and says so, because a
@@ -663,12 +748,20 @@ export default function TrainerSettings() {
                   note={c.note}
                   state={channelState(c.key, channels.muted, channels.status)}
                   onPress={() => { void toggleChannel(c.key); }} />
-                {/* Shown under the money switch alone, so it means something
-                    when it appears. A missed chat message is visible the next
-                    time the coach opens the app; a failed subscription payment
-                    is a client who has quietly stopped paying. */}
+                {/* Only under the two switches whose muting costs something a
+                    coach would not notice, and each says its OWN cost — a
+                    failed subscription payment and an unmarked session are
+                    different harms, and one shared sentence would have named
+                    the wrong one under one of them. */}
                 {c.quietCost && channelState(c.key, channels.muted, channels.status) === 'off' ? (
-                  <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{CHANNEL_QUIET_COST}</Flag>
+                  <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{c.quietCost}</Flag>
+                ) : null}
+                {/* And under the one that this phone works out for itself,
+                    because "arrives with no signal" and "only as current as the
+                    last time you opened the app" are both true of it and of
+                    nothing else in the list. */}
+                {c.local ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_LOCAL_NOTE}</Text>
                 ) : null}
               </View>
             ))}
@@ -761,7 +854,7 @@ export default function TrainerSettings() {
         <Section>
           <SectionHead title="Quiet Clients" />
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
-            <View style={{ flex: 1, paddingRight: sp.md }}>
+            <View style={{ flex: 1, paddingEnd: sp.md }}>
               <Text style={{ ...ty.body, color: t.ink }}>Shortest gap between approaches</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {cooldownStatus === 'ready'
@@ -780,7 +873,7 @@ export default function TrainerSettings() {
               placeholderTextColor={t.ink3}
               style={{
                 ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
-                paddingHorizontal: sp.md, paddingVertical: 10, minWidth: 84, textAlign: 'right',
+                paddingHorizontal: sp.md, paddingVertical: 10, minWidth: 84, textAlign: END_ALIGN,
               }}
             />
           </View>
@@ -809,7 +902,7 @@ export default function TrainerSettings() {
         <Section>
           <SectionHead title="Units" />
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
-            <View style={{ flex: 1, paddingRight: sp.md }}>
+            <View style={{ flex: 1, paddingEnd: sp.md }}>
               <Text style={{ ...ty.body, color: t.ink }}>Weight</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                 {weightNote ?? "What you read and type, including when you log a session on a client's record"}
@@ -891,10 +984,35 @@ export default function TrainerSettings() {
         <Rule />
 
         <Section>
+          <SectionHead title="Account &amp; Sign-in" />
+          {/* The other half of src/lib/accountSecurity.ts. It was written,
+              tested and wired into the CLIENT app only, so a coach who wanted
+              to change their password had to sign out and trigger a reset email
+              for a password they had not forgotten — and had no route at all to
+              a new address, which is the only way back in if they lose it. */}
+          <ListRow icon="lock" title="Change Password or Email"
+            note="The password you sign in with, and the address a reset would go to"
+            onPress={() => router.push('/(trainer)/account')} />
+        </Section>
+
+        <Rule />
+
+        <Section>
           <SectionHead title="Your Data" />
           <ListRow icon="share" title={exporting ? 'Preparing Export…' : 'Export My Data'}
-            note="Your account and your coaching business — your price list, invoices, receipts, payouts, costs and enquiries — as a JSON file you can keep"
+            note="Your account and your coaching business — your price list, invoices, receipts, payouts, costs and enquiries — as a JSON file you can keep, plus a list of every file you hold"
             onPress={exportData} />
+          {/* Only after an export, because the manifest is what the export
+              produced and this row must list exactly what that file says the
+              coach holds. `filesRowNote` refuses to state a count over a read
+              that came back short. A JSON bundle cannot carry the bytes — a
+              message attachment is up to 64 MB of video and base64 in a string
+              is a third larger again — so the files are saved one at a time. */}
+          {files !== null ? (
+            <ListRow icon="camera" title="Save My Files"
+              note={filesRowNote(files.length, filesComplete)}
+              onPress={() => { if (files.length > 0) setFilesOpen(true); }} />
+          ) : null}
           {pending?.requestedAt ? (
             <ListRow icon="back" title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
               note="Keep your account. You can withdraw right up until the deletion is carried out."
@@ -925,6 +1043,40 @@ export default function TrainerSettings() {
         </Section>
 
       </ScrollView>
+
+      {/* The files themselves, one at a time. Named in the coach's own words by
+          `FILE_KINDS` in src/lib/gdpr.ts, because "photo_1724.jpg" tells nobody
+          which of these is their physiotherapy report. */}
+      <Modal visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)} />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
+          <Text style={{ ...ty.title, color: t.ink }}>Your files</Text>
+          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>
+            {filesRowNote(files?.length ?? 0, filesComplete)} Tap one to save it to your phone.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {(files ?? []).map((f, i) => (
+              <View key={f.path}>
+                {i > 0 ? <Rule /> : null}
+                <Pressable onPress={() => { void saveFile(f); }} disabled={!!savingPath}
+                  accessibilityRole="button" accessibilityLabel={`Save ${f.what}`}
+                  accessibilityState={{ disabled: !!savingPath }}
+                  style={{ paddingVertical: sp.md, opacity: savingPath && savingPath !== f.path ? 0.5 : 1 }}>
+                  <Text style={{ ...ty.body, color: t.ink }}>{f.what}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {savingPath === f.path ? 'Saving…' : fileSizeLabel(f.sizeBytes)}
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+            <Pressable onPress={() => setFilesOpen(false)} accessibilityRole="button"
+              accessibilityLabel="Close your files"
+              style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
+              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Done</Text>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

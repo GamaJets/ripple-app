@@ -31,6 +31,15 @@ import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 // so none of them may be written without `tenants.currency`.
 import { fetchSessions, PAY_DELIVERED_ONLY, type PayPolicy, type PayrollLine } from '@lib/gymSessions';
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
+// The gym's own clock, as of supabase/parts/710. Every date and time on this
+// page used to be the reader's — see the note beside `zone` below.
+import { gymWallValue, instantAtGym, isZone, zoneGapNote, NO_ZONE_NOTE } from '@lib/gymZone';
+import {
+  STAFF_ROLES, ROLE_LABEL, STAFF_ROLE_NOTE, STAFF_ROLE_REACH, CONSOLE_LAG_NOTE,
+  grantBlocker, revokeBlocker, revokeConsequence, grantStaffRole, revokeStaffRole,
+  grantFromRow, isLiveGrant, grantNote,
+  type ProfileRole, type StaffRole, type StaffGrant,
+} from '@lib/staffRoles';
 import {
   fetchShifts, fetchDemand, addShift, updateShift, setShiftStatus, deleteShift,
   shiftFromHours, shiftBlocker, rotaCost, summariseRota, shiftHours, isLive,
@@ -69,6 +78,22 @@ export default function Staff() {
   // amounts are unprintable rather than printable in a guessed money.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
   const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
+  /**
+   * `tenants.timezone`. Null means the gym has not said where it is, and on this
+   * page that is a statement with consequences rather than a blank field.
+   *
+   * Every time on this screen is a shift — a person being asked to be in a
+   * building at an hour. They were all rendered with `toLocaleString` and no
+   * zone, which is the zone of whoever opened the console: a Dubai gym's 06:00
+   * cover read as 03:00 to a bookkeeper in London, and the edit form beside it
+   * would have SAVED that 03:00 back. The read was wrong by three hours and the
+   * write moved somebody's shift.
+   *
+   * With a zone the times are the gym's. Without one they are still the
+   * reader's, and the page says so out loud instead of printing them as though
+   * they were the gym's — which is the whole of item J1 in one paragraph.
+   */
+  const [zone, setZone] = useState<string | null>(null);
   const [rec, setRec] = useState<StaffRecord>(EMPTY);
   const [sel, setSel] = useState<string | null>(null);
   // No console page had a search input. A gym with thirty coaches reads this
@@ -135,7 +160,7 @@ export default function Staff() {
         return;
       }
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, session_fee, currency, session_pay_policy').eq('id', who.tenantId).single();
+        .from('tenants').select('name, session_fee, currency, session_pay_policy, timezone').eq('id', who.tenantId).single();
       if (!live) return;
       // Checked, not assumed. supabase-js resolves on a database error, so a
       // null fee from a failed read would price every unrated session at nothing
@@ -144,6 +169,15 @@ export default function Staff() {
       setSessionFee(tErr ? null : t?.session_fee ?? null);
       setPolicyCode(tErr ? null : (((t as any)?.session_pay_policy ?? null) as string | null));
       setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
+      // Checked against this runtime's own zone database, not merely trimmed. A
+      // stored string nothing can resolve would otherwise make every helper
+      // below return null while this page believed it had the gym's clock, and
+      // the times would silently be the reader's again with a zone name sitting
+      // beside them.
+      {
+        const tz = (((t as any)?.timezone ?? '') as string).trim();
+        setZone(tErr || !tz || !isZone(tz) ? null : tz);
+      }
       setFeeRead(tErr ? 'failed' : 'ok');
       await load(who.tenantId);
     })();
@@ -304,7 +338,7 @@ export default function Staff() {
       <Roster view={view} rec={rec} sel={sel} onPick={setSel} ccy={ccy} query={q} onQuery={setQ} />
 
       {chosen ? (
-        <Person m={chosen} rec={rec} onClose={() => setSel(null)} ccy={ccy} />
+        <Person m={chosen} rec={rec} onClose={() => setSel(null)} ccy={ccy} zone={zone} />
       ) : (
         <Section title="One person" sub="Pick somebody above to open their record.">
           <p style={{ padding: '26px 20px', margin: 0, color: 'var(--ink3)', fontSize: 13.5 }}>
@@ -313,7 +347,12 @@ export default function Staff() {
         </Section>
       )}
 
-      <Rota tenantId={me.tenantId!} trainers={rec.trainers} ccy={ccy} />
+      <Roles
+        tenantId={me.tenantId!} actorId={me.id} clients={rec.clients} zone={zone}
+        onChanged={() => load(me.tenantId!)}
+      />
+
+      <Rota tenantId={me.tenantId!} trainers={rec.trainers} ccy={ccy} zone={zone} />
 
       <OffRoster view={view} ccy={ccy} />
     </Shell>
@@ -466,8 +505,11 @@ function StatusDot({ m }: { m: StaffMember }) {
 
 /* ── one person ────────────────────────────────────────────────────────────── */
 
-function Person({ m, rec, onClose, ccy }: {
+function Person({ m, rec, onClose, ccy, zone }: {
   m: StaffMember; rec: StaffRecord; onClose: () => void; ccy: TenantCurrency;
+  /** The gym's own zone, or null. Only one figure here is a calendar date, and
+   *  it is the one below. */
+  zone: string | null;
 }) {
   return (
     <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
@@ -500,7 +542,12 @@ function Person({ m, rec, onClose, ccy }: {
           text={m.clients == null ? null : String(m.clients)}
           note={
             m.clients == null ? stateNote(rec.clients, 'the client book')
-              : m.since ? `since ${new Date(m.since).toLocaleDateString()}`
+              // The gym's own calendar where it has one. A coach who joined at
+              // 23:40 on the 31st joined in a different MONTH depending on
+              // where the page is read, which is the sort of one-day
+              // disagreement that only ever shows up in an argument about a
+              // month's pay.
+              : m.since ? `since ${new Date(m.since).toLocaleDateString(undefined, { timeZone: zone ?? undefined })}`
               : 'no join date on file'
           }
         />
@@ -645,6 +692,323 @@ function Book({ m, rec }: { m: StaffMember; rec: StaffRecord }) {
   );
 }
 
+/* ── who works here, and who put them there ────────────────────────────────── */
+
+/** One person in this gym, as `profiles` holds them. */
+interface Person {
+  id: string;
+  name: string | null;
+  role: ProfileRole | null;
+  since: string | null;
+}
+
+/**
+ * The staff roster: adding somebody, taking somebody off, and the record of who
+ * made each of those decisions.
+ *
+ * ── Why there was no such control anywhere ────────────────────────────────
+ *
+ * The section below this one — money owed to somebody not on the roster — says
+ * it, and said it before this existed: "a roster row is created when the coach
+ * accepts the gym's join code, not from here: the owner cannot insert one, and
+ * a button that the database would refuse is worse than this sentence." That
+ * was true. `trainers` has no owner INSERT policy, `profiles` has no owner
+ * UPDATE policy, and `guard_profile_identity` (part 38) refuses a person
+ * changing their own role with the words "Ask the gym owner to change it for
+ * you" — addressed to an owner who had no way to.
+ *
+ * There was also no way OFF. Not a soft one. A coach who left kept their role,
+ * their gym and every client on their book, and that book is what carries the
+ * read of those members' workouts, measurements, scans and private messages.
+ *
+ * supabase/parts/711 adds the two functions this calls. Both run as the
+ * database, both check that the caller owns this gym, and both write a
+ * `staff_grants` row in the same transaction as the access change — because
+ * putting somebody on a gym's staff hands them every member's next-of-kin
+ * details and operational medical note, and a grant of that has a name and a
+ * date against it or it does not happen.
+ *
+ * ── Two things this screen refuses to do ──────────────────────────────────
+ *
+ *   · It does not search for accounts outside this gym, because the console
+ *     cannot: `profiles_owner_tenant_r` shows an owner the profiles in their
+ *     own tenant and nothing else, which is the correct rule and is why the
+ *     second field takes an account id rather than a name. A search box that
+ *     silently found nobody would read as "that person has no account".
+ *   · It does not reproduce the database's refusals as its own verdicts. Every
+ *     blocker below is ALSO enforced by the function, which raises; these exist
+ *     so the sentence arrives beside the control rather than after a round
+ *     trip, which is part 166's arrangement for the currency.
+ */
+function Roles({ tenantId, actorId, clients, zone, onChanged }: {
+  tenantId: string;
+  /** The signed-in owner. Needed because two of the refusals are about them. */
+  actorId: string;
+  /** The gym's client book, so a coach's outstanding clients can be counted
+   *  before offering to remove them. A failed read is `null` and blocks. */
+  clients: Slice<StaffClient>;
+  zone: string | null;
+  onChanged: () => void;
+}) {
+  // Null, never [], for the reason every read on this page is: an empty staff
+  // list under a failed read says this gym employs nobody.
+  const [people, setPeople] = useState<Person[] | null>(null);
+  const [grants, setGrants] = useState<StaffGrant[] | null>(null);
+  const [readErr, setReadErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // The add form. `who` is either an id picked from the members below or one
+  // pasted in; the field is the same either way so there is one code path.
+  const [who, setWho] = useState('');
+  const [role, setRole] = useState<StaffRole | ''>('');
+  const [note, setNote] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const [ps, gs] = await Promise.all([fetchPeople(tenantId), fetchGrants(tenantId)]);
+      setPeople(ps); setGrants(gs); setReadErr(null);
+    } catch (e: any) {
+      setPeople(null); setGrants(null);
+      setReadErr(e?.message ?? 'The staff list could not be read.');
+    }
+  }, [tenantId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const staff = people?.filter((p) => p.role === 'owner' || p.role === 'trainer' || p.role === 'receptionist') ?? null;
+  const members = people?.filter((p) => p.role === 'client') ?? null;
+  const chosen = people?.find((p) => p.id === who.trim()) ?? null;
+
+  /** How many clients are pointed at a coach right now. Null when the book was
+   *  not read — which is unknown, not zero, and blocks the removal. */
+  const bookOf = (id: string): number | null =>
+    clients.state !== 'ready' ? null : clients.rows.filter((c) => c.trainerId === id).length;
+
+  /** The live grant for a person, or null because there is not one — which for
+   *  everybody on a roster today is the ordinary answer. */
+  const liveGrant = (id: string): StaffGrant | null =>
+    grants?.find((g) => g.subjectId === id && isLiveGrant(g)) ?? null;
+
+  const nameOf = (id: string | null): string | null =>
+    (id && people?.find((p) => p.id === id)?.name) || null;
+
+  const addBlocker = grantBlocker({
+    subjectId: who,
+    // `null` when the id was typed rather than picked. That is a real state and
+    // is NOT "could not be read": the account may exist and simply not be in
+    // this gym, which is exactly the case the id field is for.
+    subjectRole: chosen?.role ?? null,
+    subjectTenantId: chosen ? tenantId : null,
+    actorId, tenantId, role,
+  });
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (addBlocker || !role) { setMsg(addBlocker); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const out = await grantStaffRole(supabase, who.trim(), role, note.trim() || null);
+      setMsg(
+        `On the staff as ${ROLE_LABEL[out.role].toLowerCase()}.`
+        + (out.rosterRow ? ' A roster row was created, so they appear in the rota and in payroll.' : '')
+        + ' Recorded against your name.',
+      );
+      setWho(''); setRole(''); setNote('');
+      await load();
+      onChanged();
+    } catch (x: any) {
+      setMsg(x?.message ?? 'That grant was refused, so nothing changed.');
+    } finally { setBusy(false); }
+  };
+
+  const remove = async (p: Person) => {
+    const stop = revokeBlocker({
+      subjectId: p.id, subjectRole: p.role, actorId, clientsOnBook: bookOf(p.id),
+    });
+    if (stop) { setMsg(stop); return; }
+    if (!confirm(`Take ${p.name ?? 'this person'} off the staff?\n\n${revokeConsequence(p.role)}`)) return;
+    setBusy(true); setMsg(null);
+    try {
+      await revokeStaffRole(supabase, p.id, null);
+      setMsg('Off the staff, and the record says when and by whom.');
+      await load();
+      onChanged();
+    } catch (x: any) {
+      setMsg(x?.message ?? 'That removal was refused, so nothing changed.');
+    } finally { setBusy(false); }
+  };
+
+  const cols: Column<Person>[] = [
+    { key: 'name', header: 'Who', value: (p) => p.name ?? '￿',
+      render: (p) => p.name ?? <span className="dash">unnamed account</span> },
+    { key: 'role', header: 'Role', value: (p) => p.role ?? '',
+      render: (p) => p.role
+        ? <span style={{ color: p.role === 'owner' ? 'var(--brand)' : 'var(--ink2)' }}>{ROLE_LABEL[p.role]}</span>
+        : <span className="dash">no role on file</span> },
+    { key: 'book', header: 'On their book', value: (p) => bookOf(p.id) ?? -1, numeric: true,
+      render: (p) => {
+        if (p.role !== 'trainer') return <span className="dash">—</span>;
+        const n = bookOf(p.id);
+        // Unknown, not none. A dash here that meant "we could not count" and a
+        // dash that meant "nobody" would put a Remove button over the first.
+        if (n == null) return <span className="dash">book not read</span>;
+        return n ? <>{n}</> : <span className="dash">nobody</span>;
+      } },
+    { key: 'grant', header: 'How they got here', value: (p) => liveGrant(p.id)?.grantedAt ?? '',
+      render: (p) => {
+        const g = liveGrant(p.id);
+        return (
+          <span style={{ color: 'var(--ink3)', fontSize: 12.5 }}>
+            {grantNote(g, nameOf(g?.actorId ?? null))}
+            {g ? (
+              <>
+                {' '}
+                {/* The gym's own calendar, where it has one. A grant made at
+                    23:50 is dated a day apart for two colleagues otherwise, and
+                    this is the column somebody reads in an argument. */}
+                <span className="mono">
+                  {new Date(g.grantedAt).toLocaleDateString(undefined, { timeZone: zone ?? undefined })}
+                </span>
+              </>
+            ) : null}
+          </span>
+        );
+      } },
+    { key: 'act', header: '', value: () => 0, align: 'right',
+      render: (p) => {
+        const stop = revokeBlocker({ subjectId: p.id, subjectRole: p.role, actorId, clientsOnBook: bookOf(p.id) });
+        // The owner's own row gets no control at all rather than a disabled
+        // one: there is no circumstance in which it becomes pressable, and a
+        // greyed button invites somebody to work out how to un-grey it.
+        if (p.id === actorId || p.role === 'owner') return <span className="dash">—</span>;
+        return (
+          <button
+            style={{ ...linkBtn, color: stop ? 'var(--ink3)' : 'var(--crit)' }}
+            disabled={busy}
+            // Deliberately still pressable when there is a blocker: pressing it
+            // is how the owner READS the blocker, and the most important one —
+            // a coach whose removal would leave their access to somebody's
+            // health record behind — is a sentence nobody would guess at.
+            onClick={() => remove(p)}
+            title={stop ?? undefined}
+          >
+            Remove
+          </button>
+        );
+      } },
+  ];
+
+  return (
+    <Section
+      title="Who works here"
+      sub="Adding somebody to this gym hands them every member’s emergency contact and the gym’s medical note about them. That is why it is written down, and why taking somebody off refuses to do it by halves."
+    >
+      {readErr ? (
+        <div style={{ padding: '16px 14px', margin: 14, border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)', background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13 }}>
+          The staff list could not be read, so this section is <strong>unknown</strong>, not empty —
+          this gym is not employing nobody. Nothing can be granted or removed until it comes back.
+          <div className="mono" style={{ marginTop: 6, fontSize: 11.5, color: 'var(--ink3)' }}>{readErr}</div>
+        </div>
+      ) : null}
+
+      {staff === null ? (
+        readErr ? null : <Loading />
+      ) : (
+        <DataTable
+          rows={staff} columns={cols} rowKey={(p) => p.id}
+          empty="Nobody, which cannot be right — you are signed in as this gym’s owner. Reload; an empty staff list here is far more likely to be a refused read than a gym with no staff."
+        />
+      )}
+
+      {/* The reach table. It sits above the form on purpose: the choice between
+          the two roles is the whole decision, and it is not a choice anybody can
+          make from two words in a dropdown. */}
+      <div style={{ padding: '14px 14px 4px', borderTop: '1px solid var(--ring)' }}>
+        <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>What each of them can reach</h3>
+        <p style={{ margin: '4px 0 10px', color: 'var(--ink3)', fontSize: 12 }}>{CONSOLE_LAG_NOTE}</p>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 12.5, minWidth: 560 }}>
+            <thead>
+              <tr>
+                {['', ROLE_LABEL.owner, ROLE_LABEL.trainer, ROLE_LABEL.receptionist].map((h, i) => (
+                  <th key={i} className="micro" style={{ textAlign: 'left', padding: '5px 12px 5px 0', color: 'var(--ink3)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {STAFF_ROLE_REACH.map((r) => (
+                <tr key={r.what} style={{ borderTop: '1px solid var(--ring)' }}>
+                  <td style={{ padding: '7px 12px 7px 0', color: 'var(--ink2)' }}>
+                    {r.what}
+                    {r.note ? <div style={{ color: 'var(--ink3)', fontSize: 11.5, maxWidth: '58ch' }}>{r.note}</div> : null}
+                  </td>
+                  <td style={{ padding: '7px 12px 7px 0', color: 'var(--ink3)', verticalAlign: 'top' }}>{r.owner}</td>
+                  <td style={{ padding: '7px 12px 7px 0', color: 'var(--ink3)', verticalAlign: 'top' }}>{r.trainer}</td>
+                  <td style={{ padding: '7px 12px 7px 0', color: 'var(--ink3)', verticalAlign: 'top' }}>{r.receptionist}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <form onSubmit={add} style={{ display: 'grid', gap: 9, padding: 14, borderTop: '1px solid var(--ring)' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            value={members?.some((m) => m.id === who) ? who : ''}
+            onChange={(e) => setWho(e.target.value)}
+            style={{ ...field, minWidth: 220 }}
+            aria-label="A member of this gym to take on"
+            disabled={members === null}
+          >
+            <option value="">A member of this gym…</option>
+            {(members ?? []).map((m) => (
+              <option key={m.id} value={m.id}>{m.name ?? m.id.slice(0, 8)}</option>
+            ))}
+          </select>
+          <span style={{ color: 'var(--ink3)', fontSize: 12.5 }}>or an account id</span>
+          <input
+            value={who} onChange={(e) => setWho(e.target.value)}
+            placeholder="Paste their account id"
+            aria-label="The account id of somebody outside this gym"
+            style={{ ...field, minWidth: 300, flex: 1 }}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select value={role} onChange={(e) => setRole(e.target.value as StaffRole | '')}
+                  style={{ ...field, minWidth: 160 }} aria-label="Taken on as">
+            <option value="">Taken on as…</option>
+            {STAFF_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+          </select>
+          <input
+            value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder="Why, for the record (optional)"
+            aria-label="A note for the record"
+            style={{ ...field, minWidth: 260, flex: 1 }}
+          />
+          <button type="submit" disabled={busy || !!addBlocker} style={btn}>
+            {busy ? 'Granting…' : 'Put on the staff'}
+          </button>
+        </div>
+        {/* What the chosen role actually is, under the picker, because "Coach"
+            and "Reception" are two words and the difference between them is a
+            roster row, a place in payroll and a book of other people's health
+            records. */}
+        {role ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)', maxWidth: '78ch' }}>{STAFF_ROLE_NOTE[role]}</p> : null}
+        {addBlocker && who ? <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>{addBlocker}</p> : null}
+        {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--ink3)', maxWidth: '78ch' }}>
+          This console can only list accounts already in this gym — the database shows an owner
+          their own gym&rsquo;s profiles and no others, which is the right rule and is why the second
+          field takes an id. Somebody who belongs to another gym is refused rather than moved out of
+          it; they have to leave first.
+        </p>
+      </form>
+    </Section>
+  );
+}
+
 /* ── the rota, and what it costs ───────────────────────────────────────────── */
 
 const ROLES: ShiftRole[] = ['floor', 'classes', 'pt', 'desk', 'admin'];
@@ -675,10 +1039,13 @@ const ROLES: ShiftRole[] = ['floor', 'classes', 'pt', 'desk', 'admin'];
  * for two different questions is cheaper than one read that answers neither
  * well.
  */
-function Rota({ tenantId, trainers, ccy }: {
+function Rota({ tenantId, trainers, ccy, zone }: {
   tenantId: string;
   trainers: Slice<StaffTrainer>;
   ccy: TenantCurrency;
+  /** The gym's own IANA zone, or null because it has not set one. Never the
+   *  reader's — see the note on `zone` at the top of this file. */
+  zone: string | null;
 }) {
   // The week on screen, as the ISO date it opened on. Which day that is comes
   // from src/lib/weekStart.ts via `weekStartOf` — this screen does not decide.
@@ -767,11 +1134,15 @@ function Rota({ tenantId, trainers, ccy }: {
 
   const cols: Column<Shift>[] = [
     { key: 'when', header: 'When', value: (sh) => sh.startsAt,
+      // `timeZone: zone` where the gym has one, and the browser's where it has
+      // not — which is what this column has always silently done. The header
+      // above the table names whichever it is, because a 06:00 that is actually
+      // 03:00 looks exactly like a 06:00.
       render: (sh) => (
         <span style={{ opacity: isLive(sh) ? 1 : 0.55 }}>
-          {new Date(sh.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          {new Date(sh.startsAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: zone ?? undefined })}
           {' – '}
-          {new Date(sh.endsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+          {new Date(sh.endsAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZone: zone ?? undefined })}
         </span>
       ) },
     { key: 'who', header: 'Who', value: (sh) => sh.trainerName,
@@ -924,6 +1295,28 @@ function Rota({ tenantId, trainers, ccy }: {
       {blocker ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p> : null}
       {msg ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
 
+      {/* Whose clock the column below is in. Stated always, in both states,
+          because the failure this fixes is invisible: a shift at the wrong hour
+          renders exactly as neatly as one at the right hour, and the only
+          reader who finds out is the coach who turns up. */}
+      <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '80ch' }}>
+        {zone ? (
+          <>
+            Times below are <span className="mono">{zone}</span>, this gym&rsquo;s own clock, and the
+            hours you type are read as the gym&rsquo;s too.{' '}
+            {zoneGapNote(zone) ? <span style={{ color: 'var(--warn)' }}>{zoneGapNote(zone)}</span> : null}
+          </>
+        ) : (
+          <>
+            Times below are <strong style={{ color: 'var(--ink2)' }}>your own device&rsquo;s</strong>{' '}
+            — {NO_ZONE_NOTE}, so a colleague opening this page from somewhere else sees the same
+            shifts at different hours and neither of you is told.{' '}
+            <a href="/settings" style={{ color: 'var(--brand)' }}>Set it on Gym</a> and this table
+            becomes the gym&rsquo;s clock.
+          </>
+        )}
+      </p>
+
       {shifts === null ? (
         <div style={{ padding: '26px 20px', color: 'var(--ink3)', fontSize: 13.5 }}>
           {readErr
@@ -937,7 +1330,7 @@ function Rota({ tenantId, trainers, ccy }: {
 
       {editing ? (
         <EditShift
-          shift={editing} ccy={ccy}
+          shift={editing} ccy={ccy} zone={zone}
           onClose={(changed) => { setEditing(null); if (changed) load(); }}
         />
       ) : null}
@@ -945,19 +1338,44 @@ function Rota({ tenantId, trainers, ccy }: {
   );
 }
 
-/** Correct a shift that is already on the rota. Until `updateShift` existed the
- *  only correction available was delete-and-retype. */
-function EditShift({ shift, ccy, onClose }: {
-  shift: Shift; ccy: TenantCurrency; onClose: (changed: boolean) => void;
+/**
+ * Correct a shift that is already on the rota. Until `updateShift` existed the
+ * only correction available was delete-and-retype.
+ *
+ * ── The wall clock, and whose ────────────────────────────────────────────
+ *
+ * `datetime-local` holds a wall clock with no zone on it, and the browser both
+ * fills it in and reads it back as its own. That was correct while the reader
+ * was always standing in the gym and wrong the moment they were not: a Dubai
+ * gym's 06:00 shift opened in London showed 03:00, and pressing Save wrote 03:00
+ * Dubai — the read was three hours out and the write MOVED SOMEBODY'S SHIFT.
+ * Nothing on the form said which clock it was in, so there was nothing to
+ * notice.
+ *
+ * With `tenants.timezone` set, `gymWallValue` and `instantAtGym` put the gym's
+ * own clock in the field and take the gym's own clock back out, and the two are
+ * exact inverses across the days the clocks move. With no zone this falls back
+ * to the browser's — the old behaviour, unchanged — and says so on the form.
+ */
+function EditShift({ shift, ccy, zone, onClose }: {
+  shift: Shift; ccy: TenantCurrency; zone: string | null; onClose: (changed: boolean) => void;
 }) {
   const local = (iso: string) => {
+    const atGym = gymWallValue(iso, zone);
+    if (atGym) return atGym;
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
     const p = (n: number) => String(n).padStart(2, '0');
-    // Local wall clock, because that is what `datetime-local` takes. An ISO
-    // string here shows a UK owner their 06:00 shift as 05:00 in summer.
+    // The reader's own wall clock, which is what this field has always been.
+    // Kept as the fallback rather than refusing to open the form: a gym with no
+    // zone still has to be able to correct a shift, and this is exactly as
+    // right as it was before — the difference is that the form now says so.
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
   };
+  /** A wall clock out of the form → the instant it names. The inverse of
+   *  `local`, and it has to stay the inverse: a form that reads in one clock
+   *  and writes in another moves every shift it touches. */
+  const instant = (wall: string) => instantAtGym(wall, zone) ?? new Date(wall).toISOString();
   const [startsAt, setStartsAt] = useState(local(shift.startsAt));
   const [endsAt, setEndsAt] = useState(local(shift.endsAt));
   const [role, setRole] = useState<ShiftRole>(shift.role);
@@ -973,8 +1391,8 @@ function EditShift({ shift, ccy, onClose }: {
   const cents = rate.trim() === '' ? null : Math.round((parseFloat(rate) || 0) * 100);
   const blocker = shiftBlocker({
     trainerId: shift.trainerId,
-    startsAt: startsAt ? new Date(startsAt).toISOString() : null,
-    endsAt: endsAt ? new Date(endsAt).toISOString() : null,
+    startsAt: startsAt ? instant(startsAt) : null,
+    endsAt: endsAt ? instant(endsAt) : null,
     rateCents: cents,
     currency: cents == null ? null : cur,
   });
@@ -985,8 +1403,8 @@ function EditShift({ shift, ccy, onClose }: {
     setBusy(true); setMsg(null);
     try {
       await updateShift(supabase, shift.id, {
-        startsAt: new Date(startsAt).toISOString(),
-        endsAt: new Date(endsAt).toISOString(),
+        startsAt: instant(startsAt),
+        endsAt: instant(endsAt),
         role,
         note: note.trim() || null,
         rateCents: cents,
@@ -1008,6 +1426,10 @@ function EditShift({ shift, ccy, onClose }: {
           <h2>{shift.trainerName ?? 'This shift'}</h2>
           <p style={{ margin: '3px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
             {isLive(shift) ? 'On the rota' : 'Pulled — still on the record'}
+            {' · '}
+            {zone
+              ? <>hours are <span className="mono">{zone}</span>, the gym&rsquo;s own</>
+              : <>hours are this device&rsquo;s, not the gym&rsquo;s — the gym has not set a timezone</>}
           </p>
         </div>
         <form onSubmit={save} style={{ display: 'grid', gap: 9, padding: 14 }}>
@@ -1119,6 +1541,60 @@ async function fetchTrainers(tenantId: string): Promise<StaffTrainer[]> {
     name: meta.get(id)?.name ?? null,
     since: meta.get(id)?.since ?? null,
   }));
+}
+
+/**
+ * Everybody attached to this gym, whatever their role.
+ *
+ * Not `fetchTrainers`: that one reads `trainers`, which is the COACHING roster
+ * and by construction has no receptionist row in it and never will. Staff is a
+ * fact about `profiles.role`, and the two are different questions — a coach who
+ * has been taken off the staff keeps their `trainers` row on purpose, so a
+ * roster read would still list them.
+ *
+ * `profiles_owner_tenant_r` is what makes this readable and is also its limit:
+ * an owner sees the profiles in their own tenant and no others.
+ */
+async function fetchPeople(tenantId: string): Promise<Person[]> {
+  const { data, error } = await supabase
+    .from('profiles').select('id, full_name, role, created_at').eq('tenant_id', tenantId);
+  if (error) throw error;
+  return (data ?? []).map((p: any) => ({
+    id: p.id,
+    name: (p.full_name || '').trim() || null,
+    // Anything the column's own constraint does not permit is treated as no
+    // role rather than passed through and printed as a role somebody invented.
+    role: (['owner', 'trainer', 'client', 'receptionist'] as const).includes(p.role)
+      ? (p.role as ProfileRole) : null,
+    since: p.created_at ?? null,
+  }));
+}
+
+/**
+ * The record of who put whom on this gym's staff.
+ *
+ * Rows that are not a complete record are dropped by `grantFromRow` rather than
+ * rendered — a grant with no date or no role is not evidence of anything, and
+ * showing one under the heading "how they got here" would be worse than showing
+ * nothing, which is what everybody who joined by join code correctly gets.
+ *
+ * The two `_name` columns are selected as well as the ids and are not
+ * redundant: the ids are `on delete set null`, so a grant made by an owner who
+ * has since been erased has a name on the row and nothing to join to. That is
+ * the shape part 184 uses for the financial record and part 711 takes for the
+ * same reason — an access log that blocked an erasure would be worse than one
+ * that survives it half-anonymised.
+ */
+async function fetchGrants(tenantId: string): Promise<StaffGrant[]> {
+  const { data, error } = await supabase
+    .from('staff_grants')
+    .select('id, subject_id, subject_name, actor_id, actor_name, role, granted_at, revoked_at, revoked_by, revoked_by_name, note')
+    .eq('tenant_id', tenantId)
+    .order('granted_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? [])
+    .map((r: any) => grantFromRow(r))
+    .filter((g): g is StaffGrant => g !== null);
 }
 
 /** Every client in the gym and whose book they are on. `trainer_id` null is a

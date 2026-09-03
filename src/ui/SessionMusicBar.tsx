@@ -30,6 +30,7 @@ import {
   SpotifyError, spotifyConfigured, type NowPlaying,
 } from '../lib/spotify';
 import { progressLine } from '../lib/spotifyPlayback';
+import { FORWARD_ICON } from './direction';
 
 /** How often the bar re-reads the player. Spotify's own clients poll at about
  *  this rate; faster burns the development-mode quota for no visible gain. */
@@ -123,7 +124,7 @@ export function SessionMusicBar() {
       <Pressable onPress={() => router.push('/(client)/music')} accessibilityRole="button" accessibilityLabel="Open music settings" style={shell}>
         <Icon name="play" size={17} color={t.ink3} />
         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{line}</Text>
-        <Icon name="chevron" size={15} color={t.ink3} />
+        <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
       </Pressable>
     );
   }
@@ -171,19 +172,35 @@ export function SessionMusicBar() {
           {(now.artist ?? '—') + ' · ' + progressLine(now.progressMs, now.durationMs)}
         </Text>
       </View>
-      <Pressable onPress={() => command(spotifyPrevious)} disabled={busy} accessibilityRole="button" accessibilityLabel="Previous track" hitSlop={8}>
-        <Icon name="back" size={18} color={t.ink2} />
-      </Pressable>
-      <Pressable
-        onPress={() => command(now.isPlaying ? spotifyPause : () => spotifyPlay())}
-        disabled={busy} accessibilityRole="button"
-        accessibilityLabel={now.isPlaying ? 'Pause' : 'Play'}
-        style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
-        {busy ? <ActivityIndicator size="small" color={t.brandInk} /> : <Icon name={now.isPlaying ? 'minus' : 'play'} size={16} color={t.brandInk} />}
-      </Pressable>
-      <Pressable onPress={() => command(spotifyNext)} disabled={busy} accessibilityRole="button" accessibilityLabel="Next track" hitSlop={8}>
-        <View style={{ transform: [{ scaleX: -1 }] }}><Icon name="back" size={18} color={t.ink2} /></View>
-      </Pressable>
+      {/* ── the transport, pinned ────────────────────────────────────────
+          rtl-ok: previous / play / next keep their physical order and their
+          physical glyphs in every locale, and `direction: 'ltr'` on this row
+          is what holds them there while the art, the title and the chevron
+          above mirror normally around it.
+
+          "Previous track" does not mean "back", it means earlier in this
+          track's timeline, and a timeline is not read — it plays. iOS and
+          Android both leave transport controls alone in RTL for that reason,
+          so a member who has used any other music app on the same handset
+          finds skip-back on the same side here. Mirroring it would also flip
+          the scaleX below into pointing backwards, which is the failure this
+          note exists to stop somebody re-introducing. See UNMIRRORED in
+          src/lib/direction.ts. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, direction: 'ltr' }}>
+        <Pressable onPress={() => command(spotifyPrevious)} disabled={busy} accessibilityRole="button" accessibilityLabel="Previous track" hitSlop={8}>
+          <Icon name="back" size={18} color={t.ink2} />
+        </Pressable>
+        <Pressable
+          onPress={() => command(now.isPlaying ? spotifyPause : () => spotifyPlay())}
+          disabled={busy} accessibilityRole="button"
+          accessibilityLabel={now.isPlaying ? 'Pause' : 'Play'}
+          style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+          {busy ? <ActivityIndicator size="small" color={t.brandInk} /> : <Icon name={now.isPlaying ? 'minus' : 'play'} size={16} color={t.brandInk} />}
+        </Pressable>
+        <Pressable onPress={() => command(spotifyNext)} disabled={busy} accessibilityRole="button" accessibilityLabel="Next track" hitSlop={8}>
+          <View style={{ transform: [{ scaleX: -1 }] }}><Icon name="back" size={18} color={t.ink2} /></View>
+        </Pressable>
+      </View>
     </View>
   );
 }

@@ -26,7 +26,7 @@
 //
 // `status`, `scansStatus` and `saveFailed` make each of those visible. The
 // values themselves are unchanged: nothing here starts guessing.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ScanMetrics } from '../lib/inbodyMetrics';
 import { manualBeatsScan } from '../lib/bodyFigures';
@@ -140,6 +140,22 @@ interface Value {
    *  not be sent. The edit is on screen but not stored anywhere durable, and
    *  the local cache is cleared on launch, so it will be lost. */
   saveFailed: boolean;
+  /**
+   * Read the profile and the scan history again.
+   *
+   * A real re-read: it re-runs both server effects in this provider, so
+   * `profileStatus` and `scansStatus` go back through 'loading' and end at
+   * whatever the server says this time. It is not a state reset — nothing local
+   * is cleared, and a refused read leaves the fields on screen exactly where
+   * they were with the status saying they are not confirmed.
+   *
+   * Added because this is the provider behind the client's name, height, goal,
+   * injuries, weight, body fat and every scan-derived figure in the app, and a
+   * profile read that failed at launch had no way back at all short of killing
+   * the app — the retry loop in the profile effect gives up after its attempts
+   * and then nothing runs again until the signed-in uid changes.
+   */
+  reload: () => void;
 }
 const Ctx = createContext<Value | null>(null);
 const KEY = 'repple.profile';
@@ -194,6 +210,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [profileStatus, setProfileStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [scansStatus, setScansStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [saveFailed, setSaveFailed] = useState(false);
+  /** Bumped by `reload`, and read by both server effects below. A counter, so
+   *  two pulls in a row are two reads. */
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
   /**
    * Bumped to make the push effect below run again without anything having
    * changed.
@@ -425,7 +445,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [sbUid]);
+  }, [sbUid, readTick]);
 
   // Publish the profile to the shared backend: it is the durable store (the local
   // cache is cleared on launch when USE_SUPABASE is on) and a LINKED trainer reads
@@ -564,7 +584,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       if (id) loadForUser(id);
     });
     return () => { cancelled = true; sub.subscription.unsubscribe(); };
-  }, []);
+  }, [readTick]);
 
   const sorted = useMemo(() => {
     const byDay: Record<string, ScanRec> = {};
@@ -699,7 +719,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     // point at zero. A charted zero is not a small reading, it is a cliff: it
     // dominates the axis and reads as total muscle loss between two scans.
     muscleSeries: sorted.flatMap((s) => (s.skeletalMuscleKg != null ? [{ t: s.takenAt, v: s.skeletalMuscleKg }] : [])),
-    profileStatus, scansStatus, saveFailed,
+    profileStatus, scansStatus, saveFailed, reload,
     // The combined view: 'error' the moment either half failed, because a
     // profile screen shows both at once and cannot honestly present half of it
     // as the client's own data. 'partial' rolls up the same way — a truncated

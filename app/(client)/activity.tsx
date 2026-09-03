@@ -13,7 +13,7 @@
 // does NOT: that unit is recorded on the log entry itself (the client chose km
 // or miles when they logged the run), so it is already the client's answer and
 // the body-measurement preference has no business overriding it.
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,6 +22,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useCheckIns } from '../../src/ui/checkins';
 import { useSessions } from '../../src/ui/sessions';
 import { currentStreak, isNewPR, streakMilestone } from '../../src/lib/streaks';
@@ -31,6 +32,7 @@ import { weightIn, weightLabel } from '../../src/lib/units';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/hr';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
+import { FORWARD_ICON, turn } from '../../src/ui/direction';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -71,9 +73,15 @@ export default function Activity() {
   // training, three check-ins and a session booked for Thursday. `worstStatus`
   // is the status of the feed as a whole: it is only as complete as its least
   // complete source.
-  const { log, status: logStatus } = useWorkoutLog();
-  const { checkins, status: checkinStatus } = useCheckIns();
-  const { sessions, status: sessionStatus } = useSessions();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
+  const { checkins, status: checkinStatus, reload: reloadCheckins } = useCheckIns();
+  const { sessions, status: sessionStatus, refresh: refreshSessions } = useSessions();
+  // Four reads make this feed — the training log, the check-ins, the booked
+  // sessions and the profile — so the gesture asks for all four. Refreshing
+  // some of them would leave one timeline drawn from two different moments.
+  const pull = usePullToRefresh(useCallback(() => {
+    reloadLog(); reloadCheckins(); void refreshSessions(); cd.reload();
+  }, [reloadLog, reloadCheckins, refreshSessions, cd.reload]));
   const feedStatus = worstStatus(logStatus, checkinStatus, sessionStatus);
   // Only a whole log can say that a set was a personal record, for the same
   // reason SessionRunner and the manual-log path in workouts.tsx both check it:
@@ -130,7 +138,7 @@ export default function Activity() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
@@ -202,8 +210,8 @@ export default function Activity() {
                   </View>
                   <View style={{ alignItems: 'flex-end', gap: sp.sm }}>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeAgo(e.at)}</Text>
-                    <View style={{ transform: [{ rotate: isOpen ? '-90deg' : '0deg' }] }}>
-                      <Icon name="chevron" size={14} color={t.ink3} />
+                    <View style={{ transform: [{ rotate: turn(isOpen ? -90 : 0) }] }}>
+                      <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
                     </View>
                   </View>
                 </Pressable>

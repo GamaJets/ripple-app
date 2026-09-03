@@ -146,7 +146,32 @@ eq(unnamed[0].label, '8-session PT pass',
 eq(coachPackLines(null), null, 'unread coach packs stay unread');
 eq(coachPackLines([{ id: 'z', label: '10-session pack', left: 4, sessions_total: 10 }]),
   [{ id: 'z', kind: 'coach_pack', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: null }],
-  'a coach pack line carries no expiry, because a coach pack has none in this schema');
+  'a pack with no window reports no date, rather than one this code chose');
+
+/* THE LITERAL NULL THAT PART 612 MADE FALSE.
+
+   This assertion used to read "a coach pack carries no expiry, because a coach
+   pack has none in this schema", and `coachPackLines` wrote `expiresOn: null`
+   on every line to match. Part 612 put a real `expires_on` on a coach pack,
+   `PackLine` has carried it since, and this function threw it away — so a coach
+   pack with three weeks left on it reached the picker as a pass that never runs
+   out, sorted BEHIND every dated gym pass, and was offered with nothing saying
+   it was about to be lost. The one ordering that does not throw a client's
+   money away is soonest-to-expire first, and it was being fed a null. */
+
+eq(coachPackLines([{ id: 'w', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: '2026-09-30' }]),
+  [{ id: 'w', kind: 'coach_pack', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: '2026-09-30' }],
+  'a pack that DOES have a window carries its own last day through');
+
+// A pack whose window has already closed is not an entitlement and is not
+// offered: nothing in the database will let it be drawn — `run_pack_expiry()`
+// has reduced its `sessions_total` — so putting it in a picker offers somebody
+// something that cannot be spent.
+eq(coachPackLines([
+  { id: 'gone', label: '10-session pack', left: 1, sessions_total: 10, expiresOn: '2026-06-30', expired: true },
+  { id: 'live', label: '5-session pack', left: 2, sessions_total: 5 },
+])!.map((e) => e.id), ['live'],
+  'a pack whose window has closed is dropped rather than offered with a date in the past');
 
 /* ── 4 · one session's state ──────────────────────────────────────────────── */
 

@@ -76,6 +76,16 @@ export interface MyIntake {
   /** Forget it. Called once the answers are actually on the server, and when
    *  the member chooses the server's copy over this one. */
   discardDraft: () => void;
+  /**
+   * Read the form again from the server.
+   *
+   * A real re-read of `intakes` — the status goes back through 'loading' — and
+   * the local draft is re-read with it, so nothing typed on this phone is lost
+   * by asking. Added because a member whose intake read failed had the form's
+   * own "could not be read" state for the rest of the session with no gesture
+   * that would try again.
+   */
+  reload: () => void;
 }
 
 export function useMyIntake(): MyIntake {
@@ -89,6 +99,8 @@ export function useMyIntake(): MyIntake {
   // must not hand one person's half-finished medical history to the next.
   const draftUid = useRef<string | null>(null);
   const authRev = useAuthRevision();
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
 
   useEffect(() => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
@@ -139,7 +151,7 @@ export function useMyIntake(): MyIntake {
       }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readTick]);
 
   const save = useCallback(async (next: Intake): Promise<boolean> => {
     // The same rule the database holds, asked before the request rather than
@@ -214,6 +226,7 @@ export function useMyIntake(): MyIntake {
     draft,
     keepDraft,
     discardDraft,
+    reload,
   };
 }
 
@@ -226,6 +239,10 @@ export interface ClientIntake {
   /** The four answers a coach's screen is allowed to give, one of which is
    *  "we could not find out". */
   state: IntakeState;
+  /** Ask the client's row again. `state` reaching 'unread' is a refused read
+   *  and not a client who has filled nothing in, and until now the only way
+   *  past it was to leave the screen and come back. */
+  reload: () => void;
 }
 
 /**
@@ -243,6 +260,7 @@ export interface ClientIntake {
 export function useClientIntake(clientId: string | null | undefined): ClientIntake {
   const [intake, setIntake] = useState<Intake | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) { setStatus('ready'); setIntake(null); return; }
@@ -274,10 +292,12 @@ export function useClientIntake(clientId: string | null | undefined): ClientInta
       }
     })();
     return () => { live = false; };
-  }, [clientId]);
+  }, [clientId, nonce]);
+
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   const progress = intakeProgress(status === 'ready' ? intake : null);
-  return { status, intake, progress, state: intakeState(status, intake) };
+  return { status, intake, progress, state: intakeState(status, intake), reload };
 }
 
 /* ── asking them to finish it ───────────────────────────────────────────── */

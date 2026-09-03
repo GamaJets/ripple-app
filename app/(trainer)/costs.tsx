@@ -70,6 +70,7 @@ import { fetchMyCosts, recordCost, deleteCost } from '../../src/ui/coachCosts';
 import { fetchInvoiceCurrency, type InvoiceCurrency } from '../../src/ui/coachInvoices';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { currencyGapLine, currencyGapOfStatus } from '../../src/lib/currencyGap';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const DASH = '—';
 
@@ -97,6 +98,11 @@ export default function Costs() {
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  // The same read the focus effect runs. Both halves of it, because the
+  // currency is what decides whether a single one of these amounts may be
+  // printed at all — a refreshed cost list under a stale currency is the one
+  // combination this screen must not produce.
+  const pull = usePullToRefresh(load);
 
   // The date the DEVICE is on, not the server's UTC date. A coach in Auckland
   // recording a payment at 10am would otherwise date it yesterday.
@@ -175,7 +181,7 @@ export default function Costs() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>

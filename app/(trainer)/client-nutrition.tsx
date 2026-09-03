@@ -68,12 +68,13 @@ import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, Meter } from '../
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { type LoadStatus } from '../../src/ui/loadStatus';
-import { isQueryableId } from '../../src/lib/clientDrift';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { isoToday } from '../../src/lib/dayPlan';
 import { num } from '../../src/lib/format';
 import { readGoals, seriesFrom, type GoalRow, type ScanRow, type WeighInRow } from '../../src/lib/clientGoals';
@@ -86,6 +87,7 @@ import {
   type CoachMealPlan,
 } from '../../src/lib/mealPlan';
 import type { Diet, Goal } from '../../src/lib/types';
+import { FORWARD_ARROW } from '../../src/ui/direction';
 
 const CLIENT_COLS = 'diet, meals_per_day, avoid, goal, activity, manual_weight_kg, manual_body_fat_pct';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
@@ -177,16 +179,23 @@ export default function ClientNutrition() {
   // attributed to another, which is the worst thing this screen could do.
   const wanted = useRef<string | null>(null);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, askable: boolean) => {
     wanted.current = id;
     setProfileStatus('loading'); setGoalStatus('loading');
     setProfile(null); setSeries(null); setGoals([]); setDraft(null);
     const today = isoToday(new Date());
 
-    // A client the coach typed in by hand has a `coach_clients` note and no
-    // account, so their id is not a uuid and Postgres refuses the whole
-    // statement rather than skipping the value.
-    if (!isQueryableId(id)) {
+    // A client the coach typed in by hand has a `coach_clients` row and no user
+    // account, so nothing server-backed is asked for them.
+    //
+    // This was `isQueryableId(id)` alone, on the belief that such a client
+    // carries an id the phone invented and Postgres would refuse. It does not:
+    // `coach_clients.id` is uuid DEFAULT gen_random_uuid(), so from the first
+    // round trip onward the guard passed, every read ran, each came back with
+    // zero rows and NO error, and this screen rendered that as a fact about the
+    // person. The roster is the only thing that knows which table the row came
+    // from — see src/lib/clientRecord.ts.
+    if (!askable) {
       setProfileStatus('error'); setGoalStatus('error');
       return;
     }
@@ -317,6 +326,15 @@ export default function ClientNutrition() {
     setProfileStatus(scanFailed || scanTruncated || weighFailed || weighTruncated ? 'partial' : 'ready');
   }, []);
 
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  /** Whether the server may be asked about this person at all. Computed at
+   *  render rather than inside `load`, so a roster that arrives AFTER the read
+   *  and says this row was typed in by hand re-runs the effect and withdraws
+   *  the answer, instead of leaving an empty screen standing as a fact about
+   *  them. `handAdded` undefined is "the roster has not said", which goes on
+   *  asking — only an explicit true withholds. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
   useEffect(() => {
     if (!USE_SUPABASE) return;
     if (!picked) {
@@ -325,10 +343,17 @@ export default function ClientNutrition() {
       setProfileStatus('ready'); setGoalStatus('ready');
       return;
     }
-    void load(picked);
-  }, [picked, load]);
+    void load(picked, askable);
+  }, [picked, askable, load]);
 
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  // Three reads: the client's own profile and food series, the coach's stored
+  // adjustments and plan, and the roster the picker and header come off. The
+  // first two are crossed on every line of this screen — a target is the
+  // client's figures plus the coach's delta — so they are asked for together.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(), Promise.resolve(cn.reload()),
+    ...(picked ? [load(picked, askable)] : []),
+  ]), [r, cn, picked, askable, load]));
   const who = client?.name.split(' ')[0] ?? 'They';
   const adjust = picked ? cn.get(picked) : null;
 
@@ -418,7 +443,7 @@ export default function ClientNutrition() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -649,7 +674,7 @@ export default function ClientNutrition() {
                           <Pressable key={d} onPress={() => setDraft(copyPlanDay(draft, dayIdx, i))}
                             accessibilityRole="button" accessibilityLabel={`Copy ${PLAN_WEEKDAYS[dayIdx]} to ${d}`}
                             style={chip(false)}>
-                            <Text style={{ ...ty.micro, color: t.ink2 }}>→ {d}</Text>
+                            <Text style={{ ...ty.micro, color: t.ink2 }}>{FORWARD_ARROW} {d}</Text>
                           </Pressable>
                         ))}
                       </View>

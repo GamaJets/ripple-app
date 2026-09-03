@@ -6,7 +6,7 @@
 // Every provider, computation, conditional and route is preserved — the tone
 // that used to colour a bordered headline card is now a Notice's mark, so the
 // status colour never lands on the text itself.
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +15,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
 import { deloadCheck } from '../../src/lib/training';
 import { weekStats } from '../../src/lib/streaks';
@@ -24,7 +25,10 @@ import { useSettings } from '../../src/ui/settings';
 export default function RestDay() {
   const t = useTheme();
   const router = useRouter();
-  const { log, status: logStatus } = useWorkoutLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
+  // Whether today is a rest day, and what was trained around it, is read off
+  // the training log — the one server read behind this screen.
+  const pull = usePullToRefresh(useCallback(() => { reloadLog(); }, [reloadLog]));
   // Everything on this screen is inferred from the log, and an unread log infers
   // beautifully: no sessions means no fatigue, so `deloadCheck` comes back clear,
   // `restToday` comes back false, and the screen told a client who had trained
@@ -90,7 +94,7 @@ export default function RestDay() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>

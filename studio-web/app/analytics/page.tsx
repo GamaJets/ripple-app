@@ -63,7 +63,8 @@
 // counted LEAVING and never counted PRESENT, which inflates churn, and inflates
 // it most at the gyms with the messiest records. Both halves are now drawn from
 // the same population, and a month that lost somebody undated withholds the
-// rate rather than quietly printing the smaller one. See `monthRows`.
+// rate rather than quietly printing the smaller one. See `churnMonths` in
+// src/lib/memberChurn.ts, which the owner’s phone now calls as well.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
@@ -82,7 +83,16 @@ import { cohorts, type Cohort, type TrainerLike } from '@lib/ownerAnalytics';
 import {
   MIN_COHORT_FOR_RATE, COHORT_MATURITY_DAYS, rateOf, pointsPerMember, monthOfDate,
 } from '@lib/gymRetention';
-import { monthWindow, recentMonths, monthEnded, monthKeyOf, type MonthWindow } from '@lib/monthEnd';
+// The member spine and the churn arithmetic used to be written out in this
+// file, which is why the owner's phone said member churn "is not derived
+// anywhere on this handset". It is one module now, framework-free and tested,
+// and the handset's Growth tab calls the same functions — so the console and
+// the phone cannot land on two different churn figures for the same gym.
+import {
+  memberSpans, churnMonths, undatedExitCount, undatedJoinCount, isDay,
+  MONTHS_SHOWN, type MemberSpan, type ChurnMonth,
+} from '@lib/memberChurn';
+import { monthWindow, recentMonths, monthEnded, monthKeyOf } from '@lib/monthEnd';
 import { readAll } from '@lib/rowCap';
 // `sharedCurrency` is gone from this file. It answers "are these all one
 // money", and the only thing this page did with a No was withhold the entire
@@ -97,10 +107,6 @@ const DAY = 86400000;
  *  that is the window `cohorts()` already judges activity over, and two
  *  different recencies on one screen is two different answers. */
 const VISIT_DAYS = 30;
-
-/** How many months of joiners and leavers to draw. Thirteen so the same month
- *  last year is on screen — a gym with a January is not churning in January. */
-const MONTHS_SHOWN = 13;
 
 /**
  * What a read is when it has produced no rows: still in flight, or refused.
@@ -130,190 +136,6 @@ function failure(res: PromiseSettledResult<unknown>, what: string): string | nul
 const settled = <T,>(res: PromiseSettledResult<T[]>): Read<T> =>
   res.status === 'fulfilled' ? returned(res.value) : refused<T>();
 
-/* ── the member spine ──────────────────────────────────────────────────────── */
-
-/**
- * One person's whole history with the gym, from every membership row they hold.
- *
- * Built per member rather than per membership on purpose. Somebody who
- * cancelled in March and rejoined in June has two rows, and counting rows would
- * report them as two joiners and file the second under June — a gym that
- * recruits well and keeps nobody, assembled entirely out of its own returning
- * members. Their join month is the earliest start they have ever had.
- */
-interface Span {
-  memberId: string;
-  name: string | null;
-  /** Earliest `started_on`, or null when no row carried a usable one. */
-  joinedOn: string | null;
-  /** Latest `ends_on`, and only when every membership they hold has one. */
-  leftOn: string | null;
-  /** Holds a membership that has not been given an end date and has not been
-   *  cancelled — i.e. still on the books. */
-  open: boolean;
-  /** Holds a membership marked `active`. */
-  active: boolean;
-  /** Holds a cancelled or expired membership with NO end date. Their leaving
-   *  month is unknown, and no month may be given credit for it. */
-  undatedExit: boolean;
-}
-
-const isDay = (s: string | null | undefined): s is string => !!s && /^\d{4}-\d{2}-\d{2}/.test(s);
-
-function spansOf(rows: Membership[]): Span[] {
-  const by = new Map<string, Span>();
-  for (const m of rows) {
-    const cur = by.get(m.memberId) ?? {
-      memberId: m.memberId, name: m.memberName, joinedOn: null, leftOn: null,
-      open: false, active: false, undatedExit: false,
-    };
-    if (m.memberName && !cur.name) cur.name = m.memberName;
-
-    // String comparison, not Date.parse. 'YYYY-MM-DD' compares correctly as
-    // text, and parsing it produces UTC midnight — which read back as a local
-    // month puts every member who joined on the 1st into the previous month
-    // west of Greenwich. A whole cohort moved by a timezone.
-    if (isDay(m.startedOn) && (cur.joinedOn == null || m.startedOn < cur.joinedOn)) {
-      cur.joinedOn = m.startedOn.slice(0, 10);
-    }
-
-    if (m.status === 'active') cur.active = true;
-
-    const ended = m.status === 'cancelled' || m.status === 'expired';
-    if (!ended && !isDay(m.endsOn)) cur.open = true;
-    if (ended && !isDay(m.endsOn)) cur.undatedExit = true;
-    if (isDay(m.endsOn)) {
-      const d = m.endsOn.slice(0, 10);
-      if (cur.leftOn == null || d > cur.leftOn) cur.leftOn = d;
-    }
-
-    by.set(m.memberId, cur);
-  }
-
-  // Somebody with any membership still running has not left, whatever end date
-  // an older row of theirs carries. Otherwise their leaving day is the last end
-  // date they hold — unless one of their ended memberships has no date at all,
-  // in which case the gym does not know when they went and this page will not
-  // pick a month for them.
-  return [...by.values()].map((s) => ({
-    ...s,
-    leftOn: s.open || s.undatedExit ? null : s.leftOn,
-  }));
-}
-
-/* ── months ────────────────────────────────────────────────────────────────── */
-
-interface MonthRow {
-  key: string;
-  label: string;
-  w: MonthWindow;
-  running: boolean;
-  joined: number;
-  left: number;
-  /** On the books on the first day of the month — the churn denominator. */
-  opening: number;
-  /**
-   * Departures this month by members with NO usable join date.
-   *
-   * They are inside `left` — a person who leaves has left, whatever the record
-   * says about their arrival — and they are the reason this month can have no
-   * churn rate. See the ladder below.
-   */
-  undatedLeavers: number;
-  /** joined − left, or null when the leavers are known to be incomplete. */
-  net: number | null;
-  churn: number | null;
-  /** Why there is no churn rate. Empty when there is one. */
-  churnNote: string;
-}
-
-function monthRows(spans: Span[], undatedExits: number, now: number): MonthRow[] {
-  const keys = recentMonths(MONTHS_SHOWN, now);
-  const out: MonthRow[] = [];
-
-  for (const key of keys) {
-    const w = monthWindow(key);
-    if (!w) continue;
-    const running = !monthEnded(w, now);
-
-    const joined = spans.filter((s) => monthOfDate(s.joinedOn) === key).length;
-    const left = spans.filter((s) => monthOfDate(s.leftOn) === key).length;
-
-    /**
-     * ── The two populations, which used to be different ────────────────────
-     *
-     * `left` above counts everybody who left this month. `opening` below counts
-     * everybody on the books when it began — and it can only count somebody it
-     * has a join date for, because "joined before the 1st" is a question about
-     * a date. So a member whose start was never recorded was counted LEAVING
-     * and never counted PRESENT: in the numerator, absent from the denominator,
-     * having arrived in no month at all.
-     *
-     * That is not a rate. It is one population over another, it errs upward in
-     * both directions at once, and it errs most at the gyms with the messiest
-     * records — the ones whose churn figure is least likely to be checked
-     * against anything.
-     *
-     * Both halves are fixed here. The numerator is restricted to the same
-     * population as the denominator, so `churnable / opening` is a rate over
-     * one set of people; and where that restriction actually dropped somebody,
-     * the month withholds the rate rather than printing the smaller number,
-     * because those departures happened and a figure that quietly leaves them
-     * out understates churn exactly where the record is worst. The count is
-     * carried out to the table so the owner is told which months, and how many.
-     */
-    const undatedLeavers = spans.filter(
-      (s) => !isDay(s.joinedOn) && monthOfDate(s.leftOn) === key,
-    ).length;
-    const churnable = left - undatedLeavers;
-
-    // On the books at the START of the month: joined before it began, and had
-    // not left before it began. Somebody who joined and left inside the same
-    // month is in neither the denominator nor the opening roster, which is the
-    // standard treatment and is why the two counts are shown beside the rate.
-    const opening = spans.filter(
-      (s) => isDay(s.joinedOn) && s.joinedOn < w.firstDay && (s.leftOn == null || s.leftOn >= w.firstDay),
-    ).length;
-
-    // The churn rate, in the order the reasons disqualify it.
-    let churn: number | null = null;
-    let churnNote = '';
-    if (running) {
-      churnNote = 'still running — a partial month is not a low churn month';
-    } else if (undatedExits > 0) {
-      churnNote = `${undatedExits} ended membership${undatedExits === 1 ? ' has' : 's have'} no end date, so the leavers are incomplete`;
-    } else if (undatedLeavers > 0) {
-      // Above the size floor deliberately. This is not "too few to say"; it is
-      // "the two halves are drawn from different people", and no denominator is
-      // large enough to make that a rate.
-      churnNote = `${undatedLeavers} left this month with no start date recorded, so they are in no opening roster to be a share of`;
-    } else if (opening === 0) {
-      churnNote = 'nobody was on the books when the month began';
-    } else {
-      // rateOf withholds anything under the shared floor, so this screen and
-      // the Retention screen cannot disagree about "too small to say".
-      churn = rateOf(churnable, opening);
-      if (churn == null) {
-        const p = pointsPerMember(opening);
-        churnNote = `${opening} on the books — one leaver would move it ${p == null ? '—' : p.toFixed(1)} points`;
-      }
-    }
-
-    out.push({
-      key, label: w.label, w, running, joined, left, opening, undatedLeavers,
-      // A net over an incomplete leaver count is a claim about the direction of
-      // the roster made from half the evidence, and it always errs upward.
-      //
-      // `undatedLeavers` withholds it for the mirror-image reason, downward: a
-      // member with no start date was in no month's joiner count and is in this
-      // month's leaver count, so the net subtracts an arrival it never added.
-      // The roster reads as shrinking by somebody who, on this page, never came.
-      net: undatedExits > 0 || undatedLeavers > 0 ? null : joined - left,
-      churn, churnNote,
-    });
-  }
-  return out;
-}
 
 /* ── visit frequency ───────────────────────────────────────────────────────── */
 
@@ -452,17 +274,17 @@ export default function Analytics() {
   const windowStart = useMemo(() => new Date(now - VISIT_DAYS * DAY).toISOString(), [now]);
 
   const spans = useMemo(
-    () => (memberships.rows ? spansOf(memberships.rows) : null),
+    () => (memberships.rows ? memberSpans(memberships.rows) : null),
     [memberships.rows],
   );
 
   /** Members whose leaving month the record does not hold. */
-  const undatedExits = useMemo(() => (spans ?? []).filter((s) => s.undatedExit).length, [spans]);
+  const undatedExits = useMemo(() => undatedExitCount(spans ?? []), [spans]);
   /** Members with no usable join date — they are in no cohort and no roster. */
-  const undatedJoins = useMemo(() => (spans ?? []).filter((s) => !isDay(s.joinedOn)).length, [spans]);
+  const undatedJoins = useMemo(() => undatedJoinCount(spans ?? []), [spans]);
 
   const months = useMemo(
-    () => (spans ? monthRows(spans, undatedExits, now) : null),
+    () => (spans ? churnMonths(spans, undatedExits, now, MONTHS_SHOWN) : null),
     [spans, undatedExits, now],
   );
 
@@ -1218,11 +1040,11 @@ function ByHour({ rows, state, doorState, doorNote }: {
 /* ── joiners and leavers ───────────────────────────────────────────────────── */
 
 function Joiners({ months, state, undatedJoins }: {
-  months: MonthRow[] | null; state: Unread; undatedJoins: number;
+  months: ChurnMonth[] | null; state: Unread; undatedJoins: number;
 }) {
   const peak = Math.max(1, ...(months ?? []).map((m) => Math.max(m.joined, m.left)));
 
-  const cols: Column<MonthRow>[] = [
+  const cols: Column<ChurnMonth>[] = [
     { key: 'month', header: 'Month', value: (m) => m.label,
       render: (m) => (
         <span style={{ color: m.running ? 'var(--ink3)' : undefined }}>

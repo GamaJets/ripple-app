@@ -20,10 +20,11 @@
 // second person, so the thread is a second copy of exactly what
 // src/lib/coachShare.ts gates — and `WHERE_IT_GOES`, which is on this screen
 // above the two buttons, ends "and it is not sent to your gym."
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { num } from '../../src/lib/format';
-import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator, Alert, AccessibilityInfo } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -31,6 +32,8 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Notice, Flag, Cta, Ghost } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+// 44pt, from the one place that holds the number. See the send button below.
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { useClientData } from '../../src/ui/clientData';
 // `sharedInjuries`, NOT `injurySummary`. The difference is the note, and the
 // note is seeded from the line off a physiotherapy report — see the header of
@@ -57,6 +60,7 @@ import { currentStreak } from '../../src/lib/streaks';
 import { isWhole } from '../../src/ui/loadStatus';
 import { liftLabel } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const SUGGESTIONS = ['What should I eat post-workout?', "I'm sore today — should I still train?", 'Am I on track for my goal?', 'Give me a quick high-protein snack'];
 
@@ -64,8 +68,10 @@ export default function Coach() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
-  const coachProgram = useAssignedPrograms().getProgram(cd.id);
-  const _adj = useCoachNutrition().get(cd.id);
+  const assigned = useAssignedPrograms();
+  const coachProgram = assigned.getProgram(cd.id);
+  const coachNutrition = useCoachNutrition();
+  const _adj = coachNutrition.get(cd.id);
   // null until there is a body to scale to. This used to run on the 70 kg /
   // 20% placeholder from clientData and present the result as the client's
   // own daily targets.
@@ -81,8 +87,16 @@ export default function Coach() {
   // somebody on forty days. `readinessScore` already refuses to invent from a
   // null sleep or a null hydration for exactly this reason — the training-load
   // input has no null channel, so the gate has to be here.
-  const { log, status: logStatus } = useWorkoutLog();
-  const { consumed, status: foodStatus } = useFoodLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
+  const { consumed, status: foodStatus, reload: reloadFood } = useFoodLog();
+  // What this coach is told about the member — the profile, the assigned
+  // programme, the coach's own macro adjustment, the training log and today's
+  // food — is read once at mount and shown verbatim under "What Gets Sent". A
+  // workout logged in the last ten minutes was not in it, and there was no way
+  // to bring it in short of killing the app.
+  const pull = usePullToRefresh(useCallback(() => {
+    cd.reload(); assigned.reload(); void coachNutrition.reload(); reloadLog(); reloadFood();
+  }, [cd.reload, assigned, coachNutrition, reloadLog, reloadFood]));
   const logWhole = isWhole(logStatus);
   const foodWhole = isWhole(foodStatus);
   // What the member reads a load in, so the model does not speak kilograms to
@@ -194,6 +208,20 @@ export default function Coach() {
   const knowsAll = logWhole && foodWhole && isWhole(cd.status);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  // Say that the question went.
+  //
+  // Everything this screen does between send and answer is visual — the input
+  // empties, a spinner appears, a line of grey text says "Coach is thinking…" —
+  // and a member using VoiceOver gets none of it. They press send and hear
+  // nothing at all for several seconds, on a screen where the ordinary thing to
+  // conclude is that the button did not work and to press it again.
+  // `announceForAccessibility` is the only route on iOS: React Native's
+  // `accessibilityLiveRegion` is Android-only, and it is set on the block below
+  // for the platform that reads it. Guarded on `busy` so nothing is announced
+  // when the screen simply mounts.
+  useEffect(() => {
+    if (busy) AccessibilityInfo.announceForAccessibility('Sent. Your coach is thinking.');
+  }, [busy]);
   const scroller = useRef<ScrollView>(null);
 
   // The member's answer about their health details, read from the device once.
@@ -324,7 +352,7 @@ export default function Coach() {
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
           <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
-            <Icon name="back" size={20} color={t.ink2} />
+            <Icon name={BACK_ICON} size={20} color={t.ink2} />
           </Pressable>
           <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="sparkle" size={17} color={t.brandInk} />
@@ -346,7 +374,7 @@ export default function Coach() {
         <Rule />
 
         {/* ── the conversation ───────────────────────────────────────────── */}
-        <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scroller} refreshControl={pull} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled">
 
           {/* ── the question, before anything is sent ─────────────────────
               This screen used to post the member's weight, body fat, muscle
@@ -427,12 +455,24 @@ export default function Coach() {
               </View>
             </View>
           )) : null}
-          {busy ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2 }}>
-              <ActivityIndicator color={t.brand} size="small" />
-              <Text style={{ ...ty.caption, color: t.ink3 }}>Coach is thinking…</Text>
-            </View>
-          ) : null}
+          {/* The wait, said out loud as well as drawn.
+              A spinner and a line of grey text say "your question went" to
+              somebody looking at the screen and nothing at all to somebody
+              using a screen reader: they press send, hear silence, and the only
+              evidence either way is an answer that arrives some seconds later.
+              `accessibilityLiveRegion` is TalkBack's half of this and does
+              nothing on iOS, where React Native has no equivalent prop — so the
+              effect above announces it, and this marks it for the platform that
+              can watch the tree itself. 'polite' because it interrupts nothing;
+              it simply has to be said. */}
+          <View accessibilityLiveRegion="polite">
+            {busy ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2 }}>
+                <ActivityIndicator color={t.brand} size="small" />
+                <Text style={{ ...ty.caption, color: t.ink3 }}>Coach is thinking…</Text>
+              </View>
+            ) : null}
+          </View>
           {/* Offered only when there is genuinely nothing to carry on from, and
               only once the phone has been read: a restored conversation with
               "What should I eat post-workout?" underneath it is the screen
@@ -475,12 +515,38 @@ export default function Coach() {
                 <Ghost label={showsDetail ? 'Hide the Detail' : 'What Gets Sent'} onPress={() => setShowsDetail((v) => !v)} />
                 <Ghost label={consent === 'yes' ? 'Turn It Off' : 'Turn It On'}
                   onPress={() => answer(consent === 'yes' ? 'no' : 'yes')} />
-                {/* Straight through, with no modal. It is the member's own
+                {/* This used to go straight through, with no question, and the
+                    note above it argued the case: "It is the member's own
                     conversation on the member's own phone, it is one tap to
                     start another, and a question in a box is what this app
                     reserves for a thing that cannot be undone by doing it
-                    again — see src/ui/toast.tsx. */}
-                {msgs.length ? <Ghost label="Clear This Chat" onPress={() => thread.clear()} /> : null}
+                    again."
+
+                    The last clause is exactly the test, and clearing this chat
+                    FAILS it. Tapping the button again does not bring the
+                    conversation back. What is destroyed is not a list of
+                    messages — it is what src/lib/coachChat.ts calls health
+                    information the member typed: an injury described in their
+                    own words, a question about a medication, the reason they
+                    could not train last week, and every answer given about
+                    them. It is the longest thing anybody types into this app
+                    and it sits one tap from "What Gets Sent", which is a button
+                    people press to read something.
+
+                    So it gets the Alert that app/(client)/injuries.tsx states
+                    as the house rule for every destructive action, and the
+                    question names what goes and says plainly that it cannot be
+                    got back. */}
+                {msgs.length ? (
+                  <Ghost label="Clear This Chat" onPress={() => Alert.alert(
+                    'Clear this conversation?',
+                    `All ${msgs.length} ${msgs.length === 1 ? 'message' : 'messages'} go, including everything you have told your coach about your training, your injuries and how you have been feeling. This cannot be undone and there is no copy anywhere else — ${BRAND.label} does not keep one on our servers.`,
+                    [
+                      { text: 'Keep It', style: 'cancel' },
+                      { text: 'Clear It', style: 'destructive', onPress: () => thread.clear() },
+                    ],
+                  )} />
+                ) : null}
               </View>
               {showsDetail ? (
                 <View style={{ marginTop: sp.sm }}>
@@ -506,11 +572,35 @@ export default function Coach() {
             <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
               <TextInput value={input} onChangeText={setInput} placeholder="Ask your coach…" placeholderTextColor={t.ink3} multiline
                 style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120 }} />
-              <Pressable onPress={() => send(input)} disabled={!input.trim() || busy}
-                accessibilityRole="button" accessibilityLabel="Send message"
-                style={{ width: 44, height: 44, borderRadius: radius.pill, backgroundColor: input.trim() && !busy ? t.brand : t.surface3, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ ...ty.head, color: t.brandInk }}>↑</Text>
-              </Pressable>
+              {/* The arrow, and the three things wrong with it.
+                  · It was `t.brandInk` in both states, so when the button went
+                    to `t.surface3` to look disabled the glyph came out at
+                    roughly 1.4:1 against it — under the 3:1 that
+                    src/lib/a11y.ts requires of a MARK, which is what an arrow
+                    with no text beside it is. The disabled pair is the kit's
+                    own: `t.surface2` behind `t.ink3`, exactly as <Cta> does it,
+                    so this button and every primary button in the app grey out
+                    the same way and `check:contrast` measures one pair.
+                  · Nothing told a screen reader it was off. `accessibilityState`
+                    is what turns "Send message, button" into "Send message,
+                    dimmed" — without it somebody double-taps an inert control
+                    and is given no reason.
+                  · "Send message" is the same three words whether the composer
+                    is empty, ready, or waiting on an answer. The label now says
+                    which, because that is the only feedback available to
+                    somebody who cannot see the spinner above. */}
+              {(() => {
+                const ready = !!input.trim() && !busy;
+                return (
+                  <Pressable onPress={() => send(input)} disabled={!ready}
+                    accessibilityRole="button"
+                    accessibilityLabel={busy ? 'Sending your message' : ready ? 'Send message' : 'Send message, nothing typed yet'}
+                    accessibilityState={{ disabled: !ready, busy }}
+                    style={{ width: MIN_TARGET, height: MIN_TARGET, borderRadius: radius.pill, backgroundColor: ready ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ ...ty.head, color: ready ? t.brandInk : t.ink3 }}>↑</Text>
+                  </Pressable>
+                );
+              })()}
             </View>
           </View>
         ) : null}

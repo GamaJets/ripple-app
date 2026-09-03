@@ -26,7 +26,9 @@ import { BRAND } from '../../src/lib/brands';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useCallback } from 'react';
 import { useClientData } from '../../src/ui/clientData';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useSettings } from '../../src/ui/settings';
 import { weightDeltaIn } from '../../src/lib/units';
  import { deltaLabel, deltaSign, deltaMoved } from '../../src/lib/deltaLabel';
@@ -38,6 +40,10 @@ export default function Social() {
  const t = useTheme();
  const router = useRouter();
  const cd = useClientData();
+ // Every figure on this screen is derived from the scan history, and every one
+ // of them leaves the phone when the member shares it. A stale share is the
+ // expensive kind, so the read behind it can be asked for again.
+ const pull = usePullToRefresh(useCallback(() => { cd.reload(); }, [cd.reload]));
  const wu = useSettings().weightUnit;
 
  // `cd.scansStatus`, which this screen ignored entirely. It matters more here
@@ -94,7 +100,7 @@ export default function Social() {
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
  <Ghost icon="back" onPress={() => router.back()} />

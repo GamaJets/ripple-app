@@ -16,17 +16,19 @@ import {
   fetchVisits, checkIn, checkOut, summariseVisits, dwellMinutes,
   sweepStaleVisits, isAccountedFor, currentlyInside, duplicateOpenVisits,
   busiestSlots, visitsByHour, visitsByWeekday, averageDwellMinutes,
-  admissionCheck, wasOverridden,
+  admissionCheck, doorAdmission, wasOverridden, OVERRIDE_PREFIX,
   readPending, addPending, dropPending, partitionPending, pendingNote, pendingKey,
   WEEKDAYS,
-  type Visit, type Admission, type PendingCheckIn,
+  type Visit, type Admission, type PendingDoorWrite,
 } from '@lib/gymVisits';
 import { searchRows } from '@lib/consoleSearch';
 import {
   fetchPasses, fetchPassTypes, issuePass, redeemPass,
-  summarisePasses, passStatus, remainingUses,
+  summarisePasses, passStatus, remainingUses, passBlocker, spendable,
   type GymPass, type PassType,
 } from '@lib/gymPasses';
+import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
+import { buildRollCall, rollCallHtml, emergencyLine } from '@lib/rollCall';
 import { fetchMemberships, money, type Membership } from '@lib/gymRecord';
 import { fetchClasses, type GymClass } from '@lib/gymSchedule';
 import { isoDate } from '@lib/format';
@@ -117,6 +119,21 @@ export default function Door() {
   // attendance at. Null on a refused read, like every other state here: an
   // empty picker that says "gym floor only" is a claim about the timetable.
   const [classes, setClasses] = useState<GymClass[] | null>(null);
+  /**
+   * What the gym itself knows about the people in the building: the next of
+   * kin, and the note the desk wrote for the floor.
+   *
+   * This screen read five tables and not this one, while /members and /passes
+   * both read it — so the asthma note and the emergency number were visible on
+   * the two screens an owner opens sitting down, and invisible on the one
+   * screen that is used with a person standing in front of it. Somebody goes
+   * over on the floor at nine on a Sunday and the trainer at the desk has the
+   * roll call, the arrival time, and no way to ring anybody.
+   *
+   * Null is "not read or refused", never an empty Map — an emergency contact
+   * that did not load must never read as a member who has none.
+   */
+  const [records, setRecords] = useState<Map<string, GymMemberRecord> | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string) => {
@@ -126,7 +143,7 @@ export default function Door() {
     // visits, and the check-in dropdown lost every member — so one broken query
     // produced three wrong facts and the banner named none of them.
     const now = Date.now();
-    const [vRes, pRes, tRes, mRes, cRes] = await Promise.allSettled([
+    const [vRes, pRes, tRes, mRes, cRes, rRes] = await Promise.allSettled([
       fetchVisits(supabase, tenantId, { sinceIso: new Date(now - 30 * DAY).toISOString() }),
       fetchPasses(supabase, tenantId),
       fetchPassTypes(supabase, tenantId),
@@ -136,6 +153,10 @@ export default function Door() {
         new Date(now - CLASS_WINDOW_MIN * 60_000).toISOString(),
         new Date(now + CLASS_WINDOW_MIN * 60_000).toISOString(),
       ),
+      // Sixth, and settled beside the others rather than after them: a gym that
+      // has not applied supabase/parts/197 has no such table, and one refused
+      // read must take nothing else down with it.
+      fetchMemberRecords(supabase, tenantId),
     ]);
 
     // A read that failed is null, never []. [] is the gym saying it has none;
@@ -145,6 +166,7 @@ export default function Door() {
     setTypes(tRes.status === 'fulfilled' ? tRes.value : null);
     setMembers(mRes.status === 'fulfilled' ? mRes.value : null);
     setClasses(cRes.status === 'fulfilled' ? cRes.value : null);
+    setRecords(rRes.status === 'fulfilled' ? byMember(rRes.value) : null);
 
     // Surfaced rather than swallowed: a door screen that silently fails to read
     // is worse than one that says so, because staff will keep using it. Each
@@ -156,6 +178,10 @@ export default function Door() {
       failure(tRes, 'the pass types'),
       failure(mRes, 'the member list'),
       failure(cRes, 'the classes running now'),
+      // Named apart from the rest, because the consequence is not a figure: a
+      // desk that cannot read this has no next-of-kin number for anybody in the
+      // building and has to be told so rather than shown a blank column.
+      failure(rRes, 'the gym’s notes on your members — no next of kin and no medical note can be shown'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
   }, []);
@@ -166,7 +192,11 @@ export default function Door() {
       const who = await loadMe();
       if (!live) return;
       setMe(who);
-      if (!who?.tenantId) { setVisits([]); setPasses([]); setTypes([]); setMembers([]); setClasses([]); return; }
+      if (!who?.tenantId) {
+        setVisits([]); setPasses([]); setTypes([]); setMembers([]); setClasses([]);
+        setRecords(new Map());
+        return;
+      }
       // no-error-ok: the gym's name is a header label; without it the header is blank and every figure below is unaffected
       const { data: t } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
       if (live) setGymName(t?.name ?? null);
@@ -228,6 +258,17 @@ export default function Door() {
       document.removeEventListener('visibilitychange', onShow);
     };
   }, [me, load]);
+
+  /**
+   * The writes this machine is holding because the network would not take them.
+   *
+   * Created here rather than inside a section, because both the check-in bar
+   * and the Inside table put things in it and a hook cannot live behind the
+   * role gates below. The tenant is '' until `loadMe` answers, which holds
+   * nothing and flushes nothing.
+   */
+  const reload = useCallback(() => { if (me?.tenantId) void load(me.tenantId); }, [me, load]);
+  const queue = useDoorQueue(me?.tenantId ?? '', reload);
 
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
@@ -298,6 +339,9 @@ export default function Door() {
   // err is only ever set by a finished load, so a state still null once it is
   // set is a read that was refused rather than one still in flight.
   const unread = (rows: unknown[] | null): Unread => (rows !== null ? null : err ? 'failed' : 'loading');
+  // The same three states for the one read that comes back as a Map. A blank
+  // emergency column has to say whether it is empty or unknown.
+  const recordsUnread: Unread = records !== null ? null : err ? 'failed' : 'loading';
 
   return (
     <Shell me={me} gymName={gymName} current="/door">
@@ -341,15 +385,18 @@ export default function Door() {
       </div>
 
       <CheckInBar
-        members={members} passes={passes} classes={classes} visits={visits} tenantId={tenantId}
+        members={members} passes={passes} classes={classes} visits={visits}
+        records={records} tenantId={tenantId}
         membersUnread={unread(members)} classesUnread={unread(classes)}
-        today={today} onChange={refresh}
+        recordsUnread={recordsUnread}
+        today={today} queue={queue} onChange={refresh}
       />
       <Inside
         inside={inside} openBefore={openBefore.length} swept={sweptBefore.length}
         duplicates={dupes.length}
+        records={records} recordsUnread={recordsUnread} gymName={gymName}
         unread={unread(visits)} tenantId={tenantId} isOwner={me.role === 'owner'}
-        onChange={refresh}
+        queue={queue} onChange={refresh}
       />
       <Today visits={todays} unread={unread(visits)} />
       {/* Thirty days rather than today, because "when is my gym busy" is not a
@@ -365,13 +412,179 @@ export default function Door() {
   );
 }
 
+/* ── the writes this desk is holding ───────────────────────────────────────── */
+
+/** What the queue offers the two sections that use it. */
+interface DoorQueue {
+  pending: PendingDoorWrite[];
+  lapsed: PendingDoorWrite[];
+  /** False when this browser will not store anything, so nothing can be held. */
+  queueRead: boolean;
+  flushing: boolean;
+  /** Hold one write. The moment it happened is the caller's, never the flush's. */
+  hold: (item: Omit<PendingDoorWrite, 'id' | 'queuedAt' | 'tries' | 'refusedWhy'>) => void;
+  flush: () => void;
+  drop: (id: string) => void;
+  dismissLapsed: () => void;
+  /** Told the item is now on the record by some other route — the desk pressing
+   *  "Record it anyway" — so it leaves the queue. */
+  settled: (id: string) => void;
+}
+
+/**
+ * The arrivals AND departures this machine is holding because the network would
+ * not take them.
+ *
+ * The entire failure path here used to be one line of message text: nothing
+ * written down, nothing retried, and the next arrival cleared it. Every person
+ * who came in during a two-minute wifi drop was permanently absent from the
+ * record, and the only trace was a toast the receptionist had already
+ * dismissed. The rules — what may be held, for how long, and what happens to
+ * one the gym's own record refuses — are in src/lib/gymVisits.ts; this is the
+ * part that keeps them on the machine and sends them.
+ *
+ * ── Why it is a hook rather than state inside the check-in bar ────────────
+ *
+ * Because the outage does not know which section of the screen you are looking
+ * at. Arrivals were queued and CHECK-OUTS were not: the same dropped connection
+ * that was carefully survived at the top of the page answered "Could not check
+ * that visit out" at the bottom of it and lost the departure — leaving the
+ * person in Inside now, in the evacuation headcount, and out of the average
+ * stay. One queue, in arrival order, owned above both sections and rendered in
+ * the one place a desk already looks for it.
+ */
+function useDoorQueue(tenantId: string, onChange: () => void): DoorQueue {
+  const [pending, setPending] = useState<PendingDoorWrite[]>([]);
+  const [queueRead, setQueueRead] = useState(true);
+  const [lapsed, setLapsed] = useState<PendingDoorWrite[]>([]);
+  const [flushing, setFlushing] = useState(false);
+
+  const store = useCallback((list: PendingDoorWrite[]) => {
+    setPending(list);
+    try { window.localStorage.setItem(pendingKey(tenantId), JSON.stringify(list)); }
+    // A browser that refuses to store — private mode, a full quota — must not
+    // take the check-in down with it. The row is still being sent; what is lost
+    // is the retry, and the sentence below says so.
+    catch { setQueueRead(false); }
+  }, [tenantId]);
+
+  useEffect(() => {
+    // No gym yet — `loadMe` has not answered. There is nothing to read and, more
+    // to the point, nothing may be written under a key that is not a gym's.
+    if (!tenantId) return;
+    let raw: string | null = null;
+    try { raw = window.localStorage.getItem(pendingKey(tenantId)); } catch { setQueueRead(false); return; }
+    const { items, read } = readPending(raw);
+    setQueueRead(read);
+    // Split on the way in rather than on the way out: an arrival from last
+    // night written into this morning's log would put a stranger in "Inside
+    // now" and a phantom into the busiest hour. What lapsed is handed to the
+    // screen rather than binned, because a queue that loses things quietly is
+    // the thing this whole section exists to replace.
+    const { live, lapsed: gone } = partitionPending(items);
+    setPending(live);
+    setLapsed(gone);
+    if (gone.length) {
+      try { window.localStorage.setItem(pendingKey(tenantId), JSON.stringify(live)); } catch { /* said below */ }
+    }
+  }, [tenantId]);
+
+  const hold: DoorQueue['hold'] = useCallback((item) => {
+    store(addPending(pending, { ...item, id: newId(), queuedAt: Date.now(), tries: 1, refusedWhy: null }));
+  }, [pending, store]);
+
+  /**
+   * Send what is waiting.
+   *
+   * Run when the browser says the connection is back and after every successful
+   * write, because a desk that has just written a row is a desk that can reach
+   * the server. One at a time and in the order the morning happened, so the log
+   * reads the way the morning did.
+   *
+   * An item the gym's own record REFUSES is not retried into oblivion: the
+   * answer will not change, so the reason is stored on it and the desk is asked.
+   * An item the network refuses is left exactly as it is.
+   */
+  const flush = useCallback(async () => {
+    if (flushing) return;
+    const { live, lapsed: gone } = partitionPending(pending);
+    if (gone.length) setLapsed((l) => [...l, ...gone]);
+    if (!live.length) { if (gone.length) store(live); return; }
+    setFlushing(true);
+    let list = live;
+    for (const item of live) {
+      if (item.refusedWhy) continue;
+      try {
+        if (item.kind === 'out') {
+          // The minute they LEFT, not the minute the connection came back. A
+          // departure stamped at the flush would put a two-hour stay on a
+          // twenty-minute visit with nothing afterwards to see it by.
+          // `checkOut` only closes a visit that is still open, so this cannot
+          // overwrite a departure the other desk recorded meanwhile — it
+          // matches nothing, and that is reported as a refusal rather than
+          // swallowed.
+          await checkOut(supabase, item.visitId!, item.atIso);
+        } else {
+          await checkIn(supabase, item.tenantId, {
+            memberId: item.memberId,
+            passId: item.passId,
+            classId: item.classId,
+            enteredAtIso: item.atIso,
+            source: 'desk',
+          });
+        }
+        list = dropPending(list, item.id);
+      } catch (e: any) {
+        if (e?.name === 'AdmissionRefused') {
+          list = list.map((i) => i.id === item.id
+            ? { ...i, tries: i.tries + 1, refusedWhy: e.message ?? 'The gym’s record refused it.' }
+            : i);
+        } else if (isOffline(e)) {
+          // Still down. Stop rather than hammer, and keep the rest in order.
+          list = list.map((i) => i.id === item.id ? { ...i, tries: i.tries + 1 } : i);
+          break;
+        } else {
+          list = list.map((i) => i.id === item.id
+            ? { ...i, tries: i.tries + 1, refusedWhy: e?.message ?? 'That was refused.' }
+            : i);
+        }
+      }
+    }
+    store(list);
+    setFlushing(false);
+    onChange();
+  }, [flushing, pending, store, onChange]);
+
+  useEffect(() => {
+    const back = () => { void flush(); };
+    window.addEventListener('online', back);
+    return () => window.removeEventListener('online', back);
+  }, [flush]);
+
+  return {
+    pending, lapsed, queueRead, flushing,
+    hold,
+    flush: () => { void flush(); },
+    // The same removal under two names, because they are two different facts at
+    // the call site: one is "the desk has decided this will never be written",
+    // the other is "it is on the record now, by another route".
+    drop: (id: string) => store(dropPending(pending, id)),
+    settled: (id: string) => store(dropPending(pending, id)),
+    dismissLapsed: () => setLapsed([]),
+  };
+}
+
 /* ── check-in ──────────────────────────────────────────────────────────────── */
 
-function CheckInBar({ members, passes, classes, visits, tenantId, membersUnread, classesUnread, today, onChange }: {
+function CheckInBar({ members, passes, classes, visits, records, tenantId, membersUnread, classesUnread, recordsUnread, today, queue, onChange }: {
   members: Membership[] | null; passes: GymPass[] | null; classes: GymClass[] | null;
   visits: Visit[] | null;
+  records: Map<string, GymMemberRecord> | null;
   tenantId: string;
-  membersUnread: Unread; classesUnread: Unread; today: string; onChange: () => void;
+  membersUnread: Unread; classesUnread: Unread; recordsUnread: Unread;
+  today: string;
+  queue: DoorQueue;
+  onChange: () => void;
 }) {
   const [memberId, setMemberId] = useState('');
   /**
@@ -410,55 +623,30 @@ function CheckInBar({ members, passes, classes, visits, tenantId, membersUnread,
   const [refused, setRefused] = useState<Admission | null>(null);
   const [why, setWhy] = useState('');
 
-  /**
-   * Arrivals this machine is holding because the network would not take them.
+  /* The passes held by the person selected that may actually pay for coming in.
+   * Keyed on `holderId`, which is the whole reason A1 had to be fixed first: a
+   * pass issued with only a `holderName` belongs to nobody and can never appear
+   * here.
    *
-   * The entire failure path here used to be one line of message text: nothing
-   * written down, nothing retried, and the next arrival cleared it. Every
-   * person who came in during a two-minute wifi drop was permanently absent
-   * from the record, and the only trace was a toast the receptionist had
-   * already dismissed. The rules — what may be held, for how long, and what
-   * happens to one the gym's own record refuses — are in src/lib/gymVisits.ts;
-   * this is the part that keeps them on the machine and sends them.
-   */
-  const [pending, setPending] = useState<PendingCheckIn[]>([]);
-  const [queueRead, setQueueRead] = useState(true);
-  const [lapsed, setLapsed] = useState<PendingCheckIn[]>([]);
-  const [flushing, setFlushing] = useState(false);
-
-  const store = useCallback((list: PendingCheckIn[]) => {
-    setPending(list);
-    try { window.localStorage.setItem(pendingKey(tenantId), JSON.stringify(list)); }
-    // A browser that refuses to store — private mode, a full quota — must not
-    // take the check-in down with it. The row is still being sent; what is lost
-    // is the retry, and the sentence below says so.
-    catch { setQueueRead(false); }
-  }, [tenantId]);
-
-  useEffect(() => {
-    let raw: string | null = null;
-    try { raw = window.localStorage.getItem(pendingKey(tenantId)); } catch { setQueueRead(false); return; }
-    const { items, read } = readPending(raw);
-    setQueueRead(read);
-    // Split on the way in rather than on the way out: an arrival from last
-    // night written into this morning's log would put a stranger in "Inside
-    // now" and a phantom into the busiest hour. What lapsed is handed to the
-    // screen rather than binned, because a queue that loses things quietly is
-    // the thing this whole section exists to replace.
-    const { live, lapsed: gone } = partitionPending(items);
-    setPending(live);
-    setLapsed(gone);
-    if (gone.length) {
-      try { window.localStorage.setItem(pendingKey(tenantId), JSON.stringify(live)); } catch { /* said below */ }
-    }
-  }, [tenantId]);
-
-  /* The live passes held by the person selected. Keyed on `holderId`, which is
-   * the whole reason A1 had to be fixed first: a pass issued with only a
-   * `holderName` belongs to nobody and can never appear here. */
+   * `spendable` rather than `passStatus === 'live'`: a live pass is not the
+   * same thing as a pass that pays for a VISIT. This list offered the member's
+   * personal-training block as a way through the door, and picking it spent an
+   * hour with a coach on a walk to the treadmill. What a pass is good for is on
+   * the row — /members has printed it in a column all along. */
   const theirPasses = (passes ?? []).filter(
-    (p) => !!memberId && p.holderId === memberId && passStatus(p, today) === 'live',
+    (p) => !!memberId && p.holderId === memberId && spendable(p, 'visit', today),
   );
+  /* Their PT credits, which are deliberately NOT offered above and are named
+   * underneath instead, so the desk knows the member holds something and knows
+   * it is not for this. */
+  const theirPtPasses = (passes ?? []).filter(
+    (p) => !!memberId && p.holderId === memberId && p.covers === 'pt' && passStatus(p, today) === 'live',
+  );
+  /* What the floor would need to know if this person went over, and who to
+   * ring. On screen while they are being selected rather than hunted for
+   * afterwards. */
+  const theirRecord = memberId ? records?.get(memberId) ?? null : null;
+
   // Soonest first, so the class about to start is the first thing in the list
   // rather than the one that finished an hour ago.
   const nearby = [...(classes ?? [])].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
@@ -533,7 +721,7 @@ function CheckInBar({ members, passes, classes, visits, tenantId, membersUnread,
       onChange();
       // A desk that has just written a row is a desk that can reach the server,
       // which is the cheapest signal there is that the queue is worth trying.
-      if (pending.length) void flush();
+      if (queue.pending.length) queue.flush();
     } catch (e: any) {
       // A refusal is not an error message. It is the gym's own record saying
       // no, and it comes with the one control that gets past it — so it is held
@@ -546,19 +734,17 @@ function CheckInBar({ members, passes, classes, visits, tenantId, membersUnread,
         // The network, not the gym. The arrival is kept with the minute the
         // person actually walked in on it, so replaying it later writes exactly
         // the same fact rather than a made-up one.
-        store(addPending(pending, {
-          id: newId(),
+        queue.hold({
           tenantId,
+          kind: 'in',
           memberId: memberId || null,
           memberName: memberId
             ? (members ?? []).find((m) => m.memberId === memberId)?.memberName ?? null
             : null,
           passId, classId,
-          enteredAtIso: at,
-          queuedAt: Date.now(),
-          tries: 1,
-          refusedWhy: null,
-        }));
+          atIso: at,
+          visitId: null,
+        });
         setMemberId(''); setReason(''); setRefused(null); setWhy('');
         setMsg('The gym could not be reached, so that arrival is held on this machine and goes up on its own when the connection is back. It keeps the minute they came in.');
       } else {
@@ -567,63 +753,6 @@ function CheckInBar({ members, passes, classes, visits, tenantId, membersUnread,
       }
     } finally { setBusy(false); }
   };
-
-  /**
-   * Send what is waiting.
-   *
-   * Run when the browser says the connection is back and after every successful
-   * check-in, because a desk that has just written a row is a desk that can
-   * reach the server. One at a time and in arrival order, so the log reads the
-   * way the morning happened.
-   *
-   * An item the gym's own record REFUSES is not retried into oblivion: the
-   * answer will not change, so the reason is stored on it and the desk is asked
-   * (below). An item the network refuses is left exactly as it is.
-   */
-  const flush = useCallback(async () => {
-    if (flushing) return;
-    const { live, lapsed: gone } = partitionPending(pending);
-    if (gone.length) setLapsed((l) => [...l, ...gone]);
-    if (!live.length) { if (gone.length) store(live); return; }
-    setFlushing(true);
-    let list = live;
-    for (const item of live) {
-      if (item.refusedWhy) continue;
-      try {
-        await checkIn(supabase, item.tenantId, {
-          memberId: item.memberId,
-          passId: item.passId,
-          classId: item.classId,
-          enteredAtIso: item.enteredAtIso,
-          source: 'desk',
-        });
-        list = dropPending(list, item.id);
-      } catch (e: any) {
-        if (e?.name === 'AdmissionRefused') {
-          list = list.map((i) => i.id === item.id
-            ? { ...i, tries: i.tries + 1, refusedWhy: e.message ?? 'The gym’s record refused it.' }
-            : i);
-        } else if (isOffline(e)) {
-          // Still down. Stop rather than hammer, and keep the rest in order.
-          list = list.map((i) => i.id === item.id ? { ...i, tries: i.tries + 1 } : i);
-          break;
-        } else {
-          list = list.map((i) => i.id === item.id
-            ? { ...i, tries: i.tries + 1, refusedWhy: e?.message ?? 'That arrival was refused.' }
-            : i);
-        }
-      }
-    }
-    store(list);
-    setFlushing(false);
-    onChange();
-  }, [flushing, pending, store, onChange]);
-
-  useEffect(() => {
-    const go = () => { void flush(); };
-    window.addEventListener('online', go);
-    return () => window.removeEventListener('online', go);
-  }, [flush]);
 
   const go = (e: React.FormEvent) => {
     e.preventDefault();
@@ -667,46 +796,99 @@ function CheckInBar({ members, passes, classes, visits, tenantId, membersUnread,
         </p>
       ) : null}
 
+      {/* The two things a member of staff would want in their hand if this
+          person went over on the floor, on screen while they are being
+          selected rather than hunted for afterwards. The medical note is the
+          GYM's own operational note (supabase/parts/197), never the client's
+          injury record. */}
+      {memberId ? (
+        <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink2)', maxWidth: '80ch' }}>
+          {recordsUnread ? (
+            <span style={{ color: 'var(--ink3)' }}>
+              {recordsUnread === 'loading'
+                ? 'Still reading the gym’s notes on this member.'
+                : 'The gym’s notes did not come back, so their next of kin and any medical note are UNKNOWN here — not absent. The banner above says why.'}
+            </span>
+          ) : (
+            <>
+              {theirRecord?.medicalNote
+                ? <span style={{ color: '#f0c04e' }}>{theirRecord.medicalNote}{' · '}</span>
+                : null}
+              {emergencyLine(theirRecord)
+                ? <>In an emergency ring {emergencyLine(theirRecord)}.</>
+                : <span style={{ color: 'var(--ink3)' }}>No next of kin recorded for them. Add one on Members.</span>}
+              {contactLine(theirRecord)
+                ? <span style={{ color: 'var(--ink3)' }}>{' · '}{contactLine(theirRecord)}</span>
+                : null}
+            </>
+          )}
+        </p>
+      ) : null}
+
+      {/* Said rather than silently filtered. The member holds a PT block, the
+          desk can see they hold something, and the list above deliberately does
+          not offer it — without this line the desk reads the empty list as a
+          member with nothing left and sells them another one. */}
+      {theirPtPasses.length > 0 ? (
+        <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '80ch' }}>
+          They also hold {theirPtPasses.length === 1 ? 'a personal-training pass' : `${theirPtPasses.length} personal-training passes`}
+          {' '}({theirPtPasses.reduce((n, p) => n + remainingUses(p), 0)} left). Not offered here: it pays for an
+          hour with a coach, and spending it on a walk through the door takes that hour off them and off the
+          coach who is still owed it.
+        </p>
+      ) : null}
+
       {/* What is being held on this machine. */}
-      {pendingNote(pending) ? (
+      {pendingNote(queue.pending) ? (
         <div style={{
           margin: '0 14px 14px', padding: '11px 13px', background: 'var(--surface2)',
           border: '1px solid var(--ring)', borderLeft: '3px solid #f0c04e',
         }}>
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)', maxWidth: '80ch' }}>
-            {pendingNote(pending)}
+            {pendingNote(queue.pending)}
           </p>
           <div style={{ marginTop: 8, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
-            <button type="button" style={linkBtn} disabled={flushing} onClick={() => void flush()}>
-              {flushing ? 'Sending…' : 'Try them now'}
+            <button type="button" style={linkBtn} disabled={queue.flushing} onClick={queue.flush}>
+              {queue.flushing ? 'Sending…' : 'Try them now'}
             </button>
           </div>
-          {pending.filter((p) => p.refusedWhy).map((p) => (
+          {queue.pending.filter((p) => p.refusedWhy).map((p) => (
             <p key={p.id} style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--ink2)', maxWidth: '80ch' }}>
               <span className="mono" style={{ color: 'var(--ink)' }}>
-                {new Date(p.enteredAtIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {new Date(p.atIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
-              {' '}{p.memberName ?? 'somebody not identified'} — {p.refusedWhy}{' '}
-              <button
-                type="button" style={linkBtn}
-                onClick={() => {
-                  // Recorded against the gym's own answer, with the fact that
-                  // it was held on the desk as the reason — which is the true
-                  // one and the one an audit needs.
-                  void checkIn(supabase, p.tenantId, {
-                    memberId: p.memberId, passId: p.passId, classId: p.classId,
-                    enteredAtIso: p.enteredAtIso, source: 'desk',
-                    overrideReason: `recorded at the desk while offline at ${new Date(p.enteredAtIso).toLocaleTimeString()}`,
-                  })
-                    .then(() => { store(dropPending(pending, p.id)); onChange(); })
-                    .catch((e: any) => setMsg(e?.message ?? 'That arrival was still not recorded.'));
-                }}
-              >
-                Record it anyway
-              </button>
-              {' · '}
+              {' '}{p.memberName ?? 'somebody not identified'}
+              {' '}{p.kind === 'out' ? 'leaving' : 'arriving'} — {p.refusedWhy}{' '}
+              {/* Only an arrival is offered a way through. A refused check-out
+                  matched no open visit — somebody else closed it, or the row is
+                  not this desk's to close — and forcing it would write a second
+                  departure over the first. */}
+              {p.kind === 'in' ? (
+                <>
+                  <button
+                    type="button" style={linkBtn}
+                    onClick={() => {
+                      // Recorded against the gym's own answer, with the fact that
+                      // it was held on the desk as the reason — which is the true
+                      // one and the one an audit needs.
+                      void checkIn(supabase, p.tenantId, {
+                        memberId: p.memberId, passId: p.passId, classId: p.classId,
+                        enteredAtIso: p.atIso, source: 'desk',
+                        overrideReason: `recorded at the desk while offline at ${new Date(p.atIso).toLocaleTimeString()}`,
+                      })
+                        .then(() => { queue.settled(p.id); onChange(); })
+                        .catch((e: any) => setMsg(e?.message ?? 'That arrival was still not recorded.'));
+                    }}
+                  >
+                    Record it anyway
+                  </button>
+                  {' · '}
+                </>
+              ) : (
+                <>That visit is already closed, or is not this desk&rsquo;s to close.{' '}</>
+              )}
               <button type="button" style={{ ...linkBtn, color: 'var(--ink3)' }}
-                      onClick={() => store(dropPending(pending, p.id))}>
+                      onClick={() => queue.drop(p.id)}>
                 Discard it
               </button>
             </p>
@@ -714,24 +896,25 @@ function CheckInBar({ members, passes, classes, visits, tenantId, membersUnread,
         </div>
       ) : null}
 
-      {/* What was held too long to be today's arrival. Said, never binned in
-          silence: the gym has lost a row and is entitled to know which. */}
-      {lapsed.length > 0 ? (
+      {/* What was held too long to be today's. Said, never binned in silence:
+          the gym has lost a row and is entitled to know which. */}
+      {queue.lapsed.length > 0 ? (
         <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--crit)', maxWidth: '80ch' }}>
-          {lapsed.length === 1 ? 'One arrival was' : `${lapsed.length} arrivals were`} held on this
-          machine for more than half a day and {lapsed.length === 1 ? 'has' : 'have'} not been
+          {queue.lapsed.length === 1 ? 'One door write was' : `${queue.lapsed.length} door writes were`} held on
+          this machine for more than half a day and {queue.lapsed.length === 1 ? 'has' : 'have'} not been
           recorded:{' '}
-          {lapsed.map((p) => `${p.memberName ?? 'not identified'} at ${new Date(p.enteredAtIso).toLocaleString()}`).join(', ')}.
-          They are not written now because a visit from yesterday put into today&rsquo;s log is a
-          stranger in Inside now. Add them by hand if they matter.{' '}
-          <button type="button" style={linkBtn} onClick={() => setLapsed([])}>Dismiss</button>
+          {queue.lapsed.map((p) => `${p.memberName ?? 'not identified'} ${p.kind === 'out' ? 'leaving' : 'arriving'} at ${new Date(p.atIso).toLocaleString()}`).join(', ')}.
+          An arrival is not written now because a visit from yesterday put into today&rsquo;s log is a
+          stranger in Inside now; a departure is not written because the visit it closes has been open
+          all night and the sweep is what accounts for those. Add them by hand if they matter.{' '}
+          <button type="button" style={linkBtn} onClick={queue.dismissLapsed}>Dismiss</button>
         </p>
       ) : null}
 
-      {!queueRead ? (
+      {!queue.queueRead ? (
         <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--crit)', maxWidth: '80ch' }}>
-          This browser will not let the desk hold anything, so a check-in that fails is lost rather
-          than retried. Private browsing and a full storage quota both do this.
+          This browser will not let the desk hold anything, so a check-in or a check-out that fails is
+          lost rather than retried. Private browsing and a full storage quota both do this.
         </p>
       ) : null}
 
@@ -953,19 +1136,46 @@ function MemberPicker({ members, value, onPick, unread }: {
 
 /* ── who is inside ─────────────────────────────────────────────────────────── */
 
-function Inside({ inside, openBefore, swept, duplicates, unread, tenantId, isOwner, onChange }: {
+function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread, gymName, unread, tenantId, isOwner, queue, onChange }: {
   inside: Visit[]; openBefore: number; swept: number; duplicates: number; unread: Unread;
-  tenantId: string; isOwner: boolean; onChange: () => void;
+  records: Map<string, GymMemberRecord> | null;
+  recordsUnread: Unread;
+  gymName: string | null;
+  tenantId: string; isOwner: boolean;
+  queue: DoorQueue;
+  onChange: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [sweeping, setSweeping] = useState(false);
 
   const close = async (v: Visit) => {
     setMsg(null);
+    // Stamped here, before the write, and carried into the queue if the write
+    // does not land. A departure that took its time from a later flush would
+    // put the whole outage onto that person's stay.
+    const at = new Date().toISOString();
     try {
-      await checkOut(supabase, v.id);
+      await checkOut(supabase, v.id, at);
       onChange();
     } catch (e: any) {
+      if (isOffline(e)) {
+        // The network, not the gym. This was the half of the outage nothing
+        // survived: an arrival was held and a departure was reported as a
+        // failure and forgotten, so the gym went on believing that person was
+        // in the building — in Inside now, in the evacuation headcount, and
+        // missing from the average stay for ever.
+        queue.hold({
+          tenantId,
+          kind: 'out',
+          memberId: v.memberId,
+          memberName: v.memberName,
+          passId: null, classId: null,
+          atIso: at,
+          visitId: v.id,
+        });
+        setMsg('The gym could not be reached, so that check-out is held on this machine with the minute they left on it. It goes up on its own when the connection is back — until then this list is still counting them.');
+        return;
+      }
       // checkOut throws on a refused update, and with no catch that rejection
       // went nowhere: the row stayed exactly as it was and the screen said
       // nothing, so the desk clicked again and read the gym as slow rather
@@ -981,11 +1191,71 @@ function Inside({ inside, openBefore, swept, duplicates, unread, tenantId, isOwn
       render: (v) => new Date(v.enteredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
     { key: 'for', header: 'For', value: (v) => Date.now() - Date.parse(v.enteredAt), numeric: true,
       render: (v) => `${Math.max(0, Math.round((Date.now() - Date.parse(v.enteredAt)) / 60000))} min` },
+    // The column this screen was missing, beside the headcount it already
+    // called the evacuation list. A visit the desk could not name has nobody to
+    // ring and says so; a read that failed says something different again.
+    { key: 'ice', header: 'In an emergency', value: (v) => emergencyLine(v.memberId ? records?.get(v.memberId) ?? null : null) ?? '',
+      render: (v) => {
+        if (recordsUnread) {
+          return <span className="dash">{recordsUnread === 'loading' ? '…' : 'not read'}</span>;
+        }
+        if (!v.memberId) return <span className="dash">not identified at the desk</span>;
+        const rec = records?.get(v.memberId) ?? null;
+        const ice = emergencyLine(rec);
+        return (
+          <>
+            {ice ?? <span className="dash">none recorded</span>}
+            {/* The gym's own operational note, in colour because it is read in
+                two seconds by somebody kneeling on the floor. Never the
+                client's own injury record — that stays theirs. */}
+            {rec?.medicalNote
+              ? <div style={{ color: '#f0c04e', fontSize: 11.5, marginTop: 2 }}>{rec.medicalNote}</div>
+              : null}
+          </>
+        );
+      } },
     { key: 'out', header: '', value: () => 0, align: 'right',
       render: (v) => (
         <button style={linkBtn} onClick={() => close(v)}>Check out</button>
       ) },
   ];
+
+  /**
+   * Put the roll call on paper.
+   *
+   * The sentence under the duplicate warning below has said for as long as this
+   * screen has existed that this is "the figure somebody would read out in an
+   * evacuation", and there was no way to get it off the tablet. During an alarm
+   * the only copy is inside the building, on a device that needs wifi, and the
+   * one instruction every evacuation procedure gives is not to go back in.
+   *
+   * A new window rather than a hidden print stylesheet: what is printed is the
+   * list and the caveats, not the console around it, and a popup that is
+   * blocked can be reported. `src/lib/rollCall.ts` builds the document — the
+   * caveats are the half that decides whether the paper lies, and they are
+   * asserted there without a browser.
+   */
+  const print = () => {
+    setMsg(null);
+    const doc = buildRollCall({
+      gymName,
+      inside: inside.map((v) => ({ memberId: v.memberId, memberName: v.memberName, enteredAt: v.enteredAt })),
+      records,
+      openFromEarlierDays: openBefore,
+    });
+    const w = window.open('', '_blank');
+    if (!w) {
+      setMsg('This browser blocked the print window. Allow pop-ups for the console, or take a photograph of the list below — do not leave the building without it.');
+      return;
+    }
+    w.document.write(rollCallHtml(doc));
+    w.document.close();
+    w.focus();
+    // Printed on a timer rather than immediately: some browsers have not laid
+    // the document out when `print()` is called on the same tick and send a
+    // blank sheet, which is the one failure this must not have.
+    w.setTimeout(() => w.print(), 250);
+  };
   /**
    * Mark the visits nobody closed.
    *
@@ -1022,6 +1292,15 @@ function Inside({ inside, openBefore, swept, duplicates, unread, tenantId, isOwn
 
   return (
     <Section title="Inside now" sub="Anyone who came in today and has not been checked out. A visit left open overnight is marked with a note and never a guessed exit time — an invented exit would put a twenty-hour stay into the average.">
+      {/* Above the list, not under it: during an alarm nobody scrolls. */}
+      <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '80ch' }}>
+        <button type="button" style={linkBtn} disabled={!!unread} onClick={print}>
+          Print the roll call
+        </button>
+        {unread
+          ? ' — the door log has not been read, so there is no list to print. This screen will not print a page that says the building is empty.'
+          : ' — the list below, with each person’s next of kin and what the floor was told, on paper you can take outside. It is a snapshot of the minute you print it and it says so.'}
+      </p>
       {msg ? <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
       {duplicates > 0 ? (
         <p style={{ margin: '14px', fontSize: 12.5, color: '#f0c04e', maxWidth: '80ch' }}>
@@ -1260,6 +1539,12 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
   const [hostId, setHostId] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  /** The pass whose redemption the gym's own record refused, and the sentence
+   *  that would take it anyway. The same shape the check-in bar uses, because
+   *  it is the same decision. */
+  const [refusedTake, setRefusedTake] = useState<{ pass: GymPass; admission: Admission } | null>(null);
+  const [takeWhy, setTakeWhy] = useState('');
+  const [taking, setTaking] = useState<string | null>(null);
 
   const sell = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1289,9 +1574,42 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
     } finally { setBusy(false); }
   };
 
-  const take = async (p: GymPass) => {
+  /**
+   * Take a visit off a pass — the second way through this door.
+   *
+   * ── Why this now asks the same questions the check-in bar asks ──────────
+   *
+   * Because it did not, and it writes the same row. The form above runs
+   * `checkIn`, which reads the gym's own record at the moment of the write and
+   * refuses a double scan, somebody who is already inside, and a card scanned
+   * twice within two minutes. This button went straight to `redeemPass`, which
+   * asked nothing — so the identical mistake, made two inches lower on the same
+   * screen, was caught by nothing and put the same person into the evacuation
+   * headcount twice while spending two visits off one pass.
+   *
+   * A refusal here is overridable exactly as it is above, and for the same
+   * reason: a desk that cannot record what it can plainly see stops recording.
+   * What staff type is written onto the VISIT, so the row carries why it exists.
+   */
+  const take = async (p: GymPass, overrideWhy: string | null = null) => {
     setMsg(null);
+    // Coverage before the round trip, and before anything is written. This is
+    // the one that was losing money: a personal-training block spent by its
+    // holder walking through the turnstile. `redeemPass` refuses it again on
+    // the way to the database — the sentence is the same either way.
+    const blocked = passBlocker(p, { spendOn: 'visit', today });
+    if (blocked) { setMsg(blocked); return; }
+    setTaking(p.id);
     try {
+      if (p.holderId && !overrideWhy) {
+        const admission = await doorAdmission(supabase, tenantId, {
+          memberId: p.holderId, passId: p.id,
+        });
+        if (admission.verdict === 'refuse') {
+          setRefusedTake({ pass: p, admission });
+          return;
+        }
+      }
       // Two rows, deliberately, and `redeemPass` writes both — see the note on
       // it in src/lib/gymPasses.ts. Taking a visit off a pass used to write the
       // redemption alone, so somebody who paid at the desk and walked into the
@@ -1299,13 +1617,29 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
       // in "Inside now", not in the busiest-hour count, and not in any
       // attendance or retention figure built on gym_visits. The pass ledger
       // knew and the door did not.
-      await redeemPass(supabase, p, { tenantId, redeemedBy: me.id ?? null, today });
+      await redeemPass(supabase, p, {
+        tenantId, redeemedBy: me.id ?? null, today, spendOn: 'visit',
+        visitNote: overrideWhy ? `${OVERRIDE_PREFIX}${overrideWhy}` : null,
+      });
+      setRefusedTake(null); setTakeWhy('');
+      if (overrideWhy) setMsg('Taken, with your reason on the visit.');
       onChange();
     } catch (e: any) {
+      if (isOffline(e)) {
+        // Deliberately NOT queued, and this is the one write on this screen
+        // that is not. An arrival replayed later states the same fact; a
+        // redemption replayed later cannot promise that — if the first attempt
+        // reached the database and only the answer was lost, the replay spends
+        // a SECOND visit off the pass, and that is a member's money. So nothing
+        // is written, the desk is told exactly that, and it is given the route
+        // that is safe.
+        setMsg('The gym could not be reached, so NOTHING was written — the pass is untouched and the arrival is not recorded. Check them in from the bar at the top, which is held on this machine and goes up on its own, then take the pass off when the connection is back.');
+        return;
+      }
       // The reason matters at a desk: "expired on the 3rd" ends an argument
       // that "could not redeem" starts.
       setMsg(e?.message ?? 'Could not take that pass.');
-    }
+    } finally { setTaking(null); }
   };
 
   const cols: Column<GymPass>[] = [
@@ -1324,11 +1658,30 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
       // amount, and printing the bare number invites the reader to supply one.
       render: (p) => p.paidCents == null ? <span className="dash">not recorded</span>
         : money(p.paidCents, p.currency) ?? <span className="dash">no currency on this pass</span> },
+    // What the pass BUYS, beside what is left on it. Two passes with the same
+    // name and the same count buy different things, /members has printed this
+    // column all along, and the screen that spends them did not have it.
+    { key: 'covers', header: 'Good for', value: (p) => p.covers ?? '',
+      render: (p) => p.covers === 'pt' ? 'personal training'
+        : p.covers === 'visit' ? 'door and classes'
+        : <span className="dash">the pass type could not be read</span> },
     { key: 'status', header: 'Status', value: (p) => passStatus(p, today) },
     { key: 'take', header: '', value: () => 0, align: 'right',
-      render: (p) => passStatus(p, today) === 'live'
-        ? <button style={linkBtn} onClick={() => take(p)}>Take a visit</button>
-        : null },
+      render: (p) => {
+        // The refusal is on the row rather than behind the click. A greyed
+        // button with no sentence is a desk pressing it again.
+        const why = passBlocker(p, { spendOn: 'visit', today });
+        if (!why) {
+          return (
+            <button style={linkBtn} disabled={taking === p.id} onClick={() => void take(p)}>
+              {taking === p.id ? 'Taking…' : 'Take a visit'}
+            </button>
+          );
+        }
+        return p.covers === 'pt'
+          ? <span style={{ color: 'var(--ink3)', fontSize: 12 }} title={why}>not for the door</span>
+          : null;
+      } },
   ];
 
   const selected = (types ?? []).find((t) => t.id === typeId);
@@ -1414,6 +1767,42 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
         </p>
       ) : null}
       {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+
+      {/* The gym's own record said no to this redemption, and the way past it.
+          The same panel as the check-in bar, because it is the same decision
+          about the same person — it was simply never asked here. */}
+      {refusedTake ? (
+        <div style={{
+          margin: '0 14px 14px', padding: '11px 13px', background: 'var(--surface2)',
+          border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
+        }}>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--ink2)', maxWidth: '78ch' }}>
+            <strong style={{ color: 'var(--ink)' }}>Not taken.</strong> {refusedTake.admission.reason}
+          </p>
+          <p style={{ margin: '8px 0 9px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '78ch' }}>
+            Nothing has been written: the pass still has {remainingUses(refusedTake.pass)} on it. Take it
+            anyway if you can see the record is behind — what you type goes onto the visit.
+          </p>
+          <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+            <input
+              value={takeWhy} onChange={(e) => setTakeWhy(e.target.value)}
+              placeholder="Why this visit is being taken anyway"
+              aria-label="Why this pass is being taken anyway"
+              style={{ ...field, flex: 2, minWidth: 220 }}
+            />
+            <button
+              type="button" disabled={!takeWhy.trim() || taking !== null}
+              onClick={() => void take(refusedTake.pass, takeWhy.trim())}
+              style={{ ...btn, flex: 'none', opacity: takeWhy.trim() ? 1 : 0.5 }}
+            >
+              Take it anyway
+            </button>
+            <button type="button" style={linkBtn} onClick={() => { setRefusedTake(null); setTakeWhy(''); }}>
+              Leave it
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {summary && summary.revenueCents == null && summary.issued > 0 ? (
         <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>

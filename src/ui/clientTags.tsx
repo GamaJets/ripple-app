@@ -9,7 +9,7 @@
 // reaches. A coach picking "comp prep" over an unread tag map sends to nobody,
 // or to a subset, and the screen reports it sent. `status` is what lets the
 // broadcast screen refuse to target a segment it could not actually read.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
@@ -28,6 +28,10 @@ interface TagsValue {
   /** Resolves true only when the tag was actually removed. A refused delete
    *  means the client is still in that audience on the server. */
   removeTag: (clientId: string, tag: string) => Promise<boolean>;
+  /** Read the tag map again. Under 'error' `allTags` is a subset of unknown
+   *  size and the segment chips built from it are missing people, so a screen
+   *  that sends to a segment needs a way to ask a second time. */
+  reload: () => void;
 }
 
 // The map starts empty, and nothing seeds it. It used to be initialised with
@@ -45,6 +49,11 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
   const [map, setMap] = useState<Record<string, string[]>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload` below, in the read's dependency array beside `authRev`
+  // so a refresh runs the one read this provider has rather than a second copy
+  // of it — the merge-not-assign rule at the bottom of it is the whole reason
+  // an optimistic tag survives a refresh, and is not worth duplicating.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -88,7 +97,12 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   const addTag = async (clientId: string, raw: string): Promise<boolean> => {
     const tag = norm(raw); if (!tag) return false;
@@ -122,7 +136,7 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
 
   const tagsFor = (clientId: string) => map[clientId] || [];
 
-  return <Ctx.Provider value={{ tagsFor, allTags, status, addTag, removeTag }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ tagsFor, allTags, status, addTag, removeTag, reload }}>{children}</Ctx.Provider>;
 }
 
 export function useClientTags(): TagsValue {

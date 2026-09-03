@@ -133,9 +133,15 @@ export interface PackBalance {
    *  top is the one the next booking comes off. Matches the `order by
    *  created_at asc` in `redeem_pack_session`. */
   lines: PackLine[];
-  /** Sessions left across every pack. **`null` means the history was not read**,
-   *  and is not the same as 0. A screen may print 0; it may not print null as a
-   *  figure. */
+  /**
+   * Sessions left that can actually be BOOKED, across every pack whose window
+   * is still open. **`null` means the history was not read**, and is not the
+   * same as 0. A screen may print 0; it may not print null as a figure.
+   *
+   * A pack whose window has closed contributes nothing here, whatever its own
+   * `left` says — see the note on the reduce in `packBalance`, and
+   * `onClosedPacks` below for where those credits went.
+   */
   left: number | null;
   /** Packs with something left on them. */
   live: number;
@@ -157,6 +163,23 @@ export interface PackBalance {
    * history with nothing stranded in it.
    */
   stranded: number | null;
+  /**
+   * Credits sitting on a pack whose window has already closed.
+   *
+   * A different figure from `stranded`, and the difference is who put them
+   * there. `stranded` is what the expiry pass took off — `sessions_expired`,
+   * written once, by `run_pack_expiry()`. This is what has arrived on a closed
+   * pack SINCE: `refund_pack_session` gives a credit back to the newest pack
+   * with usage and does not ask whether that pack is over, so a late
+   * cancellation on an expired pack lands here.
+   *
+   * Nought on nearly every client, which is the point — it is the figure that
+   * is nought until something has gone wrong for somebody, and it is counted
+   * rather than dropped so that a screen can start that conversation instead of
+   * a balance quietly disagreeing with itself. `null` for the same reason
+   * `left` is.
+   */
+  onClosedPacks: number | null;
 }
 
 /**
@@ -199,7 +222,7 @@ export function packBalance(
   rows: readonly PackPurchase[] | null | undefined,
   names?: ReadonlyMap<string, string | null> | null,
 ): PackBalance {
-  if (rows == null) return { lines: [], left: null, live: 0, exhausted: 0, expired: 0, stranded: null };
+  if (rows == null) return { lines: [], left: null, live: 0, exhausted: 0, expired: 0, stranded: null, onClosedPacks: null };
 
   const lines: PackLine[] = [];
   for (const r of rows) {
@@ -246,7 +269,25 @@ export function packBalance(
 
   return {
     lines,
-    left: lines.reduce((a, l) => a + l.left, 0),
+    // EXPIRED PACKS ARE NOT IN THIS FIGURE, and the line below is why the two
+    // used to disagree. `live` has always excluded a closed pack — "nothing can
+    // be booked against it" — and `left` summed every line including those, so
+    // one number said a pack was dead and the next one spent its credits.
+    //
+    // Usually the sum is the same either way: `run_pack_expiry()` reduces
+    // `sessions_total` to `sessions_used`, so a pack it has closed has a `left`
+    // of nought and contributes nothing. The case where it is not the same is
+    // the one that matters: `refund_pack_session` (part 123) decrements
+    // `sessions_used` on the newest pack with usage, and it does not care
+    // whether that pack's window has closed. A client whose session is refunded
+    // onto an expired pack gets a credit back that nothing in the database will
+    // ever let them draw — and their balance went up by one, on their own
+    // screen, on a pack that is over.
+    //
+    // Not dropped, either. `onClosedPacks` below counts exactly what came out
+    // of this figure, because a credit somebody paid for that quietly stopped
+    // being counted is the silent subtraction this file exists to refuse.
+    left: lines.reduce((a, l) => a + (l.expired ? 0 : l.left), 0),
     // A pack whose window has closed is not live, whatever `left` says about
     // it — nothing can be booked against it, which is the only thing "live"
     // means to somebody looking at their own packs.
@@ -254,6 +295,7 @@ export function packBalance(
     exhausted: lines.filter((l) => l.exhausted).length,
     expired: lines.filter((l) => l.expired).length,
     stranded: lines.reduce((a, l) => a + l.sessionsExpired, 0),
+    onClosedPacks: lines.reduce((a, l) => a + (l.expired ? l.left : 0), 0),
   };
 }
 
@@ -265,10 +307,18 @@ export function packBalance(
  * result, more than one, or a word from a newer schema. It is deliberately NOT
  * folded into 'no_pack': "we could not tell" and "you never had one" are
  * different sentences, and only one of them is safe to say to a paying client.
+ *
+ * 'expired' is part 661's answer and only part 661's: the coach asked to move a
+ * credit on a pack whose validity window has closed. It is its own word rather
+ * than folded into 'exhausted' because the two are the opposite sentences point
+ * 3 of this file's header is about — one is somebody who got what they paid for
+ * and one is somebody who did not — and because giving a credit back to a
+ * closed pack would put one on a balance that no draw site in the database will
+ * ever spend.
  */
-export type DrawOutcome = 'drawn' | 'returned' | 'exhausted' | 'nothing_to_return' | 'no_pack' | 'unknown';
+export type DrawOutcome = 'drawn' | 'returned' | 'exhausted' | 'nothing_to_return' | 'no_pack' | 'expired' | 'unknown';
 
-const KNOWN: ReadonlySet<string> = new Set<string>(['drawn', 'returned', 'exhausted', 'nothing_to_return', 'no_pack']);
+const KNOWN: ReadonlySet<string> = new Set<string>(['drawn', 'returned', 'exhausted', 'nothing_to_return', 'no_pack', 'expired']);
 
 /** One row of the RPC's answer, once it has been believed. */
 export interface Draw {
@@ -349,6 +399,12 @@ export function drawReason(d: Draw): string | undefined {
     case 'no_pack': return undefined;
     case 'exhausted': return 'every session on your pack is already used';
     case 'nothing_to_return': return 'nothing had been drawn off it to give back';
+    // Never reachable from the two client-side functions, which do not return
+    // this word. It is here so that a screen calling `adjust_pack_credit` has a
+    // sentence rather than a silence, and so that the switch is exhaustive over
+    // the union rather than falling through to `undefined`, which reads as
+    // "nothing to explain" and would leave a coach's tap doing nothing quietly.
+    case 'expired': return 'that pack’s window has closed, so a credit put back on it could never be booked';
     case 'unknown': return 'we could not confirm the change with the server';
     default: return undefined;
   }

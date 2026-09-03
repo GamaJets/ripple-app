@@ -15,22 +15,31 @@
 // one churn puts a number in front of an owner that answers a question they did
 // not ask, under a word that means the one they did.
 //
-// ── Why the real figure is not here instead ───────────────────────────────
+// ── And the real figure, which is now here as well ────────────────────────
 //
-// Because the record cannot produce it. `app/(owner)/financials.tsx` sets the
-// constraint out at length and it is worth restating rather than re-deriving:
-// nothing in `memberships` records WHEN a membership was cancelled. `status`
-// moves to 'cancelled' in place, and `ends_on` is only set on a fixed term, so
-// a member who left in March and one who left last week are the same row today.
-// Any monthly churn figure built on this handset would be a guess dressed as a
-// measurement, and this screen has no business being the place that invents it.
+// Naming the trainer figures honestly was half the job. The other half was that
+// this screen then said member churn "is not derived anywhere on this handset"
+// — true, and the actual defect: the number a gym runs on could only be got at
+// from a laptop.
 //
-// So the labels changed and no number did. Every heading says trainers, and the
-// note under the hero says plainly that member churn is not on this screen and
-// what would have to be recorded for it to be. The console's /analytics screen
-// derives it from `ends_on` where every ended membership carries one, and
-// withholds it where they do not — which is the same answer arrived at with
-// more of the record to hand, not a different one.
+// The constraint that sentence was built on is real and unchanged.
+// `app/(owner)/financials.tsx` sets it out: nothing in `memberships` records
+// WHEN a membership was cancelled. `status` moves to 'cancelled' in place, and
+// `ends_on` is only set where somebody set it, so a member who left in March and
+// one who left last week can be the same row today. What does not follow is that
+// no figure may be derived — the console's Analytics page has derived one all
+// along, from `ends_on` where every ended membership carries one, and withheld
+// it where they do not.
+//
+// So the same derivation runs here, over the same table, through the same
+// module: src/lib/memberChurn.ts, read by `useMemberChurn()` in
+// src/ui/memberChurn.ts. Not a phone-shaped approximation of the console's
+// answer — literally the same functions, so the two surfaces cannot report
+// different churn for the same gym on the same day. Where the record cannot
+// carry a rate the handset withholds it and says which of the four reasons it
+// was, exactly as the console does: the month is still running, an ended
+// membership has no end date, somebody left with no start date recorded, or
+// there was nobody on the books to be a share of.
 //
 // Promo rows carry a real redemption count. They once appended "· N redeemed"
 // over `promos.redeemed`, a column whose only write was the literal `0` at
@@ -43,7 +52,7 @@
 // (`src/theme/scale`): three bordered stat boxes and four stacked cards became
 // one hero figure plus hairline-separated sections, and the Georgia serif
 // header is gone.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -53,7 +62,10 @@ import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../
 import { DistBar } from '../../src/ui/charts';
 import { usePromos } from '../../src/ui/promos';
 import { usePlatformTrainers } from '../../src/ui/trainers';
+import { useMemberChurn, PHONE_MONTHS } from '../../src/ui/memberChurn';
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { gymRollup, cohorts, clientAnalytics, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 
@@ -61,17 +73,46 @@ const DISCOUNTS = [10, 20, 30, 50];
 
 export default function OwnerGrowth() {
   const t = useTheme();
-  const { promos, status: promoStatus, addPromo, toggleActive, removePromo } = usePromos();
+  const { promos, status: promoStatus, addPromo, toggleActive, removePromo, refresh: refreshPromos } = usePromos();
   // The roster read has to be waited on. Every count on this screen — new this
   // month, idle, the whole funnel — is derived from `trainers`, so before it
   // returns the hero read "+0 new trainers" over "No trainers yet" and the
   // retention row reported 0% idle. An owner checking whether their growth push
   // worked was shown a month with no signups by a query that had not finished.
   const { trainers, loading, status: trainersStatus, refresh } = usePlatformTrainers();
-  /** When the roster every figure on this screen is a roll-up of last came
-   *  back. 'ready' only — a failed retry must not move the stamp. */
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  useEffect(() => { if (trainersStatus === 'ready') setFetchedAt(Date.now()); }, [trainersStatus]);
+  // The gym's own members — joiners, leavers and the rate between them, from
+  // the same module the console's Analytics page uses. Its own read and its own
+  // three states: the roster failing has nothing to do with the roster of
+  // trainers failing, and a screen that folded them together would blame one
+  // for the other.
+  const churn = useMemberChurn();
+  /** When the roster the trainer figures are a roll-up of last came back.
+   *  'ready' only — a failed retry must not move the stamp. */
+  const [trainersAt, setTrainersAt] = useState<number | null>(null);
+  useEffect(() => { if (trainersStatus === 'ready') setTrainersAt(Date.now()); }, [trainersStatus]);
+  /** And when the memberships did. Two reads, two stamps. */
+  const [churnAt, setChurnAt] = useState<number | null>(null);
+  useEffect(() => { if (churn.status === 'ready') setChurnAt(Date.now()); }, [churn.status]);
+  /** And the promo codes, which are the third read on this screen and were in
+   *  neither the stamp nor the refresh — so the codes section sat at whatever
+   *  the first read returned while the line above it said "Read just now". */
+  const [promosAt, setPromosAt] = useState<number | null>(null);
+  useEffect(() => { if (promoStatus === 'ready') setPromosAt(Date.now()); }, [promoStatus]);
+  /**
+   * The OLDEST of the three, which is the only honest thing one stamp can say
+   * about three reads.
+   *
+   * There is one "Read just now" at the top of a screen that draws from three
+   * independent reads. Showing the newest of them would put a fresh timestamp
+   * over a member churn section that had not been refreshed in twenty minutes —
+   * the staleness marker exists precisely to stop that. Null while any has yet
+   * to land, because "read 2 minutes ago" over a section that has never been
+   * read is worse than "Reading…". `oldestFetch` is that rule, with the test.
+   */
+  const fetchedAt = oldestFetch(trainersAt, churnAt, promosAt);
+  /** All three, or the gesture leaves part of the screen stale. */
+  const refreshAll = useCallback(() => { refresh(); churn.refresh(); void refreshPromos(); }, [refresh, churn.refresh, refreshPromos]);
+  const pull = usePullToRefresh(refreshAll);
   // And having waited on it, the read can still have FAILED — which leaves
   // `trainers` empty with `loading` false, i.e. exactly the state the paragraph
   // above describes, permanently. "+0 new trainers" over "No trainers yet", and
@@ -145,13 +186,13 @@ export default function OwnerGrowth() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Trainer acquisition &amp; retention</Text>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Members and trainers</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Growth</Text>
-          <Fetched at={fetchedAt} onRefresh={refresh} busy={loading} />
+          <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading || churn.loading} />
         </View>
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
@@ -171,16 +212,110 @@ export default function OwnerGrowth() {
         />
 
         {/* Under the hero, not buried at the bottom: this is the sentence that
-            stops every trainer figure below being read as a member figure.
-            No number is offered in its place — see the header for why the
-            record cannot produce one. */}
+            stops every trainer figure below being read as a member figure. It
+            used to end by saying member churn was not derived anywhere on this
+            handset. It is, now — immediately below, and pointed at from here so
+            an owner reading the hero knows where the other question is
+            answered. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-          Everything below counts trainers. Member churn is not on this screen and is not
-          derived anywhere on this handset: nothing in the membership record says WHEN a
-          membership was cancelled, so a monthly rate built from it would be a guess. The
-          console&rsquo;s Analytics page works it out from end dates where every ended
-          membership carries one, and withholds it where they do not.
+          The hero above and the trainer sections lower down count trainers. Your
+          members are counted separately, in Member Churn below.
         </Text>
+
+        <Rule />
+
+        {/* ── member churn ───────────────────────────────────────────────── */}
+        {/* The question a gym owner came to a tab called Growth to ask, which
+            this screen used to answer by explaining that it could not. */}
+        <Section>
+          <SectionHead
+            title="Member Churn"
+            note={churn.headline.label ?? undefined}
+          />
+          {/* A KpiRow and not a second <Hero>. The kit's hero is the screen's
+              ONE figure and this screen already has one; two of them side by
+              side make an owner decide which number the tab is about, which is
+              the confusion this whole file exists to end. */}
+          <KpiRow items={[
+            // `fig` renders null as a dash. Every one of the reasons a rate is
+            // withheld arrives here as null and the sentence below says which
+            // — "0%" would be the best figure on the scale, handed to an owner
+            // who has no figure at all.
+            { label: 'Churn', value: fig(churn.headline.pct),
+              unit: churn.headline.pct == null ? undefined : '%',
+              // The month the figure is about. Null only when no month on
+              // offer has finished, and the sentence below then says so in
+              // full rather than this repeating it in miniature.
+              delta: churn.headline.label ?? 'no finished month yet' },
+            { label: 'Joined', value: fig(churn.lastClosed?.joined ?? null),
+              delta: churn.lastClosed ? churn.lastClosed.label : 'no finished month yet' },
+            { label: 'Left', value: fig(churn.lastClosed?.left ?? null),
+              delta: churn.lastClosed ? churn.lastClosed.label : 'no finished month yet' },
+          ]} />
+          {/* Always shown, never only on the failure. Under a rate it says what
+              the rate is OVER — "2 of 20 on the books when August began" — and
+              where there is none it says which of the reasons applied. A dash
+              with no sentence beside it is a dash an owner learns to ignore. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {churn.headline.note}
+          </Text>
+          <View style={{ marginTop: sp.md }}>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {churn.loading ? 'Reading your memberships…'
+                : churn.status === 'error' ? `On the books: — (${unreadNote})`
+                // Never `?? 0`. A count that is not known is a dash; a zero
+                // here is the claim that the gym has nobody.
+                : `${churn.onBooks == null ? '—' : num(churn.onBooks)} on the books today`}
+              {churn.undatedJoins ? ` · ${churn.undatedJoins} with no start date on record` : ''}
+              {churn.undatedExits ? ` · ${churn.undatedExits} ended with no end date` : ''}
+            </Text>
+          </View>
+
+          <View style={{ marginTop: sp.xl }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>
+              Last {PHONE_MONTHS} months
+            </Text>
+            {churn.loading ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>Reading your memberships…</Text>
+            ) : churn.status === 'error' ? (
+              // Not "no members left". An empty list under a failed read is
+              // unknown, and the best-looking sentence on the screen is the one
+              // an owner must never be shown on no evidence.
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                Your memberships could not be read, so nobody could be counted arriving or
+                leaving. This is not a gym that nobody left.
+              </Text>
+            ) : !churn.months || churn.months.length === 0 ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>No month to draw yet.</Text>
+            ) : churn.months.map((mo) => (
+              <View key={mo.key} style={{ paddingVertical: sp.sm }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ ...ty.caption, color: mo.running ? t.ink3 : t.ink2 }}>
+                    {mo.label}{mo.running ? ' · running' : ''}
+                  </Text>
+                  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
+                    +{mo.joined} · −{mo.left}
+                    {mo.churn == null ? '' : ` · ${(mo.churn * 100).toFixed(1)}%`}
+                  </Text>
+                </View>
+                {/* The reason, in the month's own words, wherever there is no
+                    rate. A row of dashes an owner cannot account for is a row
+                    they learn to ignore. */}
+                {mo.churn == null ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{mo.churnNote}</Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
+
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+            Churn is leavers over the roster the month opened with, counted per person
+            rather than per membership row. A month still running has no rate — the
+            leavers it has not had yet have not happened. Nothing in the record says WHEN
+            a membership was cancelled, only the end date somebody wrote, so a month that
+            lost anybody undated withholds the rate rather than printing the smaller one.
+          </Text>
+        </Section>
 
         <Rule />
 
@@ -218,12 +353,14 @@ export default function OwnerGrowth() {
               it names somebody else's product: these are the members of THEIR
               gym, counted through the coaches who carry them. Overview settled
               this when it stopped saying "Repple HQ · Platform". */}
-          {/* The one section on this screen that does count members — as a
-              headcount today, through the coaches who carry them. It is not a
-              growth figure and nothing here subtracts anybody: a member who
-              left simply stops being counted, on a date the record does not
-              hold. */}
-          <SectionHead title="Your Members" note="Counted today, across every trainer" />
+          {/* Members counted a SECOND way, and the difference matters enough to
+              say: this is a headcount today through the coaches who carry them,
+              which is not the same population as the memberships Member Churn
+              is drawn from. A member with no coach is in the churn section and
+              not in this one. Neither is wrong and they will not agree — so
+              they are separately headed rather than folded together, and
+              nothing here subtracts anybody. */}
+          <SectionHead title="Clients Of Your Trainers" note="Counted today, through the roster" />
           <KpiRow items={[
             { label: 'Active Clients', value: trainersUnknown ? '—' : fig(num(ca.total)) },
             { label: 'Engaged', value: trainersUnknown ? '—' : fig(ca.engagementPct), unit: trainersUnknown || ca.engagementPct == null ? undefined : '%' },

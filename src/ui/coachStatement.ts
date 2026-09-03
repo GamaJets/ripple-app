@@ -16,7 +16,7 @@
 // promises no order between tied rows. Every page function below therefore
 // orders on its date column AND on `id`.
 //
-// ── Eight reads, eight statuses ────────────────────────────────────────────
+// ── Twelve reads, twelve statuses ──────────────────────────────────────────
 //
 // They fail independently and they are reported independently. One refused read
 // must not blank the other five, and it must not be rendered as a zero: telling
@@ -37,8 +37,9 @@ import type { LoadStatus } from './loadStatus';
 import type { TakenRow } from '../lib/coachMoney';
 import {
   periodBoundsIso,
-  type PayoutKnowledge, type StatementCharge, type StatementInput,
-  type StatementInvoice, type StatementPayout, type StatementPeriod, type StatementSession,
+  type PayoutKnowledge, type StatementCharge, type StatementCost, type StatementDispute,
+  type StatementInput, type StatementInvoice, type StatementPayout, type StatementPeriod,
+  type StatementRefund, type StatementSession,
 } from '../lib/coachStatement';
 // The coach's own name, read once for the whole app. Reusing it rather than
 // writing a second `profiles.full_name` read is what stops the statement and
@@ -119,6 +120,9 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
     lateCancellations: { status, rows: [] },
     payouts: { status, hasAccount: false, chargesEnabled: false, detailsSubmitted: false },
     payoutsPaid: { status, rows: [] },
+    refunds: { status, rows: [] },
+    disputes: { status, rows: [] },
+    costs: { status, rows: [] },
     generatedAt,
   });
 
@@ -130,7 +134,7 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
   const uid = auth?.user?.id;
   if (!uid) return nothing('error');
 
-  const [issuer, sessions, packs, subs, receipts, invoices, fees, payouts, payoutsPaid] = await Promise.all([
+  const [issuer, sessions, packs, subs, receipts, invoices, fees, payouts, payoutsPaid, refunds, disputes, costs] = await Promise.all([
     fetchInvoiceIssuer(),
 
     // Sessions. Counted, never priced — `rate_cents` is a gym payroll rate and
@@ -222,6 +226,27 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
     fetchPayoutKnowledge(uid),
 
     fetchStatementPayouts(period.from, period.to),
+
+    fetchRefunds(uid, bounds.fromIso, bounds.toIso),
+
+    fetchDisputes(uid, bounds.fromIso, bounds.toIso),
+
+    // Costs the coach recorded themselves (part 450). `paid_on` is a Postgres
+    // `date` and is compared as a CALENDAR DAY, both here and in `splitByDay` —
+    // which is why the bounds are the period's own `from`/`to` strings and not
+    // the instant range. Rent was paid on a day.
+    //
+    // No `.eq('coach_id', uid)`: `coach_costs_owner_read` is `coach_id =
+    // auth.uid()` and there is no other read policy on the table.
+    paged<any>('the costs you recorded yourself in this period', (f, t) => supabase
+      .from('coach_costs')
+      .select('description, category, amount_cents, currency, paid_on')
+      .gte('paid_on', period.from)
+      .lte('paid_on', period.to)
+      .order('paid_on', { ascending: true })
+      .order('id', { ascending: true })
+      .range(f, t) as unknown as PromiseLike<{ data: any[] | null; error: unknown }>)
+      .then((r) => ({ status: r.status, rows: r.rows.map(toCost) })),
   ]);
 
   return {
@@ -235,7 +260,164 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
     lateCancellations: fees,
     payouts,
     payoutsPaid,
+    refunds,
+    disputes,
+    costs,
     generatedAt,
+  };
+}
+
+/**
+ * Money given back, off both money tables.
+ *
+ * ── Two reads, one status ─────────────────────────────────────────────────
+ *
+ * A refund lives on the row it came off: `client_purchases.refunded_cents` for
+ * a pack or membership, `client_subscription_payments.refunded_cents` for a
+ * renewal (part 192, and part 610 for the ones made in the coach's own Stripe
+ * dashboard). Either read failing means NO figure, exactly as it does for
+ * renewals and payouts: a refund total over one of the two tables looks whole
+ * and is short by an unknown amount, and it is the figure that makes the sales
+ * above untrue.
+ *
+ * `.gt('refunded_cents', 0)` rather than a null test, because both columns
+ * default to zero and are never null: a sale nobody has refunded carries a nought
+ * and is not a refund. `refunded_at` is nullable in principle and a server range
+ * filter silently excludes every null, so the range does the excluding — but
+ * unlike `paid_at` and `arrival_on` there is a CHECK behind it: a non-zero
+ * `refunded_cents` cannot exist without a date. A row that somehow carried one
+ * would arrive here with an empty date, be undated in `splitByPeriod`, and be
+ * counted rather than dropped.
+ */
+async function fetchRefunds(uid: string, fromIso: string, toIso: string): Promise<{ status: LoadStatus; rows: StatementRefund[] }> {
+  const what = 'the money you gave back in this period';
+  type Row = { amount_cents?: unknown; refunded_cents: number | string | null; currency: string | null; refunded_at: string | null };
+  const [sales, renewals] = await Promise.all([
+    paged<Row>(what, (f, t) => supabase
+      .from('client_purchases')
+      .select('refunded_cents, currency, refunded_at')
+      .eq('trainer_id', uid)
+      .gt('refunded_cents', 0)
+      .gte('refunded_at', fromIso)
+      .lt('refunded_at', toIso)
+      .order('refunded_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(f, t) as unknown as PromiseLike<{ data: any[] | null; error: unknown }>),
+    paged<Row>(what, (f, t) => supabase
+      .from('client_subscription_payments')
+      .select('refunded_cents, currency, refunded_at')
+      .eq('trainer_id', uid)
+      .gt('refunded_cents', 0)
+      .gte('refunded_at', fromIso)
+      .lt('refunded_at', toIso)
+      .order('refunded_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(f, t) as unknown as PromiseLike<{ data: any[] | null; error: unknown }>),
+  ]);
+
+  const status: LoadStatus = sales.status === 'ready' && renewals.status === 'ready'
+    ? 'ready'
+    : (sales.status === 'error' || renewals.status === 'error') ? 'error' : 'partial';
+
+  const rows: StatementRefund[] = [
+    ...sales.rows.map((r): StatementRefund => ({
+      refundedCents: toInt(r.refunded_cents),
+      currency: (r.currency || '').trim() || null,
+      refundedAt: r.refunded_at ?? '',
+      on: 'sale',
+    })),
+    ...renewals.rows.map((r): StatementRefund => ({
+      refundedCents: toInt(r.refunded_cents),
+      currency: (r.currency || '').trim() || null,
+      refundedAt: r.refunded_at ?? '',
+      on: 'renewal',
+    })),
+  ];
+  return { status, rows };
+}
+
+/**
+ * Chargebacks raised against the coach's charges (part 611), plus the ones this
+ * app cannot date.
+ *
+ * `opened_at` is when the card issuer raised it, which is the day the money
+ * left the coach's balance — `DISPUTE_MONEY_IS_ALREADY_GONE` in
+ * src/lib/disputes.ts — and it is what the period is measured on. It is also
+ * NULLABLE, and a server filter on a range silently excludes every null: a
+ * chargeback this app was told about but never given a date for would vanish
+ * from every statement of every period, and from every count of what is
+ * missing.
+ *
+ * So the undated rows are read too and handed to the pure module with their
+ * empty date intact, exactly as `fetchRenewals` and `fetchStatementPayouts` do
+ * it. `splitByPeriod` puts them in no period and counts them, and the statement
+ * says how many there were.
+ *
+ * Every status is read, not just the open ones. Which are still live is
+ * `closedAt`'s answer and it is given in the pure module; filtering here would
+ * hide the ones that were LOST, which are the money the coach actually no
+ * longer has.
+ */
+async function fetchDisputes(uid: string, fromIso: string, toIso: string): Promise<{ status: LoadStatus; rows: StatementDispute[] }> {
+  const what = 'the chargebacks raised against you in this period';
+  // Named for its own table rather than a bare `cols`. `fetchStatementPayouts`
+  // above holds a `cols` too, and check:schema resolves a select passed as a
+  // variable by that identifier — two of them in one file and it reads the
+  // payout columns against `client_disputes`, and reports `arrival_on` as a
+  // column named by the app and declared nowhere.
+  const disputeCols = 'amount_cents, currency, status, reason, opened_at, closed_at';
+  const [inRange, undated] = await Promise.all([
+    paged<any>(what, (f, t) => supabase
+      .from('client_disputes')
+      .select(disputeCols)
+      .eq('trainer_id', uid)
+      .gte('opened_at', fromIso)
+      .lt('opened_at', toIso)
+      .order('opened_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(f, t) as unknown as PromiseLike<{ data: any[] | null; error: unknown }>),
+    paged<any>(what, (f, t) => supabase
+      .from('client_disputes')
+      .select(disputeCols)
+      .eq('trainer_id', uid)
+      .is('opened_at', null)
+      .order('id', { ascending: true })
+      .range(f, t) as unknown as PromiseLike<{ data: any[] | null; error: unknown }>),
+  ]);
+
+  // Either half failing means no figure, as it does for renewals and payouts. A
+  // total over the dated rows alone, with the undated ones unread and therefore
+  // uncounted, is a total that looks whole and is short by an unknown amount.
+  const status: LoadStatus = inRange.status === 'ready' && undated.status === 'ready'
+    ? 'ready'
+    : (inRange.status === 'error' || undated.status === 'error') ? 'error' : 'partial';
+
+  return { status, rows: [...inRange.rows, ...undated.rows].map(toDispute) };
+}
+
+function toDispute(r: any): StatementDispute {
+  return {
+    amountCents: toInt(r.amount_cents),
+    currency: (r.currency || '').trim() || null,
+    // Stripe's own status word, verbatim and uncoerced. Nothing here reads it
+    // as an outcome; the pure module only asks whether it has been closed.
+    status: String(r.status ?? ''),
+    reason: (r.reason || '').trim() || null,
+    openedAt: r.opened_at ?? '',
+    closedAt: r.closed_at ?? null,
+  };
+}
+
+function toCost(r: any): StatementCost {
+  return {
+    description: r.description ?? '',
+    category: String(r.category ?? '').trim(),
+    amountCents: toInt(r.amount_cents),
+    currency: (r.currency || '').trim() || null,
+    // A `date` column arrives as a bare `YYYY-MM-DD` and stays one. An empty
+    // string will not match a day, which keeps an undated cost out of every
+    // period rather than sweeping it into this one.
+    paidOn: String(r.paid_on ?? '').slice(0, 10),
   };
 }
 

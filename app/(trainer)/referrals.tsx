@@ -27,8 +27,8 @@
 // And joined is never converted. A signup, a first session and a first payment
 // are three different promises; the database can keep the middle one, and both
 // halves are always on the row so that neither can be read as the other.
-import { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { useCallback, useMemo } from 'react';
+import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -36,6 +36,7 @@ import { Rule, Section, SectionHead, Ghost, Notice, PartialRead } from '../../sr
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useCoachReferrals } from '../../src/ui/coachReferrals';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   coachSummaryLine, referrerLine, CONVERSION_RULE,
   COACH_REWARD_NOTE, COACH_REFERRAL_PRIVACY_NOTE,
@@ -46,12 +47,14 @@ export default function CoachReferrals() {
   const router = useRouter();
   const r = useRoster();
   const { status, rows, reload } = useCoachReferrals();
-  const [refreshing, setRefreshing] = useState(false);
-
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    try { await reload(); } finally { setRefreshing(false); }
-  }, [reload]);
+  // Was four hand-written lines of refreshing state. The shared hook is the
+  // same read with the second-pull guard and the minimum spinner the local
+  // copy never had — and the roster is refreshed alongside it, because the
+  // names on these rows come from there.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([reload(), r.refresh()]),
+    [reload, r],
+  ));
 
   /**
    * The coach's own name for this client, where the roster has one.
@@ -78,7 +81,7 @@ export default function CoachReferrals() {
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); }} tintColor={t.ink3} />}
+        refreshControl={pull}
       >
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>

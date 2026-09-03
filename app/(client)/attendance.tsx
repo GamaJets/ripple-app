@@ -26,7 +26,8 @@
 // streak that never actually broke. The weekly strip below shows what was
 // recorded and marks the weeks it knows nothing about as exactly that.
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -106,6 +107,10 @@ export default function Attendance() {
     setRefreshing(true);
     try { await reload(); } finally { setRefreshing(false); }
   }, [reload]);
+  // Was four hand-written lines of RefreshControl. The shared hook is the same
+  // gesture with the thing those lines never had: a second pull arriving while
+  // the first read is in flight is ignored rather than firing it again.
+  const pull = usePullToRefresh(refresh);
 
   // Only from a whole read. 'partial' is excluded for the same reason 'error'
   // is: the rows are real and a count over them is a subtotal shown as a total.
@@ -170,7 +175,7 @@ export default function Attendance() {
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); }} tintColor={t.ink3} />}
+        refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

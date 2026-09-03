@@ -20,7 +20,7 @@
 // `weightKind` below, rather than at each of the eight places a unit is printed.
 //
 // The arithmetic is in src/lib/goalTargets.ts, where it is tested.
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -32,6 +32,7 @@ import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightToKg, weightDeltaIn, kgToLb, readNumber, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { useGoalTracker } from '../../src/ui/goalTracker';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   progressOf, projectionOf, goalLabel, isMeasured, isOverdue, sortGoals,
   GOAL_METRIC, MEASURED_KINDS, MIN_TREND_DAYS,
@@ -113,6 +114,8 @@ export default function Goal() {
   const router = useRouter();
   const c = useClientData();
   const g = useGoalTracker();
+  // The targets, and the measurements they are measured against.
+  const pull = usePullToRefresh(useCallback(() => { g.reload(); c.reload(); }, [g.reload, c.reload]));
   // The unit this client reads weight in. Targets are stored in kilograms, the
   // same as every series they are measured against, so this only ever touches
   // what is printed and what comes back out of the entry field (TF-37).
@@ -215,7 +218,7 @@ export default function Goal() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

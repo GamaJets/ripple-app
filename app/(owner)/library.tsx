@@ -25,7 +25,7 @@
 // not a cosmetic glitch. `status` keeps loading / unreadable / capped / really
 // empty apart, and the counts are gated on 'ready' because a count over a
 // truncated read is a wrong number stated confidently.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -35,7 +35,10 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
+import { matchesSearch, fallbackTag } from '../../src/lib/catalogueLocale';
 import { catalogueValue as cap } from '../../src/lib/format';
+import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 
 /** The equipment chip standing for rows where the catalogue records none.
@@ -100,6 +103,19 @@ export default function OwnerLibrary() {
   const { rows, status, reload } = useExerciseCatalogue();
   const [q, setQ] = useState('');
   const [group, setGroup] = useState(ALL);
+
+  /* ── When the catalogue was last read ─────────────────────────────────
+     `useExerciseCatalogue` carries no stamp of its own, so the screen keeps
+     one: the moment `status` last settled on a read that came back. 'error'
+     deliberately does NOT move it — the rows on screen are still the earlier
+     read's, and saying otherwise would be the same lie one layer up. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (status === 'ready' || status === 'partial') setFetchedAt(Date.now());
+  }, [status]);
+  // The catalogue is the one server read behind every figure and row here —
+  // the filters below it are all client-side over the same rows.
+  const pull = usePullToRefresh(useCallback(() => { void reload(); }, [reload]));
   const [kit, setKit] = useState(ALL);
   // Rendered in pages. Hundreds of <ListRow>s mounted at once is a visibly
   // janky scroll on an older phone, and nobody reads past the first screenful.
@@ -122,7 +138,11 @@ export default function OwnerLibrary() {
   const list = useMemo(
     () => rows.filter((r: CatalogueRow) =>
       matches(r.group, group) && matches(r.equipment, kit) &&
-      (term === '' || r.name.toLowerCase().includes(term))),
+      // Both names, always. An owner who learned these movements in English
+      // types "squat" and must find the row their German library shows as
+      // "Kniebeuge"; a German-speaking owner types "Kniebeuge" and must find
+      // the same one. See matchesSearch() in src/lib/catalogueLocale.ts.
+      matchesSearch(term, r.name, r.display)),
     [rows, group, kit, term],
   );
   useEffect(() => { setShown(PAGE); }, [term, group, kit]);
@@ -146,6 +166,13 @@ export default function OwnerLibrary() {
     r.equipment ? cap(r.equipment) : 'Equipment not recorded',
     r.group,
     r.hasDemo ? 'illustrated' : null,
+    // Which rows have no name in the reader's language, said on the row rather
+    // than only on the detail screen. In a list of 619 that IS the report an
+    // owner needs: the untranslated ones are the ones with the marker, and
+    // without it an English name among translated ones simply reads as the
+    // translation. fallbackTag returns null for everybody when the reader is
+    // English, so this line disappears entirely for them.
+    fallbackTag(r.display),
   ].filter(Boolean).join(' · ');
 
   const emptyLine = () => {
@@ -160,7 +187,7 @@ export default function OwnerLibrary() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
-        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={goBack} />
@@ -169,6 +196,8 @@ export default function OwnerLibrary() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
           </View>
         </View>
+
+        <Fetched at={fetchedAt} onRefresh={() => { void reload(); }} busy={status === 'loading'} />
 
         <View style={{ marginTop: sp.lg }}>
           <Hero
@@ -265,7 +294,7 @@ export default function OwnerLibrary() {
                       {i > 0 ? <Rule /> : null}
                       <ListRow
                         icon={r.hasDemo ? 'play' : 'dumbbell'}
-                        title={r.name}
+                        title={r.display.text}
                         note={rowNote(r)}
                         onPress={() => router.push({ pathname: '/(owner)/exercise', params: { name: r.name, from: 'ownerLibrary' } })}
                       />

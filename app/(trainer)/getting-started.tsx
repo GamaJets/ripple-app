@@ -34,6 +34,7 @@
 // are in src/lib/coachFirstRun.ts and tested there; the reads are in
 // src/ui/coachSetup.ts and each says why it can lie by succeeding.
 import { useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -49,6 +50,7 @@ import {
   coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext, NOT_YOUR_SETUP,
   type CoachSetupRow,
 } from '../../src/lib/coachFirstRun';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 export default function CoachGettingStarted() {
   const t = useTheme();
@@ -69,6 +71,14 @@ export default function CoachGettingStarted() {
   // returns, and is still being told to set their currency — which reads as the
   // setting not having saved.
   useFocusEffect(useCallback(() => { void reload(); void refreshDelivery(); }, [reload, refreshDelivery]));
+  // The same two reads focus runs. This is the checklist a new coach works
+  // through, and every line on it is ticked by something they do somewhere
+  // else — often on another device, or on the web — so "I have done that, why
+  // is it not ticked" is the exact question this gesture answers.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([reload(), refreshDelivery()]),
+    [reload, refreshDelivery],
+  ));
 
   const rows = coachSetupRows(facts, delivery.shape);
   const next = coachSetupNext(rows);
@@ -96,7 +106,7 @@ export default function CoachGettingStarted() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -144,7 +154,7 @@ export default function CoachGettingStarted() {
                   </Text>
                 ) : null}
               </View>
-              <View style={{ paddingTop: 4 }}><Icon name="chevron" size={15} color={t.ink3} /></View>
+              <View style={{ paddingTop: 4 }}><Icon name={FORWARD_ICON} size={15} color={t.ink3} /></View>
             </Pressable>
           ))}
         </Section>

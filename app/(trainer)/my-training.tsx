@@ -40,7 +40,8 @@
 // the client's quick-log does — reps and weight are what was recorded, energy
 // was not, and `WorkoutEntry.kcal` left absent renders as a dash everywhere
 // downstream rather than as a fabricated burn in the coach's own history.
-import { useState, useMemo } from 'react';
+import { useCallback, useState, useMemo } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -282,6 +283,13 @@ export default function MyTraining() {
   // been taken, and leaving it there just covers the form.
 
   const cat = useExerciseCatalogue();
+  // Two reads: the trainer's own workout log, and the movement catalogue the
+  // name suggestions are drawn from. The log is the point — a session logged
+  // on another handset is the thing this screen is missing.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([Promise.resolve(reload()), cat.reload()]),
+    [reload, cat],
+  ));
 
   const exSuggestions = useMemo(() => {
 
@@ -330,7 +338,7 @@ export default function MyTraining() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
           {/* ── header. Whose log this is, said before anything else ─────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>

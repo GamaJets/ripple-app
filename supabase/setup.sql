@@ -42442,3 +42442,4886 @@ select cron.schedule(
   '48 7 * * *',
   $cron$ select public.run_open_slot_extension(); $cron$
 );
+
+-- ▶ an-invoice-somebody-paid.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The invoice somebody actually paid, and the one nobody could chase.
+--
+-- Two holes in the same table, both of them the same shape: a fact that came
+-- into existence AFTER the document was issued, with nowhere to be written.
+--
+-- ── 1. A REQUESTED INVOICE CAN NEVER BE SETTLED ───────────────────────────
+--
+-- `kind` is 'received' or 'requested', it is fixed at issue, and part 188 put
+-- it on the immutable list for a reason that is right: it is printed on the
+-- document, and a claim about somebody's payment that changes under a copy they
+-- are already holding is not a claim, it is an edit.
+--
+-- The consequence was never intended. A coach issues invoice 0041 for GBP 480,
+-- the client pays it three weeks later, and there is nothing the coach can do
+-- about it. `invoiceAge()` has exactly two doors out of the ageing list: void
+-- it, or issue a DIFFERENT invoice marked 'received' — which spends a second
+-- number on one charge and leaves the first one on every chase list for ever.
+-- So 0041 sits at "61+ days overdue", is counted in the outstanding figure, is
+-- named on the Money screen, and is picked up by part 613's nightly pass, which
+-- tells the coach four times over two months to chase money they have. The only
+-- other way out is to VOID it, which stamps THIS INVOICE HAS BEEN VOIDED across
+-- a document the client paid in full.
+--
+-- ── The settlement is a NEW FACT, and that is the whole design ────────────
+--
+-- Nothing here rewrites `kind`, and the immutable guard below still refuses to.
+-- Part 138's rule survives untouched: a document once issued says what it said.
+-- What is added is three columns that were not on the document when it was
+-- issued and that record something that happened afterwards — exactly the shape
+-- `reminded_at` and `reminder_count` already have, and for exactly the same
+-- reason those two were allowed to move.
+--
+--   settled_on    the DAY the coach says the money arrived
+--   settled_at    when they recorded it
+--   settle_note   how it arrived, in their own words, or null
+--
+-- They move ONCE and only away from null. There is no un-settle, for part 138's
+-- reason for having no un-void: a coach who has told this app the money came in
+-- and then tells it the money did not is describing a chargeback or a bounced
+-- transfer, which is a different event with a different date, and collapsing
+-- the two into a toggle loses the one thing an accountant needs, which is when.
+--
+-- The document reprints with the settlement on it, as the coach's own statement
+-- and labelled as one. That is not an edit of what it said: it said the money
+-- was being requested, and it still does. It now also says the issuer states it
+-- was paid on a date. Both are true, both are the issuer's word, and a client
+-- re-sent the document after paying should not receive one still demanding
+-- money.
+--
+-- ── 2. AN INVOICE ISSUED BEFORE PART 188 CANNOT BE CHASED ────────────────
+--
+-- `due_on` arrived in part 188 and is immutable, correctly: it is printed on
+-- the document as the day the issuer expects to be paid, and a term that could
+-- move after issue is a term changed under somebody who has read it.
+--
+-- Every invoice issued before that part has `due_on` null, and so does every
+-- one issued since by a coach who left the box alone — which is most of them,
+-- because the box is optional on purpose. `invoiceAge()` reports those as
+-- 'undated', `ageingBook()` puts them on a list of their own, and they are in
+-- NO outstanding figure and on NO chase list. The screen tells the coach so, in
+-- a sentence ending "and cannot be added afterwards". Which is true of a due
+-- date, and left a coach with a year of back catalogue they could see, could
+-- not total, and could not chase.
+--
+-- ── chase_from is not a due date and never appears on the document ────────
+--
+--   chase_from    the day the COACH decided to start chasing this one
+--
+-- It is written after the fact, by the person doing the chasing, about their
+-- own working list. It is NOT printed on the invoice, is not sent to the
+-- client, and `invoiceAge()` words it differently from a due date every single
+-- time it appears — "you set" rather than "you stated", because the client
+-- never agreed to it and in most cases has never seen a date at all.
+--
+-- That distinction is the whole licence for this column. A settable `due_on`
+-- would be a term rewritten under a document; a settable working note is the
+-- coach annotating their own ledger, which is what `reminded_at` already is.
+--
+-- Unlike the settlement it may move more than once: a coach who decides to give
+-- somebody another fortnight is not correcting a record of an event, they are
+-- changing their own plan, and freezing that would be this app deciding when
+-- somebody chases their own customer. It may also be cleared back to null,
+-- which puts the invoice back on the undated list where it started.
+--
+-- ── Why every one of these is a function and not a grant ──────────────────
+--
+-- `coach_invoices` grants SELECT and nothing else, and part 138's header says
+-- why: RLS narrows a grant rather than creating one, so an UPDATE grant on this
+-- table is an UPDATE grant on the row, and the immutable trigger would be the
+-- only thing between an issued amount and anybody who wanted to edit it. The
+-- trigger is a backstop, not the fence.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── The columns ───────────────────────────────────────────────────────────
+
+alter table public.coach_invoices add column if not exists settled_on date;
+alter table public.coach_invoices add column if not exists settled_at timestamptz;
+alter table public.coach_invoices add column if not exists settle_note text;
+alter table public.coach_invoices add column if not exists chase_from date;
+
+-- A settlement is one event and its three columns describe it together. Half a
+-- settlement — a day with no record of when it was written down — is a row no
+-- screen can word honestly, so the pair moves together or not at all.
+alter table public.coach_invoices drop constraint if exists coach_invoices_settled_chk;
+alter table public.coach_invoices add constraint coach_invoices_settled_chk
+  check ((settled_on is null) = (settled_at is null));
+
+-- A note about a settlement that did not happen is a note about nothing.
+alter table public.coach_invoices drop constraint if exists coach_invoices_settle_note_chk;
+alter table public.coach_invoices add constraint coach_invoices_settle_note_chk
+  check (settle_note is null or (settled_on is not null and btrim(settle_note) <> '' and length(settle_note) <= 300));
+
+-- Money cannot arrive for a charge that did not exist yet. Refused rather than
+-- clamped, like every other date in this table.
+alter table public.coach_invoices drop constraint if exists coach_invoices_settled_after_issue;
+alter table public.coach_invoices add constraint coach_invoices_settled_after_issue
+  check (settled_on is null or settled_on >= issued_on);
+
+-- The same rule for the working note. A day to start chasing that falls before
+-- the invoice existed is a typo, and it would sort to the top of an ageing list
+-- as the most urgent thing the coach owns.
+alter table public.coach_invoices drop constraint if exists coach_invoices_chase_after_issue;
+alter table public.coach_invoices add constraint coach_invoices_chase_after_issue
+  check (chase_from is null or chase_from >= issued_on);
+
+-- Voiding and settling are alternatives, not a sequence. A document that says
+-- both that it was cancelled and that it was paid describes two different
+-- outcomes of one charge and tells a reader nothing.
+alter table public.coach_invoices drop constraint if exists coach_invoices_not_both_chk;
+alter table public.coach_invoices add constraint coach_invoices_not_both_chk
+  check (voided_at is null or settled_on is null);
+
+comment on column public.coach_invoices.settled_on is
+  'The DAY the coach says the money for this invoice arrived. Their own word, exactly as `kind` is, and checked against nothing. Written once by settle_coach_invoice() and never moved: reversing a settlement is a chargeback or a bounced transfer, which is a different event on a different date.';
+comment on column public.coach_invoices.settled_at is
+  'When the coach recorded the settlement, as distinct from the day they say the money arrived. Both are needed: a quarter of payments written up in one evening must not all be dated that evening.';
+comment on column public.coach_invoices.settle_note is
+  'How the coach says it arrived, in their own words. Optional, printed verbatim on the reprinted document, and never parsed for anything.';
+comment on column public.coach_invoices.chase_from is
+  'The day the COACH decided to start chasing this one. NOT a due date: it is never printed on the document, was never shown to the client, and exists so that an invoice issued with no due date — which is every invoice issued before part 188 — can be on a chase list at all. May be moved or cleared, because it is the coach''s own plan and not a term anybody agreed to.';
+
+-- The ageing lists read through due_on OR chase_from now, so the partial index
+-- part 188 built on due_on alone misses exactly the rows this part exists to
+-- put on a list. A second partial index rather than a wider one: the two
+-- columns are never queried together and a composite would be scanned for
+-- neither.
+create index if not exists coach_invoices_chase_from_idx
+  on public.coach_invoices (coach_id, chase_from)
+  where chase_from is not null and voided_at is null and settled_on is null;
+
+-- And the settled ones drop off every ageing query, so the index part 188 built
+-- for them should stop carrying rows nobody will ask for again.
+drop index if exists coach_invoices_due_idx;
+create index if not exists coach_invoices_due_idx
+  on public.coach_invoices (coach_id, due_on)
+  where due_on is not null and voided_at is null and settled_on is null;
+
+-- ── The guard, restated with four more columns ────────────────────────────
+--
+-- Verbatim from part 451 plus the rules for the new four. Replaced rather than
+-- extended in place because it lists every immutable column by name and there
+-- is no other way to add one — which is also the reason a new column is
+-- DANGEROUS here: one added without a line in this function is a column
+-- anything reaching this table may rewrite silently.
+create or replace function public.coach_invoices_immutable_guard()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.id is distinct from old.id
+     or new.coach_id is distinct from old.coach_id
+     or new.seq is distinct from old.seq
+     or new.client_id is distinct from old.client_id
+     or new.bill_to is distinct from old.bill_to
+     or new.description is distinct from old.description
+     or new.amount_cents is distinct from old.amount_cents
+     or new.currency is distinct from old.currency
+     -- STILL immutable, and this part does not weaken it. A settlement is a new
+     -- fact recorded beside `kind`, never a rewrite of it: the document said
+     -- the money was being requested and it still says so, and it now also says
+     -- the issuer states it arrived. Flipping this to 'received' would edit a
+     -- sentence on a copy somebody is already holding.
+     or new.kind is distinct from old.kind
+     or new.issued_on is distinct from old.issued_on
+     -- On the list because it is on the DOCUMENT. A due date that could move
+     -- after issue is a term changed under somebody who has already read it.
+     -- `chase_from` below is the settable one precisely because it is NOT here.
+     or new.due_on is distinct from old.due_on
+     -- On the list for the same reason and more sharply. A tax rate or a
+     -- registration number that could move after issue is the field a tax
+     -- authority reads, changed under a document somebody is already holding.
+     or new.tax_rate_pct is distinct from old.tax_rate_pct
+     or new.tax_registration is distinct from old.tax_registration
+     or new.note is distinct from old.note
+     or new.created_at is distinct from old.created_at then
+    raise exception 'an issued invoice cannot be edited — void it and issue another';
+  end if;
+
+  -- The chase columns are the only two an update may move, and they may only
+  -- move forward. `+ 1` rather than `>=` so nothing can jump the count to a
+  -- number no sequence of taps produced, and nothing can reset it to zero.
+  if new.reminder_count is distinct from old.reminder_count
+     and new.reminder_count is distinct from old.reminder_count + 1 then
+    raise exception 'a reminder count moves up by one at a time';
+  end if;
+  if new.reminder_count = old.reminder_count
+     and new.reminded_at is distinct from old.reminded_at then
+    raise exception 'the last-chased time only changes when a chase is recorded';
+  end if;
+
+  -- A settlement is written once and never unwritten. There is no un-settle for
+  -- the same reason there is no un-void: money that came in and then went back
+  -- out is a refund or a chargeback, which happened on its own day and belongs
+  -- in its own record, and a column that could flip back would lose that day.
+  if old.settled_on is not null
+     and (new.settled_on is distinct from old.settled_on
+          or new.settled_at is distinct from old.settled_at
+          or new.settle_note is distinct from old.settle_note) then
+    raise exception 'that invoice is already recorded as settled';
+  end if;
+  -- And it cannot be settled after it has been withdrawn.
+  if old.voided_at is not null and new.settled_on is not null then
+    raise exception 'a voided invoice cannot be settled';
+  end if;
+
+  -- One way only. Un-voiding would put a number back into circulation that the
+  -- coach has already told somebody was cancelled.
+  if old.voided_at is not null then
+    raise exception 'that invoice is already voided';
+  end if;
+  return new;
+end $$;
+
+revoke all on function public.coach_invoices_immutable_guard() from public, anon, authenticated;
+
+drop trigger if exists coach_invoices_immutable on public.coach_invoices;
+create trigger coach_invoices_immutable
+  before update on public.coach_invoices
+  for each row execute function public.coach_invoices_immutable_guard();
+
+-- ── Recording that it was paid ────────────────────────────────────────────
+
+/**
+ * Record that this invoice was settled, on a day the coach names.
+ *
+ * Scoped by `coach_id = auth.uid()` inside the function because SECURITY
+ * DEFINER bypasses the read policy: without it any signed-in account could
+ * mark a stranger's invoice paid.
+ *
+ * Raises rather than updating nothing, for part 138's reason: PostgREST reports
+ * no error for a WHERE that matched nothing, so a settlement the coach believes
+ * was recorded and was not is an invoice that stays on every chase list while
+ * the screen says it came off one.
+ *
+ * `p_settled_on` comes from the DEVICE's local date, like `p_issued_on` does,
+ * and is refused more than a day ahead of the server's — the widest timezone
+ * skew there is. A coach cannot record money as having arrived tomorrow.
+ */
+create or replace function public.settle_coach_invoice(
+  p_id         uuid,
+  p_settled_on date,
+  p_note       text default null
+)
+returns public.coach_invoices
+language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  inv public.coach_invoices;
+  nte text;
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+  if p_id is null then
+    raise exception 'no invoice given';
+  end if;
+  if p_settled_on is null then
+    raise exception 'say which day the money arrived';
+  end if;
+  if p_settled_on > current_date + 1 then
+    raise exception 'money cannot have arrived on a day that has not happened';
+  end if;
+
+  nte := nullif(btrim(coalesce(p_note, '')), '');
+  if nte is not null and length(nte) > 300 then
+    raise exception 'that note is longer than the document can print';
+  end if;
+
+  select * into inv from public.coach_invoices i
+   where i.id = p_id and i.coach_id = uid
+     for update;
+
+  if inv.id is null then
+    raise exception 'that invoice is not one of yours';
+  end if;
+  if inv.voided_at is not null then
+    raise exception 'that invoice is voided, so there is nothing to settle';
+  end if;
+  if inv.settled_on is not null then
+    raise exception 'that invoice is already recorded as settled';
+  end if;
+  -- A 'received' invoice already says the money came in. Settling it would
+  -- record the same event twice, on two dates, on one document.
+  if inv.kind = 'received' then
+    raise exception 'that invoice already states the money was received';
+  end if;
+  if p_settled_on < inv.issued_on then
+    raise exception 'money cannot have arrived before the invoice was written';
+  end if;
+
+  update public.coach_invoices i
+     set settled_on  = p_settled_on,
+         settled_at  = now(),
+         settle_note = nte,
+         -- The working note goes with it. An invoice that has been paid is on
+         -- nobody's chase list and a date saying when to start chasing it is a
+         -- reminder to ask for money that has arrived.
+         chase_from  = null
+   where i.id = p_id and i.coach_id = uid and i.settled_on is null
+   returning * into inv;
+
+  if inv.id is null then
+    raise exception 'that invoice was not settled — nothing was changed';
+  end if;
+  return inv;
+end $$;
+
+revoke all on function public.settle_coach_invoice(uuid, date, text) from public, anon;
+grant execute on function public.settle_coach_invoice(uuid, date, text) to authenticated;
+
+comment on function public.settle_coach_invoice(uuid, date, text) is
+  'Record that a requested invoice was paid, on a day the coach names. Writes settled_on/settled_at/settle_note once and never moves them, and does NOT touch `kind`, which stays exactly what the issued document said. Raises rather than reporting success over zero rows.';
+
+-- ── Deciding when to start chasing one that has no due date ───────────────
+
+/**
+ * Set, move, or clear the day the coach means to start chasing this invoice.
+ *
+ * `p_from` null clears it, which is a real request and not a no-op: it puts the
+ * invoice back on the undated list, which is where it was before anybody made a
+ * plan for it.
+ *
+ * This does NOT write `due_on` and cannot. `due_on` is on the document and on
+ * the immutable list above; this column is the coach's own working note and
+ * appears on no artefact anybody else ever sees.
+ *
+ * There is deliberately no rule that `chase_from` be in the past, or the
+ * future, or near anything. A coach filing a year of back catalogue may set
+ * every one of them to today; a coach who has agreed to wait until March sets
+ * March. Both are plans about their own book.
+ */
+create or replace function public.set_coach_invoice_chase_from(p_id uuid, p_from date)
+returns public.coach_invoices
+language plpgsql security definer set search_path = public as $$
+declare
+  uid uuid := auth.uid();
+  inv public.coach_invoices;
+begin
+  if uid is null then
+    raise exception 'not signed in';
+  end if;
+  if p_id is null then
+    raise exception 'no invoice given';
+  end if;
+
+  select * into inv from public.coach_invoices i
+   where i.id = p_id and i.coach_id = uid
+     for update;
+
+  if inv.id is null then
+    raise exception 'that invoice is not one of yours';
+  end if;
+  if inv.voided_at is not null then
+    raise exception 'that invoice is voided, so there is nothing to chase';
+  end if;
+  if inv.settled_on is not null then
+    raise exception 'that invoice is settled, so there is nothing to chase';
+  end if;
+  if inv.kind = 'received' then
+    raise exception 'that invoice states the money was received, so there is nothing to chase';
+  end if;
+  -- The one refusal that is about the DOCUMENT rather than about the state: an
+  -- invoice that carries a due date is already on a chase list, dated by the
+  -- term the client was actually shown, and a second private date beside it
+  -- would give one invoice two answers to "when is this late".
+  if inv.due_on is not null then
+    raise exception 'that invoice already carries a due date, which is the date it is chased against';
+  end if;
+  if p_from is not null and p_from < inv.issued_on then
+    raise exception 'a date to start chasing from cannot fall before the invoice was written';
+  end if;
+
+  update public.coach_invoices i
+     set chase_from = p_from
+   where i.id = p_id and i.coach_id = uid
+   returning * into inv;
+
+  if inv.id is null then
+    raise exception 'that invoice was not changed';
+  end if;
+  return inv;
+end $$;
+
+revoke all on function public.set_coach_invoice_chase_from(uuid, date) from public, anon;
+grant execute on function public.set_coach_invoice_chase_from(uuid, date) to authenticated;
+
+comment on function public.set_coach_invoice_chase_from(uuid, date) is
+  'Set or clear the coach''s own working note of when to start chasing an invoice that carries no due date. Never writes due_on, which is on the document and immutable. Refuses an invoice that already has a due date, so no invoice ever has two answers to when it is late.';
+
+-- ▶ the-credit-a-refund-does-not-give-back.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The session credit a refund does not give back.
+--
+-- `REFUND_DOES_NOT` in src/lib/refunds.ts is shown to the coach in the confirm
+-- dialog, immediately before somebody's card is credited:
+--
+--   "A refund gives money back and does nothing else. It does not cancel a
+--    subscription, IT DOES NOT PUT A SESSION CREDIT BACK ON A PACK, and it
+--    does not tell your client anything."
+--
+-- Every clause of that is true and every clause but one has somewhere to go
+-- afterwards. A subscription can be cancelled from the same screen; telling the
+-- client is the coach's to do. The credit clause names a consequence and offers
+-- no way to act on it, anywhere in the product.
+--
+-- What that means in practice: a coach refunds two sessions of a ten-pack,
+-- because the client is moving away. The money goes back. The pack still says
+-- eight left, and every one of those eight can still be booked. The client has
+-- been given the money for two sessions AND kept the credits for them, and
+-- nothing on either side of the app says so — the coach's Payments screen shows
+-- the sale as partly refunded, the client's Packages screen shows a balance
+-- that has not moved, and neither screen mentions the other.
+--
+-- ── Why refund_pack_session is not the answer ────────────────────────────
+--
+-- Part 123 has exactly the right function, pointed at the wrong person. It is
+-- scoped `client_id = (select auth.uid())` — the CLIENT calls it, from
+-- `cancelBookedSession`, when they cancel outside the notice window. A coach
+-- calling it would either match nothing or, worse, operate on their own
+-- purchases from some other coach.
+--
+-- It also chooses the pack for the caller: "the newest with usage". That is
+-- right for a cancellation, where the credit belongs to whichever pack paid for
+-- the session. It is wrong here, where the coach is looking at ONE sale they
+-- have just refunded and means that one.
+--
+-- ── The pack this refuses to touch ───────────────────────────────────────
+--
+-- A pack whose window has CLOSED. `run_pack_expiry()` (part 612) reduces
+-- `sessions_total` to `sessions_used`, which is how every draw site in the
+-- database stops at an expired pack without one of them being rewritten.
+-- Decrementing `sessions_used` on such a row leaves `sessions_total -
+-- sessions_used = 1`: a credit that appears on the client's balance and that
+-- nothing in this database will ever let them draw. `packBalance` in
+-- src/lib/packDraw.ts counts exactly those under `onClosedPacks` because they
+-- can already arrive that way through part 123, and this function refuses to
+-- create another one — the coach is told to refund the money instead, which is
+-- the thing that actually reaches the client.
+--
+-- ── What it still does not do ────────────────────────────────────────────
+--
+-- It does not refund money, and it is not called by anything that does. The two
+-- are separate acts on the same screen and stay separate: a coach may take a
+-- credit back without giving money back (a session delivered off the books) and
+-- may give money back without taking a credit (a goodwill refund on a pack the
+-- client is keeping). Bundling them would make one of those two impossible and
+-- neither of them is rare.
+--
+-- It tells the client nothing. Their own balance is the artefact, exactly as
+-- `REFUND_DOES_NOT` says of the money.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Take one session credit back off, or give one back to, a pack the signed-in
+ * COACH sold.
+ *
+ * `p_delta` is +1 or -1 and nothing else. Two named directions rather than two
+ * functions, because the row lock, the ownership check, the expiry refusal and
+ * the row-count check are identical for both and a second copy of them is a
+ * second place for one to be dropped.
+ *
+ *   +1  give a credit back — the coach refunded a session, or the client did
+ *       not get what the pack was drawn for.
+ *   -1  take a credit off — a session was delivered and never marked.
+ *
+ * Answers with a ROW saying what happened rather than relying on the absence of
+ * an error, for part 123's reason: PostgREST reports no error for an UPDATE
+ * matching zero rows, so "no error" is not evidence that a credit moved. A
+ * credit the coach believes was returned and was not is one the client has paid
+ * for twice.
+ */
+create or replace function public.adjust_pack_credit(p_purchase uuid, p_delta int)
+returns table (outcome text, purchase_id uuid, sessions_left int, pack_total int)
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare v_used int; v_total int; v_status text; v_expired timestamptz; n int;
+begin
+  if auth.uid() is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+  if p_purchase is null then
+    raise exception 'No pack given.' using errcode = '22004';
+  end if;
+  if p_delta is null or p_delta not in (1, -1) then
+    raise exception 'A credit moves by one at a time.' using errcode = '22023';
+  end if;
+
+  -- `for update` for part 123's reason: a client's own booking arriving here
+  -- blocks until this commits and then re-reads, rather than reading the
+  -- balance this transaction is about to change.
+  --
+  -- Scoped by `trainer_id = auth.uid()` INSIDE the function, because SECURITY
+  -- DEFINER bypasses the row policies: without it any signed-in account could
+  -- move credits on a stranger's pack.
+  select cp.sessions_used, cp.sessions_total, cp.status, cp.expired_at
+    into v_used, v_total, v_status, v_expired
+    from public.client_purchases cp
+   where cp.id = p_purchase
+     and cp.trainer_id = (select auth.uid())
+     for update;
+
+  if not found then
+    return query select 'no_pack'::text, null::uuid, null::int, null::int;
+    return;
+  end if;
+
+  -- A membership has no credits to move; it is a thing with none, not a thing
+  -- with none left. An abandoned checkout is not a pack anybody bought.
+  if v_total is null or v_status is distinct from 'paid' then
+    return query select 'no_pack'::text, p_purchase, null::int, null::int;
+    return;
+  end if;
+
+  -- The window has closed. Giving a credit back here would put one on the
+  -- client's balance that no draw site in this database will ever spend — see
+  -- the header. Taking one off is refused too, and for a plainer reason: there
+  -- is nothing left on it to take.
+  if v_expired is not null then
+    return query select 'expired'::text, p_purchase, greatest(0, v_total - v_used), v_total;
+    return;
+  end if;
+
+  if p_delta = 1 and v_used <= 0 then
+    -- Nothing has been drawn off it, so there is nothing to give back, and
+    -- inventing one would hand the client a session they never paid for — the
+    -- same defect as swallowing one, pointed the other way.
+    return query select 'nothing_to_return'::text, p_purchase, v_total - v_used, v_total;
+    return;
+  end if;
+  if p_delta = -1 and v_used >= v_total then
+    return query select 'exhausted'::text, p_purchase, 0, v_total;
+    return;
+  end if;
+
+  update public.client_purchases cp
+     set sessions_used = cp.sessions_used - p_delta
+   where cp.id = p_purchase
+     and cp.sessions_used = v_used;
+  get diagnostics n = row_count;
+
+  if n <> 1 then
+    raise exception 'That credit was not moved — nothing was changed.'
+      using errcode = '40001';
+  end if;
+
+  return query select
+    case when p_delta = 1 then 'returned' else 'drawn' end::text,
+    p_purchase,
+    (v_total - (v_used - p_delta)),
+    v_total;
+end $fn$;
+
+revoke all on function public.adjust_pack_credit(uuid, int) from public, anon;
+grant execute on function public.adjust_pack_credit(uuid, int) to authenticated;
+
+comment on function public.adjust_pack_credit(uuid, int) is
+  'Move one session credit on a pack the signed-in COACH sold, in either direction, atomically. The coach-side counterpart of refund_pack_session (part 123), which is scoped to the client and chooses the pack itself. Refuses a pack whose validity window has closed, because a credit returned to one can never be drawn. Answers with a row naming the outcome rather than reporting success over zero rows.';
+
+-- ▶ a-note-that-overwrote-itself.sql
+
+-- ── The note about a member was one line, and it overwrote itself ──────────
+--
+-- `gym_member_records.note` (part 197) is a single text column with no author,
+-- no date and no history, and the form on /members wrote it in place. So:
+--
+--     March   the desk types "complained about the 6am — moved to the 7"
+--     June    somebody types "renewing in June" into the same box
+--
+-- and the March line is gone. No undo, no trace that it changed, nothing that
+-- says a note ever existed. That is the record an owner opens when a member
+-- disputes something, and it is the one thing on the member's file that keeps
+-- the least.
+--
+-- Every gym keeps this as a running list, because a note IS a sequence of
+-- things that were true on a date. A note with no date is not evidence and a
+-- note with no author cannot be asked about.
+--
+-- ── Append-only, and enforced here rather than by a screen ────────────────
+--
+-- There is no UPDATE and no DELETE grant on this table for anybody. Not for the
+-- trainer, not for the owner who wrote the row.
+--
+-- The reason is the same one part 187 gives for `gym_export_runs`: a record the
+-- audited party can edit is worth less than no record at all, because its
+-- CONTENT is then only ever "what somebody was willing to leave there". A note
+-- written in error is answered by another note saying so, which is what a
+-- paper day-book does and what every member of staff already understands.
+--
+-- The cost is real and it is accepted: a typo is permanent, and a note written
+-- against the wrong member cannot be taken back — only contradicted. That is
+-- worse for tidiness and better for the dispute this table exists for. Erasure
+-- is not affected: `member_id` cascades, so deleting the person deletes every
+-- note about them, exactly as part 197 argues for the record itself.
+--
+-- ── The old line is not migrated ──────────────────────────────────────────
+--
+-- `gym_member_records.note` is left alone: not copied, not cleared. Copying it
+-- would invent an author and a date for a line that has neither, and clearing
+-- it would destroy the only note most gyms have while this part is being
+-- applied. The console shows it at the bottom of the list, labelled "written
+-- before notes were kept". The column stays; nothing writes it any more.
+--
+-- Additive and idempotent.
+
+create table if not exists public.gym_member_notes (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  -- on delete cascade, for the reason part 197 gives about the member record
+  -- itself: this is personal data the gym holds ABOUT a person, and an erasure
+  -- request should take it with them. Not `set null` — an orphan note about
+  -- somebody nobody can name is a liability with no use.
+  member_id uuid not null references public.profiles(id) on delete cascade,
+
+  body text not null check (length(btrim(body)) between 1 and 2000),
+
+  written_at timestamptz not null default now(),
+  -- `set null`, unlike member_id: a member of staff leaving the gym must not
+  -- delete the notes they wrote about members who are still there. The note
+  -- then reads as written by an account that has gone, which is true and is a
+  -- different sentence from "nobody wrote it".
+  --
+  -- The default is auth.uid() so a caller that omits it still cannot file a
+  -- note under somebody else's name; the console sends it explicitly because a
+  -- stated value needs no default to be right.
+  written_by uuid default auth.uid() references public.profiles(id) on delete set null
+);
+
+-- The console's read is "this member's notes, newest first", and it is the only
+-- read there is.
+create index if not exists idx_gym_member_notes_member
+  on public.gym_member_notes (tenant_id, member_id, written_at desc);
+
+comment on table public.gym_member_notes is
+  'The running list of what the desk wrote about a member: one row per note, each carrying its author and the moment it was written. Replaces the single overwriting line in gym_member_records.note, which is left in place and shown as an unattributed entry. Append-only — no UPDATE and no DELETE for anybody, because a note its author can quietly rewrite is worth nothing in the dispute it exists for.';
+
+alter table public.gym_member_notes enable row level security;
+
+-- The owner of THIS gym writes and reads. `is_owner_of` is SECURITY DEFINER, so
+-- a policy calling it does not re-enter profiles (28-fix-profiles-recursion).
+drop policy if exists gmn_owner on public.gym_member_notes;
+create policy gmn_owner on public.gym_member_notes
+  for all using (public.is_owner_of(tenant_id))
+  with check (public.is_owner_of(tenant_id));
+
+-- Staff read, exactly as they read the member record these notes came out of
+-- (part 197 argues that at length: the trainer alone at the desk on a Sunday is
+-- the person who needs it). Writing stays with the owner, because a note about
+-- a member is something the gym is accountable for having written.
+drop policy if exists gmn_staff_r on public.gym_member_notes;
+create policy gmn_staff_r on public.gym_member_notes
+  for select using (tenant_id = public.my_tenant() and public.my_role() in ('trainer', 'owner'));
+
+-- Deliberately NO gmn_self_r. The member reads their own gym_member_record
+-- under part 197 and is entitled to; the desk's running notes about them are a
+-- different thing, and a subject-access request for them is a request a person
+-- makes and an owner answers with the export path, not a live feed the subject
+-- watches while it is being written. That is a decision, not an oversight, and
+-- reversing it is one policy.
+
+-- Append-only, stated as grants rather than left to a policy. `for all` above
+-- would otherwise permit an owner to UPDATE their own rows.
+revoke all on public.gym_member_notes from anon, authenticated, public;
+grant select, insert on public.gym_member_notes to authenticated;
+grant all on public.gym_member_notes to service_role;
+
+-- ▶ a-broadcast-that-left-no-record.sql
+
+-- ── A message to dozens of members, and nothing that says who got it ───────
+--
+-- /members can post to a segment. It writes one `announcements` row and, via
+-- `notify_users`, one inbox row per named recipient. Thirty lines further down
+-- the same screen writes a `gym_export_runs` row when a CSV of those same
+-- members leaves the browser.
+--
+-- So taking the list out was audited and shouting at everybody on it was not.
+--
+-- What survives a broadcast today is the announcement: its body, its author,
+-- its time. What does not survive is WHO IT WENT TO. `notify_users` returns a
+-- count and inserts notification rows that point back at no announcement, so
+-- there is no join in this schema from a notice to its recipients. "Who was
+-- told about the closure?" and "was that member on the winback?" have no
+-- answer, for the owner who sent it, the owner who inherits the gym, or
+-- anybody answering for it afterwards.
+--
+-- ── Two halves, and only one of them can be a trigger ─────────────────────
+--
+-- Part 187 argues against console-written audit tables and it is right on every
+-- point: a trigger cannot be forgotten by the next code path, cannot be skipped
+-- from the phone, and cannot be forged by the party being audited.
+--
+-- So the half a trigger CAN see is a trigger. An insert into `announcements`
+-- becomes a `notice-posted` gym event, with `actor_id` taken from the session
+-- rather than from anything the caller states. That is "who posted, and when",
+-- unforgeable, written by the data.
+--
+-- The recipient list is the half no trigger can see. It exists only in the
+-- argument the console passed to `notify_users`, which stores it nowhere. It is
+-- therefore written by the console, with the same caveat and the same
+-- protections as `gym_export_runs`: insert-only, no update, no delete, narrow
+-- enough that there is nothing in it worth forging.
+--
+-- ── Why the body is stored again ──────────────────────────────────────────
+--
+-- The announcement already holds it. It is copied here because the two rows
+-- have different lifetimes: an announcement is a notice board entry an owner
+-- may reasonably delete, and this row may not be deleted at all. A record that
+-- says forty people were told something, and cannot say what, answers half of
+-- the only question anybody asks it.
+--
+-- Additive and idempotent.
+
+create table if not exists public.gym_broadcast_sends (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  sent_at timestamptz not null default now(),
+  -- `set null`: a member of staff leaving must not delete the record of what
+  -- they sent. The row then says the account has gone, which is true and is a
+  -- different sentence from "nobody sent it".
+  sent_by uuid references public.profiles(id) on delete set null,
+
+  -- The segment as the console named it, and the words it showed the sender.
+  -- Both, because the id is what a later query groups by and the label is what
+  -- the person actually read before they pressed the button.
+  segment_id text not null,
+  segment_label text not null,
+
+  -- The half nothing else in this schema keeps. A plain uuid[] rather than a
+  -- join table: nothing needs a recipient to be an object with its own
+  -- history, and the question this answers is a set-membership one — "was this
+  -- member on it". No foreign key, deliberately: these ids are a statement
+  -- about who was addressed AT THE TIME, and it must stay true after somebody
+  -- leaves the gym and their profile is deleted.
+  member_ids uuid[] not null default '{}',
+  recipients integer not null check (recipients >= 0),
+  -- What notify_users reported writing. NULL is UNKNOWN — the RPC answered in a
+  -- shape the console does not understand, or failed after the notice had
+  -- already posted — and is stored as null rather than rounded up to
+  -- `recipients`, which is the one lie this table must not tell.
+  delivered integer check (delivered is null or delivered >= 0),
+
+  body text not null check (length(btrim(body)) between 1 and 4000)
+);
+
+create index if not exists idx_gym_broadcast_sends_tenant
+  on public.gym_broadcast_sends (tenant_id, sent_at desc);
+
+-- "Was this member sent that?" — the question the recipient list exists for.
+create index if not exists idx_gym_broadcast_sends_members
+  on public.gym_broadcast_sends using gin (member_ids);
+
+comment on table public.gym_broadcast_sends is
+  'One row per message posted to a group of members from the console: who sent it, the words, the segment, and the member ids it was addressed to. The recipient list exists nowhere else — notify_users returns a count and writes inbox rows that point back at no announcement. Insert-only, like gym_export_runs: a record of a broadcast the sender can delete would be read, by its absence, as nothing having been sent.';
+
+alter table public.gym_broadcast_sends enable row level security;
+
+drop policy if exists gym_broadcast_sends_owner on public.gym_broadcast_sends;
+create policy gym_broadcast_sends_owner on public.gym_broadcast_sends
+  for all using (public.is_owner_of(tenant_id))
+  with check (public.is_owner_of(tenant_id));
+
+revoke all on public.gym_broadcast_sends from anon, authenticated, public;
+grant select, insert on public.gym_broadcast_sends to authenticated;
+grant all on public.gym_broadcast_sends to service_role;
+
+-- No UPDATE and no DELETE for anybody, exactly as part 187 grants
+-- gym_export_runs. The `for all` policy above would otherwise permit both.
+
+-- ── the half that is written by the data ────────────────────────────────────
+
+-- The closed set from part 187, re-declared whole and widened by one. A CHECK
+-- constraint is replaced rather than added to, so dropping the old one without
+-- restating every kind would silently make twenty of them illegal.
+alter table public.gym_events drop constraint if exists gym_events_kind_check;
+alter table public.gym_events add constraint gym_events_kind_check
+  check (kind in (
+    -- the five from part 105
+    'member-joined', 'trainer-joined', 'session-delivered',
+    'session-missed', 'promo-redeemed',
+    -- money
+    'payment-recorded', 'payment-corrected', 'invoice-raised',
+    'price-changed', 'plan-retired',
+    -- the membership itself
+    'membership-cancelled', 'membership-frozen',
+    -- pay
+    'payroll-settled', 'payroll-reversed',
+    -- the building
+    'equipment-retired', 'equipment-out-of-service',
+    -- the record
+    'month-closed', 'month-reopened', 'record-exported',
+    -- somebody's file was opened
+    'document-opened',
+    -- somebody was told something
+    'notice-posted'
+  ));
+
+create or replace function public.gym_event_notice_posted()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  -- A coach's announcement has no tenant, and `log_gym_event` drops an event it
+  -- cannot place in a gym rather than filing it where nobody can read it. That
+  -- is what confines this to gym notices without a second condition here.
+  perform public.log_gym_event(
+    new.tenant_id, 'notice-posted', null,
+    format('A notice was posted to the gym — %s',
+           case when length(new.body) > 90 then left(new.body, 87) || '…' else new.body end));
+  return new;
+end $fn$;
+
+drop trigger if exists trg_gym_event_notice_posted on public.announcements;
+create trigger trg_gym_event_notice_posted
+  after insert on public.announcements
+  for each row execute function public.gym_event_notice_posted();
+
+-- ▶ the-only-p-and-l-a-gym-had-was-one-key-on-one-phone.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Rent, power, the cleaner, the music licence — everything a gym pays for.
+--
+-- ── What was missing ─────────────────────────────────────────────────────
+--
+-- This database records every penny a gym takes and one kind of penny it
+-- spends. `gym_payments` is money in, `gym_invoices` is money billed,
+-- `payroll_settlements` is money handed to trainers for sessions they
+-- delivered — and that is the whole of the outgoing side. /accounting's
+-- "Money out" reads `payroll_settlements` and nothing else, and says so.
+--
+-- So a gym's rent is nowhere. Nor is its electricity, which for a building
+-- full of treadmills is the second-largest line of the year. Nor water, waste,
+-- the cleaner, the engineer who services the plate-loaded kit, the music
+-- licence, the insurance, the accountant, the stock in the fridge, or the
+-- receptionist — who is not a trainer, is not paid per session, and therefore
+-- never appears in payroll at all.
+--
+-- The one place any of that existed was `app/(owner)/financials.tsx`: eight
+-- numbers an owner types into a form, of which one is called "Total Expenses /
+-- Mo", stored under the AsyncStorage key `repple.owner.financials`. One key, on
+-- one phone. No row, no sync, no backup, no history, no currency of its own,
+-- and a wipe of the app takes the lot. The screen says so three times because
+-- it is true. That single typed figure was the only profit-and-loss this
+-- product held, and every rule engine in src/lib/finReview.ts was scored
+-- against it.
+--
+-- ── THE LINE THIS TABLE MUST NOT CROSS ───────────────────────────────────
+--
+-- Nothing subtracts this from anything.
+--
+-- `NO_NET_NOTE` in src/lib/coachLedger.ts is a standing rule of this product
+-- and supabase/parts/450 refuses the same subtraction on the coach's side. A
+-- gym is the bigger temptation, not the smaller one: /accounting already prints
+-- a figure called "Cash recorded in Repple" — payments less payroll — under a
+-- paragraph explaining at length that Repple has never seen rent, stock,
+-- utilities, insurance, tax, equipment or the owner's drawings. The moment some
+-- of that IS in the database, the obvious next edit is to fold it in and call
+-- the answer profit.
+--
+-- It would be wrong for five independent reasons, any one of which is enough:
+--
+--   1. the takings are GROSS — the card processor's fee is not in this
+--      database and no webhook in this repo writes it;
+--   2. the takings are also only what somebody recorded at the desk, and
+--      /accounting's whole reconciliation section exists because that half
+--      does not always agree with the invoices;
+--   3. this side is only what somebody has typed, and in the first month of
+--      using it most of a gym's costs will simply be absent;
+--   4. the two sides can be in different currencies — a UK gym insured through
+--      a European broker is ordinary — and this app holds no rate;
+--   5. payroll is in `payroll_settlements` and the rest is here, so any total
+--      of "what went out" is a sum across two tables either of which can fail
+--      to read on its own.
+--
+-- A number over those is not a smaller truth. It is a number about nothing, and
+-- it would be filed as what the gym made. So `src/lib/gymCosts.ts` exports no
+-- `net`, no `profit`, no `margin` and no `balance`, and neither this table nor
+-- anything reading it produces one.
+--
+-- ── What a row claims ────────────────────────────────────────────────────
+--
+-- One thing: that somebody at this gym says it paid this amount, in this
+-- currency, for this, on this day. It is their own word — nothing here has been
+-- checked against a bank, a card, a receipt or a supplier's invoice, and Repple
+-- holds no document behind any of it.
+--
+-- Deliberately NOT a claim about tax. There is no tax column, no deductibility
+-- flag, no net/gross split and no category that implies one, for the reason
+-- part 451 gives about an invoice and part 450 gives about a coach's costs:
+-- what is allowable, and what tax may be reclaimed on it, is the accountant's
+-- judgement about this trade in this country, and a tick in this app would be
+-- tax advice printed under somebody's name. It is sharper here than on the
+-- coach's side, because the evidence a tax authority wants is the supplier's
+-- own VAT invoice and this product stores no supplier documents at all — a tax
+-- figure typed here would be a number with nothing behind it, in a table an
+-- accountant is being handed.
+--
+-- ── Modelled on part 450 throughout ──────────────────────────────────────
+--
+-- Same shape, same rules, same reasoning: minor units and a required currency,
+-- a DATE rather than an instant, INSERT and DELETE for the owner and no UPDATE.
+-- Where the two differ it is because a gym is not a coach, and each difference
+-- is stated below.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.gym_costs (
+  id          uuid        primary key default gen_random_uuid(),
+  tenant_id   uuid        not null references public.tenants(id) on delete cascade,
+  -- WHO wrote it down. `coach_costs` needed no such column: a coach's book has
+  -- one author by construction. A gym has an owner, and part 290 allows an
+  -- account to own more than one of them — so "who entered this" is a real
+  -- question with a real answer, and the only trace of it otherwise would be
+  -- the event log below. `on delete set null`, because an entry outlives the
+  -- account that made it and a cost that vanished when a person left would take
+  -- money out of a filed month.
+  recorded_by uuid        references public.profiles(id) on delete set null,
+  -- What it was for, in the gym's own words. Required: an amount with no
+  -- description is a line nobody can reconcile against a bank statement later,
+  -- and reconciling against a bank statement is the entire use of this table.
+  description text        not null check (btrim(description) <> '' and length(description) <= 200),
+  -- Who it was paid to. OPTIONAL, and it is the one field here that is new
+  -- against part 450 rather than inherited. A coach recording "insurance" knows
+  -- which insurer; a gym has thirty suppliers and the name is what turns a
+  -- twelve-month list into something an accountant can group. Nothing validates
+  -- it, nothing matches it against anything, and it is never required — a cash
+  -- purchase from a shop nobody wrote down is still a real cost.
+  supplier    text        check (supplier is null or (btrim(supplier) <> '' and length(supplier) <= 120)),
+  -- A closed set, for the reason `coach_costs.category` is one: the category is
+  -- the field somebody will later total or filter by, and forty spellings of
+  -- "electric" is a column nobody can group. 'other' is the escape hatch and
+  -- the description carries the detail.
+  --
+  -- These are a GYM's lines and not a coach's. There is no 'kit' and no
+  -- 'travel' — a building does not commute — and there are seven a coach's list
+  -- has no use for: utilities, maintenance, licensing, stock, marketing,
+  -- finance and staff.
+  --
+  -- NO 'payroll' and no 'wages'. What the gym pays its trainers for sessions is
+  -- already in `payroll_settlements`, is already /accounting's "Money out", and
+  -- a row here for it would count the same money twice — exactly as an
+  -- 'advertising' row would on the coach's side. 'staff' is deliberately NOT
+  -- that: it is the receptionist, the cleaner, the manager and the employer's
+  -- own taxes, none of whom is settled through Repple and none of whom appears
+  -- anywhere in this database today. The category note on the screen says which
+  -- is which, because nothing can detect that two rows are the same money.
+  --
+  -- NO 'refunds' either. Money handed back to a member is a reversing
+  -- `gym_payments` row under part 180, which is what makes the takings figure
+  -- correct; recording it a second time as a cost would take it off both sides.
+  --
+  -- 'software' DOES include this gym's own Repple bill, which is the opposite
+  -- of the rule on the coach's side, and the reason is part 252: what a gym pays
+  -- Repple is readable only by an account on the `platform_admins` allowlist. It
+  -- is on no screen this owner can open, so a row for it here counts nothing
+  -- twice — it is the only place that money can be recorded at all.
+  category    text        not null check (category in (
+                            'rent', 'utilities', 'staff', 'maintenance',
+                            'equipment', 'insurance', 'licensing', 'marketing',
+                            'software', 'stock', 'professional', 'finance',
+                            'other')),
+  -- Minor units, matching every other money column in this schema, so nothing
+  -- between this table and the rest of the gym's money ever has to be
+  -- converted.
+  --
+  -- bigint rather than the `integer` the older gym money columns use, and the
+  -- ceiling is stated in the CHECK instead of by the column width. `integer`
+  -- stops at 2,147,483,647 minor units, which is fine for a membership and is
+  -- not fine for a year's rent in a currency with a large unit count: an annual
+  -- rent of IDR 350,000,000 is 35,000,000,000 minor units and would be refused
+  -- by the type with a 22003 the owner cannot act on.
+  amount_cents bigint     not null check (amount_cents > 0 and amount_cents < 100000000000),
+  -- NOT NULL and no default. `tenants.currency` is nullable on purpose (part 99)
+  -- and part 150 removed the last database defaults, so a cost simply cannot be
+  -- recorded until somebody has stated a currency. A figure with the wrong three
+  -- letters on it is a different amount of money.
+  --
+  -- It may legitimately differ from what the gym CHARGES in, and the two are
+  -- never added: `sumTaken` keeps every currency in its own pot and so does
+  -- `costsByCategory` in src/lib/gymCosts.ts.
+  currency    text        not null check (currency = upper(btrim(currency)) and length(currency) between 3 and 4),
+  -- A DATE, not a timestamp, for the reason part 450 gives: rent was paid on a
+  -- day, and storing an instant puts a Monday payment on Sunday for every gym
+  -- west of Greenwich. It is also the column the closed-month lock reads, and a
+  -- DATE is the one input to that lock with no timezone window at all — see the
+  -- trigger below.
+  paid_on     date        not null,
+  note        text        check (note is null or length(note) <= 500),
+  created_at  timestamptz not null default now()
+);
+
+comment on table public.gym_costs is
+  'What a gym says its own operation cost it — rent, power, the cleaner, the engineer, the music licence, insurance, stock, the accountant. The gym''s own record, readable by its owner alone, never reconciled against a bank and never evidenced by a document this product holds. NOT a tax record: there is no tax column and no deductibility flag, because what is allowable is the gym''s accountant''s judgement and not this app''s. Nothing anywhere subtracts this from what the gym took.';
+comment on column public.gym_costs.category is
+  'rent | utilities | staff | maintenance | equipment | insurance | licensing | marketing | software | stock | professional | finance | other. Deliberately no ''payroll'' and no ''wages'': what the gym pays trainers for sessions is already in payroll_settlements and is already /accounting''s Money out, so a row here would count it twice. ''staff'' is the people who are NOT settled that way — reception, cleaning, a manager, employer taxes. ''software'' does include this gym''s Repple bill, which is on no screen a gym owner can open (part 252) and is therefore counted nowhere else.';
+comment on column public.gym_costs.paid_on is
+  'The day the money went out, not the day the row was written. A quarter of receipts written up in one evening must not all land in that evening''s month — and this is the column the closed-month lock reads.';
+comment on column public.gym_costs.currency is
+  'ISO 4217, uppercase, required. There is no default and no fallback — see tenants.currency in part 99. It may differ from the currency the gym charges in, and the two are never added.';
+comment on column public.gym_costs.supplier is
+  'Who it was paid to, as somebody typed it. Optional, never validated, never matched against anything. A twelve-month list of amounts with no payee on them is not something an accountant can group.';
+comment on column public.gym_costs.recorded_by is
+  'The account that entered this. NULL where that account has since been deleted — the cost stays, because a filed month must not lose money when a person leaves.';
+
+-- The read is always "this gym, newest first", and both screens read a date
+-- range of it. `id` is in the index because every paged read in this app orders
+-- on a total order — two costs paid on the same day would otherwise tie, and a
+-- page boundary could drop or repeat one.
+create index if not exists gym_costs_tenant_idx
+  on public.gym_costs (tenant_id, paid_on desc, id desc);
+
+-- ── Row-level security ───────────────────────────────────────────────────
+--
+-- The owner, and nobody else in the building.
+--
+-- This is a wider gap than it looks and it is deliberate. A trainer can read
+-- the timetable, the register, the equipment list and the door; the console
+-- offers them five screens. What the gym pays in rent, what it pays the
+-- cleaner, and what it settles with its accountant are none of those. A staff
+-- read here would put every colleague's pay bracket — 'staff' rows, with a
+-- description on them — in front of whoever is standing at the desk, and there
+-- is no version of that which is not a personnel disclosure the gym did not
+-- make. Part 450 refuses the coach's costs to the gym owner on the same
+-- reasoning pointed the other way.
+--
+-- A member reads nothing here at all, and there is no policy admitting one.
+alter table public.gym_costs enable row level security;
+
+drop policy if exists gym_costs_owner_read on public.gym_costs;
+create policy gym_costs_owner_read on public.gym_costs
+  for select
+  to authenticated
+  using (is_owner_of(tenant_id));
+
+drop policy if exists gym_costs_owner_insert on public.gym_costs;
+create policy gym_costs_owner_insert on public.gym_costs
+  for insert
+  to authenticated
+  with check (is_owner_of(tenant_id));
+
+drop policy if exists gym_costs_owner_delete on public.gym_costs;
+create policy gym_costs_owner_delete on public.gym_costs
+  for delete
+  to authenticated
+  using (is_owner_of(tenant_id));
+
+-- Named and dropped rather than merely never written, so a policy added by
+-- somebody who wanted an "edit" button cannot survive a rebuild of this file.
+-- Correcting a cost is deleting the wrong line and writing the right one; an
+-- UPDATE would leave a row whose amount and whose date came from two different
+-- intentions, and nothing on it would say so. The deletion is logged below, so
+-- the correction is not invisible.
+drop policy if exists gym_costs_owner_update on public.gym_costs;
+drop policy if exists gym_costs_trainer_read on public.gym_costs;
+drop policy if exists gym_costs_member_read on public.gym_costs;
+
+-- RLS narrows a GRANT; it does not create one.
+grant select, insert, delete on public.gym_costs to authenticated;
+revoke update on public.gym_costs from authenticated;
+revoke all on public.gym_costs from anon;
+
+-- ── A cost cannot land in a month that has been closed ───────────────────
+--
+-- Part 182's argument, unchanged: a stored close that any later write can
+-- invalidate is a note rather than a close. Part 481 made the same case for
+-- payroll and used the same function, which is the precedent this follows.
+--
+-- It matters more here than for payroll, not less. /accounting hands an
+-- accountant a month; once these costs are in that file, a rent payment typed
+-- in November against a September that was signed off in October changes a
+-- figure somebody has already filed — silently, and in the direction that
+-- reduces what the month reported. The way out is the way out everywhere else:
+-- reopen the month on /close, with a reason, and record it again.
+--
+-- `paid_on`, because that is the day the money went out and the column both
+-- screens bucket by. It is also the one input this lock has ever been given
+-- with no timezone window on it at all: part 182 notes honestly that a
+-- `timestamptz` a few hours either side of midnight can be read into the
+-- neighbouring month, and a DATE cast to `timestamptz` and formatted back in
+-- the same session timezone round-trips exactly.
+drop trigger if exists trg_gym_costs_closed_month on public.gym_costs;
+create trigger trg_gym_costs_closed_month
+  before insert or update of paid_on, amount_cents on public.gym_costs
+  for each row execute function public.gym_refuse_write_into_closed_month('paid_on');
+
+-- ── Who did what ─────────────────────────────────────────────────────────
+--
+-- Part 187's log, widened by two kinds. Its argument applies here without
+-- change: an event written by a trigger cannot drift from the data and cannot
+-- be forged by the account being audited.
+--
+-- The DELETION is the reason this is worth doing. There is no UPDATE on this
+-- table, so correcting a cost means removing a line — and without a log the
+-- only evidence that a September cost ever existed is that the September figure
+-- used to be bigger. `payroll_settlements` gets the same treatment for the same
+-- reason ('payroll-reversed'), and part 182 refuses to let a close be deleted
+-- at all.
+--
+-- NO AMOUNT IN THE SUMMARY, and that is deliberate rather than an omission.
+-- Every existing money event in part 187 writes `to_char(amount_cents / 100.0,
+-- …)` into its sentence, which is a hundred times the real figure in a gym that
+-- prices in yen and ten times it in one that prices in dinar — the same
+-- unconditional division `money()` was fixed for in src/lib/gymRecord.ts, still
+-- standing in the log. Adding a fourteenth site of it is not a trade worth
+-- making for a line an owner can read the amount of by opening the row. What
+-- the log is for is who, when and what for, and it says all three.
+alter table public.gym_events drop constraint if exists gym_events_kind_check;
+alter table public.gym_events add constraint gym_events_kind_check
+  check (kind in (
+    -- the five from part 105, unchanged
+    'member-joined', 'trainer-joined', 'session-delivered',
+    'session-missed', 'promo-redeemed',
+    -- money
+    'payment-recorded', 'payment-corrected', 'invoice-raised',
+    'price-changed', 'plan-retired',
+    -- the membership itself
+    'membership-cancelled', 'membership-frozen',
+    -- pay
+    'payroll-settled', 'payroll-reversed',
+    -- what the gym spends
+    'cost-recorded', 'cost-deleted',
+    -- the building
+    'equipment-retired', 'equipment-out-of-service',
+    -- the record
+    'month-closed', 'month-reopened', 'record-exported'
+  ));
+
+create or replace function public.gym_event_cost()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  -- `subject_id` is who the event is ABOUT, and a cost is about nobody — no
+  -- member, no trainer. NULL rather than the actor, which part 187 already
+  -- carries separately and which is a different question.
+  if tg_op = 'DELETE' then
+    perform public.log_gym_event(
+      old.tenant_id, 'cost-deleted', null,
+      format('Cost removed: %s — %s, paid %s', old.category, old.description, old.paid_on));
+    return old;
+  end if;
+  perform public.log_gym_event(
+    new.tenant_id, 'cost-recorded', null,
+    format('Cost recorded: %s — %s, paid %s', new.category, new.description, new.paid_on));
+  return new;
+end $fn$;
+
+revoke all on function public.gym_event_cost() from public, anon, authenticated;
+
+drop trigger if exists trg_gym_event_cost on public.gym_costs;
+create trigger trg_gym_event_cost
+  after insert or delete on public.gym_costs
+  for each row execute function public.gym_event_cost();
+
+-- ▶ a-registered-gym-had-nowhere-to-say-so.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A VAT-registered gym could not tell this product that it was registered.
+--
+-- ── The word "tax" appears nowhere in this schema ─────────────────────────
+--
+-- Not on `tenants`, not on `gym_invoices`, not on `gym_payments`, not on
+-- `payroll_settlements`, not on the month close. A gym with a filing obligation
+-- ran Repple for its members, its timetable and its money, and then produced
+-- its return from somewhere else entirely — which means the register an
+-- accountant is handed by /accounting has no way of even saying which of its
+-- figures are inside a tax regime and which are not.
+--
+-- ── What part 451 decided, and why this follows it ────────────────────────
+--
+-- Part 451 asked the same question on the coach's side and answered it
+-- narrowly. It added a tax RATE and a tax REGISTRATION to `coach_invoices` —
+-- both typed by the coach, both printed verbatim — and it added nothing else:
+--
+--     No tax AMOUNT. No net figure. No gross/net split. No "subtotal". Not as
+--     columns, not as defaults, not as zeros.
+--
+-- because "this app may print what a person stated and may not work anything
+-- out from it". A coach who states "20%" beside "GBP 480.00" has said two true
+-- things; an app that prints "VAT: GBP 80.00" underneath has made a claim about
+-- their tax affairs, and it is wrong for a margin scheme, a flat-rate scheme, a
+-- reverse charge or a mixed-rate invoice.
+--
+-- That reasoning holds for a gym and holds harder. A gym has more transactions
+-- and a real filing deadline, so a wrong figure here is filed faster and by
+-- somebody with less time to check it. Everything part 451 refused is refused
+-- here: this part adds no amount, no rate applied to anything, no net or gross
+-- split, no deductibility flag, and nothing anywhere in this repository
+-- multiplies a rate by a figure and calls the result tax.
+--
+-- ── Where this goes NARROWER than part 451, and why ───────────────────────
+--
+-- No rate is stored. Part 451 keeps `coach_invoices.tax_rate_pct` because a
+-- coach's invoice is one supply to one client and the rate on it is a statement
+-- about that document. A gym is not one supply. Its memberships, its personal
+-- training, its bottles of drink and its room hire can sit at different rates,
+-- some of them exempt, in the same week — so a single rate stored against the
+-- gym would be a claim about all of them, and a rate stored against a
+-- `gym_invoices` row would still say nothing about the card payments at the
+-- desk, which are most of the money.
+--
+-- A rate that describes some of the sales and is filed as though it described
+-- all of them is exactly the "subtotal printed as a total" failure that
+-- src/lib/coachLedger.ts names first among the three it exists to prevent. So
+-- there is no rate column, and src/lib/gymTax.ts states the absence on the
+-- screen rather than leaving it to be read as an oversight.
+--
+-- ── What IS recorded, and it is two facts ─────────────────────────────────
+--
+-- Whether the gym says it is registered, and the number it says it is
+-- registered under. Both are stated by a person, printed verbatim, never
+-- checked against any register — there is no register this app could check, and
+-- a format check would refuse valid numbers from countries nobody thought of —
+-- and never inferred from a country, a currency or a price.
+--
+-- They live on `tenants` rather than on a document, which is the one place this
+-- differs in SHAPE from part 451. Part 451's argument for snapshotting onto the
+-- invoice is that "a coach who deregisters next year has not changed what a
+-- document they issued this year said". Nothing in this product renders a gym
+-- invoice as a document: `gym_invoices` is a register read by /accounting and
+-- /close and by the member's own history, and there is no page, no PDF and no
+-- print path that hands one to anybody. There is therefore no issued document
+-- for a joined column to rewrite. What this records is what the gym states
+-- TODAY, the tax screen says as much beside it, and if a gym invoice ever does
+-- become a document the columns it needs are its own and belong on that row.
+--
+-- ── Everyone in the gym can read these, on purpose ────────────────────────
+--
+-- `tenants_read` (part 38) admits every signed-in account whose `tenant_id`
+-- matches — members and trainers included — and RLS selects rows rather than
+-- columns, so anything added to this table is added to what all of them can
+-- read. Part 242 makes that point while refusing to widen this very policy.
+--
+-- Both columns here are fine on that basis and it is worth saying why rather
+-- than assuming it: a tax registration number is, in every regime that has one,
+-- a thing the business is required to print on the invoices it hands out. It is
+-- published by the gym by law. That is emphatically NOT true of a note about
+-- which scheme the gym is on, what its accountant advised, or what it expects
+-- to owe — so there is no free-text tax field here, and there must not be one
+-- while this table is readable by the members.
+--
+-- Additive and idempotent.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- THREE states, which is the whole reason this is a nullable boolean rather
+-- than a `not null default false`.
+--
+--   true   the gym says it is registered for a tax on its sales.
+--   false  the gym says it is not. A real answer, deliberately given.
+--   null   nobody has said, which is where every gym on the platform starts.
+--
+-- A default of false would make the second and the third the same value on the
+-- first day, and the screen would then tell a registered gym's owner, in the
+-- confident voice, that their business is not registered. It is the same
+-- distinction `tenants.currency` is nullable for (part 99) and the same one
+-- `denominate` in src/lib/coachLedger.ts keeps between a setting nobody chose
+-- and a read that failed.
+alter table public.tenants add column if not exists tax_registered boolean;
+
+-- The number as somebody typed it. Printed verbatim; never validated, never
+-- normalised beyond trimming, never looked up. 60 characters is part 451's
+-- limit on the same field and there is no reason for a gym's to differ.
+alter table public.tenants add column if not exists tax_registration text;
+
+alter table public.tenants drop constraint if exists tenants_tax_reg_len;
+alter table public.tenants add constraint tenants_tax_reg_len
+  check (tax_registration is null or (btrim(tax_registration) <> '' and length(tax_registration) <= 60));
+
+-- A record that says both "not registered" and "registered as GB123456789" is
+-- one nobody can act on, and it is the state a half-finished edit produces:
+-- somebody unticks the box and leaves the number behind. Refused rather than
+-- silently cleared, because clearing it would throw away a number the gym may
+-- simply have unticked the wrong box about. The screen clears both in one
+-- write, so this fires against a hand-edit rather than against an owner.
+alter table public.tenants drop constraint if exists tenants_tax_reg_needs_registration;
+alter table public.tenants add constraint tenants_tax_reg_needs_registration
+  check (tax_registered is not false or tax_registration is null);
+
+comment on column public.tenants.tax_registered is
+  'Whether this gym SAYS it is registered for a tax on its sales. NULL means nobody has said, which is not the same as no — a default of false would tell a registered gym it is not one. Nothing is computed from this: Repple applies no rate, produces no tax figure and files nothing.';
+comment on column public.tenants.tax_registration is
+  'A tax registration number somebody at the gym typed, held verbatim. Never checked against any register, never inferred from a country or a currency, and never used in a calculation. Readable by everyone in the gym, which is correct for the one tax fact a business is required to print on its own invoices — and is why there is no free-text tax note on this table.';
+
+-- ▶ a-gym-in-no-particular-time.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A gym in no particular time.
+--
+-- Five screens in the web console say "in the gym's own timezone" and one says
+-- "in the gym's own time". There is no such thing. `tenants` has held a name, a
+-- colour, a currency, a plan, a session fee and a pay policy since part 01 and
+-- has never held a zone, so every one of those sentences means the zone of the
+-- laptop the sentence is being read on — the front desk's Windows machine, the
+-- owner's phone in an airport, a bookkeeper in another country opening the same
+-- console. Three readers, three different Tuesdays, one gym.
+--
+-- The damage is not theoretical and it is not cosmetic:
+--
+--   · /accounting draws a week and labels it the gym's, and a Dubai gym's
+--     Sunday takings land in the reader's Saturday for four hours of every day.
+--   · /analytics draws door entries by hour "in the gym's own time" — the one
+--     chart whose entire finding is WHICH HOUR — from `getHours()` on the
+--     reader's machine.
+--   · src/lib/freshness.ts had to be built elapsed-only, and says so in its
+--     own header: "a calendar needs a timezone the gym does not have".
+--
+-- ── The shape, taken from parts 530 and 650 ──────────────────────────────
+--
+-- Both hit this wall for one coach and both answered it the same way, and this
+-- takes the answer unchanged:
+--
+--   · The zone is STORED beside the thing it qualifies, as an IANA name.
+--   · It is VALIDATED against pg_timezone_names on the way in, so one typo in
+--     one gym's settings cannot make a query raise for everybody else. Part 530
+--     spells out the failure: a bad value inside a view is discovered during a
+--     statement that runs over every row, and it takes the whole statement
+--     down. Refused at the write, it costs one person who is looking at the
+--     field they just typed in.
+--   · The arithmetic is done HERE. `at time zone` asks Postgres's own zone
+--     database, which knows that the clocks moved; a `getHours()` in an edge
+--     function is the hour in the function's region, and a stored UTC offset is
+--     right until a Sunday in spring and then silently wrong for a fortnight.
+--
+-- ── AND THERE IS NO HONEST DEFAULT ───────────────────────────────────────
+--
+-- The column is NULLABLE, it ships null for every gym that exists, and nothing
+-- fills it in. That is the whole decision, and it is the same one part 99 made
+-- for the currency, part 118 made for the brand colour and part 166 made for
+-- the pay policy — with one extra reason that is specific to a zone.
+--
+-- The two candidate defaults are both worse than nothing:
+--
+--   · UTC is correct for gyms in Iceland and in Ghana and is wrong for almost
+--     everybody else. A London gym's day would be right for seven months and an
+--     hour out for five, which is the worst possible failure because it works
+--     during the whole of the period somebody would be testing it.
+--   · The browser's zone is the zone of whoever last opened the console. It is
+--     a fact about a laptop. Writing it to `tenants` would turn a bookkeeper
+--     opening the console from Lisbon into a permanent, invisible claim about
+--     where the gym is, and nothing on any screen would ever say so.
+--
+-- So a gym with no zone is a WITHHELD ANSWER. `tenant_clock` returns a row with
+-- a null `local_now`, `tenant_day()` returns null, and the screens say the day
+-- they are drawing is the reader's own rather than pretending otherwise. Part
+-- 650's sentence applies word for word: a slot generated in the wrong zone is
+-- worse than no slot, because a client books one. A week of takings labelled
+-- with the wrong day is worse than an unlabelled one, because an owner settles
+-- against it.
+--
+-- ── What this part does NOT do ───────────────────────────────────────────
+--
+-- It does not convert anything already stored. Every timestamp in this database
+-- is `timestamptz`, which is an instant and has never needed a zone; the zone
+-- is only ever needed to decide which DAY an instant belongs to and what hour
+-- it was. Nothing is re-bucketed, nothing is rewritten, and a gym that sets its
+-- zone today changes what future reads say about the past — which is correct,
+-- because the past always did happen at that gym's hour and the reader was the
+-- one getting it wrong.
+--
+-- It also does not finish the job. The consumers are listed at the foot of this
+-- file with which ones read the gym's zone today and which still read the
+-- browser's, so the next person does not have to grep for them.
+--
+-- Idempotent; additive; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.tenants add column if not exists timezone text;
+
+comment on column public.tenants.timezone is
+  'The IANA zone this gym''s own day is measured in — ''Europe/London'', ''Asia/Dubai''. NULL means the gym has not said, and NULL is never to be read as UTC or as the reader''s own zone: a screen that cannot get this answer says whose day it is actually drawing. Validated against pg_timezone_names on write by trg_tenants_timezone, so no query that does date arithmetic over many gyms can be made to raise by one gym''s typo.';
+
+-- ── refused at the write ─────────────────────────────────────────────────
+--
+-- A separate trigger rather than three more lines inside
+-- `tenants_normalise_settings` (part 166). That function is a normaliser — it
+-- trims, folds case, and deliberately rescues nothing — and this is a refusal.
+-- Keeping them apart means the error a bad zone produces names the zone rather
+-- than arriving from a function whose job is described as whitespace.
+--
+-- It fires after `trg_tenants_normalise` (triggers on one event run in name
+-- order and 'n' sorts before 't'), which does not touch this column, so the
+-- order between them carries no meaning and is not relied upon.
+--
+-- An empty string becomes NULL for part 166's reason: '' is what an emptied
+-- text field posts, and "the owner cleared it" and "the owner never set it" are
+-- the same fact about the gym.
+create or replace function public.tenants_timezone_check()
+returns trigger language plpgsql security definer set search_path to 'public', 'pg_temp' as $fn$
+begin
+  new.timezone := nullif(btrim(coalesce(new.timezone, '')), '');
+  if new.timezone is not null
+     and not exists (select 1 from pg_timezone_names where name = new.timezone) then
+    raise exception 'not a timezone this server knows: %', new.timezone
+      using hint = 'send an IANA zone name such as Europe/London or Asia/Dubai — not an abbreviation and not an offset';
+  end if;
+  return new;
+end $fn$;
+
+revoke all on function public.tenants_timezone_check() from public, anon, authenticated;
+
+drop trigger if exists trg_tenants_timezone on public.tenants;
+create trigger trg_tenants_timezone
+  before insert or update on public.tenants
+  for each row execute function public.tenants_timezone_check();
+
+-- ── the gym's own day ────────────────────────────────────────────────────
+--
+-- NULL when the gym has no zone, and that null is the point of the function.
+-- A caller that wants a date has to handle it, which is what stops the reader's
+-- own day being substituted three call sites downstream where nobody would ever
+-- see it happen.
+--
+-- STABLE, not IMMUTABLE: the answer depends on the row and on `now()`.
+-- SECURITY DEFINER so it works from a policy or a view without granting a read
+-- of `tenants` — it discloses one gym's calendar date, which is not a secret,
+-- and it takes the tenant id from the caller, so it discloses nothing the
+-- caller did not already name.
+create or replace function public.tenant_day(p_tenant uuid, p_at timestamptz default now())
+returns date
+language sql stable security definer set search_path to 'public', 'pg_temp' as $fn$
+  select case
+           when t.timezone is null then null
+           else (p_at at time zone t.timezone)::date
+         end
+    from public.tenants t
+   where t.id = p_tenant;
+$fn$;
+
+comment on function public.tenant_day(uuid, timestamptz) is
+  'Which calendar day an instant falls on AT THIS GYM. NULL when the gym has not set a timezone — never the server''s day and never the caller''s. Use it wherever a screen says "today" about a gym.';
+
+revoke all on function public.tenant_day(uuid, timestamptz) from public, anon;
+grant execute on function public.tenant_day(uuid, timestamptz) to authenticated;
+
+-- ── the instants a gym's calendar day spans ──────────────────────────────
+--
+-- The half of this that a `select … where entered_at >= x and entered_at < y`
+-- actually needs. Returns NULL bounds for a gym with no zone rather than a day
+-- that starts at UTC midnight, so a caller that forgets to check gets no rows
+-- rather than the wrong rows — the direction of failure that gets noticed.
+--
+-- `+ interval '1 day'` on the local date rather than `+ 1` on the instant: on
+-- the day the clocks move, the gym's day is 23 or 25 hours long, and adding a
+-- fixed 24 hours would cut an hour off one Sunday a year and double-count an
+-- hour on another. This is the entire reason the arithmetic is in Postgres.
+create or replace function public.tenant_day_bounds(p_tenant uuid, p_day date)
+returns table (starts_at timestamptz, ends_at timestamptz)
+language sql stable security definer set search_path to 'public', 'pg_temp' as $fn$
+  select case when t.timezone is null then null
+              else (p_day::timestamp) at time zone t.timezone end,
+         case when t.timezone is null then null
+              else ((p_day::timestamp + interval '1 day') at time zone t.timezone) end
+    from public.tenants t
+   where t.id = p_tenant;
+$fn$;
+
+comment on function public.tenant_day_bounds(uuid, date) is
+  'The half-open instant range [starts_at, ends_at) that one calendar day covers at this gym, honouring the 23- and 25-hour days the clocks produce. Both NULL when the gym has no timezone, so a caller that does not check gets no rows rather than a UTC day quietly labelled as the gym''s.';
+
+revoke all on function public.tenant_day_bounds(uuid, date) from public, anon;
+grant execute on function public.tenant_day_bounds(uuid, date) to authenticated;
+
+-- ── what time it is at the gym, right now ────────────────────────────────
+--
+-- One row per gym the caller can already see. This is what a screen reads to
+-- put an honest clock on itself, and it exists so no screen has to build one
+-- out of a stored offset or `getHours()`.
+--
+-- security_invoker, for part 530's reason: without it the view runs as its
+-- owner and hands any authenticated caller a row for every tenant on the
+-- platform. With it, `tenants_owner_rw` and whatever else policies `tenants`
+-- decide, exactly as they do for a direct select.
+--
+-- `local_now` and `local_day` are NULL together and only together — a gym with
+-- no zone has no local anything — so a screen can branch on either and cannot
+-- get a half-answer. `utc_offset` is included because it is the thing an owner
+-- can actually check against the wall: "Asia/Dubai" is a name they may not
+-- recognise and four hours ahead is a fact they will.
+--
+-- The offset is read from `pg_timezone_names` rather than computed with
+-- `to_char` over a difference of two timestamps, and it is an INTERVAL rather
+-- than a formatted string. Both for the same reason: the sign of a negative
+-- offset is the sort of thing a format mask gets wrong once and then nobody
+-- looks at again, and every gym west of Greenwich would be the ones it was
+-- wrong for. The catalogue's own value already accounts for whether that zone
+-- is on summer time at this instant.
+drop view if exists public.tenant_clock;
+create view public.tenant_clock
+  with (security_invoker = true) as
+select t.id            as tenant_id,
+       t.timezone      as timezone,
+       case when t.timezone is null then null
+            else now() at time zone t.timezone end                as local_now,
+       case when t.timezone is null then null
+            else (now() at time zone t.timezone)::date end        as local_day,
+       z.utc_offset                                               as utc_offset
+  from public.tenants t
+  left join lateral (
+    select n.utc_offset from pg_timezone_names n where n.name = t.timezone
+  ) z on true;
+
+comment on view public.tenant_clock is
+  'What time it is at each gym the caller may already read. local_now, local_day and utc_offset are NULL together for a gym that has not set a timezone — that is a withheld answer and screens must render it as one, never as UTC and never as the reader''s own clock. utc_offset is an interval taken from pg_timezone_names, so it already accounts for whether that zone is on summer time right now. security_invoker, so it is exactly as wide as tenants itself.';
+
+-- ── which gyms cannot answer the question ────────────────────────────────
+--
+-- Counted rather than left to be discovered, the same way part 650 returns
+-- `coaches_without_a_zone`: a number that should be falling is worth being able
+-- to read. Deliberately not a table anybody writes — it is a query with a name.
+create or replace function public.tenants_without_a_timezone()
+returns integer
+language sql stable security definer set search_path to 'public', 'pg_temp' as $fn$
+  select count(*)::int from public.tenants where timezone is null;
+$fn$;
+
+comment on function public.tenants_without_a_timezone() is
+  'How many gyms still have no timezone, and therefore how many have every "today", "this week" and "by hour" figure drawn in whichever zone the reader happens to be sitting in. Should be falling.';
+
+revoke all on function public.tenants_without_a_timezone() from public, anon;
+grant execute on function public.tenants_without_a_timezone() to authenticated;
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- WHO READS THIS, AND WHO STILL READS THE BROWSER
+--
+-- Written down because the honest half of this change is knowing which
+-- sentences on which screens are still the reader's own clock wearing the
+-- gym's name. Nothing below is enforced by the database; it is the list the
+-- next person needs.
+--
+-- Reads the gym's zone as of this part:
+--   · studio-web/app/settings/page.tsx  — sets it, and proves it by showing
+--     the gym's own wall clock beside the field.
+--   · src/lib/gymZone.ts                — the one implementation of the read
+--     side, and the only place a zone is turned into a day in TypeScript.
+--   · src/lib/freshness.ts              — `fetchedNote` can now say the hour a
+--     figure was read AT THE GYM, and still refuses calendar words without a
+--     zone.
+--   · studio-web/app/staff/page.tsx     — the rota's times and a coach's join
+--     date, both of which were the reader's wall clock.
+--
+-- Still the browser's clock, named so nobody has to grep:
+--   · studio-web/app/accounting/page.tsx:471 — "in the gym's own timezone" over
+--     a week built from `new Date()` on the reader's machine. The sentence is
+--     currently false.
+--   · studio-web/app/analytics/page.tsx:1192 — door entries by hour, "in the
+--     gym's own time". The chart whose only finding is which hour.
+--   · studio-web/app/door/page.tsx:70 — "the calendar day a visit belongs to,
+--     in the gym's own timezone", computed locally.
+--   · studio-web/app/payroll/page.tsx:74 and app/coach/earnings/page.tsx:72 —
+--     "bounds of the calendar month in the gym's own timezone", both built from
+--     the browser's month. `tenant_day_bounds` is what these want.
+--   · studio-web/app/close/page.tsx, revenue, timetable, classes — every
+--     `toLocaleString` without a zone.
+-- ═════════════════════════════════════════════════════════════════════════
+
+-- ▶ nobody-could-be-put-on-the-roster-and-the-desk-had-no-role.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Nobody could be put on the roster, and the person on the desk had no role.
+--
+-- Two halves of one gap, and the schema states the first half itself. Part 38
+-- installs `guard_profile_identity`, which refuses a profile changing its own
+-- role, with this message:
+--
+--     'A profile cannot change its own role. Ask the gym owner to change it
+--      for you.'
+--
+-- There is no function by which the gym owner can. `profiles_owner_tenant_r`
+-- lets an owner READ every profile in their tenant and there is no owner UPDATE
+-- policy at all, `trainers` has no owner INSERT — studio-web/app/staff/page.tsx
+-- says so out loud, in the section about coaches who are owed money and have no
+-- roster row: "a roster row is created when the coach accepts the gym's join
+-- code, not from here: the owner cannot insert one, and a button that the
+-- database would refuse is worse than this sentence."
+--
+-- So the only way onto a gym's staff is for the person to accept a join code,
+-- and there is NO way off. Not a soft one, not a hard one. A coach who leaves
+-- keeps their role, their tenant and — this is the part that matters — every
+-- client on their book, and `is_my_client()` reads `clients.trainer_id` with no
+-- tenant test anywhere in it. Their access to those members' workouts,
+-- measurements, check-ins, scans, food logs and private conversation with their
+-- coach survives their employment by exactly as long as nobody notices.
+--
+-- ── And the desk is not a coach ──────────────────────────────────────────
+--
+-- `profiles.role` has held three values since part 01: owner, trainer, client.
+-- Everything a gym's front desk does — taking somebody through the door,
+-- looking up a next-of-kin number, selling a day pass — is policed by
+-- `my_role() in ('trainer','owner')`. The gym's receptionist is therefore
+-- either given 'trainer', which hands them the coaching side of the product and
+-- a roster row and a place in payroll, or given nothing and the door is worked
+-- from somebody else's login. Both of those happen and neither is a decision
+-- anybody made.
+--
+-- `gym_shifts` has had a 'desk' role since the rota was built. The rota could
+-- say somebody was on the desk; the permission model had never heard of it.
+--
+-- ── WHAT THIS PART DECIDES ───────────────────────────────────────────────
+--
+-- 1. `receptionist` becomes a fourth value of `profiles.role`.
+--
+--    It is worth being precise about what that does on its own: NOTHING. Every
+--    policy in this schema that admits staff spells the roles out —
+--    `my_role() in ('trainer','owner')` — so a new value reaches no table by
+--    default and a receptionist created today can read the gym's own row (that
+--    is `tenants_read`, which is role-agnostic) and their own profile and
+--    nothing else at all. That is the right default and it is why the role can
+--    be added before every screen that should honour it exists.
+--
+--    Two policies are widened here, and only two. They are listed below with
+--    the reason each one is the desk's job, and the far longer list of what is
+--    deliberately NOT widened is beside them.
+--
+-- 2. A grant is a WRITTEN ACT. `grant_staff_role` is the only way onto a gym's
+--    staff from the console, it may only be called by that gym's owner, and it
+--    writes a row in `staff_grants` in the same transaction as the change it
+--    records. That is not bookkeeping for its own sake. Putting somebody on a
+--    gym's staff hands them the next-of-kin details and the operational medical
+--    note of every member of that gym — `gym_member_records`, part 197, whose
+--    own comment describes it as what the desk needs "at nine on a Sunday". A
+--    grant of that has to have a name and a date against it, and it has to
+--    still have one after the person who made it has left.
+--
+-- 3. A revocation that would only half-remove somebody REFUSES.
+--
+--    This is the decision in this file most likely to be argued with, so the
+--    reasoning is written out. `revoke_staff_role` clears `profiles.tenant_id`,
+--    which is what makes every `tenant_id = my_tenant()` policy stop matching —
+--    and `is_my_client()` is not one of those policies. It is
+--
+--        exists (select 1 from clients where id = c and trainer_id = auth.uid())
+--
+--    with no tenant in it, so a coach who still has clients pointed at them
+--    keeps a complete read of those people's health history AFTER being removed
+--    from the gym. A revocation that leaves that in place is worse than no
+--    revocation, because the owner has been told the person is gone.
+--
+--    Unpicking the book here instead was the other option and it is refused:
+--    `end_coaching` (part 68) is how a coaching relationship ends, it writes
+--    both halves atomically and it is the client's decision as much as the
+--    gym's. Silently ending eleven people's coaching as a side effect of a
+--    staff change would be this function inventing eleven decisions. So it
+--    raises, it says how many clients and it names `end_coaching` — the owner
+--    reassigns or ends them, and comes back.
+--
+-- ── WHAT THIS PART DOES NOT DO ───────────────────────────────────────────
+--
+-- It does not let anybody grant `owner`. A function by which an owner can make
+-- a second owner is a function by which a compromised owner account can make
+-- itself permanent, and the second owner can then remove the first. Ownership
+-- is granted where ownership is decided — part 290 makes the same call about
+-- `owner_sites` and gives the same reason.
+--
+-- It does not widen anything in the web console. Every page there gates on
+-- `me.role !== 'owner'` or `!== 'owner' && !== 'trainer'`, and the `Role` union
+-- in studio-web/lib/supabase.ts still lists three values, so a receptionist
+-- signing into the console today is refused by every screen including the door.
+-- The database is the authority and the database is what this changes; the
+-- screens are named in the footer so the next person does not have to find
+-- them. A grant made today is real, recorded and enforced — it simply has no
+-- console surface for its holder yet, which is a smaller and much more visible
+-- gap than a role that half-works.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1 · a fourth role ────────────────────────────────────────────────────
+--
+-- Both names dropped, because the original is the inline `check (role in (…))`
+-- from part 01 and carries Postgres's generated name, while a database built
+-- from these parts more than once already carries the explicit one.
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles drop constraint if exists profiles_role_known;
+alter table public.profiles add constraint profiles_role_known
+  check (role in ('owner', 'trainer', 'client', 'receptionist'));
+
+comment on column public.profiles.role is
+  'owner · trainer · client · receptionist. A receptionist works the gym''s door and its member records and is NOT a coach: they have no trainers row, no book, no place in payroll and no session of their own. Every staff policy in this schema names its roles explicitly, so this value reaches only what parts 32 and 197 were widened to admit here — adding a role grants nothing by itself. Changed only through grant_staff_role / revoke_staff_role; guard_profile_identity (part 38) refuses a profile changing its own.';
+
+-- Signing up AS a receptionist is possible in the same way signing up as an
+-- owner is, and it is harmless for the same reason part 38 gives: every new
+-- profile gets its own fresh tenant, so somebody who does it is the
+-- receptionist of their own empty gym. The danger was never the role, it was
+-- moving an existing profile into somebody else's tenant, and that is still
+-- refused for everybody except the definer functions below.
+
+-- ── 2 · what a grant is, written down ────────────────────────────────────
+
+-- ── how this survives an erasure, and why it is built this way ───────────
+--
+-- The obvious shape for an audit table is `on delete restrict` on both people,
+-- so the record cannot be destroyed by deleting an account. It is wrong here
+-- and part 184 is why: `profiles` rows are genuinely deleted by the erasure
+-- flow, a member may run that flow themselves, and a RESTRICT anywhere in this
+-- schema would turn "erase my account" into a foreign-key violation the person
+-- cannot act on. An access log that blocks a subject access request is not a
+-- compliance feature.
+--
+-- So this takes part 184's own shape instead, without a word changed: SNAPSHOT
+-- THE NAME, then let the key null itself. `profiles_retain_financial_record`
+-- copies `full_name` onto invoices, payments and memberships immediately before
+-- a profile is deleted precisely so the record stays legible when the link
+-- goes, and the two name columns below do the same job at write time rather
+-- than at delete time — there is nothing here worth a second BEFORE DELETE
+-- trigger, and a name captured when the grant was made is the more truthful
+-- one anyway: it is who they were called when somebody let them in.
+--
+-- The consequence, said plainly: after an erasure this row still says a person
+-- by that name was made a receptionist here on that date by that owner, and no
+-- longer says which account they were. That is the right side of the trade —
+-- the alternative is a gym unable to prove who granted access to its members'
+-- medical notes, and a member unable to delete their account.
+create table if not exists public.staff_grants (
+  id           uuid primary key default gen_random_uuid(),
+  tenant_id    uuid not null references public.tenants(id) on delete cascade,
+  -- The person the access was granted to. Nullable ONLY because an erasure
+  -- nulls it; grant_staff_role never writes a null.
+  subject_id   uuid references public.profiles(id) on delete set null,
+  subject_name text,
+  -- The person who made the grant, and who they were called at the time.
+  actor_id     uuid references public.profiles(id) on delete set null,
+  actor_name   text,
+  -- 'trainer' or 'receptionist'. Never 'owner' — see the header — and never
+  -- 'client', which is not a grant of anything.
+  role         text not null check (role in ('trainer', 'receptionist')),
+  granted_at   timestamptz not null default now(),
+  -- Set when the access was taken away again. The row is never deleted and
+  -- never rewritten into a different shape: "was on the staff from March to
+  -- September" is the fact somebody will eventually need, and it is not
+  -- reconstructible from a row that has been tidied up.
+  --
+  -- `revoked_at` alone is what says a grant has ended. There is deliberately no
+  -- CHECK tying it to `revoked_by`: a CHECK is re-validated on UPDATE, and
+  -- `on delete set null` IS an update — so a pairing constraint would make
+  -- erasing the owner who ended somebody's access fail, which is the exact
+  -- failure this whole block is written to avoid.
+  revoked_at   timestamptz,
+  revoked_by   uuid references public.profiles(id) on delete set null,
+  revoked_by_name text,
+  note         text
+);
+
+-- A database built from these parts before this comment existed carries the
+-- earlier, narrower shape. Both name columns and the wider keys are added
+-- rather than assumed, and the old pairing constraint is dropped, so a re-run
+-- converges on the shape above.
+alter table public.staff_grants add column if not exists subject_name    text;
+alter table public.staff_grants add column if not exists actor_name      text;
+alter table public.staff_grants add column if not exists revoked_by_name text;
+alter table public.staff_grants drop constraint if exists staff_grants_revoked_together;
+
+create index if not exists idx_staff_grants_tenant
+  on public.staff_grants (tenant_id, granted_at desc);
+-- The question the console actually asks: is this person currently staff here.
+create index if not exists idx_staff_grants_live
+  on public.staff_grants (tenant_id, subject_id) where revoked_at is null;
+
+comment on table public.staff_grants is
+  'Who put whom on this gym''s staff, when, as what, and who took it away again. Written only by grant_staff_role and revoke_staff_role, in the same transaction as the change itself, because putting somebody on a gym''s staff hands them every member''s next-of-kin details and operational medical note (gym_member_records, part 197) and an access grant of that kind needs a name against it. Rows are never deleted and never rewritten: "was staff from March to September" is the fact somebody eventually needs. Both people''s names are snapshotted at write time and their ids are ON DELETE SET NULL, so an account erasure leaves the record legible instead of being blocked by it — part 184''s shape.';
+comment on column public.staff_grants.subject_id is
+  'ON DELETE SET NULL, with the name snapshotted beside it — part 184''s shape. A RESTRICT here would make an account erasure fail with a foreign-key violation the person cannot act on, and an access log that blocks a subject access request is not a compliance feature. After an erasure the row still says who was granted what, when and by whom, and no longer says which account they were.';
+comment on column public.staff_grants.subject_name is
+  'What they were called when the grant was made. Written by grant_staff_role, never updated afterwards: a name at the moment somebody was let in is the fact this row is evidence of, and it is what remains legible once the profile has been erased.';
+
+alter table public.staff_grants enable row level security;
+
+-- The gym's owner reads their own gym's grants. `is_owner_of` is SECURITY
+-- DEFINER, so this does not re-enter anything (part 28).
+drop policy if exists staff_grants_owner_r on public.staff_grants;
+create policy staff_grants_owner_r on public.staff_grants
+  for select using (public.is_owner_of(tenant_id));
+
+-- And the subject reads their own. Somebody is entitled to know that they were
+-- given access to a gym's records and when it was taken away; a log about a
+-- person that the person may not see is a worse artefact than no log.
+drop policy if exists staff_grants_self_r on public.staff_grants;
+create policy staff_grants_self_r on public.staff_grants
+  for select using (subject_id = (select auth.uid()));
+
+-- There is deliberately NO insert, update or delete policy for anybody. The
+-- only writers are the two SECURITY DEFINER functions below, which bypass RLS
+-- and check the caller themselves. A table that records who granted access is
+-- worthless if the grantee can write it, and an owner who could edit it could
+-- make a grant look like it never happened.
+drop policy if exists staff_grants_w on public.staff_grants;
+
+-- ── 3 · making somebody staff ────────────────────────────────────────────
+--
+-- SECURITY DEFINER is required rather than convenient, exactly as it is for
+-- `end_coaching` (part 68): `guard_profile_identity` refuses a role or tenant
+-- change made by `authenticated`, and there is no owner UPDATE policy on
+-- `profiles` for it to refuse in the first place. One function owned by the
+-- database is the only place the profile write, the roster row and the audit
+-- row can happen together.
+--
+-- The identity test is `auth.uid()` and never `current_user` — part 68's header
+-- records `current_user` shipping in this project as a guard that provided
+-- none, because inside a definer function it is the function's OWNER.
+--
+-- Atomic, and half of this would be the bug: a call that moved the profile and
+-- then failed before writing `staff_grants` would produce exactly the state
+-- this file exists to end — somebody with access to a gym's medical notes and
+-- nothing anywhere saying who let them in. A plpgsql body runs inside the
+-- caller's transaction and PostgREST wraps each request in one, so an exception
+-- anywhere below aborts all of it. Nothing here commits and nothing here
+-- swallows an exception.
+create or replace function public.grant_staff_role(
+  p_subject uuid,
+  p_role    text,
+  p_note    text default null
+) returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_tenant  uuid;
+  v_actor   text;
+  v_subject record;
+  v_grant   uuid;
+begin
+  -- WHOSE gym, and what the person making the grant is called. Both taken from
+  -- the caller rather than from an argument, so there is no gym id to supply
+  -- and therefore no wrong one to supply, and no name to supply either.
+  select p.tenant_id, p.full_name into v_tenant, v_actor
+    from public.profiles p where p.id = auth.uid();
+
+  if v_tenant is null or not public.is_owner_of(v_tenant) then
+    raise exception 'Only the owner of a gym can put somebody on its staff.'
+      using errcode = '42501';
+  end if;
+
+  if p_role not in ('trainer', 'receptionist') then
+    raise exception 'A staff role is trainer or receptionist, not %', coalesce(p_role, 'nothing')
+      using errcode = '22023',
+            hint = 'Ownership is not granted from here — a function that makes a second owner is a function that makes a compromised account permanent.';
+  end if;
+
+  select p.id, p.role, p.tenant_id, p.full_name into v_subject
+    from public.profiles p where p.id = p_subject;
+
+  if v_subject.id is null then
+    raise exception 'There is no account with that id, so there is nobody to put on the roster.'
+      using errcode = '23503';
+  end if;
+
+  if v_subject.id = auth.uid() then
+    raise exception 'You already own this gym. Granting yourself a staff role would take your own access away.'
+      using errcode = '22023';
+  end if;
+
+  -- An owner is never demoted by this. Somebody else's ownership of somewhere
+  -- else is not this owner's to end, and their ownership of HERE is not
+  -- something a staff screen should be able to remove.
+  if v_subject.role = 'owner' then
+    raise exception 'That account owns a gym. Ownership is not changed from the staff roster.'
+      using errcode = '42501';
+  end if;
+
+  -- Somebody else's staff or somebody else's member. Refused rather than
+  -- moved: a person can be in one gym at a time in this schema, and quietly
+  -- taking them out of another gym would remove that gym's access to its own
+  -- coach with nothing there to say why.
+  if v_subject.tenant_id is not null and v_subject.tenant_id <> v_tenant then
+    raise exception 'That account already belongs to another gym. They have to leave it first.'
+      using errcode = '42501';
+  end if;
+
+  update public.profiles
+     set role = p_role, tenant_id = v_tenant
+   where id = p_subject;
+
+  -- A coach needs the roster row every per-coach figure is joined on; a
+  -- receptionist must NOT have one. `trainers` is what puts somebody in the
+  -- payroll, in the rota's staff picker and in the directory, and a person on
+  -- the desk belongs in none of those.
+  if p_role = 'trainer' then
+    insert into public.trainers (id, tenant_id) values (p_subject, v_tenant)
+    on conflict (id) do update set tenant_id = excluded.tenant_id;
+  end if;
+
+  -- One live grant per person per gym. Re-granting a role somebody already
+  -- holds closes the old row and opens a new one, so a change of role reads as
+  -- two dated facts rather than as one row that has always said whatever it
+  -- says now.
+  update public.staff_grants
+     set revoked_at = now(), revoked_by = auth.uid(), revoked_by_name = v_actor,
+         note = coalesce(note, '') || ' (superseded by a new grant)'
+   where tenant_id = v_tenant and subject_id = p_subject and revoked_at is null;
+
+  insert into public.staff_grants
+    (tenant_id, subject_id, subject_name, actor_id, actor_name, role, note)
+  values (v_tenant, p_subject, v_subject.full_name, auth.uid(), v_actor, p_role,
+          nullif(btrim(coalesce(p_note, '')), ''))
+  returning id into v_grant;
+
+  return jsonb_build_object(
+    'grant_id', v_grant,
+    'subject_id', p_subject,
+    'role', p_role,
+    'roster_row', p_role = 'trainer',
+    'was', v_subject.role);
+end $fn$;
+
+revoke all on function public.grant_staff_role(uuid, text, text) from public, anon;
+grant execute on function public.grant_staff_role(uuid, text, text) to authenticated;
+
+comment on function public.grant_staff_role(uuid, text, text) is
+  'Put somebody on this gym''s staff as a trainer or a receptionist. Callable only by the gym''s owner, into their own gym, and it writes the staff_grants row in the same transaction as the profile change — a grant of access to every member''s medical note and payment history has a name and a date against it or it does not happen. Refuses ownership, refuses a person who belongs to another gym, and refuses the caller themselves.';
+
+-- ── 4 · taking it away, and refusing to do it by halves ──────────────────
+create or replace function public.revoke_staff_role(
+  p_subject uuid,
+  p_note    text default null
+) returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_tenant  uuid;
+  v_actor   text;
+  v_subject record;
+  v_clients int;
+  v_rows    int;
+begin
+  select p.tenant_id, p.full_name into v_tenant, v_actor
+    from public.profiles p where p.id = auth.uid();
+
+  if v_tenant is null or not public.is_owner_of(v_tenant) then
+    raise exception 'Only the owner of a gym can take somebody off its staff.'
+      using errcode = '42501';
+  end if;
+
+  select p.id, p.role, p.tenant_id, p.full_name into v_subject
+    from public.profiles p where p.id = p_subject;
+
+  if v_subject.id is null or v_subject.tenant_id is distinct from v_tenant then
+    raise exception 'That account is not on this gym''s staff.'
+      using errcode = '42501';
+  end if;
+
+  if v_subject.id = auth.uid() or v_subject.role = 'owner' then
+    raise exception 'An owner is not removed from the staff roster. A gym with nobody who can administer it cannot be repaired from inside the product.'
+      using errcode = '42501';
+  end if;
+
+  if v_subject.role not in ('trainer', 'receptionist') then
+    raise exception 'That account is a member of this gym rather than staff, so there is no staff access to take away.'
+      using errcode = '22023';
+  end if;
+
+  -- THE REFUSAL. See the header: `is_my_client()` has no tenant in it, so a
+  -- coach with clients still pointed at them keeps a complete read of those
+  -- people's health history after this function has said they are gone. The
+  -- book is unpicked by `end_coaching` (part 68), which writes both halves and
+  -- is a decision about a coaching relationship rather than a side effect of a
+  -- staff change.
+  select count(*) into v_clients from public.clients c
+   where c.trainer_id = p_subject and c.tenant_id = v_tenant;
+
+  if v_clients > 0 then
+    raise exception
+      'That coach still has % client(s) on their book. Removing them from the staff would NOT remove their access to those clients'' training and health record, because that access follows the book and not the gym. Reassign or end those relationships first.', v_clients
+      using errcode = '42501',
+            hint = 'end_coaching(coach, client) ends one relationship; reassigning a client to another coach also clears it.';
+  end if;
+
+  -- Clearing the tenant is what actually removes the access: every staff policy
+  -- in this schema is `tenant_id = my_tenant()` and `my_tenant()` is now null,
+  -- and `is_owner_of` was already false. The ROLE is deliberately left alone —
+  -- rewriting somebody to 'client' would be a false statement about who they
+  -- are and would hand them the member half of the product at this gym they no
+  -- longer belong to.
+  update public.profiles set tenant_id = null where id = p_subject;
+  get diagnostics v_rows = row_count;
+
+  -- The roster row is KEPT, and this is the same call `gym_shifts` makes about
+  -- a pulled shift: a coach who left and delivered forty sessions is not the
+  -- same thing as a coach who never existed, and deleting the `trainers` row
+  -- would set `clients.trainer_id` to null underneath the history and strand
+  -- every per-coach figure that joins on it. It is inert without the tenant on
+  -- the profile — `trainers_peer_r` is `my_role() = 'trainer' and tenant_id =
+  -- my_tenant()`, which is now false.
+
+  update public.staff_grants
+     set revoked_at = now(), revoked_by = auth.uid(), revoked_by_name = v_actor,
+         note = coalesce(nullif(btrim(coalesce(p_note, '')), ''), note)
+   where tenant_id = v_tenant and subject_id = p_subject and revoked_at is null;
+
+  -- No live grant to close is not an error: the person may have been made staff
+  -- by a join code before this part existed. The revocation is still recorded,
+  -- as its own row, so the removal has a date on it either way.
+  if not found then
+    insert into public.staff_grants
+      (tenant_id, subject_id, subject_name, actor_id, actor_name, role,
+       granted_at, revoked_at, revoked_by, revoked_by_name, note)
+    values (v_tenant, p_subject, v_subject.full_name, auth.uid(), v_actor, v_subject.role,
+            now(), now(), auth.uid(), v_actor,
+            coalesce(nullif(btrim(coalesce(p_note, '')), ''),
+                     'Removed. There was no recorded grant — they joined before staff_grants existed.'));
+  end if;
+
+  return jsonb_build_object(
+    'subject_id', p_subject,
+    'was', v_subject.role,
+    'profile_rows', v_rows,
+    'clients_on_book', v_clients);
+end $fn$;
+
+revoke all on function public.revoke_staff_role(uuid, text) from public, anon;
+grant execute on function public.revoke_staff_role(uuid, text) to authenticated;
+
+comment on function public.revoke_staff_role(uuid, text) is
+  'Take somebody off this gym''s staff. Callable only by the gym''s owner. Clears profiles.tenant_id, which is what every tenant-scoped policy tests; keeps the trainers row, because a coach who left is not a coach who never existed; and RAISES rather than half-removing a coach who still has clients on their book — that access follows clients.trainer_id and would survive this call, so it is refused and end_coaching is named.';
+
+-- ── 5 · the two things the desk is for ───────────────────────────────────
+--
+-- Widened, and only these two. Both were already open to every trainer in the
+-- gym, so a receptionist joining them is not a new disclosure of anything — it
+-- is the same access given to the person whose actual job it is, instead of to
+-- a coach who was given it because 'trainer' was the only role there was.
+
+-- The door. `gym_visits` is the front desk's table: taking somebody in, marking
+-- them out, and the anonymous head count. Part 32's own comment on these three
+-- policies is "Staff work the door; they may record visits without being an
+-- owner", which is a sentence about the desk written before the desk had a
+-- role.
+drop policy if exists gym_visits_staff_rw on public.gym_visits;
+create policy gym_visits_staff_rw on public.gym_visits
+  for select using (tenant_id = my_tenant() and my_role() in ('trainer', 'owner', 'receptionist'));
+
+drop policy if exists gym_visits_staff_w on public.gym_visits;
+create policy gym_visits_staff_w on public.gym_visits
+  for insert with check (tenant_id = my_tenant() and my_role() in ('trainer', 'owner', 'receptionist'));
+
+drop policy if exists gym_visits_staff_u on public.gym_visits;
+create policy gym_visits_staff_u on public.gym_visits
+  for update using (tenant_id = my_tenant() and my_role() in ('trainer', 'owner', 'receptionist'))
+  with check (tenant_id = my_tenant() and my_role() in ('trainer', 'owner', 'receptionist'));
+
+-- The member record. SELECT only, which is what part 197 already gives a
+-- trainer, and its reason is the desk's reason word for word: "the desk needs
+-- the next-of-kin number at nine on a Sunday". The write stays the owner's.
+--
+-- This is the grant that makes `staff_grants` worth having. It is the emergency
+-- contact, the operational medical note and the desk's own note about every
+-- member of the gym, and the person who hands it over should be recorded
+-- handing it over.
+drop policy if exists gmr_staff_r on public.gym_member_records;
+create policy gmr_staff_r on public.gym_member_records
+  for select using (tenant_id = public.my_tenant()
+                    and public.my_role() in ('trainer', 'owner', 'receptionist'));
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- WHAT EACH ROLE CAN REACH, AFTER THIS PART
+--
+-- Every row below is what the POLICIES say, not what a screen says. The
+-- console's own gates are narrower and are listed at the foot.
+--
+--                                     owner  trainer  receptionist  client
+--   the gym's own row (tenants)         rw     r        r             r
+--     — name, brand, currency, TIMEZONE, plan and session_fee. `tenants_read`
+--       is `id = my_tenant()` and names no role, so the gym's headline session
+--       fee is visible to everybody inside the gym and always has been. "No pay
+--       rates" below means no PER-PERSON pay, which is the thing a receptionist
+--       must not see and does not.
+--   door log (gym_visits)               rw     rw       rw            own only
+--   member records (gym_member_records) rw     r        r             own only
+--   passes, drop-ins (gym_passes)       rw     rw       —             own only
+--   equipment register                  rw     rw       —             —
+--   gym documents                       all    building —             —
+--                                              paperwork only (part 390)
+--   the rota (gym_shifts) and its
+--     per-shift rate                    rw     see part —             —
+--                                              its own
+--   payroll, settlements, coach
+--     earnings, session rates           rw     own only —             —
+--   coach_clients, subscriptions,
+--     invoices, connect accounts,
+--     app errors                        r      —        —             —
+--   a member's training and health
+--     record                            —      own book —             own
+--                                              only
+--   staff_grants                        r      —        own rows      own rows
+--                                              (own rows)
+--
+-- The receptionist column is two entries wide on purpose. Everything else in
+-- this schema names its roles explicitly, so the role reaches nothing that is
+-- not written above — and the next person who wants to widen it has to write a
+-- line in a file like this one saying which table and why.
+--
+-- WHAT RECORDS A GRANT: `staff_grants`, one row per grant, holding the gym, the
+-- person, the role, the owner who made it, the moment, and — when it ends — the
+-- moment and the owner who ended it. It is written by `grant_staff_role` and
+-- `revoke_staff_role` in the same transaction as the access change itself, and
+-- it has no write policy for anybody, including the owner whose gym it is.
+--
+-- ── STILL TO DO, AND NAMED SO IT IS NOT DISCOVERED ──────────────────────
+--
+-- A receptionist cannot use the web console. Every page gates on `me.role`, and
+-- the `Role` union in studio-web/lib/supabase.ts is still the original three:
+--
+--   · studio-web/lib/supabase.ts       `Role` needs the fourth value.
+--   · studio-web/app/door/page.tsx     gates `!== 'owner' && !== 'trainer'`
+--                                      twice — this is the screen the role
+--                                      exists for.
+--   · studio-web/app/members/page.tsx  owner-only today; the member RECORD is
+--                                      what the desk needs, and the money on
+--                                      that screen is what it must not have.
+--   · studio-web/components/Shell.tsx  the rail decides what is offered.
+--
+-- Until those change, a grant made here is enforced and recorded and its holder
+-- has no screen. That is deliberately the way round it is: a role the database
+-- honours and the console has not caught up with is a visible gap, and a
+-- console that offers a receptionist screens the database will refuse is the
+-- failure part 530 spends forty lines declining to ship.
+-- ═════════════════════════════════════════════════════════════════════════
+
+-- ▶ a-number-with-nothing-to-compare-it-to.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A number with nothing to compare it to.
+--
+-- src/lib/wearables/types.ts states the rule on the field itself, and states it
+-- as a rule rather than as advice:
+--
+--     "It is deliberately NOT comparable between people. HRV is a personal
+--      baseline — 40 ms is excellent for one member and a red flag for another
+--      — so every screen that prints it prints it as a trend against that
+--      member's own history, never against a population norm this app does not
+--      have."
+--
+-- One screen printed it. app/(client)/devices.tsx rendered `62 ms HRV` off
+-- whatever the last sync returned, held it in React state, and kept nothing. So
+-- there was no history for it to be a trend against, and there could not have
+-- been: the reading was gone on the next launch, and gone for good on a second
+-- handset. A member looking at 62 cannot tell whether that is their good night
+-- or their worst week, which is the entire content of the measurement.
+--
+-- 154-a-night-a-watch-measured-outlives-the-read.sql is the same argument about
+-- sleep and it ends with the same table. This is that table for HRV, written to
+-- the same shape ON PURPOSE: a second, differently-reasoned way of keeping a
+-- nightly device reading is how two screens come to disagree about what "last
+-- night" means.
+--
+--
+-- ── What a row here is, and what it is not ────────────────────────────────
+--
+-- One row is one night, for one member, as ONE NAMED DEVICE reported it.
+--
+--   · Never an average of two devices. A WHOOP and an Oura on the same night
+--     measure different things at different times and neither recorded the
+--     mean. The row carries `provider` and `source_name` because a figure whose
+--     source has been dropped cannot be checked by the person it is about.
+--   · Only nights that were MEASURED. A night no device recorded and a night we
+--     failed to read are two different absences, and neither is a row here.
+--   · No default, anywhere. `hrv_ms`, `provider` and `source_name` are NOT NULL
+--     with NO DEFAULT, so a write that does not say what was measured or who
+--     measured it fails with 23502 rather than filing a night nobody had.
+--     150-there-is-no-default-currency.sql removed seven invented defaults for
+--     this reason and this part does not add an eighth.
+--
+--
+-- ── Milliseconds, and only milliseconds ──────────────────────────────────
+--
+-- The column is named for its unit because the two vendors that publish this
+-- publish it in different ones and neither says so in the field name: WHOOP's
+-- recovery score carries `hrv_rmssd_milli` in SECONDS (0.0621 for 62 ms) and
+-- Oura's `average_hrv` is already milliseconds. The conversion belongs in the
+-- edge function next to the field it reads; by the time a figure reaches this
+-- table it is RMSSD in milliseconds, and the CHECK is what stops a seconds
+-- reading being filed as though it were one.
+--
+-- The bounds are the range in which the number can be a nightly RMSSD at all.
+-- Zero is refused because zero is not a measurement of a heart. 400 ms is well
+-- above any adult reading and is a typo catch, not a claim about physiology.
+-- A 0.0621 arriving unconverted lands below the floor and is refused, loudly,
+-- rather than becoming a baseline of nothing.
+--
+--
+-- ── Why (user_id, night) is the key ───────────────────────────────────────
+--
+-- There is exactly one answer per night — the one the app chose from however
+-- many devices answered — and a second row for the same night would be a second
+-- answer to a question that has one. The key also makes the write an UPSERT,
+-- which is what lets a provider REVISE a night: WHOOP re-scores once its
+-- processing catches up, and pinning the first figure Repple ever saw would
+-- leave the app quietly disagreeing with the vendor's own screen for ever.
+--
+--
+-- ── Owner-scoped, and only owner-scoped ──────────────────────────────────
+--
+-- No coach policy, for the reason 154 gives about device sleep: a coach who is
+-- entitled to see a member's device readings sees them through the per-client
+-- sharing switch (src/lib/wearables/sleepAccess.ts). A blanket read here would
+-- route around that switch by the back door, from a second table.
+--
+-- RLS selects ROWS. It does not confer a grant, and a policy with no matching
+-- GRANT is inert — the failure mode is 42501 on every read with the policy
+-- looking perfectly correct in the dashboard. So the grant is explicit.
+--
+-- The REVOKE is not decoration and is not inherited from 154. This project's
+-- default privileges in `public` grant anon=arwdm on every table `create table`
+-- makes, and `anon` is the key compiled into the shipped app. Supabase grants to
+-- `anon` and to `authenticated` SEPARATELY, so nothing said to `public` or to
+-- `authenticated` covers it.
+--
+--
+-- ── NOT APPLIED ──────────────────────────────────────────────────────────
+--
+-- This part has not been run against any database. It is in the bundle
+-- (`npm run db:build`) and nowhere else; nothing has been executed and no
+-- exploit run of the kind 154 records has been done against it, because there
+-- is no table yet to run one against. src/ui/deviceHrv.ts reads this table
+-- through a status — a missing relation comes back as 42P01, which it reports
+-- as a failed read rather than as a member with no history — so the app ahead
+-- of the migration shows the night's figure with no trend beside it and says
+-- why, which is the same thing it shows on somebody's first night.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.device_hrv_nights (
+  -- Cascade: a deleted account's readings are nobody's record. Matches
+  -- device_sleep_nights, sleep_logs, habit_logs and measurements.
+  user_id uuid not null references public.profiles(id) on delete cascade,
+
+  -- The local calendar night, as `nightKey()` computes it — attributed by when
+  -- the sleep it was measured across ENDED, which is the convention every
+  -- vendor uses for "last night" and the one a member means when they look at
+  -- today's row. A date, not a timestamp: the app has already decided which day
+  -- this is, in the member's own timezone, and re-deriving it here from an
+  -- instant would move nights across the date line for everybody west of
+  -- Greenwich.
+  night date not null,
+
+  -- RMSSD in MILLISECONDS. See the header for why the unit is in the name and
+  -- why the floor matters more than the ceiling.
+  hrv_ms numeric(5,1) not null check (hrv_ms > 0 and hrv_ms <= 400),
+
+  -- Who said so. Both NOT NULL: `provider` is the Repple registry id
+  -- ('whoop', 'oura'), `source_name` is what the member is shown.
+  provider text not null,
+  source_name text not null,
+
+  -- When Repple stored it. A fact about our write and not about the member, so
+  -- unlike everything above it may have a default.
+  recorded_at timestamptz not null default now(),
+
+  -- One answer per night. See the header: this is not a log.
+  primary key (user_id, night)
+);
+
+-- The only read there is: this member's recent nights, newest first. The
+-- primary key already indexes (user_id, night) ascending, which serves an
+-- ORDER BY night DESC scan equally well — so there is no second index here, and
+-- 145-an-index-twice-and-fifteen-policies-that-asked-per-row.sql is the reason
+-- that is stated rather than left for somebody to add one.
+
+comment on table public.device_hrv_nights is
+  'Nightly heart-rate variability (RMSSD, milliseconds) measured by a member''s own connected devices, one row per night, kept so the figure can be shown as a trend against their own baseline rather than as a bare number. Private to the member — a coach reads device readings through the sharing switch, never here; see 154.';
+
+alter table public.device_hrv_nights enable row level security;
+
+drop policy if exists device_hrv_nights_own on public.device_hrv_nights;
+create policy device_hrv_nights_own on public.device_hrv_nights for all
+  using      (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+grant select, insert, update, delete on public.device_hrv_nights to authenticated;
+revoke all on public.device_hrv_nights from anon;
+
+-- ▶ a-coach-heard-about-everybody-but-themselves.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- A coach heard about everybody except themselves.
+--
+-- ── What was measured ───────────────────────────────────────────────────
+--
+-- Part 251 gave a coach five notification channels — chat, bookings, money,
+-- clients, admin — and `CoachChannel` in src/lib/coachNotify.ts mirrors them.
+-- Read the five together and they have one thing in common that is not an
+-- accident of how the list was written: every single one is SOMEBODY ELSE
+-- doing something. A client messages, books, cancels, pays, asks to be
+-- coached, signs a release, leaves.
+--
+-- That was not a choice about what a coach wants to know. It is the whole of
+-- what the platform was ABLE to tell them, because every one of those has
+-- another person's action behind it, and another person's action is what a
+-- trigger or a sending handset needs in order to exist.
+--
+-- So the four things most likely to cost a coach money were the four the app
+-- would never mention:
+--
+--   · a session whose outcome nobody recorded. `settlementBlocker` in
+--     src/lib/gymSessions.ts refuses to settle a period containing one, and
+--     the statement, the payroll figure and the analytics revenue line are all
+--     short by exactly those sessions until they are marked.
+--   · a session pack running out from under a client, who then arrives with
+--     nothing left to draw on.
+--   · an invoice ageing past its due date — money already earned, not
+--     collected, and getting older.
+--   · a client who has stopped training, which src/lib/clientDrift.ts computes
+--     and app/(trainer)/nudges.tsx already renders to anybody who opens it.
+--
+-- The app computes all four. It computed all four before this part. Every one
+-- of them was on a screen a coach had to go and look at, and the coach who
+-- most needs them is by definition the one who has not opened the app.
+--
+-- ── Why the sixth channel is LOCAL and the other five are not ───────────
+--
+-- Part 251 says, correctly, that every coach-directed notification is remote
+-- and that a device-local preference would therefore be a switch reading "off"
+-- while the banner kept arriving. That argument holds for the five it was
+-- written about and does not extend to this one, for the reason above: there
+-- is no other person's action here to hang a trigger on. Nothing in the
+-- database knows that a coach's Monday has three unmarked sessions in it —
+-- the figure is composed on the handset out of reads it already makes.
+--
+-- So `book` is scheduled by the coach's own phone (src/ui/coachReminders.ts,
+-- through `bookAlert` in src/lib/coachNotify.ts, which is pure and tested) and
+-- the ANSWER still lives here, in this table, alongside the other five.
+-- `CoachChannelDef.local` is the field that says which is which, and it is the
+-- same field, meaning the same thing, as `CategoryDef.local` in
+-- src/lib/notifyPrefs.ts.
+--
+-- Keeping the preference server-side rather than in AsyncStorage is not
+-- ceremony. It is the difference between a coach answering this question once
+-- and answering it again on every phone they sign into, and then finding the
+-- two phones disagreeing. The screen already tells them these follow the
+-- account rather than the handset (`CHANNEL_ACCOUNT_WIDE`), and one channel
+-- quietly behaving differently would make that sentence false.
+--
+-- ── What this part actually does ────────────────────────────────────────
+--
+-- Widens one CHECK. The table, the index, the RLS policy and the touch trigger
+-- from part 251 are all unchanged and are not restated here.
+--
+-- The three rules part 251 states about the filter are unaffected and worth
+-- restating only to say so: no row is still not an answer, a failed read still
+-- sends, and muting still suppresses a push and never a record. The first is
+-- what makes this part safe to apply before any client build ships with the
+-- sixth switch in it — a coach who has never seen the switch has no row, no
+-- row means never answered, and never answered reads as on.
+--
+-- The two edge functions need no change and are not touched: they filter
+-- REMOTE sends, `book` is never sent remotely, and a channel name they never
+-- see in a send is a channel name they never look up.
+--
+-- Idempotent; safe to re-run.
+-- ═════════════════════════════════════════════════════════════════════════
+
+-- Dropped and recreated rather than altered: a CHECK cannot be widened in
+-- place, and this is the same two statements part 251 uses for the same
+-- constraint, so re-running either part in either order leaves one definition
+-- standing rather than two.
+alter table public.notify_channel_prefs
+  drop constraint if exists notify_channel_prefs_channel_chk;
+alter table public.notify_channel_prefs
+  add constraint notify_channel_prefs_channel_chk
+  check (channel in ('chat', 'bookings', 'money', 'clients', 'admin', 'book'));
+
+comment on column public.notify_channel_prefs.channel is
+  'Mirrors CoachChannel in src/lib/coachNotify.ts. A CHECK rather than an enum because this list will be tuned by somebody reading a support thread, and an enum change takes a lock. Five of the six are applied in supabase/functions/send-push and notify-message, where remote recipients are resolved; ''book'' is the coach''s own handset telling them about their own book — an unmarked session, an overdue invoice, a client who has stopped — which has no other person''s action behind it and so no trigger to send it. The answer lives here anyway so it follows the coach between phones.';
+
+-- ▶ the-slots-that-stopped-coming.sql
+
+-- ── A coach's open slots quietly stopped being generated ───────────────────
+--
+-- Part 650 added `trainer_availability.tz` and built `run_open_slot_extension`
+-- on top of it, so a coach's weekly hours keep turning into bookable slots
+-- without anybody pressing anything. Line 103 of that part reads:
+--
+--     where ta.tz is not null
+--
+-- and it is right to: a slot generated in a guessed zone puts a coach's 07:00
+-- at some other hour, and the first anybody knows is a client arriving to an
+-- empty gym. Skipping is recoverable. Guessing is not.
+--
+-- What part 650 did NOT do is fill the column in for the rows that already
+-- existed. `deviceZone()` in src/ui/availability.ts stamps `tz` on INSERT only,
+-- so every availability row written before that part landed has `tz = null`,
+-- is skipped by the nightly job for ever, and can only gain a zone if the coach
+-- deletes each slot and re-adds it by hand — which nothing tells them to do.
+--
+-- The visible symptom is not an error anywhere. It is a coach whose clients
+-- open the app and find nothing to book, and a client who cannot see why. There
+-- is no failure to read, no refusal to report and no row out of place; the job
+-- runs nightly, reports a count, and the count silently excludes them.
+--
+-- ── The gym's own zone is a fact, not a guess ─────────────────────────────
+--
+-- Part 650 had nothing honest to fall back on and so fell back on nothing. That
+-- changed with part 710: a gym now carries `tenants.timezone`, refused unless
+-- `pg_timezone_names` holds it, with no default and no backfill of its own.
+--
+-- For a coach who belongs to a gym, that zone is not an inference about where
+-- they are — it is where the sessions happen. A slot at 07:00 on the gym's
+-- clock is the hour a member walks through the gym's door. So this part fills
+-- `tz` from the gym, and ONLY from the gym.
+--
+-- It does not fall back to UTC, to the server's zone, or to the zone of any
+-- other row the coach owns. A coach with no gym, or a gym with no zone set,
+-- keeps `tz = null` and stays skipped — visibly, in a count this part adds —
+-- because for an online-only coach there is genuinely nothing here that knows
+-- what hour they meant.
+--
+-- ── Why the device's zone still wins ──────────────────────────────────────
+--
+-- The trigger below fills only a NULL. A row that arrives carrying a zone keeps
+-- it, whatever the gym says, because the handset that wrote it was in the hand
+-- of the person choosing the hour and the gym's zone is a fact about a
+-- building. A coach who runs a gym in Dubai and takes online clients from
+-- Lisbon is describing Lisbon hours when they set them in Lisbon.
+--
+-- Additive and idempotent. Applying it twice fills nothing the first pass left,
+-- because the first pass left only rows with no gym zone to take.
+
+do $$
+begin
+  if to_regclass('public.trainer_availability') is null then
+    raise exception 'public.trainer_availability is missing — part 15 must be applied before part 730.';
+  end if;
+  -- Named rather than assumed: without part 710 there is no column to read and
+  -- the backfill below would be a silent no-op that looks like a success.
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'tenants' and column_name = 'timezone'
+  ) then
+    raise exception 'tenants.timezone is missing — part 710 must be applied before part 730.';
+  end if;
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'trainer_availability' and column_name = 'tz'
+  ) then
+    raise exception 'trainer_availability.tz is missing — part 650 must be applied before part 730.';
+  end if;
+end $$;
+
+-- ── the rows that already exist ────────────────────────────────────────────
+
+update public.trainer_availability ta
+   set tz = t.timezone
+  from public.profiles p
+  join public.tenants t on t.id = p.tenant_id
+ where ta.trainer_id = p.id
+   and ta.tz is null
+   and t.timezone is not null;
+
+-- ── and the ones written from a client that could not say ─────────────────
+--
+-- A handset without full ICU answers `UTC`, which src/ui/availability.ts
+-- deliberately refuses to send rather than stamp a zone almost nobody is in.
+-- That refusal produces exactly the row this trigger is for: the coach chose
+-- an hour, the phone could not say which clock it was on, and the gym can.
+
+create or replace function public.trainer_availability_default_tz()
+returns trigger language plpgsql security definer set search_path to 'public' as $fn$
+begin
+  if new.tz is null then
+    select t.timezone into new.tz
+      from public.profiles p
+      join public.tenants t on t.id = p.tenant_id
+     where p.id = new.trainer_id;
+  end if;
+  return new;
+end $fn$;
+
+-- BEFORE the validation trigger part 650 installs, so a zone taken from the
+-- gym is checked against pg_timezone_names on the way in like any other. The
+-- name sorts ahead of `trainer_availability_tz_check` and Postgres fires
+-- same-timing triggers in name order, which is the whole reason for the prefix.
+drop trigger if exists a_trainer_availability_default_tz on public.trainer_availability;
+create trigger a_trainer_availability_default_tz
+  before insert or update of tz, trainer_id on public.trainer_availability
+  for each row execute function public.trainer_availability_default_tz();
+
+-- ── the number that should be falling ─────────────────────────────────────
+--
+-- Part 650 counts the rows it skipped on each run, which is the right thing to
+-- report and the wrong place to read it: it lives in a job's return value that
+-- nobody opens. This is the same figure, askable.
+
+create or replace function public.availability_without_a_zone()
+returns table (rows bigint, coaches bigint)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select count(*)::bigint, count(distinct trainer_id)::bigint
+    from public.trainer_availability
+   where tz is null;
+$$;
+
+revoke all on function public.availability_without_a_zone() from public, anon;
+grant execute on function public.availability_without_a_zone() to authenticated;
+
+comment on function public.availability_without_a_zone is
+  'How many weekly availability rows still carry no timezone, and how many coaches they belong to. Every one of them is skipped by run_open_slot_extension (part 650), so their clients see nothing to book and no error is raised anywhere. Should fall to zero for gym coaches after part 730 and stay above it only for coaches with no gym, whose zone this database genuinely does not know.';
+
+comment on function public.trainer_availability_default_tz is
+  'Fills a null timezone on an availability row from the coach''s gym, and never overrides one the client sent. See part 730 for why the gym''s zone is a fact rather than a guess, and why a coach with no gym is left null instead of defaulted to anything.';
+
+-- ▶ a-time-the-coach-had-not-opened.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A member can ask for a time the coach never opened.
+--
+-- ── The hole, stated exactly ─────────────────────────────────────────────
+--
+-- Reported by the product owner testing the client app: "i can't see my coach
+-- Dayne's availability and am not able to book a session or send a request for
+-- a booking."
+--
+-- Three separate things are behind that sentence and only the third is here.
+--
+--   1. A client is never shown a coach's WEEKLY AVAILABILITY, on purpose.
+--      `trainer_availability` is touched by four files and all four are
+--      coach-side. What a client sees is generated open slots — real `sessions`
+--      rows with `status = 'available'` — and books one through `book_session`.
+--   2. Those slots stopped being generated for most existing coaches, because
+--      `run_open_slot_extension` (part 650) skips every availability row with
+--      `tz is null` and nothing ever backfilled the column. Part 731 fixes it.
+--   3. THERE IS NO WAY TO ASK FOR AN HOUR THE COACH HAS NOT ALREADY OPENED.
+--      Every spelling of it was grepped for and none exists. A member who wants
+--      Tuesday at seven, and whose coach has not published Tuesday at seven,
+--      has nothing to tap. This part is that.
+--
+-- ── A request is not a booking, and the schema says so ───────────────────
+--
+-- The single most dangerous thing this feature could do is let somebody arrange
+-- their evening around an hour nobody agreed to. So a request lives in its OWN
+-- table and never in `sessions`:
+--
+--   · A `sessions` row is a commitment. It occupies the coach's diary, it is
+--     counted by payroll (src/lib/gymSessions.ts), it appears on the gym's
+--     timetable (part 44), it holds the exclusion constraint that stops a coach
+--     being in two places at once, and it draws money at delivery (part 370).
+--     None of that is true of a question somebody asked.
+--   · A row in `sessions` with some new `status = 'requested'` would have been
+--     the cheap version and it is the wrong one twice over. It widens a CHECK
+--     constraint every one of those readers depends on — `status in
+--     ('available','booked','blocked')` is load-bearing in the client read
+--     policy, in `book_session`, in `block_time`, in the exclusion constraint's
+--     WHERE clause and in the payroll reads — and every one of them would have
+--     had to be re-read and re-decided to find out what a fourth value means to
+--     it. And a row that is in the table means the coach's calendar has a thing
+--     in it, which is the exact false impression the feature must not create.
+--
+-- So: `session_requests` names two people, an hour and a question. It confers
+-- nothing. ACCEPTANCE IS THE ONLY THING IN THIS FILE THAT CREATES A SESSION.
+--
+-- ── Acceptance is atomic, and what that means here ───────────────────────
+--
+-- Two coaches cannot both answer one request (a request names one coach), but
+-- ONE coach with two handsets, or one coach double-tapping, absolutely can —
+-- and a second `sessions` row from one question is a member charged twice and a
+-- diary with a phantom hour in it. `answer_session_request` therefore:
+--
+--   1. takes `select … for update` on the request row. The second caller blocks
+--      until the first commits, then reads `state <> 'asked'` and is told
+--      'already-answered'. It is not a race that is usually won; it is a race
+--      that cannot be entered.
+--   2. writes the session and the answer in ONE transaction. A function is one
+--      transaction, so there is no state in which the request says accepted and
+--      no session exists, or a session exists and the request still reads as
+--      unanswered.
+--   3. records `session_id` on the request. That is what makes step 1's refusal
+--      safe to state plainly — the second caller is told which session the
+--      first one made, rather than being left to guess.
+--
+-- ── The existing overlap rules apply, and are named in the refusal ───────
+--
+-- `src/lib/gymPtSchedule.ts` and the `classClashes` / `addSession` path in the
+-- trainer calendar are the precedent: a coach may not be put in two places at
+-- once, and the reason is said out loud rather than the write quietly failing.
+-- Accepting onto an occupied hour is refused with the reason, never dropped:
+--
+--   'clash-booked'   another one-to-one is already booked in that span.
+--   'clash-blocked'  the coach marked that time as unavailable (part 89).
+--   'clash-class'    the coach is down to teach a class then (`gym_classes`,
+--                    cancelled ones excluded exactly as `classClashes` does).
+--
+-- The first two are ALSO enforced by `sessions_no_double_booking`, the
+-- exclusion constraint parts 86 and 89 built, which covers `status in
+-- ('booked','blocked')`. The explicit checks exist to NAME the clash; the
+-- constraint exists to be true under concurrency. Both are here, and the
+-- constraint violation is caught and reported as 'clash' — the honest answer
+-- when the row that caused it landed between the check and the insert.
+--
+-- A clash with an OPEN slot is deliberately not a refusal. Part 86 already
+-- settled that: "Two OPEN slots may overlap on purpose … but only one of them
+-- can ever be taken, because the moment one is booked the other cannot be."
+-- An accepted request makes exactly that booking, and any open slot left across
+-- it becomes unbookable the way every other overlapped slot already is —
+-- `book_session` raises `exclusion_violation`, catches it, and returns false,
+-- which the client screen already prints as "someone may have taken it first".
+-- Nothing new is required and nothing is silently deleted out of a coach's
+-- calendar behind their back.
+--
+-- ── Credits and money: this file moves neither ───────────────────────────
+--
+-- There is no price on a request, no credit drawn by one, and no charge raised
+-- by one. A question costs nothing.
+--
+-- An ACCEPTED request produces a session, and that session is paid for by the
+-- route that already exists for it. Which route is decided by one field and it
+-- is decided by NOT setting it: `sessions.booking_drew_credit_at` is stamped by
+-- `book_session` to mean "the client booked this on their own phone and their
+-- phone drew the coach-pack credit in the next breath" (part 370). An accepted
+-- request was not booked on the client's phone — the coach accepted it, on
+-- theirs — so the column is left null, and `sessions_pack_draw()` treats the
+-- session exactly as it treats the one a coach books into their own diary or a
+-- front desk puts on the timetable: the credit is drawn AT DELIVERY, off
+-- whichever entitlement part 370 says pays, in part 370's order, with part
+-- 370's shortfall marker when the client held one and it was empty.
+--
+-- That is the whole of the money design and it is deliberately a subtraction.
+-- The alternative — having the member's app call `redeem_pack_session` when it
+-- notices the acceptance — would have been a SECOND draw path for a one-off,
+-- reachable only if the member opened the app, and it would double-draw against
+-- part 370's delivery trigger the moment they did. There is one path. It is the
+-- one already in the file.
+--
+-- ── What happens to a request nobody answers ─────────────────────────────
+--
+-- IT EXPIRES WHEN THE HOUR IT ASKS FOR ARRIVES, and not before.
+--
+-- One rule, chosen over a fixed timer for a reason worth stating: a request is
+-- a question about a specific hour, so the hour answers it. A 48-hour deadline
+-- would kill a request made three weeks out while it was still perfectly live,
+-- and would leave one made for tomorrow morning standing after the morning had
+-- gone. There is nothing to tune and nothing to explain to a member beyond one
+-- sentence, which `src/lib/sessionRequests.ts` writes and the member's screen
+-- prints BEFORE they rely on it rather than after.
+--
+-- Expiry is DERIVED, never stored. `state` has four values and 'expired' is not
+-- one of them: a lapsed request is one still marked 'asked' whose `starts_at`
+-- has passed. That is a deliberate refusal to depend on a job. A stored expiry
+-- needs something to run, and a nightly job that stops running is exactly how
+-- part 731's defect happened — a count quietly excluding people, with no error
+-- anywhere. Derived, the rule is true at every instant with nothing scheduled,
+-- on a database nobody has swept, and it reads the same to the member's screen,
+-- to the coach's screen and to the RPC that refuses to accept one.
+--
+-- ── Who can see one ──────────────────────────────────────────────────────
+--
+-- The member reads and writes their own. The coach reads and answers the ones
+-- addressed to them. Nobody else — no other coach, no gym owner, no front desk.
+--
+-- The owner exclusion is the one that needed deciding rather than assuming, and
+-- part 138 is the precedent: a coach's own ledger is not readable by the gym
+-- because "a self-employed trainer's own billing is not gym money". The same
+-- shape applies here for a different reason. A request is a CONVERSATION
+-- between two named people about an hour that may never happen, and most of
+-- them will never become anything the gym has a stake in. What the gym has a
+-- stake in is the SESSION, and the moment one exists the gym's existing reads
+-- pick it up: `sessions_gym_owner_r` (part 44) shows it on the timetable and
+-- payroll counts it. So the gym sees every arrangement that was made and none
+-- of the asking, which is the correct line and is narrower than the one that
+-- would have been drawn by reflex.
+--
+-- The policies are built from `is_my_client` and `auth.uid()` — the idioms
+-- already in this schema — and add no helper of their own. `my_tenant()` and
+-- `my_role()` appear nowhere below on purpose: neither the tenant nor the role
+-- decides anything here, and a policy that consulted them would be widening the
+-- read to a third party by accident of habit.
+--
+-- Every write goes through a SECURITY DEFINER function, exactly as part 09
+-- reasoned for booking and cancelling — "so no broad client UPDATE grant is
+-- needed". There is no UPDATE policy and no DELETE policy on this table for
+-- anybody. A member cannot mark their own request accepted, a coach cannot move
+-- the hour it asks for, and neither can rewrite what was asked after the fact.
+--
+-- auth.uid() throughout, never current_user: under PostgREST every signed-in
+-- request runs as the shared `authenticated` role.
+--
+-- Additive and idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+do $$
+begin
+  if to_regclass('public.sessions') is null then
+    raise exception 'public.sessions is missing — part 01 must be applied before part 740.';
+  end if;
+  if to_regclass('public.clients') is null then
+    raise exception 'public.clients is missing — part 01 must be applied before part 740.';
+  end if;
+  -- Named rather than assumed. Without the exclusion constraint parts 86 and 89
+  -- built, acceptance below would still refuse a clash it can SEE and would
+  -- have nothing underneath it when two accepts land in the same instant.
+  if not exists (
+    select 1 from pg_constraint where conname = 'sessions_no_double_booking'
+  ) then
+    raise exception 'sessions_no_double_booking is missing — parts 86 and 89 must be applied before part 740.';
+  end if;
+end $$;
+
+
+-- ── 1 · the question ───────────────────────────────────────────────────────
+
+create table if not exists public.session_requests (
+  id            uuid primary key default gen_random_uuid(),
+  -- Both sides are named on the row rather than one of them being looked up
+  -- through `clients.trainer_id` when it is needed. Coaching relationships end
+  -- (part 68) and clients move between coaches; a request answered last month
+  -- was answered by the coach it was addressed to, and re-deriving that from
+  -- today's link would rewrite history every time somebody changed coach.
+  client_id     uuid not null references public.clients(id) on delete cascade,
+  trainer_id    uuid not null references public.trainers(id) on delete cascade,
+  -- The hour being asked for. An instant, like `sessions.starts_at` — the
+  -- member's phone knows what "Tuesday at seven" means on its own clock and
+  -- sends the instant, so nothing here has to guess a zone. There is no
+  -- timezone column and no default zone anywhere in this file; part 731 is the
+  -- write-up of what a guessed zone costs.
+  starts_at     timestamptz not null,
+  duration_min  int not null default 60 check (duration_min > 0 and duration_min <= 480),
+  -- The member's own words. Optional, capped, and never required — "can we do
+  -- Tuesday at seven" is a complete request without a covering letter.
+  note          text check (note is null or char_length(note) <= 400),
+  -- Four values, and 'expired' is deliberately not one of them. See the header:
+  -- a lapsed request is one still 'asked' whose hour has gone, computed rather
+  -- than swept, so the rule needs nothing to be running to be true.
+  state         text not null default 'asked'
+                check (state in ('asked', 'accepted', 'declined', 'withdrawn')),
+  -- What the session became, once one exists. This is the join that makes the
+  -- second answerer's refusal safe to state: they are told which session the
+  -- first one made rather than being left to work it out. ON DELETE SET NULL
+  -- rather than CASCADE — a session that was later deleted does not unmake the
+  -- fact that this request was accepted.
+  session_id    uuid references public.sessions(id) on delete set null,
+  -- The coach's reason for saying no, in their own words. Optional: a coach who
+  -- declines without explaining has still given an answer, and a screen that
+  -- demanded a reason would produce a full stop typed to get past it.
+  decline_note  text check (decline_note is null or char_length(decline_note) <= 400),
+  answered_at   timestamptz,
+  answered_by   uuid references public.profiles(id) on delete set null,
+  created_at    timestamptz not null default now()
+);
+
+-- One live question per hour, per pair. A double tap, a retried offline intent
+-- and an impatient second ask are all the same question, and the second one
+-- lands as 23505 rather than as a second row for the coach to answer twice.
+-- Partial on 'asked' deliberately: a request that was DECLINED for Tuesday at
+-- seven must not stop the member asking again next week for the same hour, and
+-- an accepted one must not stop them asking again after they cancel.
+create unique index if not exists uq_session_requests_live
+  on public.session_requests (client_id, trainer_id, starts_at)
+  where state = 'asked';
+
+-- The coach's queue: "what have I been asked, soonest first". The one read the
+-- coach's screen makes and the one `answer_session_request` does not need.
+create index if not exists session_requests_coach_idx
+  on public.session_requests (trainer_id, starts_at)
+  where state = 'asked';
+
+-- The member's own list, newest first, whatever became of each one.
+create index if not exists session_requests_client_idx
+  on public.session_requests (client_id, created_at desc);
+
+comment on table public.session_requests is
+  'A member asking their coach for an hour the coach has not opened. It is NOT a booking and confers nothing: no slot is held, no credit is drawn, no money moves. Accepting one creates the `sessions` row — see answer_session_request(), which is the only thing in this schema that turns one of these into a commitment.';
+comment on column public.session_requests.state is
+  'asked | accepted | declined | withdrawn. ''expired'' is NOT a state: a request still marked ''asked'' whose starts_at has passed has lapsed, and that is computed rather than swept so it needs no job to be true. See src/lib/sessionRequests.ts, which is the one place the rule is written for the apps.';
+comment on column public.session_requests.session_id is
+  'The session acceptance created. Null for every other state — and null on an accepted one only if that session was later deleted, which does not unmake the acceptance.';
+comment on column public.session_requests.starts_at is
+  'The instant asked for. No timezone column and no default zone: the member''s phone resolved their own clock before sending. Part 731 is what a guessed zone costs.';
+
+
+-- ── 2 · who may see one ────────────────────────────────────────────────────
+--
+-- Two SELECT policies, no UPDATE policy, no DELETE policy, no INSERT policy.
+-- Every write is an RPC below, for the reason part 09 gives about booking.
+
+alter table public.session_requests enable row level security;
+
+drop policy if exists session_requests_client_r on public.session_requests;
+create policy session_requests_client_r on public.session_requests
+  for select using (client_id = auth.uid());
+
+-- `is_my_client` rather than a hand-rolled EXISTS on `clients`, for the reason
+-- part 02 established when it introduced the helper and part 109 restates: one
+-- definition of "this person is mine" that every coach-side policy in this
+-- schema shares. It is also not quite enough on its own — a coach who has since
+-- taken this member on must not inherit the requests addressed to their
+-- previous coach — so the row's own `trainer_id` is checked too, and it is the
+-- half that actually decides.
+drop policy if exists session_requests_coach_r on public.session_requests;
+create policy session_requests_coach_r on public.session_requests
+  for select using (trainer_id = auth.uid() and is_my_client(client_id));
+
+grant select on public.session_requests to authenticated;
+
+
+-- ── 3 · asking ─────────────────────────────────────────────────────────────
+--
+-- The coach is NOT a parameter. It is read from `clients.trainer_id` for the
+-- caller, so a member can only ever ask their own coach and there is no id on
+-- the wire for anybody to substitute. A member with no coach gets 'no-coach',
+-- which is a true thing their screen can say rather than an empty list.
+
+-- How many unanswered questions one member may have outstanding with one coach.
+-- Not a rate limit on asking — it is a limit on how much unanswered work one
+-- person can put in front of a coach at once, which is the thing that makes a
+-- queue useless to the coach and therefore useless to everybody asking.
+create or replace function public.session_request_live_cap()
+returns int language sql immutable set search_path to 'public'
+as $fn$ select 10 $fn$;
+
+create or replace function public.request_session(
+  p_starts_at timestamptz,
+  p_duration_min int default 60,
+  p_note text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $fn$
+declare
+  v_uid uuid := auth.uid();
+  v_trainer uuid;
+  v_live int;
+  v_id uuid;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'reason', 'not-signed-in');
+  end if;
+  if p_starts_at is null then
+    return jsonb_build_object('ok', false, 'reason', 'bad-time');
+  end if;
+  -- The hour must still be ahead. Asking for a time that has gone is not a
+  -- request, and the same sentence part 731's neighbour `canPlan` uses applies:
+  -- it would be a claim about the past arriving through the front door.
+  if p_starts_at <= now() then
+    return jsonb_build_object('ok', false, 'reason', 'in-the-past');
+  end if;
+  if p_duration_min is null or p_duration_min <= 0 or p_duration_min > 480 then
+    return jsonb_build_object('ok', false, 'reason', 'bad-duration');
+  end if;
+
+  select c.trainer_id into v_trainer from clients c where c.id = v_uid;
+  if v_trainer is null then
+    return jsonb_build_object('ok', false, 'reason', 'no-coach');
+  end if;
+
+  select count(*) into v_live
+    from session_requests r
+   where r.client_id = v_uid
+     and r.trainer_id = v_trainer
+     and r.state = 'asked'
+     and r.starts_at > now();
+  if v_live >= session_request_live_cap() then
+    return jsonb_build_object('ok', false, 'reason', 'too-many', 'cap', session_request_live_cap());
+  end if;
+
+  begin
+    insert into session_requests (client_id, trainer_id, starts_at, duration_min, note)
+    values (v_uid, v_trainer, p_starts_at, p_duration_min, nullif(btrim(coalesce(p_note, '')), ''))
+    returning id into v_id;
+  exception
+    -- The partial unique index. The member has already asked for this hour and
+    -- it is still unanswered, which is not a failure — it is the state they
+    -- wanted to be in. Reported as its own reason so the screen says "you have
+    -- already asked for that" rather than "something went wrong".
+    when unique_violation then
+      return jsonb_build_object('ok', false, 'reason', 'already-asked');
+  end;
+
+  return jsonb_build_object('ok', true, 'reason', 'asked', 'id', v_id, 'trainer', v_trainer);
+end $fn$;
+
+revoke all on function public.request_session(timestamptz, int, text) from public, anon;
+grant execute on function public.request_session(timestamptz, int, text) to authenticated;
+
+comment on function public.request_session is
+  'Ask this member''s own coach for an hour. The coach is read from clients.trainer_id and is not a parameter, so nobody can address a request to a coach who is not theirs. Creates NOTHING but the question: no slot is held and no credit moves. Returns {ok, reason, id, trainer}.';
+
+
+-- ── 4 · withdrawing ────────────────────────────────────────────────────────
+--
+-- A member changing their mind. Only from 'asked', and only their own: an
+-- accepted request has become a session, and the way out of a session is
+-- `cancel_my_session`, which prices the coach's policy and hands the slot on.
+-- Withdrawing an accepted request here would take the arrangement off this
+-- table and leave the session standing with nothing pointing at it.
+
+create or replace function public.withdraw_session_request(p_request uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $fn$
+declare
+  v_uid uuid := auth.uid();
+  v_rows int;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'reason', 'not-signed-in');
+  end if;
+  update session_requests
+     set state = 'withdrawn', answered_at = now(), answered_by = v_uid
+   where id = p_request and client_id = v_uid and state = 'asked';
+  get diagnostics v_rows = row_count;
+  if v_rows = 0 then
+    -- One answer for "not yours" and for "already answered", because from the
+    -- member's side both mean the same thing: this is not a live question any
+    -- more, and their screen should re-read rather than assert anything.
+    return jsonb_build_object('ok', false, 'reason', 'gone');
+  end if;
+  return jsonb_build_object('ok', true, 'reason', 'withdrawn');
+end $fn$;
+
+revoke all on function public.withdraw_session_request(uuid) from public, anon;
+grant execute on function public.withdraw_session_request(uuid) to authenticated;
+
+comment on function public.withdraw_session_request is
+  'The member taking back an unanswered request. Only from ''asked'' and only their own. An ACCEPTED request is a session and is cancelled with cancel_my_session, which prices the coach''s policy — withdrawing one here would orphan it.';
+
+
+-- ── 5 · answering, which is the only thing here that creates a session ─────
+
+create or replace function public.answer_session_request(
+  p_request uuid,
+  p_accept boolean,
+  p_note text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $fn$
+declare
+  v_uid uuid := auth.uid();
+  v_req session_requests%rowtype;
+  v_session uuid;
+  v_clash_id uuid;
+  v_clash_status text;
+  v_class_title text;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'reason', 'not-signed-in');
+  end if;
+  if p_accept is null then
+    return jsonb_build_object('ok', false, 'reason', 'no-answer');
+  end if;
+
+  -- THE LOCK. Everything the rest of this function decides is decided against a
+  -- row nobody else can be reading for update at the same time, so a coach with
+  -- two handsets — or one handset that sent twice — cannot produce two sessions
+  -- from one question. The second caller waits here, then falls through to the
+  -- 'already-answered' branch below with the first caller's session named.
+  select * into v_req from session_requests
+   where id = p_request and trainer_id = v_uid
+   for update;
+
+  if not found then
+    -- Not this coach's request, or no such request. One answer for both: a
+    -- coach must not be able to tell a request they may not see from one that
+    -- does not exist.
+    return jsonb_build_object('ok', false, 'reason', 'not-yours');
+  end if;
+
+  if v_req.state <> 'asked' then
+    return jsonb_build_object(
+      'ok', false, 'reason', 'already-answered',
+      'state', v_req.state, 'session', v_req.session_id
+    );
+  end if;
+
+  -- Lapsed. The hour it asks for has arrived, so there is nothing left to say
+  -- yes to. Refused rather than silently accepted into the past, and the state
+  -- is deliberately left as 'asked' — see the header on why expiry is derived.
+  if v_req.starts_at <= now() then
+    return jsonb_build_object('ok', false, 'reason', 'expired');
+  end if;
+
+  -- ── declining ──────────────────────────────────────────────────────────
+  if not p_accept then
+    update session_requests
+       set state = 'declined',
+           decline_note = nullif(btrim(coalesce(p_note, '')), ''),
+           answered_at = now(), answered_by = v_uid
+     where id = v_req.id;
+    return jsonb_build_object('ok', true, 'reason', 'declined');
+  end if;
+
+  -- ── accepting ──────────────────────────────────────────────────────────
+  --
+  -- The clash checks NAME the obstacle. They are not what makes acceptance
+  -- safe — `sessions_no_double_booking` is, and it is caught below — they are
+  -- what lets the coach be told "you are teaching Bootcamp then" instead of
+  -- "that didn't work". Same three rules the trainer calendar applies before
+  -- `addSession`, in the same order.
+
+  select s.id, s.status into v_clash_id, v_clash_status
+    from sessions s
+   where s.trainer_id = v_uid
+     and s.status in ('booked', 'blocked')
+     and session_span(s.starts_at, s.duration_min)
+         && session_span(v_req.starts_at, v_req.duration_min)
+   limit 1;
+  if v_clash_id is not null then
+    return jsonb_build_object(
+      'ok', false,
+      'reason', case when v_clash_status = 'blocked' then 'clash-blocked' else 'clash-booked' end
+    );
+  end if;
+
+  -- A class the coach is DOWN TO TEACH. `classClashes` in src/lib/booking.ts is
+  -- the precedent and this is its server half, with the same two exclusions: a
+  -- cancelled class is not a commitment, and a class attributed to nobody is
+  -- not attributed to this coach. The unattributed ones are exactly what that
+  -- function refuses to rule in or out, and a server that guessed here would be
+  -- refusing a coach their own hour over somebody else's untitled row.
+  if to_regclass('public.gym_classes') is not null then
+    select g.title into v_class_title
+      from gym_classes g
+     where g.trainer_id = v_uid
+       and coalesce(g.status, 'scheduled') <> 'cancelled'
+       and session_span(g.starts_at, g.duration_min)
+           && session_span(v_req.starts_at, v_req.duration_min)
+     limit 1;
+    if v_class_title is not null then
+      return jsonb_build_object('ok', false, 'reason', 'clash-class', 'class', v_class_title);
+    end if;
+  end if;
+
+  begin
+    insert into sessions (trainer_id, client_id, starts_at, duration_min, status, released)
+    values (v_req.trainer_id, v_req.client_id, v_req.starts_at, v_req.duration_min, 'booked', false)
+    returning id into v_session;
+  exception
+    -- The constraint caught what the checks above could not: a booking or a
+    -- block that landed in the microseconds between them and this insert.
+    -- Reported as a plain 'clash' rather than being attributed to one of the
+    -- two, because this branch genuinely does not know which it was and a
+    -- guessed reason on a refusal is worse than an unspecific true one.
+    when exclusion_violation then
+      return jsonb_build_object('ok', false, 'reason', 'clash');
+  end;
+
+  -- `booking_drew_credit_at` is NOT set, and that is the whole money decision.
+  -- See the header: leaving it null routes this session through part 370's
+  -- delivery draw, which is the same path a coach-booked or desk-booked one-off
+  -- already takes. Stamping it would tell part 370 that a client's phone had
+  -- drawn a credit that nothing drew.
+
+  update session_requests
+     set state = 'accepted', session_id = v_session,
+         answered_at = now(), answered_by = v_uid
+   where id = v_req.id;
+
+  return jsonb_build_object('ok', true, 'reason', 'accepted', 'session', v_session);
+end $fn$;
+
+revoke all on function public.answer_session_request(uuid, boolean, text) from public, anon;
+grant execute on function public.answer_session_request(uuid, boolean, text) to authenticated;
+
+revoke all on function public.session_request_live_cap() from public, anon;
+grant execute on function public.session_request_live_cap() to authenticated;
+
+comment on function public.answer_session_request is
+  'The coach''s yes or no. The ONLY thing in this schema that turns a request into a session. Locks the request row FOR UPDATE first, so one question cannot produce two sessions however many handsets answer it. Refuses an occupied hour with the reason named — clash-booked, clash-blocked, clash-class — and falls back to a plain ''clash'' when sessions_no_double_booking catches one that landed mid-flight. Leaves sessions.booking_drew_credit_at null on purpose: the credit is drawn at delivery by part 370, on the route a coach-booked one-off already uses.';
+comment on function public.session_request_live_cap is
+  'How many unanswered requests one member may have outstanding with one coach. Not a rate limit on asking — a limit on how much unanswered work can be stacked in front of one coach, past which the queue is useless to them and therefore to everyone in it.';
+
+-- ▶ a-movement-has-one-identity-and-several-names.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- A movement has ONE identity and several names.
+--
+-- The catalogue is 619 movements and it is English. A member whose phone is in
+-- German reads "Bent-Over Barbell Row" in a programme their coach wrote for
+-- them, and a member whose phone is in Spanish reads the same. This part is
+-- where the other two names live.
+--
+-- ── A table, not a column, and the reason is the id ───────────────────────
+--
+-- The obvious shape is `name_de` and `name_es` on `public.exercises`. It was
+-- rejected, and not on taste:
+--
+--   · The id IS the English name. `exercises.id` is exerciseSlug(name) and
+--     nothing else — supabase/parts/76 exists because 68 rows were keyed by a
+--     vendor id instead, and those rows listed in the picker, showed an
+--     illustration, and answered "not in our catalogue" when tapped. Programs
+--     store an exercise NAME; workout_logs store an exercise NAME; machines.ts
+--     resolves a photographed machine to a NAME. Every one of those resolves
+--     through the English string. A language must therefore be a thing that
+--     hangs OFF the identity, and the shape that says so is a child table
+--     keyed (exercise_id, locale). A column beside `name` invites exactly the
+--     mistake part 76 spent a migration undoing: somebody re-keying a row on
+--     the German name because the German name is right there.
+--
+--   · A missing translation must be visibly missing. With a column, "not
+--     translated" is a NULL sitting next to 618 other NULLs and nothing
+--     distinguishes it from "translated to the empty string" or from a column
+--     that was never filled. With a row, absence is the absence of a row —
+--     countable, joinable, and reportable ("412 of 619 in German") without
+--     scanning a wide table for nulls. src/lib/catalogueLocale.ts turns that
+--     absence into a FLAG on the string it returns, and the screens mark it.
+--     See its header.
+--
+--   · A third language is a seed part, not a schema migration. `name_fr`,
+--     `desc_fr`, and every select in the app that lists its columns — that is
+--     an ALTER TABLE and a code change per language. Here it is one row per
+--     movement and one entry in TRANSLATION_LOCALES.
+--
+--   · Re-running is free. The primary key is (exercise_id, locale), so the
+--     importer upserts: load a language, correct twelve names, load it again,
+--     and there is still one row per movement per language. A column-shaped
+--     version has the same property but only for the whole row at once, so a
+--     partial German re-run would have to read-modify-write `exercises` and
+--     could clobber `description`, `tips` or `image_paths` on the way past.
+--
+-- ── English is not in this table ──────────────────────────────────────────
+--
+-- There is no 'en' row and the check constraint refuses one. English is not a
+-- translation of the catalogue, it IS the catalogue: it lives in
+-- `exercises.name`, the id is the slug of it, and everything the app stores
+-- points at it. A second English string here would be a second answer to "what
+-- is this movement called" with nothing in the schema to say which wins — and
+-- the one that wins on screen would not be the one the id was built from.
+-- scripts/check-translations.mjs fails the build on an 'en' row for the same
+-- reason, so the rule is stated in three places and enforced in two.
+--
+-- ── Nothing here is writable through the API ──────────────────────────────
+--
+-- `exercises` grants INSERT to trainers and owners, because a coach's custom
+-- movement mints a catalogue row. Translations have no such path: they are
+-- seeded by these parts and by scripts/import-repdb.mjs, both of which run
+-- with the service key. So SELECT to authenticated and nothing else. A coach
+-- typing their own German name for Back Squat into a shared catalogue is not a
+-- feature anybody asked for, and it is one that would reach every gym on the
+-- platform.
+--
+-- ── APPLYING THIS IS NOT REQUIRED FOR THE APP TO KEEP WORKING ─────────────
+--
+-- The read path (src/ui/exerciseDetail.ts) asks for translations in a SECOND
+-- query rather than as a PostgREST embed. An embed is one round trip and would
+-- have been the tidier code, but `exercises?select=...,exercise_translations(...)`
+-- against a database where this part has not been applied is a 400 on the whole
+-- request — so the exercise screen would go blank for everyone, in English,
+-- until somebody ran the SQL. A separate query that is allowed to fail degrades
+-- to exactly what the app does today.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create table if not exists public.exercise_translations (
+  -- The English identity. ON DELETE CASCADE because a translation of a
+  -- movement that no longer exists is not a thing to keep: parts 75 and 76 both
+  -- retire rows, and a widowed translation would be invisible to every screen
+  -- and would still make the "how much is translated" count wrong.
+  exercise_id text not null references public.exercises(id) on delete cascade,
+
+  -- The language subtag alone — 'de', not 'de-DE'. src/lib/catalogueLocale.ts
+  -- resolves the reader's tag down to this, so an Austrian handset ('de-AT')
+  -- and a German one land on the same row. Regional variants are a real thing
+  -- in Spanish gym vocabulary, and if one is ever worth shipping it arrives as
+  -- its own locale here and in TRANSLATION_LOCALES — never as a silent widening
+  -- of 'es'.
+  locale text not null,
+
+  -- The name as lifters in that language actually say it. Nullable, because a
+  -- row may carry a translated description while its name is still being
+  -- decided — but never blank: see the constraint below.
+  name text,
+
+  -- One sentence saying what the movement IS, matching `exercises.description`.
+  -- Null on the great many rows where only the name is translated.
+  description text,
+
+  -- Where this string came from, stamped for the same reason `exercises.source`
+  -- is: a name somebody hand-wrote and a name a vendor pack supplied are not
+  -- equally trustworthy, and six months from now nothing else in the row will
+  -- say which this was.
+  source text not null default 'repple',
+
+  updated_at timestamptz not null default now(),
+
+  primary key (exercise_id, locale)
+);
+
+-- The supported set, in the database as well as in TypeScript.
+--
+-- A 'de-DE' or 'en' row breaks nothing at read time — it is simply never read,
+-- which is precisely the problem: the table grows rows that look, to a count,
+-- like the language is finished. The constraint makes the write fail instead.
+-- Dropped and re-added rather than `add constraint if not exists` so that
+-- adding a language actually changes an existing database.
+alter table public.exercise_translations drop constraint if exists exercise_translations_locale_chk;
+alter table public.exercise_translations add constraint exercise_translations_locale_chk
+  check (locale in ('de', 'es'));
+
+-- A blank is worse than English.
+--
+-- If `name` is the empty string the reader gets a row with no name at all, on a
+-- screen they are about to train from. Absence is expressed by a NULL or by no
+-- row; it is never expressed by ''. indexTranslations() in
+-- src/lib/catalogueLocale.ts refuses a whitespace-only name too, because a
+-- constraint protects what is written here and not what arrives from anywhere
+-- else.
+alter table public.exercise_translations drop constraint if exists exercise_translations_blank_chk;
+alter table public.exercise_translations add constraint exercise_translations_blank_chk
+  check (
+    (name is null or btrim(name) <> '')
+    and (description is null or btrim(description) <> '')
+    and (name is not null or description is not null)
+  );
+
+-- The catalogue read is "every translation in ONE language" — 619 short rows
+-- for the library list. Locale-leading, because that is the filter; the primary
+-- key already serves the detail screen's (exercise_id, locale) lookup.
+create index if not exists idx_exercise_translations_locale
+  on public.exercise_translations(locale);
+
+comment on table public.exercise_translations is
+  'Display names and descriptions for public.exercises in a language other than English. Never the identity: exercises.id is exerciseSlug(exercises.name) and stays so. A movement with no row here is shown in English AND MARKED AS ENGLISH — see src/lib/catalogueLocale.ts.';
+comment on column public.exercise_translations.locale is
+  'Language subtag only: de, es. English is not a translation and is refused — it is exercises.name.';
+comment on column public.exercise_translations.name is
+  'The movement as lifters in that language say it, not a literal rendering. Null where nobody was sure; the screen then shows English and says it is English, which is safe. A wrong movement name in a programme is a person doing the wrong exercise.';
+
+alter table public.exercise_translations enable row level security;
+
+-- Same reasoning as exercises_read in part 49: a catalogue is only useful if
+-- everybody resolves the same movement to the same name, and there is nothing
+-- private in a translation of "Back Squat".
+drop policy if exists exercise_translations_read on public.exercise_translations;
+create policy exercise_translations_read on public.exercise_translations for select
+  to authenticated using (true);
+
+-- No write policy at all, deliberately — see the header. The seed parts and
+-- scripts/import-repdb.mjs write with the service key, which bypasses RLS.
+revoke all on public.exercise_translations from anon, authenticated, public;
+grant select on public.exercise_translations to authenticated;
+grant all on public.exercise_translations to service_role;
+
+-- ▶ the-catalogue-in-german.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The catalogue in German: 599 of 619 movements.
+--
+-- Part 790 built the table and argued the shape. This is the German content
+-- for it, and the only interesting decisions here are about words.
+--
+-- ── These are gym words, not dictionary words ─────────────────────────────
+--
+-- A movement name is an instruction. Somebody reads it, walks to a rack and
+-- does what it says under load, so the test applied to every line below is
+-- "would a lifter in a German gym call it this", never "is this a correct
+-- rendering of the English". The two come apart constantly:
+--
+--   · Bench Press is Bankdrücken, not "Bankpresse".
+--   · An EZ-bar is an SZ-Stange. Rendered literally it is nothing.
+--   · A Smith machine is a Multipresse. "Schmidt-Maschine" would send
+--     somebody looking for a machine that does not exist.
+--   · A Preacher Curl is a Scottcurl — named after Larry Scott, and there is
+--     no German word for "preacher" that gets anywhere near it.
+--   · A Pec Deck is a Butterfly. Every German gym labels the machine that.
+--   · A Skull Crusher is Stirndrücken. The literal rendering is unusable.
+--   · A Clean is Umsetzen and a Snatch is Reißen — the words used on a
+--     German platform, not the words a dictionary offers for the nouns.
+--
+-- ── Where the German name IS the English one ──────────────────────────────
+--
+-- Face Pull, Burpees, Hip Thrust, Push Press, Planche, Thruster and a few
+-- dozen more are simply what German lifters say, and each of those has a row
+-- here carrying the English string. That is deliberate and it is not the same
+-- thing as no row: a row is a POSITIVE claim that this is the German name, so
+-- the app shows it plainly. No row means nobody has decided, and the app then
+-- shows English and says out loud that it is English. Conflating the two would
+-- have put an "EN" marker beside "Burpees" forever.
+--
+-- ── The 20 that stay English, on purpose ──────────────────────────────────
+--
+-- Ball Pike, Cable Kickback, Chin Tuck Hold, Cocoons, Crab Dips, the three
+-- Kickstand Deadlifts, Double Kettlebell Dead Clean / Dead Split Snatch /
+-- Swing Snatch, Downward Dog to Knee Drive, Dumbbell Bench Pull, Dumbbell
+-- Somersault Squat, Hanging Pike, Kettlebell Lunge Press, Kettlebell Offset
+-- Reverse Lunge and Press, One Arm Kettlebell Floor Glute Bridge Press,
+-- Standing Side Bend Flow and Thread the Needle Flow.
+--
+-- Not an oversight and not a to-do. For each of them either the English name
+-- is itself ambiguous about what the movement is (Cable Kickback is a glute
+-- kickback on some machines and a triceps one on others) or there is no
+-- settled German term and inventing one would be guessing. A guessed movement
+-- name in a programme is a person doing the wrong exercise under load, and the
+-- fallback — English, marked as English — costs nothing but a badge.
+--
+-- ── Re-running this file ──────────────────────────────────────────────────
+--
+-- The primary key is (exercise_id, locale) and the conflict clause updates, so
+-- running this twice leaves 599 rows and running a corrected copy replaces the
+-- names it changes. Nothing is deleted: a row this file no longer carries
+-- stays until somebody removes it deliberately, because a name silently
+-- vanishing from a language is the failure that looks like nothing happened.
+--
+-- Descriptions are NOT translated here. `exercises.description` is one
+-- sentence per movement across 617 rows, translating it is a separate and much
+-- larger judgement call, and part 790's read path already handles a translated
+-- name beside an untranslated description — it says so on screen rather than
+-- letting the two blur.
+-- ─────────────────────────────────────────────────────────────────────────
+
+insert into public.exercise_translations (exercise_id, locale, name) values
+  ('ab-crunch', 'de', 'Bauchcrunch'),
+  ('ab-wheel-rollout', 'de', 'Bauchroller-Rollout'),
+  ('air-bike', 'de', 'Air Bike'),
+  ('archer-pull-ups', 'de', 'Archer-Klimmzüge'),
+  ('archer-push-ups', 'de', 'Archer-Liegestütze'),
+  ('arnold-press', 'de', 'Arnold-Drücken'),
+  ('assisted-pull-up', 'de', 'Klimmzug mit Unterstützung'),
+  ('back-extension', 'de', 'Rückenstrecken'),
+  ('back-lever', 'de', 'Back Lever'),
+  ('back-squat', 'de', 'Kniebeuge'),
+  ('band-assisted-pull-ups', 'de', 'Klimmzüge mit Band'),
+  ('band-pull-apart', 'de', 'Band Pull-Apart'),
+  ('banded-adductor-stretch', 'de', 'Adduktorendehnung mit Band'),
+  ('banded-ankle-stretch', 'de', 'Sprunggelenkdehnung mit Band'),
+  ('banded-calf-stretch', 'de', 'Wadendehnung mit Band'),
+  ('banded-chest-stretch', 'de', 'Brustdehnung mit Band'),
+  ('banded-clamshell', 'de', 'Clamshell mit Band'),
+  ('banded-figure-4-stretch', 'de', 'Figure-4-Dehnung mit Band'),
+  ('banded-fire-hydrant', 'de', 'Hüftabduktion im Vierfüßlerstand mit Band'),
+  ('banded-glute-bridge', 'de', 'Beckenheben mit Band'),
+  ('banded-good-morning', 'de', 'Good Morning mit Band'),
+  ('banded-hamstring-stretch', 'de', 'Beinbeugerdehnung mit Band'),
+  ('banded-hip-thrust', 'de', 'Hip Thrust mit Band'),
+  ('banded-it-band-stretch', 'de', 'IT-Band-Dehnung mit Band'),
+  ('banded-kneeling-hip-thrust', 'de', 'Kniender Hip Thrust mit Band'),
+  ('banded-lat-stretch', 'de', 'Latissimusdehnung mit Band'),
+  ('banded-lateral-walk', 'de', 'Seitwärtsgehen mit Band'),
+  ('banded-rear-delt-stretch', 'de', 'Dehnung der hinteren Schulter mit Band'),
+  ('banded-romanian-deadlift', 'de', 'Rumänisches Kreuzheben mit Band'),
+  ('banded-seated-hip-abduction', 'de', 'Sitzende Hüftabduktion mit Band'),
+  ('banded-shoulder-stretch', 'de', 'Schulterdehnung mit Band'),
+  ('banded-squat', 'de', 'Kniebeuge mit Band'),
+  ('banded-standing-hip-abduction', 'de', 'Stehende Hüftabduktion mit Band'),
+  ('banded-standing-hip-adduction', 'de', 'Stehende Hüftadduktion mit Band'),
+  ('banded-standing-leg-curl', 'de', 'Stehender Beinbeuger mit Band'),
+  ('banded-sumo-walk', 'de', 'Sumo-Gehen mit Band'),
+  ('banded-terminal-knee-extension', 'de', 'Terminale Kniestreckung mit Band'),
+  ('banded-triceps-stretch', 'de', 'Trizepsdehnung mit Band'),
+  ('barbell-ab-rollout', 'de', 'Rollout mit der Langhantel'),
+  ('barbell-back-squat', 'de', 'Langhantel-Kniebeuge'),
+  ('barbell-bench-press', 'de', 'Langhantel-Bankdrücken'),
+  ('barbell-calf-raise', 'de', 'Wadenheben mit der Langhantel'),
+  ('barbell-curl', 'de', 'Langhantelcurl'),
+  ('barbell-deadlift', 'de', 'Langhantel-Kreuzheben'),
+  ('barbell-front-raise', 'de', 'Frontheben mit der Langhantel'),
+  ('barbell-glute-bridge', 'de', 'Beckenheben mit der Langhantel'),
+  ('barbell-hip-thrust', 'de', 'Hip Thrust mit der Langhantel'),
+  ('barbell-lunge', 'de', 'Ausfallschritt mit der Langhantel'),
+  ('barbell-overhead-extension', 'de', 'Überkopf-Trizepsstrecken mit der Langhantel'),
+  ('barbell-overhead-press', 'de', 'Langhantel-Überkopfdrücken'),
+  ('barbell-preacher-curl', 'de', 'Scottcurl mit der Langhantel'),
+  ('barbell-pullover', 'de', 'Langhantel-Überzüge'),
+  ('barbell-rear-delt-row', 'de', 'Rudern für die hintere Schulter mit der Langhantel'),
+  ('barbell-reverse-lunge', 'de', 'Rückwärtiger Ausfallschritt mit der Langhantel'),
+  ('barbell-shrug', 'de', 'Schulterheben mit der Langhantel'),
+  ('barbell-upright-row', 'de', 'Aufrechtes Rudern mit der Langhantel'),
+  ('barbell-wrist-curl', 'de', 'Handgelenkcurl mit der Langhantel'),
+  ('battle-rope-double-slam', 'de', 'Battle-Rope-Doppelschlag'),
+  ('battle-ropes', 'de', 'Battle Ropes'),
+  ('bear-crawl', 'de', 'Bärengang'),
+  ('behind-the-back-barbell-shrug', 'de', 'Schulterheben mit der Langhantel hinter dem Rücken'),
+  ('behind-the-neck-lat-pulldown', 'de', 'Latzug in den Nacken'),
+  ('behind-the-neck-press', 'de', 'Nackendrücken'),
+  ('behind-the-neck-pull-up', 'de', 'Klimmzug in den Nacken'),
+  ('bench-adductor-stretch', 'de', 'Adduktorendehnung an der Bank'),
+  ('bench-ankle-stretch', 'de', 'Sprunggelenkdehnung an der Bank'),
+  ('bench-bulgarian-split-stretch', 'de', 'Bulgarische Split-Dehnung an der Bank'),
+  ('bench-calf-stretch', 'de', 'Wadendehnung an der Bank'),
+  ('bench-chest-stretch', 'de', 'Brustdehnung an der Bank'),
+  ('bench-child-s-pose', 'de', 'Kindhaltung an der Bank'),
+  ('bench-couch-stretch', 'de', 'Couch-Stretch an der Bank'),
+  ('bench-dips', 'de', 'Bankdips'),
+  ('bench-figure-4-glute-stretch', 'de', 'Figure-4-Gesäßdehnung an der Bank'),
+  ('bench-hamstring-stretch', 'de', 'Beinbeugerdehnung an der Bank'),
+  ('bench-lat-stretch', 'de', 'Latissimusdehnung an der Bank'),
+  ('bench-leg-pull-in', 'de', 'Knieanziehen auf der Bank'),
+  ('bench-press', 'de', 'Bankdrücken'),
+  ('bench-pull', 'de', 'Rudern in Bauchlage auf der Bank'),
+  ('bent-arm-barbell-pullover', 'de', 'Überzüge mit gebeugten Armen mit der Langhantel'),
+  ('bent-arm-ez-bar-pullover', 'de', 'Überzüge mit gebeugten Armen mit der SZ-Stange'),
+  ('bent-over-barbell-row', 'de', 'Vorgebeugtes Langhantelrudern'),
+  ('bent-over-dumbbell-row', 'de', 'Vorgebeugtes Kurzhantelrudern'),
+  ('bent-over-ez-bar-row', 'de', 'Vorgebeugtes Rudern mit der SZ-Stange'),
+  ('bent-over-row', 'de', 'Vorgebeugtes Rudern'),
+  ('bicep-curl', 'de', 'Bizepscurl'),
+  ('bicycle-crunch', 'de', 'Fahrrad-Crunch'),
+  ('bilateral-dumbbell-wrist-curl', 'de', 'Beidarmiger Handgelenkcurl mit Kurzhanteln'),
+  ('bird-dog', 'de', 'Bird-Dog'),
+  ('bird-dog-hold', 'de', 'Bird-Dog halten'),
+  ('boat-pose', 'de', 'Bootshaltung'),
+  ('bodyweight-calf-raise', 'de', 'Wadenheben mit dem eigenen Körpergewicht'),
+  ('bodyweight-good-morning', 'de', 'Good Morning ohne Gewicht'),
+  ('bodyweight-lateral-raise', 'de', 'Seitheben ohne Gewicht'),
+  ('bodyweight-overhead-press', 'de', 'Überkopfdrücken ohne Gewicht'),
+  ('bodyweight-reverse-lunge', 'de', 'Rückwärtiger Ausfallschritt ohne Gewicht'),
+  ('bodyweight-squat', 'de', 'Kniebeuge ohne Gewicht'),
+  ('bow-pose', 'de', 'Bogenhaltung'),
+  ('box-jump', 'de', 'Sprung auf die Box'),
+  ('box-squat', 'de', 'Box-Kniebeuge'),
+  ('bulgarian-split-squat', 'de', 'Bulgarische Kniebeuge'),
+  ('burpees', 'de', 'Burpees'),
+  ('butterfly-stretch', 'de', 'Schmetterlingsdehnung'),
+  ('cable-bent-over-row', 'de', 'Vorgebeugtes Rudern am Kabelzug'),
+  ('cable-chest-press', 'de', 'Brustdrücken am Kabelzug'),
+  ('cable-crossover', 'de', 'Fliegende am Kabelzug'),
+  ('cable-crunch', 'de', 'Crunch am Kabelzug'),
+  ('cable-curl', 'de', 'Bizepscurl am Kabelzug'),
+  ('cable-external-rotation', 'de', 'Außenrotation am Kabelzug'),
+  ('cable-face-pull', 'de', 'Face Pull am Kabelzug'),
+  ('cable-front-raise', 'de', 'Frontheben am Kabelzug'),
+  ('cable-glute-kickback', 'de', 'Beinrückheben am Kabelzug'),
+  ('cable-hammer-curl', 'de', 'Hammercurl am Kabelzug'),
+  ('cable-lateral-raise', 'de', 'Seitheben am Kabelzug'),
+  ('cable-machine', 'de', 'Kabelzug'),
+  ('cable-pallof-press', 'de', 'Pallof Press am Kabelzug'),
+  ('cable-tricep-kickback', 'de', 'Trizeps-Kickback am Kabelzug'),
+  ('cable-tricep-pushdown', 'de', 'Trizepsdrücken am Kabelzug'),
+  ('cable-upright-row', 'de', 'Aufrechtes Rudern am Kabelzug'),
+  ('cable-wrist-curl', 'de', 'Handgelenkcurl am Kabelzug'),
+  ('calf-raise', 'de', 'Wadenheben'),
+  ('camel-pose', 'de', 'Kamelhaltung'),
+  ('captain-s-chair-knee-raise', 'de', 'Knieheben im Beinhebestuhl'),
+  ('captain-s-chair-leg-raise', 'de', 'Beinheben im Beinhebestuhl'),
+  ('cat-cow', 'de', 'Katze-Kuh'),
+  ('cat-stretch', 'de', 'Katzendehnung'),
+  ('chair-pose', 'de', 'Stuhlhaltung'),
+  ('cheat-curl', 'de', 'Cheat Curl'),
+  ('chest-dips', 'de', 'Dips für die Brust'),
+  ('chest-press', 'de', 'Brustdrücken'),
+  ('chest-supported-dumbbell-row', 'de', 'Kurzhantelrudern mit Brustauflage'),
+  ('chest-supported-dumbbell-shrug', 'de', 'Schulterheben mit Kurzhanteln und Brustauflage'),
+  ('chest-supported-kettlebell-row', 'de', 'Kettlebell-Rudern mit Brustauflage'),
+  ('chest-supported-smith-machine-row', 'de', 'Rudern an der Multipresse mit Brustauflage'),
+  ('child-s-pose', 'de', 'Kindhaltung'),
+  ('chin-ups', 'de', 'Klimmzüge im Untergriff'),
+  ('clamshell-hold', 'de', 'Clamshell halten'),
+  ('clamshells', 'de', 'Clamshells'),
+  ('clap-push-ups', 'de', 'Klatsch-Liegestütze'),
+  ('clean', 'de', 'Umsetzen'),
+  ('clean-and-jerk', 'de', 'Umsetzen und Stoßen'),
+  ('close-grip-barbell-curl', 'de', 'Langhantelcurl im engen Griff'),
+  ('close-grip-bench-press', 'de', 'Enges Bankdrücken'),
+  ('close-grip-dumbbell-bench-press', 'de', 'Enges Bankdrücken mit Kurzhanteln'),
+  ('close-grip-ez-bar-bench-press', 'de', 'Enges Bankdrücken mit der SZ-Stange'),
+  ('close-grip-ez-bar-curl', 'de', 'SZ-Curl im engen Griff'),
+  ('close-grip-incline-bench-press', 'de', 'Enges Schrägbankdrücken'),
+  ('close-grip-lat-pulldown', 'de', 'Latzug im engen Griff'),
+  ('close-grip-pull-ups', 'de', 'Klimmzüge im engen Griff'),
+  ('close-grip-push-ups', 'de', 'Enge Liegestütze'),
+  ('close-stance-leg-press', 'de', 'Beinpresse mit engem Stand'),
+  ('cobra-stretch', 'de', 'Kobrahaltung'),
+  ('concentration-curl', 'de', 'Konzentrationscurl'),
+  ('corpse-pose', 'de', 'Totenhaltung'),
+  ('cossack-squat', 'de', 'Kosakenkniebeuge'),
+  ('cow-face-pose', 'de', 'Kuhkopfhaltung'),
+  ('crescent-lunge', 'de', 'Halbmond-Ausfallschritt'),
+  ('cross-body-crunch', 'de', 'Diagonaler Crunch'),
+  ('cross-body-hammer-curl', 'de', 'Hammercurl über den Körper'),
+  ('cross-body-shoulder-stretch', 'de', 'Schulterdehnung über den Körper'),
+  ('crow-pose', 'de', 'Krähenhaltung'),
+  ('dancer-pose', 'de', 'Tänzerhaltung'),
+  ('dead-bug', 'de', 'Dead Bug'),
+  ('dead-bug-hold', 'de', 'Dead Bug halten'),
+  ('dead-hang', 'de', 'Passives Hängen'),
+  ('deadlift', 'de', 'Kreuzheben'),
+  ('decline-barbell-bench-press', 'de', 'Negativ-Bankdrücken mit der Langhantel'),
+  ('decline-bench-press', 'de', 'Negativ-Bankdrücken'),
+  ('decline-crunch', 'de', 'Crunch auf der Negativbank'),
+  ('decline-dumbbell-fly', 'de', 'Fliegende auf der Negativbank mit Kurzhanteln'),
+  ('decline-ez-bar-bench-press', 'de', 'Negativ-Bankdrücken mit der SZ-Stange'),
+  ('decline-push-up', 'de', 'Liegestütz mit erhöhten Füßen'),
+  ('deficit-deadlift', 'de', 'Kreuzheben vom Podest'),
+  ('deficit-push-ups', 'de', 'Liegestütze mit erhöhten Händen'),
+  ('diamond-push-ups', 'de', 'Diamant-Liegestütze'),
+  ('dolphin-pose', 'de', 'Delfinhaltung'),
+  ('donkey-calf-raise', 'de', 'Eselwadenheben'),
+  ('doorway-chest-stretch', 'de', 'Brustdehnung im Türrahmen'),
+  ('double-dumbbell-overhead-carry', 'de', 'Überkopftragen mit zwei Kurzhanteln'),
+  ('double-kettlebell-bicep-curl', 'de', 'Bizepscurl mit zwei Kettlebells'),
+  ('double-kettlebell-clean', 'de', 'Umsetzen mit zwei Kettlebells'),
+  ('double-kettlebell-clean-and-press', 'de', 'Umsetzen und Drücken mit zwei Kettlebells'),
+  ('double-kettlebell-jerk', 'de', 'Stoßen mit zwei Kettlebells'),
+  ('double-kettlebell-overhead-carry', 'de', 'Überkopftragen mit zwei Kettlebells'),
+  ('double-kettlebell-overhead-press', 'de', 'Überkopfdrücken mit zwei Kettlebells'),
+  ('double-kettlebell-push-press', 'de', 'Push Press mit zwei Kettlebells'),
+  ('double-kettlebell-rear-delt-row', 'de', 'Rudern für die hintere Schulter mit zwei Kettlebells'),
+  ('double-kettlebell-row', 'de', 'Rudern mit zwei Kettlebells'),
+  ('double-kettlebell-split-jerk', 'de', 'Stoßen in den Ausfallschritt mit zwei Kettlebells'),
+  ('downward-dog-to-low-lunge', 'de', 'Herabschauender Hund in den tiefen Ausfallschritt'),
+  ('downward-dog-to-plank', 'de', 'Herabschauender Hund in den Stütz'),
+  ('downward-dog-to-upward-dog', 'de', 'Herabschauender Hund in den heraufschauenden Hund'),
+  ('downward-facing-dog', 'de', 'Herabschauender Hund'),
+  ('drag-curl', 'de', 'Drag Curl'),
+  ('dragon-flag', 'de', 'Dragon Flag'),
+  ('dumbbell-bench-press', 'de', 'Kurzhantel-Bankdrücken'),
+  ('dumbbell-bicep-curl', 'de', 'Bizepscurl mit Kurzhanteln'),
+  ('dumbbell-calf-raise', 'de', 'Wadenheben mit Kurzhanteln'),
+  ('dumbbell-deadlift', 'de', 'Kreuzheben mit Kurzhanteln'),
+  ('dumbbell-face-pull', 'de', 'Face Pull mit Kurzhanteln'),
+  ('dumbbell-farmer-s-walk', 'de', 'Farmer''s Walk mit Kurzhanteln'),
+  ('dumbbell-floor-press', 'de', 'Floor Press mit Kurzhanteln'),
+  ('dumbbell-fly', 'de', 'Fliegende mit Kurzhanteln'),
+  ('dumbbell-front-raise', 'de', 'Frontheben mit Kurzhanteln'),
+  ('dumbbell-front-squat', 'de', 'Frontkniebeuge mit Kurzhanteln'),
+  ('dumbbell-hammer-curl', 'de', 'Hammercurl mit Kurzhanteln'),
+  ('dumbbell-hip-thrust', 'de', 'Hip Thrust mit Kurzhantel'),
+  ('dumbbell-lateral-raise', 'de', 'Seitheben mit Kurzhanteln'),
+  ('dumbbell-lunge', 'de', 'Ausfallschritt mit Kurzhanteln'),
+  ('dumbbell-overhead-carry', 'de', 'Überkopftragen mit Kurzhantel'),
+  ('dumbbell-pistol-squat', 'de', 'Pistol Squat mit Kurzhantel'),
+  ('dumbbell-pullover', 'de', 'Überzüge mit Kurzhantel'),
+  ('dumbbell-push-press', 'de', 'Push Press mit Kurzhanteln'),
+  ('dumbbell-reverse-curl', 'de', 'Reverse Curl mit Kurzhanteln'),
+  ('dumbbell-reverse-fly', 'de', 'Reverse Fliegende mit Kurzhanteln'),
+  ('dumbbell-reverse-wrist-curl', 'de', 'Umgekehrter Handgelenkcurl mit Kurzhanteln'),
+  ('dumbbell-romanian-deadlift', 'de', 'Rumänisches Kreuzheben mit Kurzhanteln'),
+  ('dumbbell-shrug', 'de', 'Schulterheben mit Kurzhanteln'),
+  ('dumbbell-side-bend', 'de', 'Seitbeuge mit Kurzhantel'),
+  ('dumbbell-skull-crusher', 'de', 'Stirndrücken mit Kurzhanteln'),
+  ('dumbbell-snatch', 'de', 'Reißen mit der Kurzhantel'),
+  ('dumbbell-split-squat', 'de', 'Split-Kniebeuge mit Kurzhanteln'),
+  ('dumbbell-squat', 'de', 'Kniebeuge mit Kurzhanteln'),
+  ('dumbbell-sumo-squat', 'de', 'Sumo-Kniebeuge mit Kurzhantel'),
+  ('dumbbell-tricep-extension', 'de', 'Trizepsstrecken mit Kurzhantel'),
+  ('dumbbell-tricep-kickback', 'de', 'Trizeps-Kickback mit Kurzhanteln'),
+  ('dumbbell-upright-row', 'de', 'Aufrechtes Rudern mit Kurzhanteln'),
+  ('dumbbell-windmill', 'de', 'Windmühle mit Kurzhantel'),
+  ('dumbbell-wrist-curl', 'de', 'Handgelenkcurl mit Kurzhanteln'),
+  ('eagle-pose', 'de', 'Adlerhaltung'),
+  ('easy-pose', 'de', 'Schneidersitz'),
+  ('elliptical', 'de', 'Crosstrainer'),
+  ('extended-side-angle-pose', 'de', 'Gestreckte Seitwinkelhaltung'),
+  ('ez-bar-bench-press', 'de', 'Bankdrücken mit der SZ-Stange'),
+  ('ez-bar-curl', 'de', 'SZ-Curl'),
+  ('ez-bar-front-raise', 'de', 'Frontheben mit der SZ-Stange'),
+  ('ez-bar-lying-triceps-extension', 'de', 'Liegendes Trizepsstrecken mit der SZ-Stange'),
+  ('ez-bar-overhead-tricep-extension', 'de', 'Überkopf-Trizepsstrecken mit der SZ-Stange'),
+  ('ez-bar-pullover', 'de', 'Überzüge mit der SZ-Stange'),
+  ('ez-bar-reverse-curl', 'de', 'Reverse Curl mit der SZ-Stange'),
+  ('ez-bar-reverse-grip-row', 'de', 'Rudern im Untergriff mit der SZ-Stange'),
+  ('ez-bar-romanian-deadlift', 'de', 'Rumänisches Kreuzheben mit der SZ-Stange'),
+  ('ez-bar-shrug', 'de', 'Schulterheben mit der SZ-Stange'),
+  ('ez-bar-spider-curl', 'de', 'Spider Curl mit der SZ-Stange'),
+  ('ez-bar-upright-row', 'de', 'Aufrechtes Rudern mit der SZ-Stange'),
+  ('ez-bar-wrist-curl', 'de', 'Handgelenkcurl mit der SZ-Stange'),
+  ('face-pull', 'de', 'Face Pull'),
+  ('fish-pose', 'de', 'Fischhaltung'),
+  ('floor-ez-bar-press', 'de', 'Floor Press mit der SZ-Stange'),
+  ('floor-kettlebell-pullover', 'de', 'Überzüge am Boden mit der Kettlebell'),
+  ('floor-press', 'de', 'Floor Press'),
+  ('flutter-kicks', 'de', 'Beinflattern'),
+  ('front-lever', 'de', 'Front Lever'),
+  ('front-squat', 'de', 'Frontkniebeuge'),
+  ('garland-pose', 'de', 'Girlandenhaltung'),
+  ('glute-bridge', 'de', 'Beckenheben'),
+  ('glute-bridge-hold', 'de', 'Beckenheben halten'),
+  ('glute-kickback', 'de', 'Beinrückheben'),
+  ('glute-kickback-hold', 'de', 'Beinrückheben halten'),
+  ('goblet-squat', 'de', 'Goblet-Kniebeuge'),
+  ('good-morning', 'de', 'Good Morning'),
+  ('hack-squat', 'de', 'Hackenschmidt-Kniebeuge'),
+  ('hack-squat-calf-raise', 'de', 'Wadenheben an der Hackenschmidt-Maschine'),
+  ('half-moon-pose', 'de', 'Halbmondhaltung'),
+  ('hammer-curl', 'de', 'Hammercurl'),
+  ('handstand-push-ups', 'de', 'Handstand-Liegestütze'),
+  ('hang-clean', 'de', 'Umsetzen aus dem Hang'),
+  ('hang-power-clean', 'de', 'Power-Umsetzen aus dem Hang'),
+  ('hanging-knee-raise', 'de', 'Hängendes Knieheben'),
+  ('hanging-leg-raise', 'de', 'Hängendes Beinheben'),
+  ('happy-baby-pose', 'de', 'Haltung des glücklichen Babys'),
+  ('head-to-knee-pose', 'de', 'Kopf-zum-Knie-Haltung'),
+  ('heel-elevated-squat', 'de', 'Kniebeuge mit erhöhten Fersen'),
+  ('heel-to-toe-walk', 'de', 'Fersen-Zehen-Gang'),
+  ('hero-pose', 'de', 'Heldenhaltung'),
+  ('hex-bar-deadlift', 'de', 'Kreuzheben mit der Hexbar'),
+  ('high-foot-leg-press', 'de', 'Beinpresse mit hoher Fußstellung'),
+  ('high-knees', 'de', 'Kniehebelauf'),
+  ('high-plank', 'de', 'Hoher Stütz'),
+  ('hip-abduction', 'de', 'Hüftabduktion'),
+  ('hip-adduction', 'de', 'Hüftadduktion'),
+  ('hip-thrust', 'de', 'Hip Thrust'),
+  ('hollow-body-hold', 'de', 'Hollow Body halten'),
+  ('horizontal-leg-press', 'de', 'Horizontale Beinpresse'),
+  ('human-flag', 'de', 'Human Flag'),
+  ('incline-barbell-bench-press', 'de', 'Schrägbankdrücken mit der Langhantel'),
+  ('incline-dumbbell-curl', 'de', 'Bizepscurl auf der Schrägbank'),
+  ('incline-dumbbell-fly', 'de', 'Fliegende auf der Schrägbank'),
+  ('incline-dumbbell-press', 'de', 'Schrägbankdrücken mit Kurzhanteln'),
+  ('incline-ez-bar-bench-press', 'de', 'Schrägbankdrücken mit der SZ-Stange'),
+  ('incline-hammer-curl', 'de', 'Hammercurl auf der Schrägbank'),
+  ('incline-push-up', 'de', 'Liegestütz mit erhöhten Händen'),
+  ('incline-treadmill-walk', 'de', 'Gehen am Laufband mit Steigung'),
+  ('inverted-row', 'de', 'Umgekehrtes Rudern'),
+  ('isometric-neck-lateral-flexion', 'de', 'Isometrische seitliche Nackenbeugung'),
+  ('jackknife-sit-up', 'de', 'Klappmesser'),
+  ('jump-rope', 'de', 'Seilspringen'),
+  ('jump-squat', 'de', 'Sprungkniebeuge'),
+  ('jumping-jacks', 'de', 'Hampelmann'),
+  ('kettlebell-bulgarian-split-squat', 'de', 'Bulgarische Kniebeuge mit der Kettlebell'),
+  ('kettlebell-close-grip-floor-press', 'de', 'Enges Floor Press mit der Kettlebell'),
+  ('kettlebell-concentration-curl', 'de', 'Konzentrationscurl mit der Kettlebell'),
+  ('kettlebell-deadlift', 'de', 'Kreuzheben mit der Kettlebell'),
+  ('kettlebell-farmer-s-walk', 'de', 'Farmer''s Walk mit Kettlebells'),
+  ('kettlebell-floor-press', 'de', 'Floor Press mit der Kettlebell'),
+  ('kettlebell-goblet-lunge', 'de', 'Goblet-Ausfallschritt mit der Kettlebell'),
+  ('kettlebell-halo', 'de', 'Kettlebell-Halo'),
+  ('kettlebell-hammer-curl', 'de', 'Hammercurl mit der Kettlebell'),
+  ('kettlebell-hip-thrust', 'de', 'Hip Thrust mit der Kettlebell'),
+  ('kettlebell-overhead-carry', 'de', 'Überkopftragen mit der Kettlebell'),
+  ('kettlebell-overhead-tricep-extension', 'de', 'Überkopf-Trizepsstrecken mit der Kettlebell'),
+  ('kettlebell-pistol-squat', 'de', 'Pistol Squat mit der Kettlebell'),
+  ('kettlebell-pullover', 'de', 'Überzüge mit der Kettlebell'),
+  ('kettlebell-reverse-lunge', 'de', 'Rückwärtiger Ausfallschritt mit der Kettlebell'),
+  ('kettlebell-reverse-wrist-curl', 'de', 'Umgekehrter Handgelenkcurl mit der Kettlebell'),
+  ('kettlebell-rotational-lunge', 'de', 'Ausfallschritt mit Rotation und Kettlebell'),
+  ('kettlebell-russian-twist', 'de', 'Russischer Twist mit der Kettlebell'),
+  ('kettlebell-shrug', 'de', 'Schulterheben mit Kettlebells'),
+  ('kettlebell-single-leg-deadlift', 'de', 'Einbeiniges Kreuzheben mit der Kettlebell'),
+  ('kettlebell-skull-crusher', 'de', 'Stirndrücken mit der Kettlebell'),
+  ('kettlebell-squat', 'de', 'Kniebeuge mit der Kettlebell'),
+  ('kettlebell-sumo-deadlift', 'de', 'Sumo-Kreuzheben mit der Kettlebell'),
+  ('kettlebell-sumo-high-pull', 'de', 'Sumo High Pull mit der Kettlebell'),
+  ('kettlebell-svend-press', 'de', 'Svend Press mit der Kettlebell'),
+  ('kettlebell-swing', 'de', 'Kettlebell Swing'),
+  ('kettlebell-swing-clean', 'de', 'Swing-Umsetzen mit der Kettlebell'),
+  ('kettlebell-turkish-get-ups', 'de', 'Türkisches Aufstehen mit der Kettlebell'),
+  ('kettlebell-windmills', 'de', 'Windmühlen mit der Kettlebell'),
+  ('kettlebell-wrist-curl', 'de', 'Handgelenkcurl mit der Kettlebell'),
+  ('knee-push-ups', 'de', 'Liegestütze auf den Knien'),
+  ('knee-to-chest-stretch', 'de', 'Knie-zur-Brust-Dehnung'),
+  ('kneeling-cable-row', 'de', 'Kniendes Rudern am Kabelzug'),
+  ('kneeling-hip-flexor-stretch', 'de', 'Hüftbeugerdehnung im Kniestand'),
+  ('kneeling-wrist-stretch', 'de', 'Handgelenkdehnung im Kniestand'),
+  ('l-sit', 'de', 'L-Sitz'),
+  ('landmine-press', 'de', 'Landmine Press'),
+  ('lat-pulldown', 'de', 'Latzug'),
+  ('lateral-raise', 'de', 'Seitheben'),
+  ('leg-curl', 'de', 'Beinbeuger'),
+  ('leg-extension', 'de', 'Beinstrecker'),
+  ('leg-press', 'de', 'Beinpresse'),
+  ('legs-up-the-wall-pose', 'de', 'Beine an der Wand'),
+  ('lizard-stretch', 'de', 'Eidechsenhaltung'),
+  ('locust-pose', 'de', 'Heuschreckenhaltung'),
+  ('low-lunge', 'de', 'Tiefer Ausfallschritt'),
+  ('low-lunge-to-half-split', 'de', 'Tiefer Ausfallschritt in den halben Spagat'),
+  ('lunge', 'de', 'Ausfallschritt'),
+  ('lying-leg-curl', 'de', 'Liegender Beinbeuger'),
+  ('lying-leg-raise', 'de', 'Liegendes Beinheben'),
+  ('lying-tricep-extension', 'de', 'Liegendes Trizepsstrecken'),
+  ('machine-assisted-dips', 'de', 'Dips an der Maschine mit Unterstützung'),
+  ('machine-back-extension', 'de', 'Rückenstrecken an der Maschine'),
+  ('machine-bicep-curl', 'de', 'Bizepscurl an der Maschine'),
+  ('machine-chest-fly', 'de', 'Butterfly an der Maschine'),
+  ('machine-chest-press', 'de', 'Brustdrücken an der Maschine'),
+  ('machine-hip-abduction', 'de', 'Hüftabduktion an der Maschine'),
+  ('machine-preacher-curl', 'de', 'Scottcurl an der Maschine'),
+  ('machine-seated-crunch', 'de', 'Sitzender Crunch an der Maschine'),
+  ('machine-shoulder-press', 'de', 'Schulterdrücken an der Maschine'),
+  ('machine-triceps-extension', 'de', 'Trizepsstrecken an der Maschine'),
+  ('medicine-ball-slam', 'de', 'Medizinball-Slam'),
+  ('mountain-climbers', 'de', 'Bergsteiger'),
+  ('mountain-pose', 'de', 'Berghaltung'),
+  ('muscle-ups', 'de', 'Muscle-ups'),
+  ('neck-side-stretch', 'de', 'Seitliche Nackendehnung'),
+  ('negative-pull-ups', 'de', 'Negative Klimmzüge'),
+  ('neutral-grip-pull-ups', 'de', 'Klimmzüge im Neutralgriff'),
+  ('nordic-curl', 'de', 'Nordic Curl'),
+  ('one-arm-dumbbell-push-press', 'de', 'Einarmiges Push Press mit der Kurzhantel'),
+  ('one-arm-dumbbell-swing', 'de', 'Einarmiger Swing mit der Kurzhantel'),
+  ('one-arm-kettlebell-bicep-curl', 'de', 'Einarmiger Bizepscurl mit der Kettlebell'),
+  ('one-arm-kettlebell-bottoms-up-press', 'de', 'Einarmiges Bottoms-Up-Drücken mit der Kettlebell'),
+  ('one-arm-kettlebell-floor-press', 'de', 'Einarmiges Floor Press mit der Kettlebell'),
+  ('one-arm-kettlebell-front-squat', 'de', 'Einarmige Frontkniebeuge mit der Kettlebell'),
+  ('one-arm-kettlebell-push-press', 'de', 'Einarmiges Push Press mit der Kettlebell'),
+  ('one-arm-kettlebell-row', 'de', 'Einarmiges Rudern mit der Kettlebell'),
+  ('one-arm-kettlebell-shoulder-press', 'de', 'Einarmiges Schulterdrücken mit der Kettlebell'),
+  ('one-arm-kettlebell-swing', 'de', 'Einarmiger Kettlebell Swing'),
+  ('one-arm-kettlebell-tricep-kickback', 'de', 'Einarmiger Trizeps-Kickback mit der Kettlebell'),
+  ('one-arm-landmine-press', 'de', 'Einarmiges Landmine Press'),
+  ('one-arm-lat-pulldown', 'de', 'Einarmiger Latzug'),
+  ('one-arm-single-leg-dumbbell-romanian-deadlift', 'de', 'Einarmiges einbeiniges rumänisches Kreuzheben mit der Kurzhantel'),
+  ('one-arm-single-leg-kettlebell-romanian-deadlift', 'de', 'Einarmiges einbeiniges rumänisches Kreuzheben mit der Kettlebell'),
+  ('overhead-press', 'de', 'Überkopfdrücken'),
+  ('overhead-squat', 'de', 'Überkopfkniebeuge'),
+  ('overhead-tricep-extension', 'de', 'Überkopf-Trizepsstrecken'),
+  ('overhead-triceps-stretch', 'de', 'Überkopf-Trizepsdehnung'),
+  ('pause-deadlift', 'de', 'Kreuzheben mit Pause'),
+  ('pause-pull-up', 'de', 'Klimmzug mit Pause'),
+  ('pause-squat', 'de', 'Kniebeuge mit Pause'),
+  ('paused-bench-press', 'de', 'Bankdrücken mit Pause'),
+  ('paused-incline-bench-press', 'de', 'Schrägbankdrücken mit Pause'),
+  ('paused-overhead-press', 'de', 'Überkopfdrücken mit Pause'),
+  ('pec-deck', 'de', 'Butterfly'),
+  ('pendlay-row', 'de', 'Pendlay Row'),
+  ('pigeon-stretch', 'de', 'Taubenhaltung'),
+  ('pike-push-ups', 'de', 'Pike-Liegestütze'),
+  ('pilates-kneeling-side-kick', 'de', 'Pilates Side Kick im Kniestand'),
+  ('pilates-leg-pull-back', 'de', 'Pilates Leg Pull Back'),
+  ('pilates-leg-pull-front', 'de', 'Pilates Leg Pull Front'),
+  ('pilates-roll-down', 'de', 'Pilates Roll Down'),
+  ('pilates-roll-over', 'de', 'Pilates Roll Over'),
+  ('pilates-saw', 'de', 'Pilates Säge'),
+  ('pilates-side-bend', 'de', 'Pilates Seitbeuge'),
+  ('pilates-spine-stretch-forward', 'de', 'Pilates Wirbelsäulendehnung vorwärts'),
+  ('pilates-spine-twist', 'de', 'Pilates Wirbelsäulendrehung'),
+  ('pistol-squat', 'de', 'Pistol Squat'),
+  ('planche', 'de', 'Planche'),
+  ('plank', 'de', 'Unterarmstütz'),
+  ('plate-loaded-donkey-calf-raise', 'de', 'Eselwadenheben mit Scheibenaufnahme'),
+  ('plate-loaded-lateral-raise', 'de', 'Seitheben an der Maschine mit Scheibenaufnahme'),
+  ('plate-loaded-shrug', 'de', 'Schulterheben an der Maschine mit Scheibenaufnahme'),
+  ('plate-pinch', 'de', 'Scheibenklemmen'),
+  ('plate-pullover', 'de', 'Überzüge mit der Hantelscheibe'),
+  ('plow-pose', 'de', 'Pflughaltung'),
+  ('plyo-lunge', 'de', 'Sprungausfallschritt'),
+  ('plyo-push-up', 'de', 'Plyometrischer Liegestütz'),
+  ('preacher-curl', 'de', 'Scottcurl'),
+  ('preacher-hammer-curl', 'de', 'Hammercurl am Scottpult'),
+  ('pseudo-planche-push-ups', 'de', 'Pseudo-Planche-Liegestütze'),
+  ('pull-up', 'de', 'Klimmzug'),
+  ('puppy-pose', 'de', 'Welpenhaltung'),
+  ('push-jerk', 'de', 'Push Jerk'),
+  ('push-press', 'de', 'Push Press'),
+  ('push-up', 'de', 'Liegestütz'),
+  ('pyramid-pose', 'de', 'Pyramidenhaltung'),
+  ('rack-pull', 'de', 'Rack Pull'),
+  ('rear-delt-fly', 'de', 'Reverse Butterfly'),
+  ('reverse-crunches', 'de', 'Umgekehrte Crunches'),
+  ('reverse-curl', 'de', 'Reverse Curl'),
+  ('reverse-grip-bent-over-row', 'de', 'Vorgebeugtes Rudern im Untergriff'),
+  ('reverse-grip-lat-pulldown', 'de', 'Latzug im Untergriff'),
+  ('reverse-lunge', 'de', 'Rückwärtiger Ausfallschritt'),
+  ('reverse-nordic-curl', 'de', 'Reverse Nordic Curl'),
+  ('reverse-plank', 'de', 'Umgekehrter Stütz'),
+  ('reverse-plank-dips', 'de', 'Dips im umgekehrten Stütz'),
+  ('reverse-tabletop-hip-pulses', 'de', 'Hüftpulsieren im umgekehrten Tisch'),
+  ('reverse-tabletop-hold', 'de', 'Umgekehrten Tisch halten'),
+  ('revolved-chair-pose', 'de', 'Gedrehte Stuhlhaltung'),
+  ('revolved-crescent-lunge', 'de', 'Gedrehter Halbmond-Ausfallschritt'),
+  ('ring-dead-hang', 'de', 'Passives Hängen an den Ringen'),
+  ('ring-dips', 'de', 'Dips an den Ringen'),
+  ('ring-face-pull', 'de', 'Face Pull an den Ringen'),
+  ('ring-muscle-up', 'de', 'Muscle-up an den Ringen'),
+  ('ring-push-up', 'de', 'Liegestütz an den Ringen'),
+  ('ring-row', 'de', 'Rudern an den Ringen'),
+  ('rings-inverted-row', 'de', 'Umgekehrtes Rudern an den Ringen'),
+  ('romanian-deadlift', 'de', 'Rumänisches Kreuzheben'),
+  ('rope-climb', 'de', 'Seilklettern'),
+  ('rowing-machine', 'de', 'Ruderergometer'),
+  ('running', 'de', 'Laufen'),
+  ('russian-twist', 'de', 'Russischer Twist'),
+  ('scapular-pull-ups', 'de', 'Skapula-Klimmzüge'),
+  ('scissor-kicks', 'de', 'Beinscheren'),
+  ('seated-barbell-overhead-press', 'de', 'Sitzendes Überkopfdrücken mit der Langhantel'),
+  ('seated-calf-raise', 'de', 'Sitzendes Wadenheben'),
+  ('seated-dumbbell-curl', 'de', 'Sitzender Bizepscurl mit Kurzhanteln'),
+  ('seated-dumbbell-lateral-raise', 'de', 'Sitzendes Seitheben mit Kurzhanteln'),
+  ('seated-dumbbell-shoulder-press', 'de', 'Sitzendes Schulterdrücken mit Kurzhanteln'),
+  ('seated-dumbbell-tricep-extension', 'de', 'Sitzendes Trizepsstrecken mit Kurzhantel'),
+  ('seated-forward-fold', 'de', 'Sitzende Vorbeuge'),
+  ('seated-leg-curl', 'de', 'Sitzender Beinbeuger'),
+  ('seated-row', 'de', 'Sitzendes Rudern'),
+  ('seated-smith-machine-shoulder-press', 'de', 'Sitzendes Schulterdrücken an der Multipresse'),
+  ('seated-spinal-twist', 'de', 'Sitzender Drehsitz'),
+  ('seated-straddle-stretch', 'de', 'Sitzende Grätsche'),
+  ('shoulder-press', 'de', 'Schulterdrücken'),
+  ('side-lunge', 'de', 'Seitlicher Ausfallschritt'),
+  ('side-lying-hip-abduction', 'de', 'Hüftabduktion in Seitlage'),
+  ('side-lying-hip-abduction-hold', 'de', 'Hüftabduktion in Seitlage halten'),
+  ('side-lying-hip-adduction', 'de', 'Hüftadduktion in Seitlage'),
+  ('side-lying-hip-adduction-hold', 'de', 'Hüftadduktion in Seitlage halten'),
+  ('side-lying-lateral-raise', 'de', 'Seitheben in Seitlage'),
+  ('side-plank', 'de', 'Seitstütz'),
+  ('side-plank-leg-lift-hold', 'de', 'Seitstütz mit angehobenem Bein halten'),
+  ('side-plank-with-leg-lift', 'de', 'Seitstütz mit Beinheben'),
+  ('single-arm-chest-supported-dumbbell-row', 'de', 'Einarmiges Kurzhantelrudern mit Brustauflage'),
+  ('single-arm-dumbbell-overhead-tricep-extension', 'de', 'Einarmiges Überkopf-Trizepsstrecken mit der Kurzhantel'),
+  ('single-arm-dumbbell-row', 'de', 'Einarmiges Kurzhantelrudern'),
+  ('single-arm-hammer-curl', 'de', 'Einarmiger Hammercurl'),
+  ('single-arm-machine-shoulder-press', 'de', 'Einarmiges Schulterdrücken an der Maschine'),
+  ('single-arm-plate-loaded-lateral-raise', 'de', 'Einarmiges Seitheben an der Maschine mit Scheibenaufnahme'),
+  ('single-arm-tricep-pushdown', 'de', 'Einarmiges Trizepsdrücken am Kabelzug'),
+  ('single-dumbbell-svend-press', 'de', 'Svend Press mit einer Kurzhantel'),
+  ('single-leg-calf-raise', 'de', 'Einbeiniges Wadenheben'),
+  ('single-leg-extension', 'de', 'Einbeiniger Beinstrecker'),
+  ('single-leg-glute-bridge', 'de', 'Einbeiniges Beckenheben'),
+  ('single-leg-glute-bridge-hold', 'de', 'Einbeiniges Beckenheben halten'),
+  ('single-leg-lying-leg-curl', 'de', 'Einbeiniger liegender Beinbeuger'),
+  ('single-leg-press', 'de', 'Einbeinige Beinpresse'),
+  ('single-leg-romanian-deadlift', 'de', 'Einbeiniges rumänisches Kreuzheben'),
+  ('sit-ups', 'de', 'Sit-ups'),
+  ('ski-erg', 'de', 'Ski-Ergometer'),
+  ('skull-crusher', 'de', 'Stirndrücken'),
+  ('sled-row', 'de', 'Rudern am Schlitten'),
+  ('smith-machine', 'de', 'Multipresse'),
+  ('smith-machine-bench-press', 'de', 'Bankdrücken an der Multipresse'),
+  ('smith-machine-bent-over-row', 'de', 'Vorgebeugtes Rudern an der Multipresse'),
+  ('smith-machine-bulgarian-split-squat', 'de', 'Bulgarische Kniebeuge an der Multipresse'),
+  ('smith-machine-calf-raise', 'de', 'Wadenheben an der Multipresse'),
+  ('smith-machine-decline-bench-press', 'de', 'Negativ-Bankdrücken an der Multipresse'),
+  ('smith-machine-front-squat', 'de', 'Frontkniebeuge an der Multipresse'),
+  ('smith-machine-good-morning', 'de', 'Good Morning an der Multipresse'),
+  ('smith-machine-hip-thrust', 'de', 'Hip Thrust an der Multipresse'),
+  ('smith-machine-incline-bench-press', 'de', 'Schrägbankdrücken an der Multipresse'),
+  ('smith-machine-reverse-grip-bent-over-row', 'de', 'Vorgebeugtes Rudern im Untergriff an der Multipresse'),
+  ('smith-machine-reverse-lunge', 'de', 'Rückwärtiger Ausfallschritt an der Multipresse'),
+  ('smith-machine-romanian-deadlift', 'de', 'Rumänisches Kreuzheben an der Multipresse'),
+  ('smith-machine-shoulder-press', 'de', 'Schulterdrücken an der Multipresse'),
+  ('smith-machine-shrug', 'de', 'Schulterheben an der Multipresse'),
+  ('smith-machine-split-squat', 'de', 'Split-Kniebeuge an der Multipresse'),
+  ('smith-machine-squat', 'de', 'Kniebeuge an der Multipresse'),
+  ('smith-machine-upright-row', 'de', 'Aufrechtes Rudern an der Multipresse'),
+  ('snatch', 'de', 'Reißen'),
+  ('sphinx-pose', 'de', 'Sphinxhaltung'),
+  ('spider-curl', 'de', 'Spider Curl'),
+  ('split-jerk', 'de', 'Stoßen in den Ausfallschritt'),
+  ('split-squat', 'de', 'Split-Kniebeuge'),
+  ('spoto-press', 'de', 'Spoto Press'),
+  ('stability-ball-hip-bridge', 'de', 'Beckenheben am Gymnastikball'),
+  ('stability-ball-knee-tuck', 'de', 'Knieanziehen am Gymnastikball'),
+  ('stability-ball-leg-curl', 'de', 'Beinbeuger am Gymnastikball'),
+  ('stability-ball-push-up', 'de', 'Liegestütz am Gymnastikball'),
+  ('stability-ball-push-up-hands-on-ball', 'de', 'Liegestütz mit den Händen auf dem Gymnastikball'),
+  ('stability-ball-wall-squat', 'de', 'Wandkniebeuge mit dem Gymnastikball'),
+  ('stair-climber', 'de', 'Treppensteiger'),
+  ('standing-calf-raise', 'de', 'Stehendes Wadenheben'),
+  ('standing-calf-stretch', 'de', 'Stehende Wadendehnung'),
+  ('standing-forward-fold', 'de', 'Stehende Vorbeuge'),
+  ('standing-forward-fold-to-half-lift', 'de', 'Stehende Vorbeuge zum halben Aufrichten'),
+  ('standing-quad-stretch', 'de', 'Stehende Quadrizepsdehnung'),
+  ('standing-side-bend', 'de', 'Stehende Seitbeuge'),
+  ('standing-split', 'de', 'Stehender Spagat'),
+  ('step-ups', 'de', 'Step-ups'),
+  ('stiff-leg-deadlift', 'de', 'Gestrecktes Kreuzheben'),
+  ('straight-arm-pulldown', 'de', 'Latziehen mit gestreckten Armen'),
+  ('straight-bar-cable-front-raise', 'de', 'Frontheben am Kabelzug mit der Stange'),
+  ('straight-bar-dips', 'de', 'Dips an der geraden Stange'),
+  ('strict-curl', 'de', 'Strict Curl'),
+  ('suitcase-carry', 'de', 'Koffertragen'),
+  ('sumo-deadlift', 'de', 'Sumo-Kreuzheben'),
+  ('sumo-squat', 'de', 'Sumo-Kniebeuge'),
+  ('superman', 'de', 'Superman'),
+  ('supine-spinal-twist', 'de', 'Wirbelsäulendrehung in Rückenlage'),
+  ('supine-windshield-wipers', 'de', 'Scheibenwischer in Rückenlage'),
+  ('supported-shoulderstand', 'de', 'Gestützter Schulterstand'),
+  ('svend-press', 'de', 'Svend Press'),
+  ('t-bar-row', 'de', 'T-Bar-Rudern'),
+  ('thoracic-bridge', 'de', 'Thorakale Brücke'),
+  ('thread-the-needle', 'de', 'Nadel einfädeln'),
+  ('three-legged-downward-dog', 'de', 'Dreibeiniger herabschauender Hund'),
+  ('thruster', 'de', 'Thruster'),
+  ('toes-to-bar', 'de', 'Zehen zur Stange'),
+  ('treadmill', 'de', 'Laufband'),
+  ('tree-pose', 'de', 'Baumhaltung'),
+  ('triangle-pose', 'de', 'Dreieckshaltung'),
+  ('tricep-pushdown', 'de', 'Trizepsdrücken'),
+  ('trx-bicep-curl', 'de', 'Bizepscurl am TRX'),
+  ('trx-chest-press', 'de', 'Brustdrücken am TRX'),
+  ('trx-face-pull', 'de', 'Face Pull am TRX'),
+  ('trx-hamstring-curl', 'de', 'Beinbeuger am TRX'),
+  ('trx-lunge', 'de', 'Ausfallschritt am TRX'),
+  ('trx-pistol-squat', 'de', 'Pistol Squat am TRX'),
+  ('trx-plank', 'de', 'Unterarmstütz am TRX'),
+  ('trx-row', 'de', 'Rudern am TRX'),
+  ('trx-side-plank', 'de', 'Seitstütz am TRX'),
+  ('trx-squat', 'de', 'Kniebeuge am TRX'),
+  ('trx-triceps-extension', 'de', 'Trizepsstrecken am TRX'),
+  ('trx-y-fly', 'de', 'Y-Fly am TRX'),
+  ('upright-bike', 'de', 'Fahrradergometer'),
+  ('upward-facing-dog', 'de', 'Heraufschauender Hund'),
+  ('v-bar-lat-pulldown', 'de', 'Latzug mit dem V-Griff'),
+  ('v-bar-tricep-pushdown', 'de', 'Trizepsdrücken mit dem V-Griff'),
+  ('v-sit', 'de', 'V-Sitz'),
+  ('v-ups', 'de', 'V-Ups'),
+  ('walking', 'de', 'Gehen'),
+  ('walking-lunge', 'de', 'Gehender Ausfallschritt'),
+  ('wall-push-ups', 'de', 'Liegestütze an der Wand'),
+  ('wall-sit', 'de', 'Wandsitz'),
+  ('warrior-i', 'de', 'Krieger I'),
+  ('warrior-ii', 'de', 'Krieger II'),
+  ('warrior-iii', 'de', 'Krieger III'),
+  ('weighted-dips', 'de', 'Dips mit Zusatzgewicht'),
+  ('weighted-pull-up', 'de', 'Klimmzug mit Zusatzgewicht'),
+  ('weighted-wall-crunch', 'de', 'Crunch an der Wand mit Zusatzgewicht'),
+  ('wide-grip-bench-press', 'de', 'Bankdrücken im weiten Griff'),
+  ('wide-grip-pull-ups', 'de', 'Klimmzüge im weiten Griff'),
+  ('wide-grip-push-ups', 'de', 'Weite Liegestütze'),
+  ('wide-grip-seated-cable-row', 'de', 'Sitzendes Rudern am Kabelzug im weiten Griff'),
+  ('wide-legged-forward-fold', 'de', 'Grätschstand-Vorbeuge'),
+  ('wide-stance-leg-press', 'de', 'Beinpresse mit weitem Stand'),
+  ('wrist-roller', 'de', 'Unterarmroller'),
+  ('zottman-curl', 'de', 'Zottman-Curl'),
+  ('downward-dog-knee-tuck', 'de', 'Herabschauender Hund mit Knieanziehen'),
+  ('downward-dog-pedal', 'de', 'Herabschauender Hund mit Fersendrücken'),
+  ('dumbbell-svend-press', 'de', 'Svend Press mit Kurzhanteln'),
+  ('half-kneeling-hip-flexor-rock', 'de', 'Hüftbeuger-Wippen im halben Kniestand'),
+  ('jefferson-curl', 'de', 'Jefferson Curl'),
+  ('muscle-snatch', 'de', 'Muscle Snatch'),
+  ('plate-loaded-glute-drive', 'de', 'Glute Drive mit Scheibenaufnahme')
+on conflict (exercise_id, locale) do update
+  set name = excluded.name,
+      source = excluded.source,
+      updated_at = now();
+
+-- ▶ the-catalogue-in-spanish.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The catalogue in Spanish: 599 of 619 movements.
+--
+-- The same set part 791 translates into German, translated into Spanish. Part
+-- 790 argues the schema; this file's decisions are all about words.
+--
+-- ── Gym Spanish, not translated English ───────────────────────────────────
+--
+--   · Bench Press is press de banca. Deadlift is peso muerto — "levantamiento
+--     muerto" is what a translator produces and what nobody says.
+--   · A Lat Pulldown is a jalón al pecho; behind the neck it is a jalón tras
+--     nuca. Neither contains the word for "pulldown".
+--   · An Upright Row is a remo al mentón — named for where the bar finishes,
+--     not for the torso being upright.
+--   · A Skull Crusher and a Lying Triceps Extension are both press francés.
+--     Two English names, one Spanish one, and pretending otherwise would
+--     invent a distinction Spanish lifters do not make.
+--   · A Preacher Curl is a curl en banco Scott, an EZ-bar is a barra Z, a
+--     Smith machine is a máquina Smith, and a Pec Deck is a contractor de
+--     pecho.
+--   · Clean and Snatch are cargada and arrancada — the platform words.
+--
+-- ── One Spanish, and it is not pretending to be two ───────────────────────
+--
+-- Regional gym vocabulary genuinely differs: a lunge is a zancada in Spain and
+-- often a desplante in Mexico. This ships ONE Spanish, so an es-MX handset
+-- reads the same rows an es-ES one does — see catalogueLocale(), which matches
+-- on the language subtag alone and says why. That is honest. What would not be
+-- honest is claiming a regional match we have not done; if es-MX is ever worth
+-- shipping it arrives as its own locale, not as a quiet widening of this one.
+--
+-- Where a term is regional and a neutral one exists, the neutral one is used:
+-- "elevación de talones" rather than a local word for calf work, "prensa de
+-- piernas" rather than the several names the leg press machine has.
+--
+-- ── Where the Spanish name IS the English one ─────────────────────────────
+--
+-- Face pull, burpees, thruster, planche, rack pull, push press, kettlebell.
+-- These carry a row with the English words, because that is what is said in a
+-- Spanish gym — a positive claim, not an absence. See part 791's header for
+-- why the two must not be conflated.
+--
+-- ── The same 20 stay English ──────────────────────────────────────────────
+--
+-- Identical list to part 791 and for the same reason: no settled term, or an
+-- English name that is itself ambiguous about which movement it is. Guessing
+-- one would put somebody on the wrong machine.
+--
+-- Re-running upserts on (exercise_id, locale); nothing is deleted. Descriptions
+-- are not translated here — see part 791.
+-- ─────────────────────────────────────────────────────────────────────────
+
+insert into public.exercise_translations (exercise_id, locale, name) values
+  ('ab-crunch', 'es', 'Crunch abdominal'),
+  ('ab-wheel-rollout', 'es', 'Rueda abdominal'),
+  ('air-bike', 'es', 'Bicicleta de aire'),
+  ('archer-pull-ups', 'es', 'Dominadas de arquero'),
+  ('archer-push-ups', 'es', 'Flexiones de arquero'),
+  ('arnold-press', 'es', 'Press Arnold'),
+  ('assisted-pull-up', 'es', 'Dominada asistida'),
+  ('back-extension', 'es', 'Hiperextensión lumbar'),
+  ('back-lever', 'es', 'Back lever'),
+  ('back-squat', 'es', 'Sentadilla trasera'),
+  ('band-assisted-pull-ups', 'es', 'Dominadas con banda'),
+  ('band-pull-apart', 'es', 'Separaciones con banda elástica'),
+  ('banded-adductor-stretch', 'es', 'Estiramiento de aductores con banda'),
+  ('banded-ankle-stretch', 'es', 'Estiramiento de tobillo con banda'),
+  ('banded-calf-stretch', 'es', 'Estiramiento de gemelos con banda'),
+  ('banded-chest-stretch', 'es', 'Estiramiento de pecho con banda'),
+  ('banded-clamshell', 'es', 'Almeja con banda'),
+  ('banded-figure-4-stretch', 'es', 'Estiramiento en cuatro con banda'),
+  ('banded-fire-hydrant', 'es', 'Abducción de cadera en cuadrupedia con banda'),
+  ('banded-glute-bridge', 'es', 'Puente de glúteos con banda'),
+  ('banded-good-morning', 'es', 'Buenos días con banda'),
+  ('banded-hamstring-stretch', 'es', 'Estiramiento de isquiotibiales con banda'),
+  ('banded-hip-thrust', 'es', 'Empuje de cadera con banda'),
+  ('banded-it-band-stretch', 'es', 'Estiramiento de la banda iliotibial con banda'),
+  ('banded-kneeling-hip-thrust', 'es', 'Empuje de cadera de rodillas con banda'),
+  ('banded-lat-stretch', 'es', 'Estiramiento de dorsales con banda'),
+  ('banded-lateral-walk', 'es', 'Caminata lateral con banda'),
+  ('banded-rear-delt-stretch', 'es', 'Estiramiento del deltoides posterior con banda'),
+  ('banded-romanian-deadlift', 'es', 'Peso muerto rumano con banda'),
+  ('banded-seated-hip-abduction', 'es', 'Abducción de cadera sentado con banda'),
+  ('banded-shoulder-stretch', 'es', 'Estiramiento de hombro con banda'),
+  ('banded-squat', 'es', 'Sentadilla con banda'),
+  ('banded-standing-hip-abduction', 'es', 'Abducción de cadera de pie con banda'),
+  ('banded-standing-hip-adduction', 'es', 'Aducción de cadera de pie con banda'),
+  ('banded-standing-leg-curl', 'es', 'Curl femoral de pie con banda'),
+  ('banded-sumo-walk', 'es', 'Caminata sumo con banda'),
+  ('banded-terminal-knee-extension', 'es', 'Extensión terminal de rodilla con banda'),
+  ('banded-triceps-stretch', 'es', 'Estiramiento de tríceps con banda'),
+  ('barbell-ab-rollout', 'es', 'Rollout abdominal con barra'),
+  ('barbell-back-squat', 'es', 'Sentadilla trasera con barra'),
+  ('barbell-bench-press', 'es', 'Press de banca con barra'),
+  ('barbell-calf-raise', 'es', 'Elevación de talones con barra'),
+  ('barbell-curl', 'es', 'Curl con barra'),
+  ('barbell-deadlift', 'es', 'Peso muerto con barra'),
+  ('barbell-front-raise', 'es', 'Elevación frontal con barra'),
+  ('barbell-glute-bridge', 'es', 'Puente de glúteos con barra'),
+  ('barbell-hip-thrust', 'es', 'Empuje de cadera con barra'),
+  ('barbell-lunge', 'es', 'Zancada con barra'),
+  ('barbell-overhead-extension', 'es', 'Extensión de tríceps sobre la cabeza con barra'),
+  ('barbell-overhead-press', 'es', 'Press militar con barra'),
+  ('barbell-preacher-curl', 'es', 'Curl en banco Scott con barra'),
+  ('barbell-pullover', 'es', 'Pullover con barra'),
+  ('barbell-rear-delt-row', 'es', 'Remo para deltoides posterior con barra'),
+  ('barbell-reverse-lunge', 'es', 'Zancada hacia atrás con barra'),
+  ('barbell-shrug', 'es', 'Encogimiento de hombros con barra'),
+  ('barbell-upright-row', 'es', 'Remo al mentón con barra'),
+  ('barbell-wrist-curl', 'es', 'Curl de muñeca con barra'),
+  ('battle-rope-double-slam', 'es', 'Golpe doble con cuerdas de batalla'),
+  ('battle-ropes', 'es', 'Cuerdas de batalla'),
+  ('bear-crawl', 'es', 'Marcha del oso'),
+  ('behind-the-back-barbell-shrug', 'es', 'Encogimiento de hombros con barra por detrás'),
+  ('behind-the-neck-lat-pulldown', 'es', 'Jalón tras nuca'),
+  ('behind-the-neck-press', 'es', 'Press tras nuca'),
+  ('behind-the-neck-pull-up', 'es', 'Dominada tras nuca'),
+  ('bench-adductor-stretch', 'es', 'Estiramiento de aductores en banco'),
+  ('bench-ankle-stretch', 'es', 'Estiramiento de tobillo en banco'),
+  ('bench-bulgarian-split-stretch', 'es', 'Estiramiento en split búlgaro con banco'),
+  ('bench-calf-stretch', 'es', 'Estiramiento de gemelos en banco'),
+  ('bench-chest-stretch', 'es', 'Estiramiento de pecho en banco'),
+  ('bench-child-s-pose', 'es', 'Postura del niño con banco'),
+  ('bench-couch-stretch', 'es', 'Estiramiento de sofá con banco'),
+  ('bench-dips', 'es', 'Fondos en banco'),
+  ('bench-figure-4-glute-stretch', 'es', 'Estiramiento de glúteo en cuatro con banco'),
+  ('bench-hamstring-stretch', 'es', 'Estiramiento de isquiotibiales en banco'),
+  ('bench-lat-stretch', 'es', 'Estiramiento de dorsales en banco'),
+  ('bench-leg-pull-in', 'es', 'Encogimiento de piernas en banco'),
+  ('bench-press', 'es', 'Press de banca'),
+  ('bench-pull', 'es', 'Remo tumbado en banco'),
+  ('bent-arm-barbell-pullover', 'es', 'Pullover con barra y brazos flexionados'),
+  ('bent-arm-ez-bar-pullover', 'es', 'Pullover con barra Z y brazos flexionados'),
+  ('bent-over-barbell-row', 'es', 'Remo con barra'),
+  ('bent-over-dumbbell-row', 'es', 'Remo con mancuernas'),
+  ('bent-over-ez-bar-row', 'es', 'Remo con barra Z'),
+  ('bent-over-row', 'es', 'Remo inclinado'),
+  ('bicep-curl', 'es', 'Curl de bíceps'),
+  ('bicycle-crunch', 'es', 'Crunch bicicleta'),
+  ('bilateral-dumbbell-wrist-curl', 'es', 'Curl de muñeca con mancuernas a dos manos'),
+  ('bird-dog', 'es', 'Bird dog'),
+  ('bird-dog-hold', 'es', 'Bird dog isométrico'),
+  ('boat-pose', 'es', 'Postura del barco'),
+  ('bodyweight-calf-raise', 'es', 'Elevación de talones con peso corporal'),
+  ('bodyweight-good-morning', 'es', 'Buenos días con peso corporal'),
+  ('bodyweight-lateral-raise', 'es', 'Elevación lateral sin peso'),
+  ('bodyweight-overhead-press', 'es', 'Press sobre la cabeza sin peso'),
+  ('bodyweight-reverse-lunge', 'es', 'Zancada hacia atrás con peso corporal'),
+  ('bodyweight-squat', 'es', 'Sentadilla con peso corporal'),
+  ('bow-pose', 'es', 'Postura del arco'),
+  ('box-jump', 'es', 'Salto al cajón'),
+  ('box-squat', 'es', 'Sentadilla al cajón'),
+  ('bulgarian-split-squat', 'es', 'Sentadilla búlgara'),
+  ('burpees', 'es', 'Burpees'),
+  ('butterfly-stretch', 'es', 'Estiramiento de mariposa'),
+  ('cable-bent-over-row', 'es', 'Remo inclinado en polea'),
+  ('cable-chest-press', 'es', 'Press de pecho en polea'),
+  ('cable-crossover', 'es', 'Cruce de poleas'),
+  ('cable-crunch', 'es', 'Crunch en polea'),
+  ('cable-curl', 'es', 'Curl en polea'),
+  ('cable-external-rotation', 'es', 'Rotación externa en polea'),
+  ('cable-face-pull', 'es', 'Face pull en polea'),
+  ('cable-front-raise', 'es', 'Elevación frontal en polea'),
+  ('cable-glute-kickback', 'es', 'Patada de glúteo en polea'),
+  ('cable-hammer-curl', 'es', 'Curl martillo en polea'),
+  ('cable-lateral-raise', 'es', 'Elevación lateral en polea'),
+  ('cable-machine', 'es', 'Máquina de poleas'),
+  ('cable-pallof-press', 'es', 'Press Pallof en polea'),
+  ('cable-tricep-kickback', 'es', 'Patada de tríceps en polea'),
+  ('cable-tricep-pushdown', 'es', 'Extensión de tríceps en polea'),
+  ('cable-upright-row', 'es', 'Remo al mentón en polea'),
+  ('cable-wrist-curl', 'es', 'Curl de muñeca en polea'),
+  ('calf-raise', 'es', 'Elevación de talones'),
+  ('camel-pose', 'es', 'Postura del camello'),
+  ('captain-s-chair-knee-raise', 'es', 'Elevación de rodillas en silla romana'),
+  ('captain-s-chair-leg-raise', 'es', 'Elevación de piernas en silla romana'),
+  ('cat-cow', 'es', 'Gato-vaca'),
+  ('cat-stretch', 'es', 'Estiramiento del gato'),
+  ('chair-pose', 'es', 'Postura de la silla'),
+  ('cheat-curl', 'es', 'Curl con impulso'),
+  ('chest-dips', 'es', 'Fondos para pecho'),
+  ('chest-press', 'es', 'Press de pecho'),
+  ('chest-supported-dumbbell-row', 'es', 'Remo con mancuernas con apoyo de pecho'),
+  ('chest-supported-dumbbell-shrug', 'es', 'Encogimiento de hombros con mancuernas con apoyo de pecho'),
+  ('chest-supported-kettlebell-row', 'es', 'Remo con kettlebell con apoyo de pecho'),
+  ('chest-supported-smith-machine-row', 'es', 'Remo en máquina Smith con apoyo de pecho'),
+  ('child-s-pose', 'es', 'Postura del niño'),
+  ('chin-ups', 'es', 'Dominadas supinas'),
+  ('clamshell-hold', 'es', 'Almeja isométrica'),
+  ('clamshells', 'es', 'Almejas'),
+  ('clap-push-ups', 'es', 'Flexiones con palmada'),
+  ('clean', 'es', 'Cargada'),
+  ('clean-and-jerk', 'es', 'Cargada y envión'),
+  ('close-grip-barbell-curl', 'es', 'Curl con barra agarre cerrado'),
+  ('close-grip-bench-press', 'es', 'Press de banca agarre cerrado'),
+  ('close-grip-dumbbell-bench-press', 'es', 'Press de banca con mancuernas agarre cerrado'),
+  ('close-grip-ez-bar-bench-press', 'es', 'Press de banca con barra Z agarre cerrado'),
+  ('close-grip-ez-bar-curl', 'es', 'Curl con barra Z agarre cerrado'),
+  ('close-grip-incline-bench-press', 'es', 'Press inclinado agarre cerrado'),
+  ('close-grip-lat-pulldown', 'es', 'Jalón agarre cerrado'),
+  ('close-grip-pull-ups', 'es', 'Dominadas agarre cerrado'),
+  ('close-grip-push-ups', 'es', 'Flexiones agarre cerrado'),
+  ('close-stance-leg-press', 'es', 'Prensa de piernas con pies juntos'),
+  ('cobra-stretch', 'es', 'Postura de la cobra'),
+  ('concentration-curl', 'es', 'Curl concentrado'),
+  ('corpse-pose', 'es', 'Postura del cadáver'),
+  ('cossack-squat', 'es', 'Sentadilla cosaca'),
+  ('cow-face-pose', 'es', 'Postura de la cara de vaca'),
+  ('crescent-lunge', 'es', 'Zancada en media luna'),
+  ('cross-body-crunch', 'es', 'Crunch cruzado'),
+  ('cross-body-hammer-curl', 'es', 'Curl martillo cruzado'),
+  ('cross-body-shoulder-stretch', 'es', 'Estiramiento de hombro cruzado'),
+  ('crow-pose', 'es', 'Postura del cuervo'),
+  ('dancer-pose', 'es', 'Postura del bailarín'),
+  ('dead-bug', 'es', 'Dead bug'),
+  ('dead-bug-hold', 'es', 'Dead bug isométrico'),
+  ('dead-hang', 'es', 'Colgado pasivo'),
+  ('deadlift', 'es', 'Peso muerto'),
+  ('decline-barbell-bench-press', 'es', 'Press de banca declinado con barra'),
+  ('decline-bench-press', 'es', 'Press de banca declinado'),
+  ('decline-crunch', 'es', 'Crunch en banco declinado'),
+  ('decline-dumbbell-fly', 'es', 'Aperturas declinadas con mancuernas'),
+  ('decline-ez-bar-bench-press', 'es', 'Press de banca declinado con barra Z'),
+  ('decline-push-up', 'es', 'Flexión declinada'),
+  ('deficit-deadlift', 'es', 'Peso muerto en déficit'),
+  ('deficit-push-ups', 'es', 'Flexiones en déficit'),
+  ('diamond-push-ups', 'es', 'Flexiones diamante'),
+  ('dolphin-pose', 'es', 'Postura del delfín'),
+  ('donkey-calf-raise', 'es', 'Elevación de talones tipo burro'),
+  ('doorway-chest-stretch', 'es', 'Estiramiento de pecho en el marco de la puerta'),
+  ('double-dumbbell-overhead-carry', 'es', 'Transporte sobre la cabeza con dos mancuernas'),
+  ('double-kettlebell-bicep-curl', 'es', 'Curl de bíceps con dos kettlebells'),
+  ('double-kettlebell-clean', 'es', 'Cargada con dos kettlebells'),
+  ('double-kettlebell-clean-and-press', 'es', 'Cargada y press con dos kettlebells'),
+  ('double-kettlebell-jerk', 'es', 'Envión con dos kettlebells'),
+  ('double-kettlebell-overhead-carry', 'es', 'Transporte sobre la cabeza con dos kettlebells'),
+  ('double-kettlebell-overhead-press', 'es', 'Press sobre la cabeza con dos kettlebells'),
+  ('double-kettlebell-push-press', 'es', 'Push press con dos kettlebells'),
+  ('double-kettlebell-rear-delt-row', 'es', 'Remo para deltoides posterior con dos kettlebells'),
+  ('double-kettlebell-row', 'es', 'Remo con dos kettlebells'),
+  ('double-kettlebell-split-jerk', 'es', 'Envión en tijera con dos kettlebells'),
+  ('downward-dog-to-low-lunge', 'es', 'Perro boca abajo a zancada baja'),
+  ('downward-dog-to-plank', 'es', 'Perro boca abajo a plancha'),
+  ('downward-dog-to-upward-dog', 'es', 'Perro boca abajo a perro boca arriba'),
+  ('downward-facing-dog', 'es', 'Perro boca abajo'),
+  ('drag-curl', 'es', 'Curl de arrastre'),
+  ('dragon-flag', 'es', 'Bandera del dragón'),
+  ('dumbbell-bench-press', 'es', 'Press de banca con mancuernas'),
+  ('dumbbell-bicep-curl', 'es', 'Curl de bíceps con mancuernas'),
+  ('dumbbell-calf-raise', 'es', 'Elevación de talones con mancuernas'),
+  ('dumbbell-deadlift', 'es', 'Peso muerto con mancuernas'),
+  ('dumbbell-face-pull', 'es', 'Face pull con mancuernas'),
+  ('dumbbell-farmer-s-walk', 'es', 'Paseo del granjero con mancuernas'),
+  ('dumbbell-floor-press', 'es', 'Press en el suelo con mancuernas'),
+  ('dumbbell-fly', 'es', 'Aperturas con mancuernas'),
+  ('dumbbell-front-raise', 'es', 'Elevación frontal con mancuernas'),
+  ('dumbbell-front-squat', 'es', 'Sentadilla frontal con mancuernas'),
+  ('dumbbell-hammer-curl', 'es', 'Curl martillo con mancuernas'),
+  ('dumbbell-hip-thrust', 'es', 'Empuje de cadera con mancuerna'),
+  ('dumbbell-lateral-raise', 'es', 'Elevación lateral con mancuernas'),
+  ('dumbbell-lunge', 'es', 'Zancada con mancuernas'),
+  ('dumbbell-overhead-carry', 'es', 'Transporte sobre la cabeza con mancuerna'),
+  ('dumbbell-pistol-squat', 'es', 'Sentadilla pistol con mancuerna'),
+  ('dumbbell-pullover', 'es', 'Pullover con mancuerna'),
+  ('dumbbell-push-press', 'es', 'Push press con mancuernas'),
+  ('dumbbell-reverse-curl', 'es', 'Curl inverso con mancuernas'),
+  ('dumbbell-reverse-fly', 'es', 'Aperturas invertidas con mancuernas'),
+  ('dumbbell-reverse-wrist-curl', 'es', 'Curl de muñeca inverso con mancuernas'),
+  ('dumbbell-romanian-deadlift', 'es', 'Peso muerto rumano con mancuernas'),
+  ('dumbbell-shrug', 'es', 'Encogimiento de hombros con mancuernas'),
+  ('dumbbell-side-bend', 'es', 'Flexión lateral con mancuerna'),
+  ('dumbbell-skull-crusher', 'es', 'Press francés con mancuernas'),
+  ('dumbbell-snatch', 'es', 'Arrancada con mancuerna'),
+  ('dumbbell-split-squat', 'es', 'Sentadilla dividida con mancuernas'),
+  ('dumbbell-squat', 'es', 'Sentadilla con mancuernas'),
+  ('dumbbell-sumo-squat', 'es', 'Sentadilla sumo con mancuerna'),
+  ('dumbbell-tricep-extension', 'es', 'Extensión de tríceps con mancuerna'),
+  ('dumbbell-tricep-kickback', 'es', 'Patada de tríceps con mancuernas'),
+  ('dumbbell-upright-row', 'es', 'Remo al mentón con mancuernas'),
+  ('dumbbell-windmill', 'es', 'Molino con mancuerna'),
+  ('dumbbell-wrist-curl', 'es', 'Curl de muñeca con mancuernas'),
+  ('eagle-pose', 'es', 'Postura del águila'),
+  ('easy-pose', 'es', 'Postura fácil'),
+  ('elliptical', 'es', 'Elíptica'),
+  ('extended-side-angle-pose', 'es', 'Postura del ángulo lateral extendido'),
+  ('ez-bar-bench-press', 'es', 'Press de banca con barra Z'),
+  ('ez-bar-curl', 'es', 'Curl con barra Z'),
+  ('ez-bar-front-raise', 'es', 'Elevación frontal con barra Z'),
+  ('ez-bar-lying-triceps-extension', 'es', 'Press francés tumbado con barra Z'),
+  ('ez-bar-overhead-tricep-extension', 'es', 'Extensión de tríceps sobre la cabeza con barra Z'),
+  ('ez-bar-pullover', 'es', 'Pullover con barra Z'),
+  ('ez-bar-reverse-curl', 'es', 'Curl inverso con barra Z'),
+  ('ez-bar-reverse-grip-row', 'es', 'Remo supino con barra Z'),
+  ('ez-bar-romanian-deadlift', 'es', 'Peso muerto rumano con barra Z'),
+  ('ez-bar-shrug', 'es', 'Encogimiento de hombros con barra Z'),
+  ('ez-bar-spider-curl', 'es', 'Curl araña con barra Z'),
+  ('ez-bar-upright-row', 'es', 'Remo al mentón con barra Z'),
+  ('ez-bar-wrist-curl', 'es', 'Curl de muñeca con barra Z'),
+  ('face-pull', 'es', 'Face pull'),
+  ('fish-pose', 'es', 'Postura del pez'),
+  ('floor-ez-bar-press', 'es', 'Press en el suelo con barra Z'),
+  ('floor-kettlebell-pullover', 'es', 'Pullover en el suelo con kettlebell'),
+  ('floor-press', 'es', 'Press en el suelo'),
+  ('flutter-kicks', 'es', 'Aleteo de piernas'),
+  ('front-lever', 'es', 'Front lever'),
+  ('front-squat', 'es', 'Sentadilla frontal'),
+  ('garland-pose', 'es', 'Postura de la guirnalda'),
+  ('glute-bridge', 'es', 'Puente de glúteos'),
+  ('glute-bridge-hold', 'es', 'Puente de glúteos isométrico'),
+  ('glute-kickback', 'es', 'Patada de glúteo'),
+  ('glute-kickback-hold', 'es', 'Patada de glúteo isométrica'),
+  ('goblet-squat', 'es', 'Sentadilla goblet'),
+  ('good-morning', 'es', 'Buenos días'),
+  ('hack-squat', 'es', 'Sentadilla hack'),
+  ('hack-squat-calf-raise', 'es', 'Elevación de talones en máquina hack'),
+  ('half-moon-pose', 'es', 'Postura de la media luna'),
+  ('hammer-curl', 'es', 'Curl martillo'),
+  ('handstand-push-ups', 'es', 'Flexiones en pino'),
+  ('hang-clean', 'es', 'Cargada desde suspensión'),
+  ('hang-power-clean', 'es', 'Cargada de potencia desde suspensión'),
+  ('hanging-knee-raise', 'es', 'Elevación de rodillas colgado'),
+  ('hanging-leg-raise', 'es', 'Elevación de piernas colgado'),
+  ('happy-baby-pose', 'es', 'Postura del bebé feliz'),
+  ('head-to-knee-pose', 'es', 'Postura de cabeza a rodilla'),
+  ('heel-elevated-squat', 'es', 'Sentadilla con talones elevados'),
+  ('heel-to-toe-walk', 'es', 'Marcha talón-punta'),
+  ('hero-pose', 'es', 'Postura del héroe'),
+  ('hex-bar-deadlift', 'es', 'Peso muerto con barra hexagonal'),
+  ('high-foot-leg-press', 'es', 'Prensa de piernas con pies altos'),
+  ('high-knees', 'es', 'Rodillas altas'),
+  ('high-plank', 'es', 'Plancha alta'),
+  ('hip-abduction', 'es', 'Abducción de cadera'),
+  ('hip-adduction', 'es', 'Aducción de cadera'),
+  ('hip-thrust', 'es', 'Empuje de cadera'),
+  ('hollow-body-hold', 'es', 'Hollow body isométrico'),
+  ('horizontal-leg-press', 'es', 'Prensa de piernas horizontal'),
+  ('human-flag', 'es', 'Bandera humana'),
+  ('incline-barbell-bench-press', 'es', 'Press inclinado con barra'),
+  ('incline-dumbbell-curl', 'es', 'Curl inclinado con mancuernas'),
+  ('incline-dumbbell-fly', 'es', 'Aperturas inclinadas con mancuernas'),
+  ('incline-dumbbell-press', 'es', 'Press inclinado con mancuernas'),
+  ('incline-ez-bar-bench-press', 'es', 'Press inclinado con barra Z'),
+  ('incline-hammer-curl', 'es', 'Curl martillo inclinado'),
+  ('incline-push-up', 'es', 'Flexión inclinada'),
+  ('incline-treadmill-walk', 'es', 'Caminata en cinta con inclinación'),
+  ('inverted-row', 'es', 'Remo invertido'),
+  ('isometric-neck-lateral-flexion', 'es', 'Flexión lateral isométrica de cuello'),
+  ('jackknife-sit-up', 'es', 'Navaja abdominal'),
+  ('jump-rope', 'es', 'Saltar a la comba'),
+  ('jump-squat', 'es', 'Sentadilla con salto'),
+  ('jumping-jacks', 'es', 'Saltos de tijera'),
+  ('kettlebell-bulgarian-split-squat', 'es', 'Sentadilla búlgara con kettlebell'),
+  ('kettlebell-close-grip-floor-press', 'es', 'Press en el suelo con agarre cerrado con kettlebell'),
+  ('kettlebell-concentration-curl', 'es', 'Curl concentrado con kettlebell'),
+  ('kettlebell-deadlift', 'es', 'Peso muerto con kettlebell'),
+  ('kettlebell-farmer-s-walk', 'es', 'Paseo del granjero con kettlebells'),
+  ('kettlebell-floor-press', 'es', 'Press en el suelo con kettlebell'),
+  ('kettlebell-goblet-lunge', 'es', 'Zancada goblet con kettlebell'),
+  ('kettlebell-halo', 'es', 'Halo con kettlebell'),
+  ('kettlebell-hammer-curl', 'es', 'Curl martillo con kettlebell'),
+  ('kettlebell-hip-thrust', 'es', 'Empuje de cadera con kettlebell'),
+  ('kettlebell-overhead-carry', 'es', 'Transporte sobre la cabeza con kettlebell'),
+  ('kettlebell-overhead-tricep-extension', 'es', 'Extensión de tríceps sobre la cabeza con kettlebell'),
+  ('kettlebell-pistol-squat', 'es', 'Sentadilla pistol con kettlebell'),
+  ('kettlebell-pullover', 'es', 'Pullover con kettlebell'),
+  ('kettlebell-reverse-lunge', 'es', 'Zancada hacia atrás con kettlebell'),
+  ('kettlebell-reverse-wrist-curl', 'es', 'Curl de muñeca inverso con kettlebell'),
+  ('kettlebell-rotational-lunge', 'es', 'Zancada con rotación con kettlebell'),
+  ('kettlebell-russian-twist', 'es', 'Giro ruso con kettlebell'),
+  ('kettlebell-shrug', 'es', 'Encogimiento de hombros con kettlebells'),
+  ('kettlebell-single-leg-deadlift', 'es', 'Peso muerto a una pierna con kettlebell'),
+  ('kettlebell-skull-crusher', 'es', 'Press francés con kettlebell'),
+  ('kettlebell-squat', 'es', 'Sentadilla con kettlebell'),
+  ('kettlebell-sumo-deadlift', 'es', 'Peso muerto sumo con kettlebell'),
+  ('kettlebell-sumo-high-pull', 'es', 'Tirón alto sumo con kettlebell'),
+  ('kettlebell-svend-press', 'es', 'Press Svend con kettlebell'),
+  ('kettlebell-swing', 'es', 'Swing con kettlebell'),
+  ('kettlebell-swing-clean', 'es', 'Cargada en swing con kettlebell'),
+  ('kettlebell-turkish-get-ups', 'es', 'Levantada turca con kettlebell'),
+  ('kettlebell-windmills', 'es', 'Molinos con kettlebell'),
+  ('kettlebell-wrist-curl', 'es', 'Curl de muñeca con kettlebell'),
+  ('knee-push-ups', 'es', 'Flexiones de rodillas'),
+  ('knee-to-chest-stretch', 'es', 'Estiramiento de rodilla al pecho'),
+  ('kneeling-cable-row', 'es', 'Remo en polea de rodillas'),
+  ('kneeling-hip-flexor-stretch', 'es', 'Estiramiento de flexores de cadera de rodillas'),
+  ('kneeling-wrist-stretch', 'es', 'Estiramiento de muñecas de rodillas'),
+  ('l-sit', 'es', 'L-sit'),
+  ('landmine-press', 'es', 'Press landmine'),
+  ('lat-pulldown', 'es', 'Jalón al pecho'),
+  ('lateral-raise', 'es', 'Elevación lateral'),
+  ('leg-curl', 'es', 'Curl femoral'),
+  ('leg-extension', 'es', 'Extensión de piernas'),
+  ('leg-press', 'es', 'Prensa de piernas'),
+  ('legs-up-the-wall-pose', 'es', 'Postura de piernas en la pared'),
+  ('lizard-stretch', 'es', 'Postura del lagarto'),
+  ('locust-pose', 'es', 'Postura del saltamontes'),
+  ('low-lunge', 'es', 'Zancada baja'),
+  ('low-lunge-to-half-split', 'es', 'Zancada baja a medio split'),
+  ('lunge', 'es', 'Zancada'),
+  ('lying-leg-curl', 'es', 'Curl femoral tumbado'),
+  ('lying-leg-raise', 'es', 'Elevación de piernas tumbado'),
+  ('lying-tricep-extension', 'es', 'Press francés tumbado'),
+  ('machine-assisted-dips', 'es', 'Fondos asistidos en máquina'),
+  ('machine-back-extension', 'es', 'Extensión lumbar en máquina'),
+  ('machine-bicep-curl', 'es', 'Curl de bíceps en máquina'),
+  ('machine-chest-fly', 'es', 'Aperturas en máquina'),
+  ('machine-chest-press', 'es', 'Press de pecho en máquina'),
+  ('machine-hip-abduction', 'es', 'Abducción de cadera en máquina'),
+  ('machine-preacher-curl', 'es', 'Curl en banco Scott en máquina'),
+  ('machine-seated-crunch', 'es', 'Crunch sentado en máquina'),
+  ('machine-shoulder-press', 'es', 'Press de hombro en máquina'),
+  ('machine-triceps-extension', 'es', 'Extensión de tríceps en máquina'),
+  ('medicine-ball-slam', 'es', 'Golpe con balón medicinal'),
+  ('mountain-climbers', 'es', 'Escaladores'),
+  ('mountain-pose', 'es', 'Postura de la montaña'),
+  ('muscle-ups', 'es', 'Muscle ups'),
+  ('neck-side-stretch', 'es', 'Estiramiento lateral de cuello'),
+  ('negative-pull-ups', 'es', 'Dominadas negativas'),
+  ('neutral-grip-pull-ups', 'es', 'Dominadas con agarre neutro'),
+  ('nordic-curl', 'es', 'Curl nórdico'),
+  ('one-arm-dumbbell-push-press', 'es', 'Push press a una mano con mancuerna'),
+  ('one-arm-dumbbell-swing', 'es', 'Swing a una mano con mancuerna'),
+  ('one-arm-kettlebell-bicep-curl', 'es', 'Curl de bíceps a una mano con kettlebell'),
+  ('one-arm-kettlebell-bottoms-up-press', 'es', 'Press bottoms up a una mano con kettlebell'),
+  ('one-arm-kettlebell-floor-press', 'es', 'Press en el suelo a una mano con kettlebell'),
+  ('one-arm-kettlebell-front-squat', 'es', 'Sentadilla frontal a una mano con kettlebell'),
+  ('one-arm-kettlebell-push-press', 'es', 'Push press a una mano con kettlebell'),
+  ('one-arm-kettlebell-row', 'es', 'Remo a una mano con kettlebell'),
+  ('one-arm-kettlebell-shoulder-press', 'es', 'Press de hombro a una mano con kettlebell'),
+  ('one-arm-kettlebell-swing', 'es', 'Swing a una mano con kettlebell'),
+  ('one-arm-kettlebell-tricep-kickback', 'es', 'Patada de tríceps a una mano con kettlebell'),
+  ('one-arm-landmine-press', 'es', 'Press landmine a una mano'),
+  ('one-arm-lat-pulldown', 'es', 'Jalón a una mano'),
+  ('one-arm-single-leg-dumbbell-romanian-deadlift', 'es', 'Peso muerto rumano a una pierna y una mano con mancuerna'),
+  ('one-arm-single-leg-kettlebell-romanian-deadlift', 'es', 'Peso muerto rumano a una pierna y una mano con kettlebell'),
+  ('overhead-press', 'es', 'Press militar'),
+  ('overhead-squat', 'es', 'Sentadilla con barra sobre la cabeza'),
+  ('overhead-tricep-extension', 'es', 'Extensión de tríceps sobre la cabeza'),
+  ('overhead-triceps-stretch', 'es', 'Estiramiento de tríceps sobre la cabeza'),
+  ('pause-deadlift', 'es', 'Peso muerto con pausa'),
+  ('pause-pull-up', 'es', 'Dominada con pausa'),
+  ('pause-squat', 'es', 'Sentadilla con pausa'),
+  ('paused-bench-press', 'es', 'Press de banca con pausa'),
+  ('paused-incline-bench-press', 'es', 'Press inclinado con pausa'),
+  ('paused-overhead-press', 'es', 'Press militar con pausa'),
+  ('pec-deck', 'es', 'Contractor de pecho'),
+  ('pendlay-row', 'es', 'Remo Pendlay'),
+  ('pigeon-stretch', 'es', 'Postura de la paloma'),
+  ('pike-push-ups', 'es', 'Flexiones pike'),
+  ('pilates-kneeling-side-kick', 'es', 'Patada lateral de rodillas de Pilates'),
+  ('pilates-leg-pull-back', 'es', 'Leg pull back de Pilates'),
+  ('pilates-leg-pull-front', 'es', 'Leg pull front de Pilates'),
+  ('pilates-roll-down', 'es', 'Roll down de Pilates'),
+  ('pilates-roll-over', 'es', 'Roll over de Pilates'),
+  ('pilates-saw', 'es', 'Sierra de Pilates'),
+  ('pilates-side-bend', 'es', 'Flexión lateral de Pilates'),
+  ('pilates-spine-stretch-forward', 'es', 'Estiramiento de columna hacia delante de Pilates'),
+  ('pilates-spine-twist', 'es', 'Giro de columna de Pilates'),
+  ('pistol-squat', 'es', 'Sentadilla pistol'),
+  ('planche', 'es', 'Planche'),
+  ('plank', 'es', 'Plancha'),
+  ('plate-loaded-donkey-calf-raise', 'es', 'Elevación de talones tipo burro con discos'),
+  ('plate-loaded-lateral-raise', 'es', 'Elevación lateral en máquina de discos'),
+  ('plate-loaded-shrug', 'es', 'Encogimiento de hombros en máquina de discos'),
+  ('plate-pinch', 'es', 'Pinza de discos'),
+  ('plate-pullover', 'es', 'Pullover con disco'),
+  ('plow-pose', 'es', 'Postura del arado'),
+  ('plyo-lunge', 'es', 'Zancada pliométrica'),
+  ('plyo-push-up', 'es', 'Flexión pliométrica'),
+  ('preacher-curl', 'es', 'Curl en banco Scott'),
+  ('preacher-hammer-curl', 'es', 'Curl martillo en banco Scott'),
+  ('pseudo-planche-push-ups', 'es', 'Flexiones pseudo planche'),
+  ('pull-up', 'es', 'Dominada'),
+  ('puppy-pose', 'es', 'Postura del cachorro'),
+  ('push-jerk', 'es', 'Push jerk'),
+  ('push-press', 'es', 'Push press'),
+  ('push-up', 'es', 'Flexión'),
+  ('pyramid-pose', 'es', 'Postura de la pirámide'),
+  ('rack-pull', 'es', 'Rack pull'),
+  ('rear-delt-fly', 'es', 'Aperturas para deltoides posterior'),
+  ('reverse-crunches', 'es', 'Crunch inverso'),
+  ('reverse-curl', 'es', 'Curl inverso'),
+  ('reverse-grip-bent-over-row', 'es', 'Remo inclinado supino'),
+  ('reverse-grip-lat-pulldown', 'es', 'Jalón supino'),
+  ('reverse-lunge', 'es', 'Zancada hacia atrás'),
+  ('reverse-nordic-curl', 'es', 'Curl nórdico inverso'),
+  ('reverse-plank', 'es', 'Plancha inversa'),
+  ('reverse-plank-dips', 'es', 'Fondos en plancha inversa'),
+  ('reverse-tabletop-hip-pulses', 'es', 'Pulsos de cadera en mesa invertida'),
+  ('reverse-tabletop-hold', 'es', 'Mesa invertida isométrica'),
+  ('revolved-chair-pose', 'es', 'Postura de la silla con torsión'),
+  ('revolved-crescent-lunge', 'es', 'Zancada en media luna con torsión'),
+  ('ring-dead-hang', 'es', 'Colgado pasivo en anillas'),
+  ('ring-dips', 'es', 'Fondos en anillas'),
+  ('ring-face-pull', 'es', 'Face pull en anillas'),
+  ('ring-muscle-up', 'es', 'Muscle up en anillas'),
+  ('ring-push-up', 'es', 'Flexión en anillas'),
+  ('ring-row', 'es', 'Remo en anillas'),
+  ('rings-inverted-row', 'es', 'Remo invertido en anillas'),
+  ('romanian-deadlift', 'es', 'Peso muerto rumano'),
+  ('rope-climb', 'es', 'Trepa de cuerda'),
+  ('rowing-machine', 'es', 'Máquina de remo'),
+  ('running', 'es', 'Correr'),
+  ('russian-twist', 'es', 'Giro ruso'),
+  ('scapular-pull-ups', 'es', 'Dominadas escapulares'),
+  ('scissor-kicks', 'es', 'Tijeras de piernas'),
+  ('seated-barbell-overhead-press', 'es', 'Press militar sentado con barra'),
+  ('seated-calf-raise', 'es', 'Elevación de talones sentado'),
+  ('seated-dumbbell-curl', 'es', 'Curl sentado con mancuernas'),
+  ('seated-dumbbell-lateral-raise', 'es', 'Elevación lateral sentado con mancuernas'),
+  ('seated-dumbbell-shoulder-press', 'es', 'Press de hombro sentado con mancuernas'),
+  ('seated-dumbbell-tricep-extension', 'es', 'Extensión de tríceps sentado con mancuerna'),
+  ('seated-forward-fold', 'es', 'Flexión hacia delante sentado'),
+  ('seated-leg-curl', 'es', 'Curl femoral sentado'),
+  ('seated-row', 'es', 'Remo sentado'),
+  ('seated-smith-machine-shoulder-press', 'es', 'Press de hombro sentado en máquina Smith'),
+  ('seated-spinal-twist', 'es', 'Torsión espinal sentado'),
+  ('seated-straddle-stretch', 'es', 'Estiramiento sentado con piernas abiertas'),
+  ('shoulder-press', 'es', 'Press de hombro'),
+  ('side-lunge', 'es', 'Zancada lateral'),
+  ('side-lying-hip-abduction', 'es', 'Abducción de cadera tumbado de lado'),
+  ('side-lying-hip-abduction-hold', 'es', 'Abducción de cadera tumbado de lado isométrica'),
+  ('side-lying-hip-adduction', 'es', 'Aducción de cadera tumbado de lado'),
+  ('side-lying-hip-adduction-hold', 'es', 'Aducción de cadera tumbado de lado isométrica'),
+  ('side-lying-lateral-raise', 'es', 'Elevación lateral tumbado de lado'),
+  ('side-plank', 'es', 'Plancha lateral'),
+  ('side-plank-leg-lift-hold', 'es', 'Plancha lateral con elevación de pierna isométrica'),
+  ('side-plank-with-leg-lift', 'es', 'Plancha lateral con elevación de pierna'),
+  ('single-arm-chest-supported-dumbbell-row', 'es', 'Remo a una mano con mancuerna y apoyo de pecho'),
+  ('single-arm-dumbbell-overhead-tricep-extension', 'es', 'Extensión de tríceps sobre la cabeza a una mano con mancuerna'),
+  ('single-arm-dumbbell-row', 'es', 'Remo a una mano con mancuerna'),
+  ('single-arm-hammer-curl', 'es', 'Curl martillo a una mano'),
+  ('single-arm-machine-shoulder-press', 'es', 'Press de hombro a una mano en máquina'),
+  ('single-arm-plate-loaded-lateral-raise', 'es', 'Elevación lateral a una mano en máquina de discos'),
+  ('single-arm-tricep-pushdown', 'es', 'Extensión de tríceps a una mano en polea'),
+  ('single-dumbbell-svend-press', 'es', 'Press Svend con una mancuerna'),
+  ('single-leg-calf-raise', 'es', 'Elevación de talones a una pierna'),
+  ('single-leg-extension', 'es', 'Extensión de pierna a una pierna'),
+  ('single-leg-glute-bridge', 'es', 'Puente de glúteos a una pierna'),
+  ('single-leg-glute-bridge-hold', 'es', 'Puente de glúteos a una pierna isométrico'),
+  ('single-leg-lying-leg-curl', 'es', 'Curl femoral tumbado a una pierna'),
+  ('single-leg-press', 'es', 'Prensa de piernas a una pierna'),
+  ('single-leg-romanian-deadlift', 'es', 'Peso muerto rumano a una pierna'),
+  ('sit-ups', 'es', 'Abdominales'),
+  ('ski-erg', 'es', 'Máquina de esquí'),
+  ('skull-crusher', 'es', 'Press francés'),
+  ('sled-row', 'es', 'Remo con trineo'),
+  ('smith-machine', 'es', 'Máquina Smith'),
+  ('smith-machine-bench-press', 'es', 'Press de banca en máquina Smith'),
+  ('smith-machine-bent-over-row', 'es', 'Remo inclinado en máquina Smith'),
+  ('smith-machine-bulgarian-split-squat', 'es', 'Sentadilla búlgara en máquina Smith'),
+  ('smith-machine-calf-raise', 'es', 'Elevación de talones en máquina Smith'),
+  ('smith-machine-decline-bench-press', 'es', 'Press de banca declinado en máquina Smith'),
+  ('smith-machine-front-squat', 'es', 'Sentadilla frontal en máquina Smith'),
+  ('smith-machine-good-morning', 'es', 'Buenos días en máquina Smith'),
+  ('smith-machine-hip-thrust', 'es', 'Empuje de cadera en máquina Smith'),
+  ('smith-machine-incline-bench-press', 'es', 'Press inclinado en máquina Smith'),
+  ('smith-machine-reverse-grip-bent-over-row', 'es', 'Remo inclinado supino en máquina Smith'),
+  ('smith-machine-reverse-lunge', 'es', 'Zancada hacia atrás en máquina Smith'),
+  ('smith-machine-romanian-deadlift', 'es', 'Peso muerto rumano en máquina Smith'),
+  ('smith-machine-shoulder-press', 'es', 'Press de hombro en máquina Smith'),
+  ('smith-machine-shrug', 'es', 'Encogimiento de hombros en máquina Smith'),
+  ('smith-machine-split-squat', 'es', 'Sentadilla dividida en máquina Smith'),
+  ('smith-machine-squat', 'es', 'Sentadilla en máquina Smith'),
+  ('smith-machine-upright-row', 'es', 'Remo al mentón en máquina Smith'),
+  ('snatch', 'es', 'Arrancada'),
+  ('sphinx-pose', 'es', 'Postura de la esfinge'),
+  ('spider-curl', 'es', 'Curl araña'),
+  ('split-jerk', 'es', 'Envión en tijera'),
+  ('split-squat', 'es', 'Sentadilla dividida'),
+  ('spoto-press', 'es', 'Press Spoto'),
+  ('stability-ball-hip-bridge', 'es', 'Puente de cadera con fitball'),
+  ('stability-ball-knee-tuck', 'es', 'Encogimiento de rodillas con fitball'),
+  ('stability-ball-leg-curl', 'es', 'Curl femoral con fitball'),
+  ('stability-ball-push-up', 'es', 'Flexión con fitball'),
+  ('stability-ball-push-up-hands-on-ball', 'es', 'Flexión con las manos en el fitball'),
+  ('stability-ball-wall-squat', 'es', 'Sentadilla en pared con fitball'),
+  ('stair-climber', 'es', 'Máquina de escaleras'),
+  ('standing-calf-raise', 'es', 'Elevación de talones de pie'),
+  ('standing-calf-stretch', 'es', 'Estiramiento de gemelos de pie'),
+  ('standing-forward-fold', 'es', 'Flexión hacia delante de pie'),
+  ('standing-forward-fold-to-half-lift', 'es', 'Flexión hacia delante de pie a media elevación'),
+  ('standing-quad-stretch', 'es', 'Estiramiento de cuádriceps de pie'),
+  ('standing-side-bend', 'es', 'Flexión lateral de pie'),
+  ('standing-split', 'es', 'Split de pie'),
+  ('step-ups', 'es', 'Subidas al cajón'),
+  ('stiff-leg-deadlift', 'es', 'Peso muerto con piernas rígidas'),
+  ('straight-arm-pulldown', 'es', 'Jalón con brazos extendidos'),
+  ('straight-bar-cable-front-raise', 'es', 'Elevación frontal en polea con barra'),
+  ('straight-bar-dips', 'es', 'Fondos en barra recta'),
+  ('strict-curl', 'es', 'Curl estricto'),
+  ('suitcase-carry', 'es', 'Transporte tipo maleta'),
+  ('sumo-deadlift', 'es', 'Peso muerto sumo'),
+  ('sumo-squat', 'es', 'Sentadilla sumo'),
+  ('superman', 'es', 'Superman'),
+  ('supine-spinal-twist', 'es', 'Torsión espinal tumbado'),
+  ('supine-windshield-wipers', 'es', 'Limpiaparabrisas tumbado'),
+  ('supported-shoulderstand', 'es', 'Postura sobre los hombros con apoyo'),
+  ('svend-press', 'es', 'Press Svend'),
+  ('t-bar-row', 'es', 'Remo en barra T'),
+  ('thoracic-bridge', 'es', 'Puente torácico'),
+  ('thread-the-needle', 'es', 'Enhebrar la aguja'),
+  ('three-legged-downward-dog', 'es', 'Perro boca abajo a tres patas'),
+  ('thruster', 'es', 'Thruster'),
+  ('toes-to-bar', 'es', 'Pies a la barra'),
+  ('treadmill', 'es', 'Cinta de correr'),
+  ('tree-pose', 'es', 'Postura del árbol'),
+  ('triangle-pose', 'es', 'Postura del triángulo'),
+  ('tricep-pushdown', 'es', 'Extensión de tríceps en polea alta'),
+  ('trx-bicep-curl', 'es', 'Curl de bíceps en TRX'),
+  ('trx-chest-press', 'es', 'Press de pecho en TRX'),
+  ('trx-face-pull', 'es', 'Face pull en TRX'),
+  ('trx-hamstring-curl', 'es', 'Curl femoral en TRX'),
+  ('trx-lunge', 'es', 'Zancada en TRX'),
+  ('trx-pistol-squat', 'es', 'Sentadilla pistol en TRX'),
+  ('trx-plank', 'es', 'Plancha en TRX'),
+  ('trx-row', 'es', 'Remo en TRX'),
+  ('trx-side-plank', 'es', 'Plancha lateral en TRX'),
+  ('trx-squat', 'es', 'Sentadilla en TRX'),
+  ('trx-triceps-extension', 'es', 'Extensión de tríceps en TRX'),
+  ('trx-y-fly', 'es', 'Vuelo en Y en TRX'),
+  ('upright-bike', 'es', 'Bicicleta estática'),
+  ('upward-facing-dog', 'es', 'Perro boca arriba'),
+  ('v-bar-lat-pulldown', 'es', 'Jalón con agarre en V'),
+  ('v-bar-tricep-pushdown', 'es', 'Extensión de tríceps con agarre en V'),
+  ('v-sit', 'es', 'V-sit'),
+  ('v-ups', 'es', 'Abdominales en V'),
+  ('walking', 'es', 'Caminar'),
+  ('walking-lunge', 'es', 'Zancada caminando'),
+  ('wall-push-ups', 'es', 'Flexiones en pared'),
+  ('wall-sit', 'es', 'Sentadilla isométrica en pared'),
+  ('warrior-i', 'es', 'Guerrero I'),
+  ('warrior-ii', 'es', 'Guerrero II'),
+  ('warrior-iii', 'es', 'Guerrero III'),
+  ('weighted-dips', 'es', 'Fondos con lastre'),
+  ('weighted-pull-up', 'es', 'Dominada con lastre'),
+  ('weighted-wall-crunch', 'es', 'Crunch en pared con lastre'),
+  ('wide-grip-bench-press', 'es', 'Press de banca agarre ancho'),
+  ('wide-grip-pull-ups', 'es', 'Dominadas agarre ancho'),
+  ('wide-grip-push-ups', 'es', 'Flexiones agarre ancho'),
+  ('wide-grip-seated-cable-row', 'es', 'Remo sentado en polea agarre ancho'),
+  ('wide-legged-forward-fold', 'es', 'Flexión hacia delante con piernas abiertas'),
+  ('wide-stance-leg-press', 'es', 'Prensa de piernas con pies separados'),
+  ('wrist-roller', 'es', 'Rodillo de muñeca'),
+  ('zottman-curl', 'es', 'Curl Zottman'),
+  ('downward-dog-knee-tuck', 'es', 'Perro boca abajo con encogimiento de rodilla'),
+  ('downward-dog-pedal', 'es', 'Perro boca abajo pedaleando'),
+  ('dumbbell-svend-press', 'es', 'Press Svend con mancuernas'),
+  ('half-kneeling-hip-flexor-rock', 'es', 'Balanceo de flexores de cadera en medio arrodillado'),
+  ('jefferson-curl', 'es', 'Jefferson curl'),
+  ('muscle-snatch', 'es', 'Muscle snatch'),
+  ('plate-loaded-glute-drive', 'es', 'Glute drive con discos')
+on conflict (exercise_id, locale) do update
+  set name = excluded.name,
+      source = excluded.source,
+      updated_at = now();
+
+-- ▶ a-refund-the-gym-made-and-the-ledger-never-heard.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A gym refunded an online sale from its own Stripe dashboard and the ledger
+-- went on counting the money.
+--
+-- supabase/parts/480 closed one half of this. An online membership or pass sale
+-- now writes `gym_payments`, so /money, /revenue, /accounting and /close count
+-- the money a member paid by card. This part closes the other half, which is
+-- the same defect pointed the other way.
+--
+-- `supabase/functions/stripe-webhook` handles `charge.refunded` by resolving
+-- the charge against exactly two tables — `client_subscription_payments` by
+-- `stripe_invoice_id`, and `client_purchases` by payment intent then by
+-- checkout session. A gym online sale is in NEITHER. It lives in `gym_orders`
+-- and `gym_payments`, keyed by `gym_order_id`, and nothing in the refund path
+-- has ever looked there.
+--
+-- So a gym owner who presses Refund in their own Stripe dashboard — which is
+-- the ordinary way a refund happens, because under direct charges the gym is
+-- the merchant of record and has the full dashboard — produced exactly three
+-- things: a `charge.refunded` event, a line in the edge-function log reading
+-- "REFUND WITH NO SALE TO MIRROR IT ON", and a `gym_payments` row still holding
+-- the whole original amount. The gym's ledger, its month-end close and its
+-- revenue screen all keep counting money that has gone back, and the only
+-- person who could have known is whoever tails the logs.
+--
+-- ── The refund is a ROW, and part 180 already decided that ────────────────
+--
+-- Nothing here adds a `refunded_cents` column to `gym_payments`, and that is
+-- the whole design rather than an omission. supabase/parts/180 settled how this
+-- table records money going back: a NEGATIVE row carrying
+-- `reverses_payment_id`, because there are eleven places in this console that
+-- add `gym_payments.amount_cents` up and a flag would have to be understood by
+-- all eleven, today and in every query written after today. A reversal that is
+-- a row nets correctly in every one of them with no change at all.
+--
+-- The client-side tables are different and stay different: `client_purchases`
+-- and `client_subscription_payments` carry `refunded_cents`, assigned from
+-- Stripe's running total, and part 192's CHECK bounds it. Two tables, two
+-- shapes, and each is right for the queries over it. What this part adds is the
+-- two columns that let the webhook write part 180's shape SAFELY.
+--
+-- ── 1. `gym_payments.stripe_refund_id` — so a retry cannot halve the month ─
+--
+-- A Stripe webhook is retried, and it is retried precisely when the handler
+-- failed part way through. A refund mirrored twice takes the money off the
+-- gym's takings a second time, and unlike a doubled SALE — which an owner
+-- notices, because it is money they did not get — a doubled REFUND makes the
+-- month look worse in a way nobody goes looking for.
+--
+-- "Have I already mirrored this?" cannot be answered from the amount. Two
+-- members on the same plan are refunded the same money on the same afternoon,
+-- and a partial refund of 2000 followed by a second partial refund of 2000 on
+-- the SAME charge is two legitimate rows that are identical in every column
+-- this table has. It has to be answered by IDENTITY, and the identity of a
+-- refund is Stripe's refund id.
+--
+-- This is deliberately the same shape as `gym_payments.gym_order_id` in part
+-- 480 and `memberships.gym_order_id` in part 281: one Stripe object, at most
+-- one row, a partial UNIQUE index saying so, and a webhook that is delivered
+-- twice finding the row the first delivery wrote instead of writing a second.
+--
+-- PARTIAL, because every payment taken at the desk, every imported row and
+-- every hand-entered correction has NULL here, and NULLs do not collide. The
+-- index only ever constrains rows the webhook wrote.
+--
+-- NOT keyed on the charge, and not on `charge.amount_refunded`. A charge can be
+-- refunded in instalments and each instalment is its own reversal with its own
+-- date; keying on the charge would record the first one and silently drop every
+-- later one, which is the same class of bug as keying on the amount.
+--
+-- ── 2. Stripe's running total, on the order, so the gap is VISIBLE ────────
+--
+-- `gym_orders.refunded_cents` is Stripe's `amount_refunded` — the RUNNING TOTAL
+-- across every refund on the charge — written by plain assignment and never by
+-- addition. That makes it idempotent by construction and correct in the one
+-- case an addition is not: two deliveries racing, each adding its own figure to
+-- a total it read a moment earlier.
+--
+-- It is NOT the ledger, it is not summed by any money screen, and it must never
+-- become either. It exists so that ONE question has an answer: is what Stripe
+-- sent back the same as what the payment record has taken off? Both halves are
+-- stored, so the exception is DERIVED rather than declared —
+--
+--     gym_orders.refunded_cents  >  Σ|reversals against this order's payment|
+--
+-- — and a derived exception CLEARS ITSELF the moment somebody records the
+-- missing correction by hand. A stored "this went wrong" flag would not. That
+-- matters more here than it looks: the ways a mirror can fail (below) are all
+-- ways where the only fix is a person, and Stripe will not redeliver the event
+-- once it has been accepted, so nothing would ever come back to clear a flag.
+--
+-- `refunded_currency` is stored beside it and is NOT assumed to be the order's.
+-- It is what Stripe says it sent back. A refund whose currency disagrees with
+-- the payment it is reversing is refused rather than mirrored — see the module
+-- header in src/lib/gymRefundMirror.ts — and this column is how the screen can
+-- say what the disagreement was instead of rendering a figure in a money nobody
+-- chose. supabase/parts/150 removed the defaults from this schema for exactly
+-- this reason and no column added here reintroduces one.
+--
+-- `refund_note` is the REASON a mirror did not happen, in the webhook's own
+-- words. It is not the exception — the arithmetic above is — it is what the
+-- exception says when it is drawn, so an owner reads "the month was closed"
+-- rather than being left to work out which of four things went wrong.
+--
+-- ── The closed month, which is the case this is really for ────────────────
+--
+-- supabase/parts/182 refuses any write into a month a gym has closed, and that
+-- trigger applies to `gym_payments` and is deliberately not exempted for the
+-- webhook — a webhook is not a reason to write into a month an owner has signed
+-- off. A refund is dated when it was MADE (part 180 argues this at length: a
+-- refund handed back in September belongs in September, not backdated into an
+-- August somebody has filed), so a refund made inside a month that has already
+-- been closed is refused.
+--
+-- That refusal is FINAL, not transient: every retry is refused identically
+-- until a person reopens the month. Answering Stripe with a 500 would spend the
+-- retry budget on a write that cannot land and then abandon the delivery with
+-- nothing recorded anywhere. So the webhook accepts the event and writes the
+-- three columns below, and the reconciliation screen lists the sale with the
+-- reason on it.
+--
+-- This is the only place in the product where that gap is visible at all. On
+-- the sale side, part 480's failure showed up as a paid order with no payment
+-- row against it. Here the payment row EXISTS and looks perfectly correct — it
+-- is simply too big — so without these columns there is nothing on any screen
+-- that is even slightly wrong-looking.
+--
+-- `gym_orders` is not locked by part 182's trigger (only `gym_payments` and
+-- `gym_invoices` are), so these three writes always land. That is deliberate
+-- and it is what makes the exception survivable: the record of what Stripe did
+-- is written even when the ledger refuses the consequence.
+--
+-- Additive and idempotent. Nothing here alters an existing row.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── the identity that makes a retry safe ────────────────────────────────────
+
+alter table public.gym_payments
+  add column if not exists stripe_refund_id text;
+
+create unique index if not exists uq_gym_payments_stripe_refund
+  on public.gym_payments (stripe_refund_id)
+  where stripe_refund_id is not null;
+
+-- A Stripe refund id may only ever appear on a reversal. Not NOT VALID, unlike
+-- part 180's `gym_payments_correction_shape`: that one had to be deferred
+-- because gyms already held bare negative rows entered before there was any
+-- other way to record a refund, whereas this column is new and every existing
+-- row satisfies this trivially with NULL. Nothing is being asserted about the
+-- past here, so nothing has to be excused.
+alter table public.gym_payments drop constraint if exists gym_payments_stripe_refund_is_a_reversal;
+alter table public.gym_payments add constraint gym_payments_stripe_refund_is_a_reversal
+  check (stripe_refund_id is null or kind = 'refund');
+
+comment on column public.gym_payments.stripe_refund_id is
+  'The Stripe refund (re_...) this reversal mirrors, or NULL for a correction somebody made at the desk. Unique: it is what stops a retried charge.refunded taking the money off this gym''s takings twice. Keyed on the refund and not on the charge because a charge can be refunded in instalments and each instalment is its own dated reversal. Written only by supabase/functions/stripe-webhook.';
+
+-- The reversals against one payment, which is the sum the reconciliation
+-- compares Stripe's running total to. part 180 already indexed
+-- `reverses_payment_id`; this is the covering half so the sum does not have to
+-- go to the heap for every order on the screen.
+create index if not exists idx_gym_payments_reversal_amounts
+  on public.gym_payments (reverses_payment_id, amount_cents)
+  where reverses_payment_id is not null;
+
+-- ── what Stripe says it sent back ───────────────────────────────────────────
+
+alter table public.gym_orders
+  add column if not exists refunded_cents integer;
+
+alter table public.gym_orders drop constraint if exists gym_orders_refunded_not_negative;
+alter table public.gym_orders add constraint gym_orders_refunded_not_negative
+  check (refunded_cents is null or refunded_cents >= 0);
+
+-- NULL and 0 are different facts and the column keeps them apart. NULL is
+-- "Stripe has never mentioned a refund on this charge"; 0 is "it did, and the
+-- running total came back as nothing", which is what a refund reversed or
+-- failed looks like. A screen that read the first as the second would be
+-- claiming a fact about every order ever taken.
+
+alter table public.gym_orders
+  add column if not exists refunded_currency text;
+
+alter table public.gym_orders drop constraint if exists gym_orders_refunded_currency_is_iso;
+alter table public.gym_orders add constraint gym_orders_refunded_currency_is_iso
+  check (refunded_currency is null or refunded_currency ~ '^[A-Z]{3}$');
+
+alter table public.gym_orders
+  add column if not exists refunded_at timestamptz;
+
+-- Stripe's own instant for the event, not now(). A delivery retried three days
+-- late must not move a refund into a different month, and this is the column an
+-- owner reads to find out when the money actually went back — which is very
+-- often not the day they are looking at the screen.
+
+alter table public.gym_orders
+  add column if not exists refund_note text;
+
+comment on column public.gym_orders.refunded_cents is
+  'Stripe''s amount_refunded on this order''s charge — the RUNNING TOTAL across every refund, in minor units, assigned rather than added so a redelivery cannot inflate it. Not a ledger figure and never summed by a money screen: gym_payments holds the money. This is one half of the comparison that makes an unmirrored refund visible, the other half being the sum of reversals against this order''s payment row.';
+comment on column public.gym_orders.refunded_currency is
+  'What Stripe says the refund was denominated in, upper case. Stored rather than assumed to be gym_orders.currency: a refund in a currency that disagrees with the payment it reverses is refused by the webhook rather than netted, and this is how the screen can say so instead of drawing a figure in a money nobody chose.';
+comment on column public.gym_orders.refunded_at is
+  'When STRIPE says the money went back, from the event''s own timestamp rather than from now(). A delivery retried on Tuesday must not date Saturday''s refund on Tuesday.';
+comment on column public.gym_orders.refund_note is
+  'Why a refund Stripe made was not mirrored into gym_payments, in the webhook''s own words — most often that the month it falls in has been closed. Not the exception itself: that is derived from refunded_cents against the reversals, so it clears itself the moment somebody records the correction by hand. This is what the exception SAYS when it is drawn.';
+
+create index if not exists idx_gym_orders_refunded
+  on public.gym_orders (tenant_id, refunded_at desc)
+  where refunded_cents is not null;
+
+-- ▶ a-grant-only-rls-was-holding-back.sql
+
+-- ── Three tables where only RLS stood between a coach's book and everybody ──
+--
+-- `coach_credential_notices` (part 202), `coach_overdue_notices` (part 202) and
+-- `coach_invoice_ageing_notices` (part 613) are deduplication ledgers. The
+-- nightly jobs write a row to say "this coach has already been told about this
+-- one", so the next pass does not tell them again. Nothing in the three apps or
+-- the console reads them — verified by grep across `src/`, `app/`,
+-- `studio-web/` and `supabase/functions/`, which returns nothing at all.
+--
+-- All three have RLS enabled and **no policy**, which is the right posture for
+-- a table only the service role uses: RLS with no policy denies everybody, so
+-- the tables are already unreadable.
+--
+-- What they also have is a live `grant select ... to authenticated`, inherited
+-- from whatever the default was when they were created. That grant reaches
+-- nothing today. It reaches everything the moment anybody adds a permissive
+-- policy to one of these tables for an unrelated reason — a debugging aid, a
+-- screen somebody builds later, a copy-paste from a neighbouring part.
+--
+-- ── Why this is worth a part of its own ───────────────────────────────────
+--
+-- Part 401 already argues the doctrine for `instagram_accounts`: a table the
+-- app must never read has its grants revoked, and does not merely rely on the
+-- absence of a policy. `share_card_objects` follows the same rule. These three
+-- are the ones that were missed, and they are not empty of anything sensitive:
+--
+--   coach_overdue_notices          which of a coach's clients have stopped
+--                                  turning up, and when they were chased
+--   coach_invoice_ageing_notices   which invoices a coach is owed on, and how
+--                                  long they have been outstanding
+--   coach_credential_notices       when a coach's insurance or qualification
+--                                  is expiring
+--
+-- That is a coach's arrears, their attrition and their lapsed paperwork —
+-- exactly the three things a competitor, or a gym owner they are negotiating
+-- with, would most like to read. RLS is the fence; the grant should not be
+-- sitting behind it waiting for the fence to move.
+--
+-- Nothing changes for the jobs: they run as the service role, which is granted
+-- explicitly below rather than by inheritance, so the grant that makes them
+-- work is now written down instead of assumed.
+--
+-- Additive and idempotent. No behaviour changes anywhere, by design — if
+-- anything in the product breaks after this, that thing was reading a table it
+-- was never entitled to and the breakage is the point.
+
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'coach_credential_notices',
+    'coach_overdue_notices',
+    'coach_invoice_ageing_notices'
+  ] loop
+    -- Skipped rather than raised: parts 202 and 613 are both already applied
+    -- everywhere this runs, but a part that refuses to apply against a database
+    -- missing a table it only tightens is a part that blocks a deploy for no
+    -- gain.
+    if to_regclass('public.' || t) is null then
+      raise notice 'public.% is not here — nothing to tighten', t;
+      continue;
+    end if;
+
+    execute format('revoke all on public.%I from anon, authenticated, public', t);
+    execute format('grant all on public.%I to service_role', t);
+    -- Belt and braces. All three already have it; a table that gained one of
+    -- these grants back would otherwise be readable with RLS off entirely.
+    execute format('alter table public.%I enable row level security', t);
+  end loop;
+end $$;
+
+comment on table public.coach_overdue_notices is
+  'Which clients a coach has already been told have stopped turning up, so the nightly pass does not tell them twice. Service role only — no policy and no grant, deliberately, per part 401''s rule that a table the app must never read is revoked rather than left to RLS alone. Nothing in the apps or the console reads this.';
+comment on table public.coach_invoice_ageing_notices is
+  'Which overdue invoices a coach has already been chased about. Service role only — see the header of part 820 for why the authenticated grant was removed rather than left behind the policy.';
+comment on table public.coach_credential_notices is
+  'Which expiring credentials a coach has already been warned about. Service role only, for the same reason as its two neighbours.';

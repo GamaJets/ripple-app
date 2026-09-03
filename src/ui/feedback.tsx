@@ -8,7 +8,7 @@
 // whose coach had written them three notes was told their coach had said
 // nothing — and on the other side the coach saw their own notes vanish from the
 // client detail and wrote them again.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
@@ -25,6 +25,9 @@ interface FeedbackValue {
   /** Resolves true only once the note is on the server, where the client will
    *  actually read it. False means the coach wrote it to their own screen. */
   addFeedback: (clientId: string, body: string) => Promise<boolean>;
+  /** Read the feedback again. Under 'error' an empty list means unknown, and
+   *  a coach who reads it as "I have written nothing" writes it twice. */
+  reload: () => void;
 }
 
 const Ctx = createContext<FeedbackValue | null>(null);
@@ -35,6 +38,8 @@ export function CoachFeedbackProvider({ children }: { children: ReactNode }) {
   const [map, setMap] = useState<Record<string, FeedbackItem[]>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`, beside `authRev` in the read below.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -72,7 +77,15 @@ export function CoachFeedbackProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  /** The read MERGES into the map rather than replacing it, so an entry
+   *  written optimistically while a refresh was in flight is not dropped by
+   *  the answer to a query that was sent before it. */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   const getFeedback = (clientId: string) => map[clientId] ?? [];
   /**
@@ -114,7 +127,7 @@ export function CoachFeedbackProvider({ children }: { children: ReactNode }) {
     } catch { return false; }
   };
 
-  return <Ctx.Provider value={{ getFeedback, status, addFeedback }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ getFeedback, status, addFeedback, reload }}>{children}</Ctx.Provider>;
 }
 
 export function useCoachFeedback(): FeedbackValue {

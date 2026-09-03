@@ -1,6 +1,6 @@
 import {
   CHECKS, HEAVY_REPS, HIGH_REPS, MIN_GOAL_SETS, NOT_CHECKED, RECENT_OUTINGS,
-  SHORT_REST_SEC, VOLUME_JUMP, checksLine, reviewProgram,
+  SHORT_REST_SEC, VOLUME_JUMP, checksLine, coverageLine, reviewProgram,
   type Finding, type ReviewInput,
 } from './programReview';
 import type { Program, ProgramExercise } from './programs';
@@ -55,12 +55,13 @@ ok(NOT_CHECKED.length > 0, 'the questions deliberately not asked are named');
 
 const empty = reviewProgram(base({ title: '', focus: [], note: '', days: [] }));
 eq(empty.findings, [], 'an empty programme has nothing to find');
-eq(empty.counted, { days: 0, exercises: 0, sets: 0 }, 'and nothing to count');
+eq(empty.counted, { weeks: 1, days: 0, exercises: 0, sets: 0 }, 'and nothing to count — one week of no days, because a programme with no `weeks` IS one week');
 eq(empty.status, 'ready', 'an empty programme is not a failed read');
 eq(reviewProgram(base(null as unknown as Program)).findings, [], 'a missing programme is not a crash');
 
 const counted = reviewProgram(base(prog(ex('Bench Press', 'Chest'), ex('Row', 'Back', { sets: 4 })))).counted;
-eq(counted, { days: 1, exercises: 2, sets: 7 }, 'days, exercises and sets are counted off the programme');
+const oneWeekCount = counted;
+eq(counted, { weeks: 1, days: 1, exercises: 2, sets: 7 }, 'days, exercises and sets are counted off the programme');
 
 /* ── injury ───────────────────────────────────────────────────────────────── */
 
@@ -70,6 +71,10 @@ ok(shoulder.findings[0].detail.includes('Bench Press'), 'and the finding names t
 ok(shoulder.findings[0].detail.includes('shoulder'), 'and the area');
 ok(shoulder.findings[0].detail.includes('moderate'), 'and the severity as disclosed');
 eq(shoulder.findings[0].day, 'Mon', 'and the day it is on');
+eq(shoulder.findings[0].week, null,
+  'and no week number, because a one-week programme has no week two to be distinguished from');
+ok(!/week/i.test(shoulder.findings[0].detail),
+  'and the sentence names no week either — a programme written before blocks existed reads exactly as it did');
 
 eq(only(reviewProgram(base(prog(ex('Leg Curl', 'Hamstrings')), { injuries: [injury('shoulder')] })).findings, 'injury'),
    [], 'a movement that does not load the area is not reported');
@@ -470,6 +475,76 @@ for (const f of all.findings) {
   ok(!/\bAI\b/.test(f.detail), `${f.id} does not claim to be an AI`);
   ok(/^[A-Z]/.test(f.detail) && f.detail.trim().endsWith('.'), `${f.id} reads as a sentence`);
 }
+
+/* ── every week of a block, not week one ──────────────────────────────────
+ *
+ * THE defect this section is here for. `days` is week one by construction (see
+ * `ProgramWeek` in ./programs), and reading it alone meant a coach writing a
+ * twelve-week block was told seven checks had run over their draft while
+ * eleven twelfths of it had never been looked at. Silence from a check reads
+ * as a pass, so an injury conflict in week four was reported as a clean
+ * programme.
+ */
+
+/** A block: week one is `days` and `weeks[0]`, and the rest follow. Built the
+ *  way `withWeeks` builds one, so the invariant the resolver relies on holds. */
+const block = (...weeks: ProgramExercise[][]): Program => ({
+  title: 'Block', focus: [], note: '',
+  days: [{ day: 'Mon', focus: 'Push', exercises: weeks[0] }],
+  weeks: weeks.map((exs) => ({ days: [{ day: 'Mon', focus: 'Push', exercises: exs }] })),
+});
+
+const late = reviewProgram(base(
+  block(
+    [ex('Leg Curl', 'Hamstrings')],
+    [ex('Leg Curl', 'Hamstrings')],
+    [ex('Bench Press', 'Chest')],
+  ),
+  { injuries: [injury('shoulder')] },
+));
+eq(only(late.findings, 'injury').length, 1,
+   'a movement that loads a disclosed area in week THREE is found — this used to be silence, and silence reads as a pass');
+eq(late.findings[0].week, 3, 'and the finding carries the week it is in');
+ok(late.findings[0].detail.includes('week 3'),
+   'and says so in the sentence, because "on Mon" over twelve Mondays tells a coach nothing about which one to open');
+eq(late.counted, { weeks: 3, days: 3, exercises: 3, sets: 9 },
+   'and the counts are the whole block, so the coverage line cannot understate what was read');
+ok((coverageLine(late.counted) ?? '').includes('3 weeks'),
+   'and the coverage line says how many weeks were read, because "7 checks run over this draft" was true of week one and read as true of twelve');
+eq(coverageLine(oneWeekCount), null,
+   'a one-week programme says nothing about weeks at all');
+
+// One movement written into three weeks is three findings, not one. They are
+// three separate things the coach may want to change, in three different weeks,
+// and folding them into one would leave two of them unmentioned.
+const everyWeek = reviewProgram(base(
+  block([ex('Bench Press', 'Chest')], [ex('Bench Press', 'Chest')]),
+  { injuries: [injury('shoulder')] },
+));
+eq(only(everyWeek.findings, 'injury').length, 2, 'the same conflict in two weeks is two findings');
+eq(only(everyWeek.findings, 'injury').map((f) => f.week), [1, 2], 'each naming its own week');
+
+// The goal check counts across the block and belongs to no week, because the
+// share it reports is a fact about the whole draft.
+const goalBlock = reviewProgram(base(
+  block(
+    [ex('Curl', 'Biceps', { sets: 2, reps: '15-20' })],
+    [ex('Curl', 'Biceps', { sets: 2, reps: '15-20' })],
+  ),
+  { goal: 'muscle' },
+));
+eq(only(goalBlock.findings, 'goal-reps').length, 1,
+   'the goal check reports once for the block rather than once per week');
+eq(only(goalBlock.findings, 'goal-reps')[0].week, null, 'and names no week');
+ok(only(goalBlock.findings, 'goal-reps')[0].detail.includes('of the 4 working sets'),
+   'and counts the block\'s sets, not week one\'s');
+
+// A one-week programme is untouched in every particular. This is the guarantee
+// that makes the change safe: every programme in every one of the three homes
+// `ProgramWeek` names is a one-week programme today.
+const oneWeek = reviewProgram(base(prog(ex('Bench Press', 'Chest')), { injuries: [injury('shoulder')] }));
+eq(oneWeek.findings.map((f) => f.week), [null], 'a one-week programme carries no week number on any finding');
+ok(oneWeek.findings.every((f) => !/week/i.test(f.detail)), 'and no week appears in any sentence');
 
 // A blank name and a blank day are real states, and neither may leave a hole
 // at the front of a sentence — scripts/check-prose.mjs.

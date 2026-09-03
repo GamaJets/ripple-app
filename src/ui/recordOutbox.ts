@@ -1,6 +1,6 @@
-// The writes behind the three member-record kinds the outbox did not have.
+// The writes behind the member-record kinds the outbox did not have.
 //
-// src/lib/recordQueue.ts is the policy — which three, why they pass the
+// src/lib/recordQueue.ts is the policy — which kinds, why they pass the
 // outbox's own admission rule, what each payload carries and why only one of
 // them expires. This file is the wire: the Supabase statement for each kind and
 // the registration that hands them to src/ui/outbox.tsx.
@@ -26,7 +26,7 @@
 // day saved on this phone" that only drains if the member happens to reopen the
 // calendar at the moment a flush fires.
 //
-// So `useRecordOutboxHandlers` registers all three from one place that is
+// So `useRecordOutboxHandlers` registers them all from one place that is
 // mounted for the whole app. It belongs beside `<MessageOutboxHandler />` in
 // app/_layout.tsx and it is called from `GoalTrackerProvider` instead, which
 // wraps the same tree — the effect is identical, and the note is here so the
@@ -36,7 +36,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { classifyWrite, type WriteOutcome } from '../lib/offlineQueue';
 import { reportError } from '../lib/reportError';
-import { asDayPlanIntent, asGlucoseIntent, asGoalIntent } from '../lib/recordQueue';
+import { asCoachDocAcceptIntent, asDayPlanIntent, asGlucoseIntent, asGoalIntent, asScanIntent, asSessionRequestIntent } from '../lib/recordQueue';
 import type { OutboxItem } from '../lib/outbox';
 import { useOutbox } from './outbox';
 
@@ -161,7 +161,145 @@ async function sendGlucose(item: OutboxItem): Promise<WriteOutcome> {
 }
 
 /**
- * Register all three, for as long as the caller is mounted.
+ * A coach's document the member accepted with no signal.
+ *
+ * The row is (document_id, client_id) and nothing else this end supplies:
+ * `accepted_at` defaults to now() on the server, and the INSERT policy
+ * (supabase/parts/135) re-checks that the document is the member's own coach's
+ * and still in circulation. So a replay is checked against the world as it is
+ * when it lands rather than as the phone remembered it — which is the property
+ * that makes this queueable at all.
+ *
+ * ── The one refusal that is not a refusal ─────────────────────────────────
+ *
+ * The primary key is (document_id, client_id), so sending one the server
+ * already holds comes back 23505. `classifyWrite` reads that as 'refused',
+ * which is right for every other write in this file and wrong here: the row
+ * exists, the member HAS accepted it, and reporting a refusal would leave a
+ * screen saying their signature never landed when it is sitting in the table.
+ * A duplicate key is 'stored' — that is what the member asked for and what is
+ * now true. Nothing else in the 23 class is reinterpreted.
+ */
+async function sendCoachDocAccept(item: OutboxItem): Promise<WriteOutcome> {
+  const d = asCoachDocAcceptIntent(item.payload);
+  if (!d) return 'refused';
+  const uid = await myId();
+  if (!uid) return 'unsent';
+  try {
+    const { data, error } = await supabase.from('coach_document_acceptances')
+      .insert({ document_id: d.documentId, client_id: uid })
+      .select('document_id');
+    if (error) {
+      if ((error as { code?: string }).code === '23505') return 'stored';
+      reportError('recordOutbox.coachDocAccept', error, { id: d.documentId });
+    }
+    return classifyWrite(error as any, data ? data.length : 0);
+  } catch { return 'unsent'; }
+}
+
+/**
+ * A body scan the member typed in with no signal.
+ *
+ * `client_id` is resolved here, at the moment it lands, rather than captured on
+ * the device — the same reasoning `sendGoal` gives: the intent was queued
+ * precisely because no server had been reached, so an id taken from the phone
+ * names an account nothing has confirmed.
+ *
+ * `metrics` goes in the SAME statement as the rest of the row, unlike
+ * `clientData.addScan`, which inserts and then updates. That is deliberate:
+ * here there is nobody watching to be told that the scan saved and the
+ * breakdown did not, and a two-statement write in a replay is two chances to
+ * land half a row. One insert either happens or it does not.
+ *
+ * ── The one refusal that is not a refusal ─────────────────────────────────
+ *
+ * The row carries the id the device minted, so a replay of one the server
+ * already holds comes back 23505. `classifyWrite` reads that as 'refused',
+ * which is right for a write that failed and wrong here: the scan is in the
+ * table, it is the member's own, and reporting a refusal would leave a screen
+ * saying their body composition never landed while it is sitting in their
+ * history. A duplicate key is 'stored'. Nothing else in the 23 class is
+ * reinterpreted — a 23514 really is a figure the column will not take.
+ */
+async function sendScan(item: OutboxItem): Promise<WriteOutcome> {
+  const s = asScanIntent(item.payload);
+  if (!s) return 'refused';
+  const uid = await myId();
+  if (!uid) return 'unsent';
+  try {
+    const { data, error } = await supabase.from('scans').insert({
+      id: s.id,
+      client_id: uid,
+      taken_at: s.takenAt,
+      weight_kg: s.weightKg,
+      body_fat_pct: s.bodyFatPct,
+      skeletal_muscle_kg: s.skeletalMuscleKg,
+      source: s.source,
+      ...(s.metrics ? { metrics: s.metrics } : {}),
+    }).select('id');
+    if (error) {
+      if ((error as { code?: string }).code === '23505') return 'stored';
+      reportError('recordOutbox.scan', error);
+    }
+    return classifyWrite(error as any, data ? data.length : 0);
+  } catch { return 'unsent'; }
+}
+
+/**
+ * An hour the member asked their coach for with no signal.
+ *
+ * The one handler here that talks to an RPC rather than to a table, because
+ * `session_requests` has no INSERT policy for anybody (supabase/parts/740, and
+ * part 09's reasoning about booking). `request_session` decides who the coach is
+ * from `clients.trainer_id` AT THE MOMENT IT RUNS, so a member who changed coach
+ * while this sat on their phone asks the coach they now have.
+ *
+ * Three outcomes, and the middle one is the reason this is not a one-liner:
+ *
+ *   ok                 the question is with the coach. 'stored'.
+ *   'already-asked'    the partial unique index refused a second live request
+ *                      for the same hour, which means THIS request is already
+ *                      there — sent from another handset, or by an earlier
+ *                      flush whose answer never got back to us. 'stored', for
+ *                      exactly the reason a 23505 is 'stored' for a coach
+ *                      document: the row exists and the member's intent stands.
+ *   any other reason   the server read it and said no — no coach on the
+ *                      account, the hour has passed, too many outstanding.
+ *                      Offering the same bytes again gets the same answer, so
+ *                      it comes out of the queue rather than being retried for
+ *                      ever. 'refused'.
+ *
+ * An hour that has passed cannot normally reach the third branch: the intent
+ * carries `sessionRequestExpiry`, so `partitionLapsed` takes it out first and
+ * the member is told it did not go. The branch is here for the flush that runs
+ * in the same second the hour turns.
+ */
+async function sendSessionRequest(item: OutboxItem): Promise<WriteOutcome> {
+  const d = asSessionRequestIntent(item.payload);
+  if (!d) return 'refused';
+  const uid = await myId();
+  if (!uid) return 'unsent';
+  try {
+    const { data, error } = await supabase.rpc('request_session', {
+      p_starts_at: d.startsAt, p_duration_min: d.durationMin, p_note: d.note,
+    });
+    if (error) {
+      reportError('recordOutbox.sessionRequest', error);
+      // Nobody answered, as far as this can tell. `classifyWrite` is what knows
+      // the difference between a wire that dropped and a server that refused.
+      return classifyWrite(error as any, 0) === 'unsent' ? 'unsent' : 'refused';
+    }
+    const o = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+    if (o.ok === true) return 'stored';
+    if (o.reason === 'already-asked') return 'stored';
+    // A null answer is a database that has not taken part 740. There is nothing
+    // for this to become on that server and retrying would not change it.
+    return 'refused';
+  } catch { return 'unsent'; }
+}
+
+/**
+ * Register all of them, for as long as the caller is mounted.
  *
  * Renders nothing. Every one of these is a no-op without a backend, and without
  * an outbox above it there is nothing to register into — which `useOutbox`
@@ -193,6 +331,27 @@ export function useRecordOutboxHandlers(opts: { onGoalSettled?: (id: string) => 
       }),
       outbox.registerHandler('day-plan', sendDayPlan),
       outbox.registerHandler('glucose', sendGlucose),
+      // Registered here rather than from app/(client)/coach-documents.tsx, and
+      // for the reason the header gives about the other three, only more so:
+      // paperwork is a screen a member visits once. An acceptance queued in a
+      // basement studio and then left there — the app closed, that screen never
+      // reopened — would have no handler at the flush and would sit on the
+      // phone being counted for ever.
+      outbox.registerHandler('coach-doc-accept', sendCoachDocAccept),
+      // Registered here for the reason the header gives about the other four.
+      // Scans is a screen somebody opens once a month, on the way out of the
+      // gym, and a scan queued there and then left — the app closed, that
+      // screen never reopened — would have no handler at the flush and would
+      // sit on the phone being counted for ever.
+      outbox.registerHandler('scan', sendScan),
+      // Registered here for the reason the header gives about the other five,
+      // and it is the sharpest case of it: a member types "can we do Tuesday at
+      // seven" on the request screen, gets no signal, and closes the app. That
+      // screen is one they visit when they want something, not one they leave
+      // open — so a handler registered from it would never be mounted at the
+      // flush, and the question would sit on the phone being counted for ever
+      // while they waited for an answer nobody had been asked for.
+      outbox.registerHandler('session-request', sendSessionRequest),
     ];
     return () => { for (const f of off) f(); };
   }, [outbox]);

@@ -21,7 +21,7 @@
 //    their goal progress and their coach's view are all computed from. The
 //    field now says which unit it wants, the bound is expressed in that unit,
 //    and the number is converted on the way to storage.
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -33,6 +33,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, kgToLb, plain, convertedNote, readNumber } from '../../src/lib/units';
 import { useCheckIns } from '../../src/ui/checkins';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isPending } from '../../src/lib/wellnessSync';
 import { unsentNote } from '../../src/lib/offlineQueue';
 
@@ -64,6 +65,9 @@ export default function CheckIn() {
   const router = useRouter();
   const cd = useClientData();
   const ci = useCheckIns();
+  // The history under the form — what was sent, and whether the coach has it —
+  // plus the profile the figures are prefilled from.
+  const pull = usePullToRefresh(useCallback(() => { ci.reload(); cd.reload(); }, [ci.reload, cd.reload]));
 
   const wu = useSettings().weightUnit;
 
@@ -150,7 +154,7 @@ export default function CheckIn() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>

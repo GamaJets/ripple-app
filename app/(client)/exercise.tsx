@@ -19,7 +19,7 @@
 // back to a stranger's clip. Rule 3 is what this screen adds. Rule 4 is the one
 // that must never be dressed up as rule 3: a placeholder silhouette shown where
 // we have no picture is a lie a client acts on under load.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 // expo-image is required through src/ui/nativeModules.ts, never imported. Its
 // entry point resolves to `requireNativeModule('ExpoImage')`, which THROWS on a
 // binary that predates the dependency — and expo-image landed on 30 Aug, three
@@ -37,6 +37,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseDetail } from '../../src/ui/exerciseDetail';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 // The demonstration renderers moved to src/ui/ExerciseDemo when the owner app
@@ -66,6 +67,7 @@ import { exerciseIndex } from '../../src/lib/exerciseHistory';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { tapLight } from '../../src/ui/haptics';
+import { BACK_ICON } from '../../src/ui/direction';
 
 
 export default function ExerciseScreen() {
@@ -74,7 +76,7 @@ export default function ExerciseScreen() {
   const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
-  const { detail, status, signedOut } = useExerciseDetail(name);
+  const { detail, display, status, signedOut, reload: reloadDetail } = useExerciseDetail(name);
   // `status`, not just `videos`. exerciseVideos.ts says so in as many words:
   // "`[]` with status 'error' is not the same claim as `[]` with status
   // 'ready', and the screens must not conflate them." This screen conflated
@@ -82,7 +84,7 @@ export default function ExerciseScreen() {
   // branch below, and told a client "Nobody has filmed this movement" about a
   // clip their coach uploaded last week. The catalogue read already had its own
   // error branch; the video read had none.
-  const { videos, status: videoStatus } = useExerciseVideos();
+  const { videos, status: videoStatus, reload: reloadVideos } = useExerciseVideos();
   const cd = useClientData();
 
   // The client's own coach first. cd.trainerId is who actually trains them, so
@@ -106,7 +108,12 @@ export default function ExerciseScreen() {
   const caption = demoCaption(detail?.source, frames.length);
 
   // ── this member's own record of this movement ──────────────────────────
-  const { log, status: logStatus, unsent: unsentSets, logWorkouts } = useWorkoutLog();
+  const { log, status: logStatus, unsent: unsentSets, logWorkouts, reload: reloadLog } = useWorkoutLog();
+  // Three reads: the movement itself, the coach's clips for it, and this
+  // member's own history of the lift underneath.
+  const pull = usePullToRefresh(useCallback(() => {
+    void reloadDetail(); void reloadVideos(); reloadLog();
+  }, [reloadDetail, reloadVideos, reloadLog]));
   const wu = useSettings().weightUnit;
   // The member's weight over time, so a set of pull-ups is priced at the body
   // that did them rather than left out of every figure on the panel below. An
@@ -129,13 +136,21 @@ export default function ExerciseScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
           <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
-            <Icon name="back" size={20} color={t.ink} />
+            <Icon name={BACK_ICON} size={20} color={t.ink} />
           </Pressable>
-          <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{detail?.name || name || 'Exercise'}</Text>
+          {/* The reader's own language where the catalogue has it, English
+              where it does not — and `display.note` below says which, so an
+              English name among German ones is never passed off as the German
+              one. The identity is still `name`: that is what this screen was
+              opened with and what a logged set is written under. */}
+          <Text style={{ ...ty.title, color: t.ink, flex: 1 }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
         </View>
+        {display?.note ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{display.note}</Text>
+        ) : null}
 
         {/* ── the demonstration ─────────────────────────────────────────── */}
         {status === 'loading' ? (
@@ -238,11 +253,11 @@ export default function ExerciseScreen() {
                 being told that it is compound and intermediate — and this was
                 the one thing the original request asked for that the previous
                 dataset had no field for at all. */}
-            {detail.description ? (
+            {display?.description ? (
               <>
                 <Rule />
                 <Section>
-                  <Text style={{ ...ty.body, color: t.ink }}>{detail.description}</Text>
+                  <Text style={{ ...ty.body, color: t.ink }}>{display.description.text}</Text>
                 </Section>
               </>
             ) : null}

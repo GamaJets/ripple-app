@@ -55,7 +55,7 @@
 // which is the branch above.
 import type { LoadStatus } from '../ui/loadStatus';
 import type { WorkoutEntry } from './mockData';
-import { suggestForExercise } from './progression';
+import { lastSetsFor, suggestForExercise } from './progression';
 import type { WeightUnit } from './units';
 
 export interface ProgressionInput {
@@ -116,6 +116,26 @@ export function progressionOffer(i: ProgressionInput): ProgressionOffer {
 
   const s = suggestForExercise(i.log, i.exercise, i.reps, 2.5, i.unit);
   if (s) return { kind: 'suggestion', weightKg: s.weight, reason: s.reason, up: s.up };
+
+  // ── logged, with nothing on the bar ───────────────────────────────────
+  //
+  // `suggestNextWeight` returns null in exactly two situations: the movement
+  // has no logged sets at all, and its last session's heaviest set carried no
+  // load. The second is every bodyweight movement in the catalogue — press-ups,
+  // pull-ups, dips, a plank — and both fell through to the sentence at the
+  // bottom of this function, which told the coach the client had not logged the
+  // movement. They had. A coach writing next week's programme was reading an
+  // accusation of absence about somebody who did the work on Tuesday.
+  //
+  // `lastSetsFor` is the same reader `suggestNextWeight` is given its sets by,
+  // so the two cannot come to disagree about whether anything was logged.
+  const last = lastSetsFor(i.log, i.exercise);
+  if (last && last.length) {
+    return {
+      kind: 'gap',
+      note: 'They have logged this movement with no weight on it, so there is no load of theirs to build from. That is bodyweight work they did, not a movement they have never done.',
+    };
+  }
 
   if (i.status === 'partial') {
     // THE distinction. The cap drops the oldest sessions, so a movement whose

@@ -139,6 +139,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="pt-sessions" options={{ href: null, title: 'Personal Training' }} />
       <Tabs.Screen name="session-credits" options={{ href: null, title: 'Session Credits' }} />
       <Tabs.Screen name="bookings" options={{ href: null, title: 'My Bookings' }} />
+      <Tabs.Screen name="request-session" options={{ href: null, title: 'Ask for a Time' }} />
     </Tabs>
     <WhatsNewSheet visible={whatsNew.visible} releases={whatsNew.releases} onClose={whatsNew.onClose} />
     </WaiverGate>

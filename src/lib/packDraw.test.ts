@@ -261,5 +261,68 @@ eq(noWindow.lines[0].expiresOn, null, 'and reports no date, rather than one this
 eq(packBalance(null).stranded, null, 'an unread history is not a history with nothing stranded in it');
 eq(packBalance([]).stranded, 0, 'and an empty one genuinely strands nothing');
 
+/* ── 6. A CREDIT ON A CLOSED PACK IS NOT A CREDIT ─────────────────────────
+   `left` summed every line including the expired ones, which the very next
+   line excluded from `live`. So one figure said a pack was dead and the next
+   spent its credits.
+
+   Usually the sum is the same either way, because `run_pack_expiry()` reduces
+   `sessions_total` to `sessions_used` and a closed pack has nothing left on it.
+   The case where it is not the same is the one that matters:
+   `refund_pack_session` (part 123) gives a credit back to the newest pack with
+   usage and does not ask whether its window has closed. A client whose session
+   is refunded onto an expired pack gets a credit back that no draw site in the
+   database will ever let them spend — and their balance went up by one, on
+   their own screen, on a pack that is over. */
+
+{
+  const stuck = packBalance([P({
+    id: 'closed', sessions_total: 10, sessions_used: 9,
+    expires_on: '2026-06-30', expired_at: '2026-07-01T02:00:00.000Z', sessions_expired: 0,
+  })]);
+  eq(stuck.lines[0].left, 1, 'the line still reports what the row holds');
+  eq(stuck.lines[0].expired, true, 'and that its window has closed');
+  eq(stuck.left, 0, 'but the balance counts nothing that cannot be booked');
+  eq(stuck.live, 0, 'which is what `live` already said about the same pack');
+  eq(stuck.onClosedPacks, 1, 'and the credit is COUNTED rather than dropped, so it can be talked about');
+  eq(stuck.stranded, 0, 'and is not confused with what the expiry pass took off');
+
+  // The ordinary closed pack — the one the expiry pass has been over — is
+  // unchanged in every figure, so this is not a change to what most clients see.
+  const ordinary = packBalance([P({
+    id: 'done', sessions_total: 7, sessions_used: 7,
+    expires_on: '2026-06-30', expired_at: '2026-07-01T02:00:00.000Z', sessions_expired: 3,
+  })]);
+  eq(ordinary.left, 0, 'a pack the pass has closed contributes nothing, as it always did');
+  eq(ordinary.onClosedPacks, 0, 'and has no undrawable credit sitting on it');
+  eq(ordinary.stranded, 3, 'while what the window took is still stated');
+
+  // A live pack beside a closed one: only the live credits are spendable, and
+  // the figure a screen prints is the spendable one.
+  const both = packBalance([
+    P({ id: 'live', sessions_total: 10, sessions_used: 6 }),
+    P({ id: 'closed', sessions_total: 10, sessions_used: 9, expires_on: '2026-06-30', expired_at: '2026-07-01T02:00:00.000Z' }),
+  ]);
+  eq(both.left, 4, 'only what can be booked is in the balance');
+  eq(both.onClosedPacks, 1, 'and what cannot is counted separately');
+
+  // Unread is unknown for this figure too, exactly as it is for `left`.
+  eq(packBalance(null).onClosedPacks, null, 'an unread history strands an unknown number on closed packs');
+  eq(packBalance([]).onClosedPacks, 0, 'and an empty one has none');
+}
+
+/* ── 7. the outcome word part 661 adds ────────────────────────────────────
+   'expired' is its own answer and not 'exhausted'. The two are the opposite
+   sentences point 3 of this file's header is about — one is somebody who got
+   what they paid for and one is somebody who did not — and a coach asking to
+   put a credit back onto a closed pack has to be told which. */
+
+{
+  const d = readDraw([{ outcome: 'expired', purchase_id: 'p1', sessions_left: 1, pack_total: 10 }]);
+  eq(d.outcome, 'expired', 'the word is believed rather than falling through to unknown');
+  eq(drew(d), false, 'and no credit moved');
+  ok((drawReason(d) ?? '').includes('window has closed'), 'and the reason says why, rather than staying silent');
+}
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('packDraw: ok (unread balance is null, zero rows is not a redemption, oldest pack spends first, a window closing is not a pack used up)');

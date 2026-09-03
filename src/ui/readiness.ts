@@ -29,6 +29,7 @@ import { useHabits } from './habits';
 import { useWorkoutLog } from './workoutLog';
 import { isWhole, type LoadStatus } from './loadStatus';
 import { readinessScore, readinessSleep, type Readiness, type ReadinessSleep } from '../lib/readiness';
+import { todayISO } from '../lib/bodyFigures';
 import { readinessBreakdown, type ReadinessBreakdown, type ReadinessSource } from '../lib/readinessBreakdown';
 import { providerById } from '../lib/wearables/registry';
 import type { ProviderId } from '../lib/wearables/types';
@@ -74,7 +75,15 @@ export function useReadiness(): ReadinessView {
     // readinessScore withholds the score rather than scoring an unread log as
     // maximally rested and telling somebody to push.
     const since = Date.now() - 2 * 86400000;
-    const days = new Set(log.filter((e) => Date.parse(e.t) >= since).map((e) => e.t.slice(0, 10))).size;
+    // The LOCAL day of each session, not a slice of its ISO string. Its sibling
+    // file states the rule where it does the same job for sleep: "Slicing the
+    // ISO string would take the UTC day and file a 9pm entry under tomorrow for
+    // anybody west of Greenwich." Here the cost is the other way round and
+    // lands on the score: a member in Auckland training on Monday and Tuesday
+    // evening produced two UTC dates that were the SAME day, so two days of
+    // training counted as one, readiness read them as rested, and the app told
+    // them to push. `todayISO` is the local calendar day.
+    const days = new Set(log.filter((e) => Date.parse(e.t) >= since).map((e) => todayISO(new Date(e.t)))).size;
     const workoutsLast2Days = isWhole(logStatus) ? days : null;
 
     // Null, never `water / 8` and never `?? 0`. No goal means there is no

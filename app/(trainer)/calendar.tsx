@@ -20,9 +20,20 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Field, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { insideNoticeWindow, feeAmountLine, noticeLabel, openSlotWindow, slotWindowLine, classClashes, classCheckCaveat, type CancellationPolicy } from '../../src/lib/booking';
+// "I work Tuesdays 7 to 7", said once instead of forty-eight times. See that
+// file's header for why trainer_availability was empty: offering 07:00–19:00 in
+// quarters meant forty-eight separate additions for ONE day.
+import { expandRange, rangeBlocker, rangeSlotCount, remainderNote, splitAgainstExisting,
+  addButtonLabel, rangeSummary, addOutcome, type RangeInput } from '../../src/lib/availabilityRange';
 import { useClasses } from '../../src/ui/classes';
 import { useSessions, useSessionWaitlistCounts, useLateCancelCharges, useMyCancellationPolicy, promoteWaitlist } from '../../src/ui/sessions';
 import { useAvailability, upcomingDates, useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+// Why a coach's open slots have stopped being generated, and the one honest
+// thing that can be offered about it. See that file's header: this failure
+// has no error anywhere in it, so saying it out loud is the whole fix.
+import { zoneState, zonelessNote, selfHealLabel, noZoneToOfferNote, selfHealConfirm, selfHealResult }
+  from '../../src/lib/slotGeneration';
 import {
   DOW_NAMES, SERIES_HORIZON_DAYS, SERIES_MINUTES, RECURRING_CLASH_NOTE, RECURRING_CREDIT_NOTE,
   cancelOptions, clashLine, createdLine, seriesLabel,
@@ -32,12 +43,23 @@ import { useRoster } from '../../src/ui/roster';
 import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
-import { markOutcome } from '../../src/lib/gymSessions';
 import { minorFromWhole } from '../../src/lib/coachMoney';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
-import { reportError } from '../../src/lib/reportError';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+// Who is actually in an hour. `roster.find(…)?.name ?? 'Open slot'` presented a
+// booked hour whose client the roster read never returned as a free one, on the
+// screen where a coach decides what to give away. See the module header.
+import { slotLabel, slotWhoName, unnamedSlotNote } from '../../src/lib/slotName';
+// The group timetable this screen has always loaded and never drawn. See
+// src/lib/dayClasses.ts — the classes a coach teaches were invisible on the
+// coach's own day sheet while the same list was silently blocking bookings.
+import { classDayCaveat, classDayHeading, classDayNote, classesOnDay } from '../../src/lib/dayClasses';
+// Check In is a write made standing next to somebody, usually in a basement.
+// It went straight to `markOutcome`, so a check-in made down there failed
+// outright and the delivered session — which is money — was lost.
+import { useFloorQueue } from '../../src/ui/floorQueue';
+import { floorPendingNote, flushResultLine, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
 // Paging back into a month the read never reached must not draw an empty grid.
 // See `monthNote` below. Surgical addition alongside the calendar-sync work in
 // this file — three lines of state and one Flag under the grid, nothing else.
@@ -245,7 +267,7 @@ export default function TrainerSchedule() {
   // launch — including a slot that has just been taken.
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
-  const { roster, status: rosterStatus } = useRoster();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
   /* ── the group timetable, which this screen never asked about ───────────
    *
    * `addSession` checks `overlaps` against the `sessions` list and nothing
@@ -259,7 +281,7 @@ export default function TrainerSchedule() {
    * screen is: an empty class list under 'error' is a read that did not happen,
    * and the one thing this must not do is report a clear hour it never checked.
    */
-  const { classes: gymClasses, status: classStatus } = useClasses();
+  const { classes: gymClasses, status: classStatus, refresh: refreshClasses } = useClasses();
   const classesKnown = classStatus !== 'error';
   // Who is waiting on which of these hours. A booked slot with somebody behind
   // it is not the same object as one with nobody behind it: cancelling the
@@ -273,11 +295,31 @@ export default function TrainerSchedule() {
   // them, and to let one off.
   const { charges: lateFees, status: feeStatus, waive: waiveFee, unwaive: unwaiveFee, reload: reloadFees } = useLateCancelCharges();
   const lcPolicy = useMyCancellationPolicy();
+  // Pulled out because the hook hands back a fresh object every render; the
+  // callback inside it is stable, and depending on the object would rebuild the
+  // refresh control on every frame.
+  const reloadPolicy = lcPolicy.reload;
   // The fee was recorded by the CLIENT's cancellation, on their phone, and the
   // waitlist moved with it. Neither shows up here without asking again.
   useFocusEffect(useCallback(() => { reloadFees(); }, [reloadFees]));
   const { tenant } = useTenant();
-  const nameOf = (id: string | null) => roster.find((c) => c.id === id)?.name ?? 'Open slot';
+  /* ── who is in an hour, and the answer that used to be guessed ──────────
+   *
+   * This was `roster.find((c) => c.id === id)?.name ?? 'Open slot'`, and those
+   * three words came out of two entirely different facts: a slot with no client
+   * in it, and a booked slot whose client this screen's roster read did not
+   * return. The second was drawn as the first in the day sheet, the cancel
+   * confirmation, the move sheet and the fee list — the four places a coach
+   * decides whether an hour is theirs to give away.
+   *
+   * `nameOf` is the form that goes inside a sentence and `slotOf` the one that
+   * goes on a row; src/lib/slotName.ts holds both, and the reason they are two
+   * functions rather than one. `rosterStatus` is passed because a missing id
+   * under a whole read is a client who has left the book, and under any other
+   * read is a list that did not come back — different sentences.
+   */
+  const nameOf = (id: string | null) => slotWhoName(id, roster, rosterStatus);
+  const slotOf = (id: string | null) => slotLabel(id, roster, rosterStatus);
 
   // ── The one person in the transaction this app never reminded ───────────
   //
@@ -300,6 +342,26 @@ export default function TrainerSchedule() {
   /** The signed-in coach. Named rather than read inline, because it decides
    *  which classes on the gym's board are this coach's to be double-booked by. */
   const coachId = user?.id ?? null;
+  /* ── the queue Check In was not going through ───────────────────────────
+   *
+   * `markOutcome` wrote straight to the server, so a check-in made in a
+   * basement failed outright: the coach was told it did not save, the client
+   * was standing in front of them, and the delivered session — which is what
+   * the gym pays on — was lost. src/lib/floorQueue.ts exists for exactly this
+   * and already carried the same write from app/(trainer)/sessions.tsx.
+   *
+   * Nothing here softens rule 1: a kept check-in is reported as kept, in the
+   * queue's own words, and never as saved.
+   */
+  const floor = useFloorQueue(coachId);
+  const [floorSending, setFloorSending] = useState(false);
+  const [floorNote, setFloorNote] = useState<string | null>(null);
+  const sendFloorNow = async () => {
+    if (floorSending) return;
+    setFloorSending(true);
+    setFloorNote(null);
+    try { setFloorNote(flushResultLine(await floor.flush())); } finally { setFloorSending(false); }
+  };
   const remindable = known
     ? sessions.map((s) => ({
       id: s.id,
@@ -350,11 +412,25 @@ export default function TrainerSchedule() {
   // `slots` is empty for want of a read. The sheet then said "No weekly slots
   // yet" and the row beneath the calendar said "Set the times you offer every
   // week" — to a coach whose week is set and whose clients can still book it.
-  const { slots: availSlots, status: availStatus, addSlot: addAvail, removeSlot: removeAvail } = useAvailability();
+  const { slots: availSlots, status: availStatus, addSlot: addAvail, removeSlot: removeAvail,
+          zoneless, deviceZone: phoneZone, setZoneOnUnzoned, reload: reloadAvail } = useAvailability();
   /** Whether `availSlots` is the whole of this coach's week. Under 'partial'
    *  the slots listed are real but there are more, so it is still not a set
    *  anything may be counted from or declared empty. */
   const availKnown = isWhole(availStatus);
+  /**
+   * How many people are waiting on this coach's booking screen, or null.
+   *
+   * NULL under anything but a whole roster read, and that is the point of it.
+   * `openSlotWindow` reaches 'never-set' — the state that tells a coach their
+   * clients cannot book them — only when this is a real, positive count, and
+   * stays silent on a number nobody could read. A 'partial' roster is the
+   * dangerous one: it holds real people, so it is tempting to count, but a
+   * truncated book counted as the whole book is a figure this screen would then
+   * print in a sentence at somebody.
+   */
+  const clientsOnBook = isWhole(rosterStatus) ? roster.length : null;
+
   /**
    * How much bookable diary is left, and whether to say anything about it.
    *
@@ -369,8 +445,10 @@ export default function TrainerSchedule() {
    * read has not been shown to have none, so they are not told their generated
    * slots have run out either.
    */
-  const slotWindow = openSlotWindow(sessions, { known, hasWeekly: availKnown && availSlots.length > 0 });
-  const slotLine = slotWindowLine(slotWindow);
+  const slotWindow = openSlotWindow(sessions, {
+    known, hasWeekly: availKnown && availSlots.length > 0, clientsOnBook,
+  });
+  const slotLine = slotWindowLine(slotWindow, clientsOnBook);
   const [availOpen, setAvailOpen] = useState(false);
   const [blockOpen, setBlockOpen] = useState(false);
   const [blkFrom, setBlkFrom] = useState(9);
@@ -435,6 +513,15 @@ export default function TrainerSchedule() {
   const [avDow, setAvDow] = useState(1);
   const [avHour, setAvHour] = useState(9);
   const [avMinute, setAvMinute] = useState(0);
+  // A stretch of the day, rather than one slot at a time. Defaulted ON: the
+  // single-slot form is the one nobody could face using, so it is the
+  // alternative now rather than the only way in.
+  const [avRange, setAvRange] = useState(true);
+  const [avDays, setAvDays] = useState<number[]>([1]);
+  const [avFrom, setAvFrom] = useState(7);
+  const [avTo, setAvTo] = useState(19);
+  const [avDur, setAvDur] = useState(60);
+  const [avBusy, setAvBusy] = useState(false);
   /* ── Standing appointments ────────────────────────────────────────────────
    *
    * "Ana trains with me at seven every Tuesday" — the single most common fact
@@ -456,6 +543,30 @@ export default function TrainerSchedule() {
   // ended on the client's phone since this screen loaded. Re-read on focus, the
   // same reason the calendar and the fees are.
   useFocusEffect(useCallback(() => { reloadSeries(); }, [reloadSeries]));
+
+  /* ── pull to refresh ─────────────────────────────────────────────────────
+   *
+   * This screen is the one a coach comes back to. Everything on it was written
+   * somewhere else: a client books on their phone, a client cancels and the fee
+   * is recorded by their cancellation, the gym schedules a class into the hour a
+   * one-to-one wants, a standing arrangement is ended from the other side.
+   * Focus effects already re-read the fees and the standing series, but a coach
+   * who leaves this screen open — which is what it is for — sits on a diary that
+   * stops moving, and the calendar itself, the classes, the waitlists and the
+   * weekly grid had no way of being asked again at all.
+   *
+   * Eight reads and all eight of them, because this screen crosses them
+   * constantly: `classClashes` compares the diary against the gym's classes,
+   * the slot-window warning above compares the diary against the weekly grid
+   * AND the roster, and the fee rows are read against the policy. A refresh
+   * that moved one and left another would produce a clash warning about an hour
+   * that no longer holds either thing in it. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    refresh(), refreshRoster(), Promise.resolve(refreshClasses()),
+    Promise.resolve(reloadWaits()), Promise.resolve(reloadFees()),
+    Promise.resolve(reloadSeries()), Promise.resolve(reloadAvail()),
+    Promise.resolve(reloadPolicy()),
+  ]), [refresh, refreshRoster, refreshClasses, reloadWaits, reloadFees, reloadSeries, reloadAvail, reloadPolicy]));
   // What is running. An ended arrangement stays in the table for the record and
   // is not listed — a coach's screen is their week, not their history — but it
   // is counted, so the empty state can tell "you have never made one" apart
@@ -485,6 +596,37 @@ export default function TrainerSchedule() {
   // that decides whether a client can ever see the slot — so a slot the server
   // refused used to be counted in "12 open slots added" and then be bookable by
   // nobody. The count now says how many are actually open.
+  // ── the slots that stopped coming ────────────────────────────────────────
+  //
+  // Part 650's nightly job skips an availability row with no timezone, and part
+  // 650 filled none in for the rows that already existed. There is no error
+  // anywhere in that state: the job runs, reports a count, and the count
+  // silently excludes this coach. Their clients find nothing to book and are
+  // told nothing, because an empty day is what an empty day looks like.
+  const zones = zoneState(zoneless, availSlots.length, availStatus);
+  const zoneNote = zonelessNote(zones, zoneless);
+  const healLabel = selfHealLabel(zones, phoneZone);
+  const noHealNote = noZoneToOfferNote(zones, phoneZone);
+
+  const applyPhoneZone = () => {
+    if (!phoneZone || !zoneless) return;
+    Alert.alert(
+      'Record this timezone?',
+      selfHealConfirm(zoneless, phoneZone),
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Record it',
+          onPress: async () => {
+            const asked = zoneless;
+            const saved = await setZoneOnUnzoned();
+            Alert.alert(saved ? 'Timezone recorded' : 'Not saved', selfHealResult(saved, asked, phoneZone));
+          },
+        },
+      ],
+    );
+  };
+
   const generateSlots = async () => {
     // The asymmetry this fixes was the giveaway. Twelve lines below, an unread
     // CALENDAR stops this function with an explicit "could not be read" — but
@@ -569,6 +711,46 @@ export default function TrainerSchedule() {
     }
     if (lost) lines.push(lost + ' slot' + (lost === 1 ? '' : 's') + ' could not be saved to the server, so ' + (lost === 1 ? 'it is' : 'they are') + ' not open to anyone. Try generating again.');
     Alert.alert(added ? 'Slots generated' : 'No slots opened', lines.join('\n\n'));
+  };
+
+  // ── the stretch, and what it would do ─────────────────────────────────────
+  const rangeInput: RangeInput = { days: avDays, fromMin: avFrom * 60, toMin: avTo * 60, durationMin: avDur };
+  const rangeRefusal = rangeBlocker(rangeInput);
+  const rangeSlots = rangeRefusal ? [] : expandRange(rangeInput);
+  // Split against the week the coach already has, so re-entering a morning they
+  // already offer is counted and skipped rather than refused row by row by the
+  // unique index. Under an unread week `availSlots` is empty for want of a read,
+  // so nothing is claimed as a duplicate and the server does the deciding.
+  const rangeSplit = splitAgainstExisting(rangeSlots, availKnown ? availSlots : []);
+  const rangeNote = rangeRefusal ?? rangeSummary(rangeInput, rangeSplit.fresh.length, rangeSplit.duplicates);
+  const rangeLeftover = rangeRefusal ? null : remainderNote(rangeInput);
+
+  /**
+   * Add every slot in the stretch, and report what the SERVER took.
+   *
+   * Counted from the outcomes, never from the length of what was sent:
+   * `addSlot` answers 'local' for a row that never reached the server, and a
+   * coach told "48 slots added" over twelve that landed has a week their
+   * clients cannot see three quarters of.
+   */
+  const addRange = async () => {
+    if (rangeRefusal || avBusy) return;
+    const { fresh, duplicates } = rangeSplit;
+    if (fresh.length === 0) {
+      Alert.alert('Nothing to add', addOutcome(0, 0, duplicates), [{ text: 'OK' }]);
+      return;
+    }
+    setAvBusy(true);
+    // Sequential rather than Promise.all: these hit one unique index on one
+    // table and the hook keeps its list in React state, so firing forty-eight
+    // at once races its own duplicate check.
+    let saved = 0;
+    for (const sl of fresh) {
+      const res = await addAvail(sl.dow, sl.hour, sl.minute, sl.dur);
+      if (res === 'saved') saved++;
+    }
+    setAvBusy(false);
+    Alert.alert(saved ? 'Weekly hours added' : 'Not added', addOutcome(saved, fresh.length, duplicates), [{ text: 'OK' }]);
   };
 
   const addWeekly = async () => {
@@ -793,6 +975,23 @@ export default function TrainerSchedule() {
    * cannot come out differently.
    */
   const selDay = `${selY}-${String(selM + 1).padStart(2, '0')}-${String(selD).padStart(2, '0')}`;
+
+  /* ── the classes this screen was already reading and never drawing ──────
+   *
+   * `gymClasses` came in for `classClashes`, which stops Generate Open Slots
+   * putting a bookable PT hour on top of a class the coach is running. It was
+   * never drawn, so the day sheet — built from `byDay`, which holds sessions
+   * and nothing else — showed a coach with a 6pm class an empty Thursday. The
+   * screen would then refuse to generate a slot at six, silently, off the same
+   * list. The check existed; what it was checking against was invisible.
+   *
+   * The coach's own classes and the ones with NO coach against them, which is
+   * the split `classClashes` already makes: a colleague's class is their
+   * business, and an unattributed one is the one nothing can rule in or out.
+   * See src/lib/dayClasses.ts.
+   */
+  const selDayClasses = classesOnDay(gymClasses, selDate, coachId);
+  const classCaveat = classDayCaveat(classStatus);
 
   // Time the coach is NOT available. The database withdraws the open slots
   // inside the period as it writes the block, because an offer left standing
@@ -1657,25 +1856,70 @@ export default function TrainerSchedule() {
    *
    * The write is awaited and read. Navigating away from a refused update would
    * take the coach to a screen implying the attendance was recorded.
+   *
+   * ── And it goes through the floor queue ────────────────────────────────
+   *
+   * It called `markOutcome` directly, which is a write straight to the server
+   * from the one screen a coach uses standing next to somebody — and gyms are
+   * in basements. A check-in made down there failed outright: the coach was
+   * told to try again, the client was in front of them, and the delivered
+   * session, which is what the gym settles payroll on, was lost.
+   *
+   * The three arms are kept apart, because they mean three different things to
+   * the person holding the phone:
+   *
+   *   stored   the gym has it. Open their record.
+   *   unsent   nobody answered. This phone now holds the decision, and the
+   *            coach is told that in the queue's own words rather than told it
+   *            saved — but the session IS happening, so the record still opens.
+   *   refused  the server read it and declined. Nothing moves, and the coach is
+   *            told it is not waiting to send either.
    */
   const checkIn = async (s: TrainingSession) => {
     if (!s.clientId) return;
     const who = nameOf(s.clientId);
-    try {
-      // `* 100` was wrong everywhere the minor unit is not a hundredth: a
-      // ¥6,300 fee snapshotted as 630,000 and a KWD 40 one as 4,000. This is
-      // the figure the gym settles payroll against, so it is converted by the
-      // currency or it is not written at all — `undefined` leaves `rate_cents`
-      // unset, and payrollByTrainer already reads that as unknown rather than
-      // as nothing owed.
-      const rateCents = minorFromWhole(tenant?.sessionFee, tenant?.currency) ?? undefined;
-      await markOutcome(supabase, s.id, 'completed', rateCents);
-    } catch (e) {
-      reportError('calendar.checkIn', e, { sessionId: s.id });
-      Alert.alert('Not checked in', `${who} was not marked present — that did not save. Check your connection and try again.`);
+    if (!coachId) {
+      // The queue is per account and cannot hold anything without one, so an
+      // 'unsent' here would be reported as "kept on this phone" while nothing
+      // was kept. A sign-in still being restored is not a signed-out coach, and
+      // this says which without sending anybody to sign in again.
+      Alert.alert('Not checked in',
+        `${who} was not marked present. Your sign-in has not come back yet, so there is nothing to record this against — try again in a moment.`);
       return;
     }
-    router.push({ pathname: '/(trainer)/client', params: { clientId: s.clientId, name: who, checkedIn: '1' } });
+    // The NAME and not the description. `who` is a noun phrase when the roster
+    // could not name this client — "a client this screen could not name" — and
+    // the client screen would print it as a title. Passed only when it is
+    // actually somebody's name; that screen reads its own roster otherwise.
+    const realName = roster.find((c) => c.id === s.clientId)?.name?.trim();
+    const openRecord = () =>
+      router.push({
+        pathname: '/(trainer)/client',
+        params: realName
+          ? { clientId: s.clientId as string, name: realName, checkedIn: '1' }
+          : { clientId: s.clientId as string, checkedIn: '1' },
+      });
+    // `* 100` was wrong everywhere the minor unit is not a hundredth: a
+    // ¥6,300 fee snapshotted as 630,000 and a KWD 40 one as 4,000. This is
+    // the figure the gym settles payroll against, so it is converted by the
+    // currency or it is not written at all — `undefined` leaves `rate_cents`
+    // unset, and payrollByTrainer already reads that as unknown rather than
+    // as nothing owed.
+    const rateCents = minorFromWhole(tenant?.sessionFee, tenant?.currency) ?? undefined;
+    const out = await floor.attempt({
+      kind: 'session-outcome', sessionId: s.id, clientName: who, outcome: 'completed', rateCents,
+    });
+    if (out === 'refused') {
+      Alert.alert('Not checked in', refusedLine(`${who}’s session`, 'Nothing has been recorded against it.'));
+      return;
+    }
+    if (out === 'unsent') {
+      Alert.alert('Kept on this phone', keptOfflineLine('This check-in'), [
+        { text: 'Open Their Record', onPress: openRecord },
+      ]);
+      return;
+    }
+    openRecord();
   };
 
   const exportSchedule = async () => {
@@ -1685,7 +1929,7 @@ export default function TrainerSchedule() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
@@ -1743,9 +1987,22 @@ export default function TrainerSchedule() {
             to run on one for the same reason. */}
         {slotLine ? (
           <View style={{ paddingTop: sp.md }}>
-            <Notice tone={t.warn} kicker="Bookings" title={slotWindow.state === 'empty' ? 'Nobody can book you' : 'Your open slots are running out'} note={slotLine}>
+            <Notice tone={t.warn} kicker="Bookings"
+              title={slotWindow.state === 'never-set' ? 'Your clients cannot book you'
+                : slotWindow.state === 'empty' ? 'Nobody can book you'
+                  : 'Your open slots are running out'}
+              note={slotLine}>
               <View style={{ marginTop: sp.md }}>
-                <Ghost label="Generate Open Slots" onPress={() => setAvailOpen(true)} />
+                {/* Same sheet, different label, and the label is the fix. A
+                    coach who has never set weekly hours cannot generate
+                    anything — `generateSlots` refuses them with "No
+                    availability set. Add at least one weekly slot first." —
+                    so offering them a button named after the second step is
+                    offering them a refusal. Under 'never-set' the button is
+                    named after the step they are actually missing. */}
+                <Ghost
+                  label={slotWindow.state === 'never-set' ? 'Set Your Weekly Hours' : 'Generate Open Slots'}
+                  onPress={() => setAvailOpen(true)} />
               </View>
             </Notice>
           </View>
@@ -1970,7 +2227,11 @@ export default function TrainerSchedule() {
                   ? 'Reading your calendar…'
                   : sessionsStatus === 'partial'
                     ? 'Nothing came back for this day, but only part of your calendar loaded — so this day may not be empty. Pull down to refresh.'
-                    : 'No sessions this day. Tap Add to book one.'}
+                    // A day with a class on it is not a free day, and the
+                    // sentence that used to stand here said so by omission.
+                    : selDayClasses.length > 0
+                      ? 'No one-to-ones this day. You are teaching below — tap Add to book somebody around it.'
+                      : 'No sessions this day. Tap Add to book one.'}
               </Text>
             )
           ) : selDaySessions.map((s, i) => (
@@ -1981,7 +2242,19 @@ export default function TrainerSchedule() {
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'booked' ? t.brand : s.status === 'blocked' ? t.warn : t.surface3 }} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? nameOf(s.clientId) : s.status === 'blocked' ? 'Unavailable · nobody can book this' : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? slotOf(s.clientId) : s.status === 'blocked' ? 'Unavailable · nobody can book this' : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
+                    {/* A booked hour whose client this screen cannot name. Said
+                        in a sentence and not left to an odd-looking label,
+                        because the coach's next decision is whether to hand the
+                        hour to somebody else. Null for every ordinary row. */}
+                    {s.status === 'booked' && unnamedSlotNote(s.clientId, roster, rosterStatus) ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 3 }}>
+                        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.warn, marginTop: 5 }} />
+                        <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+                          {unnamedSlotNote(s.clientId, roster, rosterStatus)}
+                        </Text>
+                      </View>
+                    ) : null}
                     {/* Who is behind this hour. It changes what cancelling
                         means — the slot is handed straight over rather than
                         thrown open — so it is said on the row, next to the
@@ -2016,7 +2289,7 @@ export default function TrainerSchedule() {
                     ) : null}
                   </View>
                 </View>
-                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, marginLeft: sp.md + 6 }}>
+                <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, marginStart: sp.md + 6 }}>
                   {s.status === 'booked' ? (<>
                     {/* Check in is the start of the session, and it is the one
                         thing a coach does standing next to somebody. It marks
@@ -2043,6 +2316,62 @@ export default function TrainerSchedule() {
               </View>
             </View>
           ))}
+
+          {/* ── the classes on this day ──────────────────────────────────
+              Below the one-to-ones because that is what this screen is for,
+              and on it because an evening with a class in it is not a free
+              evening. The rows carry no verbs: a class is managed on the
+              Classes screen and its register is taken there, and two routes to
+              the same write is how one of them goes stale. */}
+          {classDayHeading(selDayClasses.length) ? (
+            <>
+              <Rule />
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
+                {classDayHeading(selDayClasses.length)}
+              </Text>
+              {selDayClasses.map((c) => (
+                <View key={c.id} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.mine ? t.brand : t.warn, marginTop: 6 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>
+                      {timeLabel(c.startsAt)} · {c.durationMin} min · {c.title}
+                    </Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {classDayNote(c)}{c.room?.trim() ? ` · ${c.room.trim()}` : ''}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </>
+          ) : null}
+
+          {/* An empty class list is not an empty timetable. This is the same
+              rule `classCheckCaveat` holds for the booking side of this screen,
+              said in the one place a coach reads a day and decides it is free. */}
+          {classCaveat ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{classCaveat}</Flag>
+          ) : null}
+
+          {/* What this phone is still carrying, which now includes check-ins
+              made on this screen. Drawn even when the last one went through:
+              the count is about the morning, not about the tap. A queue that
+              could not be READ is not an empty one — src/lib/floorQueue.ts,
+              rule 2 — so "nothing waiting" is withheld rather than stated. */}
+          {!floor.queueRead ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+              What this phone is still carrying could not be read, so whether any check-ins are waiting to go up is not known. Nothing has been lost — it is not being written over either.
+            </Flag>
+          ) : floorPendingNote(floor.unsent) ? (
+            <>
+              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{floorPendingNote(floor.unsent)}</Flag>
+              <View style={{ alignItems: 'flex-start', paddingTop: sp.sm }}>
+                <Ghost label={floorSending ? 'Sending…' : 'Send Now'}
+                  a11yLabel="Send what is waiting on this phone"
+                  onPress={() => { void sendFloorNow(); }} />
+              </View>
+            </>
+          ) : null}
+          {floorNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{floorNote}</Flag> : null}
         </Section>
 
         <Rule />
@@ -2105,6 +2434,22 @@ export default function TrainerSchedule() {
           <Text style={{ ...ty.head, color: t.ink }}>Weekly Availability</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>Set the times you offer every week, then generate open slots.</Text>
           <ScrollView showsVerticalScrollIndicator={false}>
+            {/* Above the grid rather than below it: a coach opening this sheet
+                is about to act on their week, and this is the reason the week
+                they can see is not the week their clients can book. */}
+            {zoneNote ? (
+              <View style={{ marginBottom: sp.md }}>
+                <Flag tone={zones === 'unknown' ? t.ink3 : t.warn}>{zoneNote}</Flag>
+                {healLabel ? (
+                  <View style={{ marginTop: sp.sm }}>
+                    <Cta label={healLabel} onPress={applyPhoneZone} />
+                  </View>
+                ) : null}
+                {noHealNote ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{noHealNote}</Text>
+                ) : null}
+              </View>
+            ) : null}
             {/* An empty list under 'error' is UNKNOWN, never "there are none" —
                 src/ui/loadStatus.ts. Said here rather than only in the row that
                 opens this sheet, because this is the screen a coach acts on:
@@ -2133,7 +2478,81 @@ export default function TrainerSchedule() {
               </View>
             ))}
 
-            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.md }}>Add a weekly slot</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg, marginBottom: sp.md }}>Add weekly hours</Text>
+            {/* ── a stretch, or one slot ────────────────────────────────────
+                This sheet could only ever add ONE slot: a day, a time, a
+                length, add. To offer 07:00–19:00 in quarter-hours a coach
+                tapped that forty-eight times for one day and three hundred
+                and thirty-six for a week.
+
+                Nobody did. This database holds eight coach accounts, ten
+                coaching relationships and zero rows in trainer_availability —
+                the first step of the whole personal-training loop has never
+                once been completed by a real person, because what it asked
+                for was unreasonable rather than because it was hidden.
+
+                So the unit a coach thinks in — a stretch of the day — is now
+                the unit they enter, and it is the default. */}
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+              <Chip t={t} label="A stretch of the day" on={avRange} onPress={() => setAvRange(true)} />
+              <Chip t={t} label="One slot" on={!avRange} onPress={() => setAvRange(false)} />
+            </View>
+
+            {avRange ? (<>
+              {/* Multi-select. A coach who works the same hours Monday to
+                  Friday says so once. */}
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Days</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {DOW.map((d, i) => (
+                  <Chip key={'ar' + d} t={t} label={d} on={avDays.includes(i)}
+                    onPress={() => setAvDays((prev) => (prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]))} />
+                ))}
+              </ScrollView>
+
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {HOURS.map((h) => (
+                  <Chip key={'af' + h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={avFrom === h}
+                    onPress={() => { setAvFrom(h); if (avTo <= h) setAvTo(Math.min(24, h + 1)); }} />
+                ))}
+              </ScrollView>
+
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Until</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {HOURS.filter((h) => h > avFrom).concat([24]).map((h) => (
+                  <Chip key={'at' + h} t={t} label={hourLabel(h)} on={avTo === h} onPress={() => setAvTo(h)} />
+                ))}
+              </ScrollView>
+
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Each session</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                {[15, 30, 45, 60, 90].map((d) => (
+                  <Chip key={'ad' + d} t={t} label={`${d} min`} on={avDur === d} onPress={() => setAvDur(d)} />
+                ))}
+              </ScrollView>
+
+              {/* What is about to happen, before the button rather than after
+                  it. The count is the one thing about this feature that can
+                  surprise somebody, so it goes where the decision is made. */}
+              {/* A refusal is a Flag — the tone rides a 6pt mark and the words
+                  stay in ink. `warn` as text ink is 3.87:1 on the light
+                  palettes, which clears what a MARK needs and not what TEXT
+                  does; check:contrast catches exactly this. */}
+              {rangeNote ? (
+                rangeRefusal
+                  ? <View style={{ marginBottom: sp.sm }}><Flag tone={t.warn}>{rangeNote}</Flag></View>
+                  : <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{rangeNote}</Text>
+              ) : null}
+              {rangeLeftover ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{rangeLeftover}</Text>
+              ) : null}
+
+              <Ghost
+                label={avBusy ? 'Adding…' : rangeRefusal ? 'Check the times above' : addButtonLabel(rangeSplit.fresh.length, rangeSplit.duplicates)}
+                icon="plus"
+                onPress={() => { void addRange(); }}
+              />
+            </>) : (<>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
               {DOW.map((d, i) => <Chip key={d} t={t} label={d} on={avDow === i} onPress={() => setAvDow(i)} />)}
             </ScrollView>
@@ -2153,6 +2572,7 @@ export default function TrainerSchedule() {
                 saved one. Now each of the three outcomes says its own thing,
                 and the two that are not "saved" say what to do. */}
             <Ghost label={`Add ${DOW[avDow]} ${avTime(avHour, avMinute)}`} icon="plus" onPress={() => { void addWeekly(); }} />
+            </>)}
           </ScrollView>
           <View style={{ height: sp.lg }} />
           <Cta label="Generate Open Slots · Next 4 Weeks" wide onPress={generateSlots} />
@@ -2493,7 +2913,7 @@ export default function TrainerSchedule() {
             <>
               <Text style={{ ...ty.head, color: t.ink }}>Move Session</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
-                {nameOf(moveFrom.clientId)} · {DOW[new Date(moveFrom.startsAt).getDay()]} {timeLabel(moveFrom.startsAt)}
+                {slotOf(moveFrom.clientId)} · {DOW[new Date(moveFrom.startsAt).getDay()]} {timeLabel(moveFrom.startsAt)}
               </Text>
               <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.md }}>
                 Pick one of your open slots. The session moves in one go, nothing is charged, and the credit already on it moves with it. The hour you are leaving goes to whoever is first on its waitlist, once your client is in their new one.

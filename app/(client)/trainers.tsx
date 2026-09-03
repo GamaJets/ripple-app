@@ -44,6 +44,7 @@
 // <Notice> for the one thing that needs a decision — an invitation. Every
 // query, conditional and route above is untouched.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, Modal, Alert, ActivityIndicator, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -85,6 +86,7 @@ import {
 import { wholeMoney } from '../../src/lib/coachMoney';
 import { currencyGapOfStatus, currencyGapLineAbout } from '../../src/lib/currencyGap';
 import { readSessionFee, sessionFeeAmount, sessionFeeShort, sessionFeeNote, type SessionFee } from '../../src/lib/sessionFee';
+import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
 
 interface Coach {
   id: string;
@@ -112,7 +114,7 @@ export default function FindTrainer() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
-  const { received, acceptInvite, declineInvite } = useInvites();
+  const { received, acceptInvite, declineInvite, reload: reloadInvites } = useInvites();
   const [coaches, setCoaches] = useState<Coach[]>([]);
   // Three answers where there were two. `coaches: []` meant both "no trainer has
   // published a profile" and "we never got an answer from the server", and this
@@ -129,6 +131,13 @@ export default function FindTrainer() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'partial' | 'error'>('loading');
   const [attempt, setAttempt] = useState(0);
   const [sel, setSel] = useState<Coach | null>(null);
+  // The directory and its ratings both run off `attempt` — the same counter the
+  // three "Try Again" buttons on this screen bump — and the invitations waiting
+  // at the top of it are their own read. An invitation sent while this screen
+  // was open appeared nowhere until the app was killed.
+  const pull = usePullToRefresh(useCallback(() => {
+    setAttempt((n) => n + 1); reloadInvites(); cd.reload();
+  }, [reloadInvites, cd.reload]));
   const [sent, setSent] = useState<Record<string, boolean>>({});
   // Set only when the pending-requests read itself failed. Absence of a request
   // and an unreadable list of requests are different things: the first means
@@ -589,7 +598,7 @@ export default function FindTrainer() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -671,6 +680,12 @@ export default function FindTrainer() {
         {/* ── the direct path ────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Have a code from your coach?" />
+          {/* rtl-ok: a navigation PATH inside an English sentence — "the screen
+            called X, and inside it the thing called Y". The separator belongs to
+            the sentence, not to the layout: dropping FORWARD_CHAR into it would
+            put a mirrored chevron in the middle of an unmirrored English clause,
+            which is worse than leaving it. When the catalogue is translated the
+            whole sentence moves and the separator goes with it. */}
           <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
             {fromLink
               ? 'Your coach’s code came in with the link you tapped, so it is already filled in below. Send it when you are ready — they see the request and add you once they accept.'
@@ -811,9 +826,9 @@ export default function FindTrainer() {
                     <Text style={{ ...ty.caption, color: t.ink3 }}>/ session</Text>
                   </View>
                 ) : (
-                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'right', flexShrink: 1 }}>{sessionFeeShort(c.sessionFee)}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, textAlign: END_ALIGN, flexShrink: 1 }}>{sessionFeeShort(c.sessionFee)}</Text>
                 )}
-                <Icon name="chevron" size={16} color={t.ink3} />
+                <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
               </Pressable>
             </View>
           ))}
@@ -843,7 +858,7 @@ export default function FindTrainer() {
                   <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                     <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Session fee</Text>
                     <Text style={{ ...value(20), color: t.ink }}>{feeMoney(sel.id, sessionFeeAmount(sel.sessionFee)!) ?? sessionFeeAmount(sel.sessionFee)}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 4 }}>/ session</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: 4 }}>/ session</Text>
                   </View>
                 ) : (
                   <>
@@ -977,7 +992,7 @@ export default function FindTrainer() {
                           <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>{r.body}</Text>
                         ) : null}
                         {r.coachReply ? (
-                          <View style={{ marginTop: sp.sm, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.ring }}>
+                          <View style={{ marginTop: sp.sm, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
                             <Text style={{ ...ty.micro, color: t.ink3 }}>{sel.name.toUpperCase()} REPLIED</Text>
                             <Text style={{ ...ty.body, color: t.ink2, marginTop: 2 }}>{r.coachReply}</Text>
                           </View>

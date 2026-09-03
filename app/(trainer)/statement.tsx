@@ -51,6 +51,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useBrand } from '../../src/ui/brand';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { shareDoc, shareTextFile, pdfExportAvailable, fileShareBlocker } from '../../src/lib/exportShare';
 import {
   coachStatement, statementDoc, statementCsv, statementItemsCsv, statementFileStem,
@@ -173,7 +174,7 @@ export default function StatementOfRecord() {
 
   /* The period whose figures are allowed to land.
    *
-   * `fetchStatementInput` is seven paged reads, so the answers do not come back
+   * `fetchStatementInput` is a dozen paged reads, so the answers do not come back
    * in the order the taps went out — and a coach comparing quarters taps
    * straight down the pill row. With `setInput` unconditional, tapping Q1 and
    * then Q2 and having Q1 resolve second put Q1's takings, sessions and
@@ -207,6 +208,12 @@ export default function StatementOfRecord() {
   }, [period, appName, year, span, start]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  // One read, and it is the whole statement: `fetchStatementInput` composes
+  // the period in one call, which is what keeps every figure on the page from
+  // the same moment. The year-start preference is not re-read — it lives on
+  // this handset and this screen is the only thing that writes it, so there is
+  // no other copy for a refresh to go and find.
+  const pull = usePullToRefresh(load);
 
   const statement: Statement | null = useMemo(() => (input ? coachStatement(input) : null), [input]);
 
@@ -237,7 +244,17 @@ export default function StatementOfRecord() {
     if (!statement || busy) return;
     setBusy(true);
     const text = items
-      ? statementItemsCsv(statement, input?.invoices.rows ?? [], input?.lateCancellations.rows ?? [])
+      // Every row-bearing part of the record, not two of them. The file used to
+      // carry invoices and fees only, so an accountant working line by line saw
+      // every document the coach issued and no refund, no chargeback and no
+      // cost — the three that make the figures beside them untrue.
+      ? statementItemsCsv(statement, {
+        invoices: input?.invoices.rows ?? [],
+        fees: input?.lateCancellations.rows ?? [],
+        refunds: input?.refunds.rows ?? [],
+        disputes: input?.disputes.rows ?? [],
+        costs: input?.costs.rows ?? [],
+      })
       : statementCsv(statement);
     const name = `${statementFileStem(statement)}${items ? '-line-items' : ''}.csv`;
     setBusy(false);
@@ -262,7 +279,7 @@ export default function StatementOfRecord() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>

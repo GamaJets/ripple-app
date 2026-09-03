@@ -69,7 +69,8 @@
 // for "I want this to stop"; a long press on a bubble is for "look at THIS",
 // and it is the one that files a report carrying the message itself — copied
 // into the report row, so deleting the message afterwards cannot empty it.
-import { useRef } from 'react';
+import { useCallback, useRef } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, Pressable, ScrollView, Image, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -93,6 +94,7 @@ import {
   useThread, useThreadPeerName, useAttachmentUrl, pickMessageAttachment, useThreadSafety,
   type AttachSource, type PendingAttachment, type ThreadMessage,
 } from '../../src/ui/messaging';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** The clip itself. Split into its own component so the player hook receives a
  *  settled URL — a signature arrives asynchronously and a hook cannot wait. */
@@ -148,7 +150,7 @@ function Attachment({ m }: { m: ThreadMessage }) {
             : delivered ? <Clip uri={m.local.uri} label="The video you sent" />
             : note('This video did not send.')}
         {m.sending ? (
-          <View style={{ position: 'absolute', right: sp.sm, bottom: sp.sm }}>
+          <View style={{ position: 'absolute', end: sp.sm, bottom: sp.sm }}>
             <ActivityIndicator size="small" color={t.ink3} />
           </View>
         ) : null}
@@ -177,7 +179,13 @@ export default function Messages() {
   const router = useRouter();
   const peer = useThreadPeerName('client', null);
   const head = peerHeading(peer, 'coach');
-  const { messages: msgs, send, status, unsent, cachedNote, hasOlder, loadingOlder, olderError, loadOlder } = useThread(null, 'client');
+  const { messages: msgs, send, status, unsent, cachedNote, hasOlder, loadingOlder, olderError, loadOlder, reload } = useThread(null, 'client');
+  // There is no realtime subscription on this thread, so a reply that arrived
+  // while the member was looking at the screen appeared only if they sent
+  // something themselves or left and came back. `reload` re-reads the newest
+  // page; `loadOlder` above walks backwards, and the two are different asks.
+  // Nothing queued on this device is dropped by it.
+  const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
   // The block and the report. Its state is deliberately allowed to be stale or
   // unread: the database refuses a blocked write regardless, so being wrong
   // here costs a sentence rather than the protection. See src/lib/threadSafety.
@@ -291,7 +299,7 @@ export default function Messages() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
         <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
-          <Icon name="back" size={20} color={t.ink2} />
+          <Icon name={BACK_ICON} size={20} color={t.ink2} />
         </Pressable>
         {/* The face, under the same rule as the name: `peer.avatar` is only
             ever what came back from the read for the COACH's id, so there is no
@@ -334,7 +342,7 @@ export default function Messages() {
             a live one believes they have heard everything — and the message
             that is missing is the one that arrived after the signal went. */}
         {cachedNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingTop: sp.sm }}>{cachedNote}</Flag> : null}
-        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }}
+        <ScrollView ref={scRef} refreshControl={pull} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }}
           onContentSizeChange={() => {
             if (heldPosition.current) { heldPosition.current = false; return; }
             scRef.current?.scrollToEnd({ animated: true });
@@ -382,11 +390,39 @@ export default function Messages() {
               // yourself is not a thing, and offering it would make the gesture
               // read as something else. Wrapped rather than replacing the View
               // so nothing about how a bubble draws depends on this.
+              //
+              // ── Why there is an accessibilityAction as well ───────────────
+              //
+              // The gesture was the ONLY way in. A bubble with `onLongPress`
+              // and no `onPress` announces itself as a button, says "Opens the
+              // report options for this message" — and then does nothing at all
+              // when a VoiceOver user double-taps it, because activation maps
+              // to `onPress`. So the one route this app offers for reporting
+              // abuse or a message that should not have been sent was closed to
+              // exactly the people least able to work around it, while a hint
+              // promised it was open. A long press is not available to somebody
+              // driving the screen through a screen reader or a switch.
+              //
+              // `accessibilityActions` is the fix rather than an `onPress`: an
+              // ordinary tap on a chat bubble must keep doing nothing, because
+              // a report sheet that opens when somebody rests a thumb on a
+              // message is its own kind of broken. 'activate' is what a
+              // double-tap sends and 'longpress' is what the rotor's long-press
+              // action sends; both land here, and both do what the hint says.
               <Pressable key={m.id} disabled={mine}
                 onLongPress={() => { setReportNote(''); setReportFor({ open: true, messageId: m.id.startsWith('local-') ? null : m.id }); }}
                 accessibilityRole={mine ? undefined : 'button'}
                 accessibilityLabel={mine ? undefined : 'Report this message'}
                 accessibilityHint={mine ? undefined : 'Opens the report options for this message'}
+                accessibilityActions={mine ? undefined : [
+                  { name: 'activate', label: 'Report this message' },
+                  { name: 'longpress', label: 'Report this message' },
+                ]}
+                onAccessibilityAction={mine ? undefined : (e) => {
+                  if (e.nativeEvent.actionName !== 'activate' && e.nativeEvent.actionName !== 'longpress') return;
+                  setReportNote('');
+                  setReportFor({ open: true, messageId: m.id.startsWith('local-') ? null : m.id });
+                }}
                 style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '82%', marginBottom: sp.md }}>
                 {hasMedia ? (
                   <View style={{ marginBottom: m.body ? sp.xs : 0, alignSelf: mine ? 'flex-end' : 'flex-start', overflow: 'hidden', borderRadius: radius.md }}>

@@ -406,11 +406,47 @@ export const NOT_MEDICAL_ADVICE =
  * code the amounts are in so it does not write dollars at a coach in Dubai.
  * Amounts with no currency are passed as the string the screen composes
  * ("unknown — the gym has not set one"), never as a bare number.
+ *
+ * ── Three fields the prompt was written around and never received ─────────
+ *
+ * An allowlist has one failure mode and this was it: the Monday digest on
+ * app/(trainer)/analytics.tsx composed `takenThisMonth`, `sessionsStillUnmarked`
+ * and `howTheyCoach`, wrote three sentences of prompt rules about them, and
+ * none of the three was declared here — so `businessAskContext` dropped all
+ * three on the way out and the model was asked to quote a figure it had never
+ * been given.
+ *
+ * That is not a harmless omission in either direction. The rule about
+ * `sessionsStillUnmarked` exists so a coach with nine unrecorded sessions is
+ * not congratulated on a quiet month; with the field gone the rule could never
+ * fire. The rule about `howTheyCoach` says not to suggest anything needing a
+ * room to a coach who works entirely online; same. And the digest was told to
+ * lead on takings for an online coach while the takings were not in the object.
+ * A model given a rule about an absent field does not decline — it writes
+ * around the gap, in prose, where no formatter and no dash can catch it.
+ *
+ * All three are facts about the coach's own business and none of them names,
+ * counts or characterises any individual client:
+ *
+ *   takenThisMonth        a formatted amount in the coach's own currency, or
+ *                         the LEDGER'S OWN reason there is no figure —
+ *                         `ledger()` composes that sentence out of strand
+ *                         labels ("sales", "renewals"), never out of a payer.
+ *   sessionsStillUnmarked a count of the coach's own hours.
+ *   howTheyCoach          'entirely online' or 'in person, or both in person
+ *                         and remotely'. The coach's delivery model, off their
+ *                         own settings.
+ *
+ * The two clients-shaped counts already here — `clients`, `atRiskClients` — are
+ * the precedent and the boundary: a count of people is the coach's business, a
+ * list of them is not, and `COACH_CLIENT_HEALTH` is asserted against this list
+ * so nothing about one person can be added to it by accident.
  */
 export const COACH_BUSINESS_KEYS = [
-  'sessionsDeliveredThisMonth', 'revenueAtOwnRate', 'currency',
+  'sessionsDeliveredThisMonth', 'sessionsStillUnmarked', 'revenueAtOwnRate',
+  'takenThisMonth', 'currency',
   'clients', 'avgAdherence', 'atRiskClients', 'onTrack', 'watch', 'atRiskLow',
-  'newClientsThisMonth', 'endedThisMonth', 'unreadThreads',
+  'newClientsThisMonth', 'endedThisMonth', 'unreadThreads', 'howTheyCoach',
 ] as const;
 
 /**

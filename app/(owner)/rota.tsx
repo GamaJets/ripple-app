@@ -27,6 +27,8 @@ import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { pct } from '../../src/lib/gymSchedule';
 import { fetchGymTrainers, type GymTrainer } from '../../src/lib/gymTrainers';
 import {
@@ -35,6 +37,7 @@ import {
   rosterByTrainer, summariseRota, hourLabel,
   type Shift, type ShiftRole, type DemandBlock, type RotaGap,
 } from '../../src/lib/gymRota';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 const ROLES: { key: ShiftRole; label: string }[] = [
   { key: 'floor', label: 'Floor' },
@@ -115,7 +118,13 @@ export default function OwnerRota() {
   const [busy, setBusy] = useState(false);
   /** When the week's shifts and demand last landed. Not moved by a failed
    *  retry — what is on screen is still the earlier read's. */
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [shiftsAt, setShiftsAt] = useState<number | null>(null);
+  /** And when the coaching staff came back. It is a second, independent read —
+   *  every name on this rota comes from it — and it had neither a stamp nor a
+   *  way to be asked for again, so a refresh brought back the shifts and left
+   *  the names at whatever the first read returned. */
+  const [trainersAt, setTrainersAt] = useState<number | null>(null);
+  const [trainersTick, setTrainersTick] = useState(0);
 
   const [addOpen, setAddOpen] = useState(false);
   const [who, setWho] = useState<string | null>(null);
@@ -143,7 +152,7 @@ export default function OwnerRota() {
       setShifts(s);
       setDemand(d);
       setFailed(false);
-      setFetchedAt(Date.now());
+      setShiftsAt(Date.now());
     } catch (e) {
       reportError('rota.fetch', e);
       // Null, and `failed` says which of the two nulls this is. See the note on
@@ -162,7 +171,7 @@ export default function OwnerRota() {
     (async () => {
       try {
         const list = await fetchGymTrainers(supabase, tenant.id);
-        if (!cancelled) { setTrainers(list); setTrainersFailed(false); }
+        if (!cancelled) { setTrainers(list); setTrainersFailed(false); setTrainersAt(Date.now()); }
       } catch (e) {
         reportError('rota.trainers', e);
         // Not `[]`: that rendered as "No trainers on this gym yet, so there is
@@ -171,7 +180,14 @@ export default function OwnerRota() {
       }
     })();
     return () => { cancelled = true; };
-  }, [tenant?.id]);
+  }, [tenant?.id, trainersTick]);
+
+  /** One line over both reads, and it is the age of the older. */
+  const fetchedAt = oldestFetch(shiftsAt, trainersAt);
+  /** Both reads. The Refresh button ran only the shifts one, so an owner could
+   *  press it all morning and still be looking at yesterday's staff list. */
+  const refreshAll = useCallback(() => { void load(); setTrainersTick((n) => n + 1); }, [load]);
+  const pull = usePullToRefresh(refreshAll);
 
   const loaded = shifts !== null && demand !== null;
   const cov = loaded ? coverage(days, shifts!, demand!) : null;
@@ -249,10 +265,11 @@ export default function OwnerRota() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
+            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Rota</Text>
         </View>
@@ -260,7 +277,7 @@ export default function OwnerRota() {
         {/* Who is on the floor this week, and when that was last asked. A rota
             read in a basement an hour ago and still on screen is exactly the
             figure somebody staffs a shift against. */}
-        <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={!loaded && !failed}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={!loaded && !failed}
           style={{ marginTop: 0, marginBottom: sp.md }} />
 
         {/* ── the week being read ────────────────────────────────────────── */}

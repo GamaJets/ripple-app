@@ -41,6 +41,7 @@ import { assertWhole, capLimit, readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
 import { fetchMemberships, matchPayment, fetchOnlineOrders, type Membership, type OnlineOrder } from '@lib/gymRecord';
 import { onlineOrderProblem } from '@lib/gymOrderPayment';
+import { fetchGymCosts, gymCostsTaken, gymCostCategoryLabel, type GymCost } from '@lib/gymCosts';
 import {
   createInvoice, setInvoiceStatus, settleInvoice, invoiceBlocker, parseAmount,
   dueAfter, isoDay, SETTABLE_INVOICE_STATUSES, INVOICE_STATUS_LABEL,
@@ -53,6 +54,7 @@ import {
 import { toCsv } from '@lib/gymExport';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { saveText } from '@/lib/save';
+import { Banner } from '@/components/Banner';
 
 /** How far back the picker offers. Thirteen so last year's same month is there. */
 const MONTHS_OFFERED = 13;
@@ -159,6 +161,17 @@ interface Books {
   invoices: Read<Invoice>;
   payments: Read<GymPayment>;
   settled: Read<Settled>;
+  /**
+   * What the gym paid for that is not payroll — rent, power, the cleaner, the
+   * engineer, the music licence, insurance, stock, the accountant.
+   *
+   * Its own read, and its own failure, because it is a different table from a
+   * different screen (part 700, recorded on /costs). A month whose costs will
+   * not load must still be able to report what was taken and what was settled;
+   * the alternative is a month-end that reports nothing because one of four
+   * queries was refused.
+   */
+  costs: Read<GymCost>;
   /** The answers already given on this gym's reconciliation. Not scoped to the
    *  month: an exception raised in June is still an exception in September, and
    *  an answer keyed to a month would have to be given again each time. */
@@ -173,7 +186,7 @@ interface Books {
 }
 
 const EMPTY: Books = {
-  invoices: reading(), payments: reading(), settled: reading(),
+  invoices: reading(), payments: reading(), settled: reading(), costs: reading(),
   marks: new Map(), marksErr: null, online: reading(),
 };
 
@@ -284,7 +297,7 @@ export default function Accounting() {
     // empties the payments — and this screen would then report a month in which
     // the gym both billed nothing and took nothing, two wrong facts that agree
     // with each other and so look like a quiet month rather than a broken read.
-    const [iRes, pRes, sRes, mRes, oRes] = await Promise.allSettled([
+    const [iRes, pRes, sRes, mRes, oRes, cRes] = await Promise.allSettled([
       fetchInvoices(tenantId, mw.lastDay),
       fetchPayments(supabase, tenantId, since, until),
       fetchSettled(tenantId, mw.fromIso, mw.toIso),
@@ -294,6 +307,11 @@ export default function Accounting() {
       // the member's own purchase history — so a sale that took the money and
       // failed to grant anything existed in a server log and on no screen.
       fetchOnlineOrders(supabase, tenantId, mw.fromIso, mw.toIso),
+      // What the gym paid for that is not payroll. Bounded by the month's own
+      // days rather than by the payment shoulders above: a cost is dated by the
+      // day the money went out and nothing here reconciles it against anything,
+      // so there is no invoice on the other side of a boundary to reach for.
+      fetchGymCosts(supabase, tenantId, mw.firstDay, mw.lastDay),
     ]);
 
     setLoaded({
@@ -309,6 +327,7 @@ export default function Accounting() {
         marks: mRes.status === 'fulfilled' ? mRes.value : new Map(),
         marksErr: mRes.status === 'fulfilled' ? null : failure(mRes, 'the answers already given on this reconciliation'),
         online: landed(oRes, 'the online sales'),
+        costs: landed(cRes, 'the recorded costs'),
       },
     });
   }, []);
@@ -326,6 +345,7 @@ export default function Accounting() {
             invoices: { rows: [], state: null, why: null },
             payments: { rows: [], state: null, why: null },
             settled: { rows: [], state: null, why: null },
+            costs: { rows: [], state: null, why: null },
             marks: new Map(),
             marksErr: null,
             online: { rows: [], state: null, why: null },
@@ -453,9 +473,13 @@ function Month({ w, books, gymName, ccy, members, tenantId, me, onChange }: {
   );
 
   const settledRows = books.settled.rows ?? [];
+  const costRows = books.costs.rows ?? [];
 
   const cashIn = sumOf(inMonthPayments, `no payment is recorded in ${w.label} — which is not the same as none being taken`);
   const cashOut = sumOf(settledRows, `no payroll settlement is recorded in ${w.label}`);
+  // The same refusing sum as everything else on this page, so a month holding
+  // two currencies of cost gets the reason rather than a number.
+  const costsOut = sumOf(costRows, `no cost is recorded in ${w.label} — which is not the same as none being paid`);
   const raisedSum = sumOf(raised.filter((i) => isRaised(i.status)), `no invoice was raised in ${w.label}`);
   const owedSum = sumOf(outstanding, `nothing was outstanding as at ${asAt}`);
 
@@ -494,9 +518,17 @@ function Month({ w, books, gymName, ccy, members, tenantId, me, onChange }: {
           note={note(books.settled, 'the settlements') ?? (cashOut.known ? `${settledRows.length} settlement${settledRows.length === 1 ? '' : 's'}` : cashOut.why)}
         />
         <Kpi
+          label="Money out (costs)"
+          text={books.costs.state ? null : sumText(costsOut)}
+          note={note(books.costs, 'the recorded costs') ?? (costsOut.known ? `${costRows.length} cost${costRows.length === 1 ? '' : 's'} recorded` : costsOut.why)}
+        />
+        {/* Deliberately still payments less PAYROLL, with the costs beside it
+            rather than inside it. Folding them in would produce a figure over
+            two sides of different completeness — see the paragraph under it. */}
+        <Kpi
           label="Cash recorded in Repple"
           text={net.known ? sumText(net) : null}
-          note={net.known ? 'not profit — see below' : net.why}
+          note={net.known ? 'not profit, and costs are not in it — see below' : net.why}
         />
         <Kpi
           label="Invoiced"
@@ -517,7 +549,8 @@ function Month({ w, books, gymName, ccy, members, tenantId, me, onChange }: {
       />
       <MoneyIn read={books.payments} rows={inMonthPayments} w={w} total={cashIn} />
       <MoneyOut read={books.settled} rows={settledRows} total={cashOut} />
-      <NetCash net={net} w={w} />
+      <CostsOut read={books.costs} rows={costRows} w={w} total={costsOut} />
+      <NetCash net={net} w={w} costs={books.costs} />
       <Register
         read={books.invoices} raised={raised} w={w} ccy={ccy}
         members={members} tenantId={tenantId} onChange={onChange}
@@ -772,9 +805,76 @@ function perSession(s: Settled): number | null {
   return Math.round(s.amountCents / s.sessionsCount);
 }
 
+/* ── money out that is not payroll ─────────────────────────────────────────── */
+
+/**
+ * What the gym paid for, other than its trainers.
+ *
+ * Until part 700 this table did not exist, and neither did this section: the
+ * whole outgoing side of a gym's month was `payroll_settlements`, so the
+ * accountant's page reported a business whose only cost was session pay. Rent,
+ * power, the cleaner, the engineer, the music licence, insurance, stock and the
+ * accountant's own fee all reached this app through nothing at all.
+ *
+ * It is listed here and it is NOT added to payroll. Two reads of two tables
+ * that can fail independently do not make one "money out" figure, and the one
+ * on the KPI strip above is each read's own.
+ */
+function CostsOut({ read, rows, w, total }: {
+  read: Read<GymCost>; rows: GymCost[]; w: MonthWindow; total: Sum;
+}) {
+  const cols: Column<GymCost>[] = [
+    { key: 'paid', header: 'Paid', value: (c) => c.paidOn },
+    { key: 'what', header: 'What for', value: (c) => c.description },
+    { key: 'supplier', header: 'Paid to', value: (c) => c.supplier,
+      render: (c) => c.supplier ?? <span className="dash">not stated</span> },
+    { key: 'category', header: 'Category', value: (c) => gymCostCategoryLabel(c.category) },
+    { key: 'amount', header: 'Amount', value: (c) => c.amountCents, numeric: true,
+      render: (c) => (c.amountCents == null
+        ? <span className="dash">no amount recorded</span>
+        : <>{money(c.amountCents, c.currency)}</>) },
+    { key: 'note', header: 'Note', value: (c) => c.note },
+  ];
+
+  // Per currency, because a month holding two of them has two amounts of money
+  // and not a sum — and the KPI above has already refused to state one.
+  const pots = gymCostsTaken(rows).pots;
+
+  return (
+    <Section
+      title="Money out (costs)"
+      sub={`What the gym paid for in ${w.label} other than its trainers, dated the day the money went out. Recorded on the Costs screen; nothing infers a cost from anything.`}
+    >
+      <Part read={read} what="the recorded costs"
+            cost="what this gym spent outside payroll is unknown for this month, not nil">
+        <>
+          <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
+            {total.known
+              ? <>{money(total.cents, total.currency)} across {rows.length} cost{rows.length === 1 ? '' : 's'}.</>
+              : <>No single total: {total.why}.</>}
+            {!total.known && pots.length > 1
+              ? ` ${pots.map((p) => money(p.minorUnits, p.currency)).join(' and ')} — kept apart, because this app holds no rate between them.`
+              : null}
+          </p>
+          <DataTable
+            rows={rows} columns={cols} rowKey={(c) => c.id}
+            empty={`No cost is recorded in ${w.label}. That is a statement about the record, not about the gym — rent, power and everything else reach this app only when somebody enters them on the Costs screen.`}
+          />
+          <p className="no-print" style={{ margin: 0, padding: '10px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink3)' }}>
+            Costs are entered on <a href="/costs" style={{ color: 'var(--brand)' }}>Costs</a>, and
+            what this gym has said about its own tax registration is on{' '}
+            <a href="/tax" style={{ color: 'var(--brand)' }}>Tax</a>, which states no tax figure and
+            says why.
+          </p>
+        </>
+      </Part>
+    </Section>
+  );
+}
+
 /* ── the net, named honestly ───────────────────────────────────────────────── */
 
-function NetCash({ net, w }: { net: Sum; w: MonthWindow }) {
+function NetCash({ net, w, costs }: { net: Sum; w: MonthWindow; costs: Read<GymCost> }) {
   return (
     <Section
       title="Cash recorded in Repple"
@@ -794,17 +894,35 @@ function NetCash({ net, w }: { net: Sum; w: MonthWindow }) {
         <p style={{ margin: '12px 0 0', color: 'var(--ink2)', fontSize: 13.5, maxWidth: 760 }}>
           <strong>This is not profit, and it is not a P&amp;L line.</strong> It is the
           difference between two things Repple happens to hold records of: payments
-          somebody entered, and payroll somebody settled here. It omits rent,
-          utilities, stock and supplements, equipment and finance on it, insurance,
-          licences, marketing, software, bank and card fees, VAT and corporation tax,
-          staff paid outside Repple, and the owner&rsquo;s own drawings — none of which
-          this database has ever seen. A gym with a healthy figure on this line can be
-          losing money every month of {w.label}&rsquo;s year.
+          somebody entered, and payroll somebody settled here. It omits tax of every
+          kind and the owner&rsquo;s own drawings, which this database has never seen —
+          and it omits the costs section above, deliberately. A gym with a healthy
+          figure on this line can be losing money every month of {w.label}&rsquo;s year.
+        </p>
+        {/* This paragraph used to end "none of which this database has ever
+            seen", listing rent, utilities, stock, equipment, insurance,
+            licences, marketing, software and bank fees. Part 700 gave the gym a
+            place to record every one of them, so the sentence became false the
+            day /costs shipped — and a false sentence on the page an accountant
+            works from is worse than the omission it was describing. What is
+            still true is the REFUSAL, which is a different claim and is the one
+            worth making. */}
+        <p style={{ margin: '9px 0 0', color: 'var(--ink2)', fontSize: 13, maxWidth: 760 }}>
+          <strong>Why the costs are not subtracted here.</strong> The two sides are not
+          the same kind of record. What came in is gross of the card processor&rsquo;s
+          fee and is only what somebody entered at the desk; what went out in costs is
+          only what somebody typed, is unevidenced, and in a gym&rsquo;s first months
+          will be missing most of itself; and either side can be in a currency the
+          other is not. Subtracting them would produce a plausible number about none
+          of that, on the page it would most likely be filed from.
+          {costs.state === 'failed'
+            ? ' The costs read failed for this month, so what is missing from that side is unknown as well.'
+            : null}
         </p>
         <p style={{ margin: '9px 0 0', color: 'var(--ink3)', fontSize: 12.5, maxWidth: 760 }}>
           It is here for one job: to be reconciled against the bank. If the bank moved
-          by something other than this, the difference is either a cost Repple never
-          saw, or a payment nobody recorded.
+          by something other than this, the difference is a cost, a payment nobody
+          recorded, or something this app was never told about.
         </p>
       </div>
     </Section>
@@ -971,14 +1089,14 @@ function Register({ read, raised, w, ccy, members, tenantId, onChange }: {
     e.preventDefault();
     setSaved(null);
     if (blocker) { setWriteErr(blocker); return; }
-    const amt = parseAmount(amount);
+    const amt = parseAmount(amount, ccy);
     if (amt.kind !== 'amount' || !ccy) return;
     setBusy(true); setWriteErr(null);
     try {
       const { number } = await createInvoice(supabase, tenantId, {
         memberId,
         membershipId: membershipId || null,
-        amountCents: amt.cents,
+        amountCents: amt.minorUnits,
         currency: ccy,
         issuedOn,
         dueOn: dueOn || null,
@@ -1173,6 +1291,17 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
           settled.map((r) => [
             r.settledAt, r.trainerName, r.periodFrom, r.periodTo,
             r.amountCents, r.currency, r.sessionsCount, r.method,
+          ]),
+          false));
+
+    parts.push(head('MONEY OUT — costs recorded in the month'));
+    parts.push(books.costs.state === 'failed'
+      ? unreadable('the recorded costs', books.costs.why)
+      : toCsv(
+          ['Paid on', 'What for', 'Paid to', 'Category', 'Amount (minor units)', 'Currency', 'Note'],
+          (books.costs.rows ?? []).map((c) => [
+            c.paidOn, c.description, c.supplier, gymCostCategoryLabel(c.category),
+            c.amountCents, c.currency, c.note,
           ]),
           false));
 
@@ -2138,16 +2267,6 @@ function Figure({ label, text, note }: { label: string; text: string | null; not
       </div>
       {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 2, maxWidth: 300 }}>{note}</div> : null}
     </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
   );
 }
 

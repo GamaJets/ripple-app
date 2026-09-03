@@ -30,6 +30,7 @@
 // produced, and this page stops there rather than multiplying it by a rate
 // nobody in this app was told.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -103,6 +104,11 @@ export default function MyRegister() {
   }, [window]);
 
   const reload = useCallback(() => setTick((n) => n + 1), []);
+  // The one read on this screen, through the nonce the effect already
+  // watches. A register is written at the door by whoever taught the class,
+  // often on another handset, so this is a coach asking whether their own
+  // teaching has been recorded yet.
+  const pull = usePullToRefresh(reload);
 
   const split = useMemo(() => splitTaught(rows ?? []), [rows]);
   // The rate is over the classes that HAVE a register and nothing else. This is
@@ -126,7 +132,7 @@ export default function MyRegister() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

@@ -290,9 +290,18 @@ export interface NavItem {
 // thirty-two: Explore pushes `route` with no params, so a screen that needs one
 // is not listed. Deliberately absent for that reason —
 //
-//   · client, client-body, client-week, client-photos, chat  — all need
-//     `clientId`; they are reached by tapping the person on the roster, which is
-//     the only place the id exists.
+//   · client, chat  — both need `clientId`; they are reached by tapping the
+//     person on the roster, which is the only place the id exists.
+//
+// client-body, client-week, client-photos, client-training and client-intake
+// were on that list and are not any more, because the reason they were on it
+// stopped being true. Every one of them acquired a roster picker — each reads
+// `clientId` if it is given one and falls back to its own list if it is not —
+// and none was added here, so a coach searching "body fat", "photos", "their
+// week", "what have they logged" or "intake" found nothing at all while five
+// working screens sat behind those exact words. That is the same failure the
+// paragraph above this list describes about log-session, arriving five more
+// times.
 //   · exercise            — needs `name`; the Exercise Library is the way in.
 //   · explore             — is this list. A search result that opens the search
 //     screen is a row that does nothing.
@@ -353,6 +362,20 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'client-goals', label: 'Working Toward', note: 'What a client is aiming at, and how it is going', route: '/(trainer)/client-goals', icon: 'target', keywords: 'goal goals target working toward client aim weight measurement' },
   { key: 'client-nutrition', label: "A Client's Nutrition", note: 'Their targets, and the week of meals you write them', route: '/(trainer)/client-nutrition', icon: 'meals', keywords: 'nutrition meals macros calories diet plan client food week allergens targets deltas' },
   { key: 'client-report', label: 'Client Report', note: 'The handover document at the end of a block', route: '/(trainer)/client-report', icon: 'pencil', keywords: 'report handover document summary end of block twelve week pdf share export client progress what we did' },
+  // ── the five per-client screens that had no way in but a client's page ──
+  //
+  // Each takes an optional clientId and falls back to its own roster picker, so
+  // a bare push from search opens something usable — the same test
+  // client-nutrition and client-report already passed. Keyworded with what a
+  // coach TYPES rather than what the screen is called: "body fat" and "inbody"
+  // find the scans screen, "photos" and "progress pics" find the inbox, "what
+  // have they logged" finds their training, "par-q" and "readiness" find the
+  // intake.
+  { key: 'client-body', label: "A Client's Body", note: 'Their scans, their measurements and which way they are going', route: '/(trainer)/client-body', icon: 'scale', keywords: 'body composition scan scans inbody dexa body fat bodyfat percent muscle mass skeletal lean weight kg lbs measurements tape waist trend gaining losing progress' },
+  { key: 'client-training', label: 'What They Have Logged', note: 'Their sessions against the programme you wrote', route: '/(trainer)/client-training', icon: 'dumbbell', keywords: 'training log logged workouts sessions what have they done did they train volume sets reps weights lifted plan vs actual adherence stuck to the plan off plan swapped exercises' },
+  { key: 'client-week', label: 'Their Week', note: 'The days they have marked, against what you programmed', route: '/(trainer)/client-week', icon: 'calendar', keywords: 'their week planned days rest day deload travelling holiday marked ahead clash conflict schedule what are they doing this week day plan' },
+  { key: 'client-photos', label: 'Photos They Sent', note: 'Progress photographs a client shared with you', route: '/(trainer)/client-photos', icon: 'camera', keywords: 'photos photographs progress pics pictures shared sent me front back side comparison before after gallery images' },
+  { key: 'client-intake', label: 'Their Intake', note: 'What they told you before you trained them', route: '/(trainer)/client-intake', icon: 'pencil', keywords: 'intake onboarding form questionnaire par q parq readiness health screening history injuries surgery medication availability when can they train emergency contact next of kin what did they tell me' },
   // Beside Quiet Clients on purpose: both are read before ringing somebody, and
   // this is the one that says whether there is anything to ring about. The
   // member has been able to see this record since part 136 and the coach could

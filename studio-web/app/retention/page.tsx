@@ -71,6 +71,7 @@ import { readByIds } from '@lib/idLookup';
 import { fetchSessions } from '@lib/gymSessions';
 import { buildDossiers, sliceLoading, sliceReady, sliceFailed, type Slice, type MemberBooking } from '@lib/memberView';
 import { bandTitle, bandNote, DRIFT_LABEL, type ActivityEvent, type Drift } from '@lib/clientDrift';
+import { Banner } from '@/components/Banner';
 import {
   buildGymRetention, headline, suppressionNote, activityFor,
   type RetentionRecord, type RetentionRow, type Cohort, type GymRetention,
@@ -1377,17 +1378,6 @@ function Kpi({ label, text, note, tone }: {
       </div>
       {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
     </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' | 'warn' }) {
-  const edge = tone === 'crit' ? 'var(--crit)' : tone === 'warn' ? 'var(--warn)' : 'var(--brand)';
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${edge}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
   );
 }
 

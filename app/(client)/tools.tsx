@@ -44,7 +44,7 @@
 // through `readLift` — the same kilogram round trip a logged set makes — before
 // anything is estimated or loaded, so this screen and the workout log cannot
 // disagree about what "225" was.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -54,6 +54,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   liftingMacros, rangeLabel,
   PROTEIN_G_PER_KG_LEAN, FAT_G_PER_KG_BODYWEIGHT,
@@ -380,6 +381,11 @@ export default function Tools() {
  // tools are working in and leads to the one place it is chosen. A client who
  // reads in pounds finds out before they type, not after they load the bar.
  const wu = useSettings().weightUnit;
+ // The calculators are arithmetic and need nothing. The macro reference is not:
+ // its two g/kg lines are the client's own weight and body fat, read from the
+ // profile, and a failed profile read renders them as dashes with no way back.
+ const cd = useClientData();
+ const pull = usePullToRefresh(useCallback(() => { cd.reload(); }, [cd.reload]));
  // A caller can name the tab. Meals links here for the macro reference, and
  // landing that reader on the 1RM estimator is how "why is tapping macros
  // sending you to lifting tools?" got reported — the destination was right and
@@ -414,7 +420,7 @@ export default function Tools() {
  const G = layout.gutter;
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
  <Ghost icon="back" onPress={() => router.back()} />

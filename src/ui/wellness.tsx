@@ -49,16 +49,50 @@
 // pushed up on the next launch that reaches the server. See
 // src/lib/wellnessSync.ts for the merge, and for why a failed read (null) must
 // not be treated as an empty answer ([]).
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
 import { adoptServerId, isPending, localId, mergeLog } from '../lib/wellnessSync';
+import { classifyWrite } from '../lib/offlineQueue';
+import { reportError } from '../lib/reportError';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 
 export interface SleepEntry { id: string; at: string; hours: number; quality: number }
+
+/* ── the bounds, and why they are here as well as in the column ────────────
+ *
+ * `sleep_logs.hours` is `check (hours > 0 and hours <= 24)` and `quality` is
+ * `check (quality between 1 and 5)`, and part 109 says why: they are the range
+ * in which the number can be a number of hours at all, not a judgement about
+ * how much anybody should sleep.
+ *
+ * The column was doing the whole job on its own and that was the defect. A
+ * fat-fingered 75 was filed OPTIMISTICALLY here first — that is what makes a
+ * night logged in a basement survive — then refused by the CHECK with a 23514.
+ * Nothing read the refusal. The entry kept its `local:` id, stayed in the list,
+ * stayed in this device's cache, stayed counted in `unsent`, and was re-offered
+ * to the server on every launch for the life of the install. Meanwhile 75 hours
+ * sat in the client's sleep average and in readiness, which is the biggest
+ * number on the home screen, and there was no second mutator anywhere in this
+ * provider to take it out again.
+ *
+ * So the bound is checked before anything is filed. The screen's own gate is
+ * still the first line — Recovery disables the button below 1 hour and with no
+ * quality mark — and this is the second, exactly like the `if (!hours)` that
+ * has always been below it.
+ */
+export const MAX_SLEEP_HOURS = 24;
+export const MAX_QUALITY = 5;
+
+/** Is this a night that can be filed at all? Pure, and the same question the
+ *  column asks, so a refusal here and a refusal there cannot disagree. */
+export function isFilableNight(hours: number, quality: number): boolean {
+  return Number.isFinite(hours) && hours > 0 && hours <= MAX_SLEEP_HOURS
+    && Number.isInteger(quality) && quality >= 1 && quality <= MAX_QUALITY;
+}
 
 /** Per-account, so signing out and back in as somebody else cannot show one
  *  client another client's nights off this device. `availability.ts` caches
@@ -79,10 +113,35 @@ interface WellnessValue {
    *  entry is on this phone and nowhere else — it is still shown, and it will
    *  be sent on the next launch that reaches the server. */
   addSleep: (hours: number, quality: number) => Promise<boolean>;
+  /**
+   * Take a night back out.
+   *
+   * The second mutator this provider did not have. `addSleep` was the whole of
+   * it, so every entry ever filed was permanent — a night typed as 12 when the
+   * client meant 1.2 went on being a twelve-hour night in their average and in
+   * their readiness score for as long as the account existed, and the only
+   * remedy the app offered was to log more nights until it stopped mattering.
+   *
+   * Resolves true when the row is gone from the server (or was never on it,
+   * which is the case for an unsent entry — there is nothing to delete and the
+   * removal is complete). False means the row is still there and the caller
+   * must NOT tell the client it went: it will come back on the next read, which
+   * is the failure mode that makes people stop believing a delete button.
+   */
+  removeSleep: (id: string) => Promise<boolean>;
   /** Whether the nights on screen were confirmed by the server. Under 'error'
    *  an empty list means UNKNOWN and a non-empty one is this device's cached
    *  copy, not a confirmed current one. */
   status: LoadStatus;
+  /**
+   * Read the sleep log again.
+   *
+   * A real re-read: it bumps the key the load effect is on, so the same query
+   * runs and `status` ends at whatever the server says this time. Nothing
+   * queued on this device is dropped — the unsent nights are merged in after
+   * the read as they are on any other pass.
+   */
+  reload: () => void;
   /** How many of `sleep` have not reached the server. Derived from the list
    *  rather than counted alongside it, because a count kept in its own state is
    *  a second answer to the same question and the two drift. */
@@ -103,6 +162,8 @@ const rowToEntry = (r: any): SleepEntry => ({
 
 export function WellnessProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
   const [sleep, setSleepState] = useState<SleepEntry[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -133,7 +194,16 @@ export function WellnessProvider({ children }: { children: ReactNode }) {
 
   /** Write one entry and adopt the id the server gave it. Returns false for
    *  every reason the row is not on the server, which the caller reports as
-   *  "this phone only" — never as a failure the user has to redo. */
+   *  "this phone only" — never as a failure the user has to redo.
+   *
+   *  A REFUSAL is not one of those reasons any more. `classifyWrite` reads the
+   *  evidence supabase-js hands back — a SQLSTATE means Postgres parsed the row
+   *  and declined it, no code at all means nobody answered — and a row the
+   *  database has declined will be declined every time it is offered. Left in
+   *  the list it is a night in the client's average that no server will ever
+   *  hold, retried on every launch for the life of the install. So it comes
+   *  out. See src/lib/offlineQueue.ts, which was written for exactly this
+   *  shape of bug in the food log. */
   const send = async (owner: string, e: SleepEntry): Promise<boolean> => {
     try {
       const { data, error } = await supabase.from('sleep_logs')
@@ -144,7 +214,13 @@ export function WellnessProvider({ children }: { children: ReactNode }) {
       // cannot arrive here looking like a successful one — but `sid` is checked
       // anyway, because adopting `undefined` as an id would quietly turn a
       // pending entry into one nothing will ever retry.
-      if (error || !sid) return false;
+      if (error || !sid) {
+        if (error && classifyWrite(error as any, 0) === 'refused') {
+          reportError('wellness.sleepRefused', error, { hours: e.hours, quality: e.quality });
+          setSleep(listRef.current.filter((x) => x.id !== e.id), owner);
+        }
+        return false;
+      }
       setSleep(adoptServerId(listRef.current, e.id, String(sid)), owner);
       return true;
     } catch { return false; }
@@ -203,6 +279,8 @@ export function WellnessProvider({ children }: { children: ReactNode }) {
         // Anything logged while offline goes up now. A failure here is neither
         // fatal nor silent: the entry keeps its local id, stays in the list,
         // stays counted in `unsent`, and is tried again on the next launch.
+        // Unless the server REFUSED it, in which case `send` takes it out —
+        // that entry is not waiting for signal, it is waiting for nothing.
         for (const e of m.pending) {
           if (cancelled) return;
           await send(id, e);
@@ -210,14 +288,22 @@ export function WellnessProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); /* offline: the cached copy stands, and now says so */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readTick]);
 
   const addSleep = async (hours: number, quality: number): Promise<boolean> => {
     // Unchanged from the in-memory version, and load-bearing: tapping "Log
     // Sleep" without touching either control used to file a night the client
     // never had, which then became their sleep average and fed readiness. The
     // screen disables the button for the same reason; this is the second line.
+    //
+    // The bound is checked with it now, and BEFORE anything is filed locally.
+    // See `isFilableNight`: the optimistic write is what makes a night logged
+    // with no signal survive, and it is also what made a 75 permanent — the
+    // column refused it, nothing read the refusal, and 75 hours stayed in the
+    // average and in readiness for ever. A night that cannot be stored is not
+    // filed at all rather than filed and quietly disowned.
     if (!hours) return false;
+    if (!isFilableNight(hours, quality)) return false;
     const e: SleepEntry = { id: localId(), at: new Date().toISOString(), hours, quality };
     // Optimistic, and cached immediately — a night logged in a lift has to
     // survive the app being killed before the network ever comes back.
@@ -226,8 +312,59 @@ export function WellnessProvider({ children }: { children: ReactNode }) {
     return send(uid, e);
   };
 
+  /**
+   * Take one night back out.
+   *
+   * Optimistic like everything else here, and then honest about what happened:
+   * a delete the server refuses puts the entry back, because a row that is
+   * still in `sleep_logs` will be read again on the next launch and a client
+   * who watched it disappear and then return has been told two different things
+   * about their own record.
+   *
+   * An entry that never reached the server has no row to delete. Removing it
+   * from the list IS the whole of the deletion, and that is reported as a
+   * success rather than as "nothing was deleted" — which would be true of the
+   * server and false of what the client asked for.
+   *
+   * `.eq('user_id', uid)` alongside the id, for the reason clientData's
+   * updateScan gives about the same clause: RLS already scopes this to the
+   * signed-in account, so it changes nothing about what is permitted — it is
+   * there so a bug handing this an id from another account matches nothing
+   * rather than relying on the policy as the only thing in the way.
+   */
+  const removeSleep = async (id: string): Promise<boolean> => {
+    const before = listRef.current;
+    const target = before.find((e) => e.id === id);
+    if (!target) return true;                 // already gone; nothing to undo
+    setSleep(before.filter((e) => e.id !== id), uid);
+    if (isPending(target.id) || !USE_SUPABASE || !uid) return true;
+    try {
+      // `.select('id')` so the count is readable. A delete that matches no rows
+      // is a 204 with `error: null` over PostgREST — see src/lib/wroteRows.ts —
+      // so "no error" is not evidence that anything was deleted.
+      const { data, error } = await supabase.from('sleep_logs')
+        .delete().eq('id', target.id).eq('user_id', uid).select('id');
+      if (error) {
+        reportError('wellness.removeSleep', error);
+        setSleep(before, uid);
+        return false;
+      }
+      // Zero rows means the row is not this account's, or is already gone. The
+      // second is success and the first must not be reported as one, and they
+      // are indistinguishable from here — so the entry goes back and the caller
+      // is told the delete did not land. A night that really had gone comes
+      // back off the next read as absent anyway.
+      if (!data || data.length === 0) { setSleep(before, uid); return false; }
+      return true;
+    } catch (e) {
+      reportError('wellness.removeSleep', e);
+      setSleep(before, uid);
+      return false;
+    }
+  };
+
   const unsent = useMemo(() => sleep.filter((e) => isPending(e.id)).length, [sleep]);
 
-  return <Ctx.Provider value={{ sleep, addSleep, status, unsent }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ sleep, addSleep, removeSleep, status, unsent, reload }}>{children}</Ctx.Provider>;
 }
 export function useWellness(): WellnessValue { const v = useContext(Ctx); if (!v) throw new Error('useWellness must be used inside <WellnessProvider>'); return v; }

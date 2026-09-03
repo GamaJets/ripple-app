@@ -248,6 +248,37 @@ export function slug(name: string | null | undefined): string {
  *                  themselves are bytes in a bucket and cannot travel in a CSV;
  *                  the table says so in its own note rather than leaving a
  *                  reader to assume the export contained them.
+ *
+ * ── And the five after those ──────────────────────────────────────────────
+ *
+ * Four tables were still written by this product and readable by nobody
+ * leaving it, and one — the order book — was not readable by the gym AT ALL
+ * until src/lib/gymOrders.ts and /orders landed beside this round.
+ *
+ *   orders         `gym_orders`. Card money the gym took online, through a
+ *                  Stripe account it owns. `payments` is the DESK's register
+ *                  and does not contain these: an online sale that Stripe
+ *                  settled is a line the gym has to reconcile against a payout
+ *                  and could not export at all.
+ *   closes         `gym_month_closes`. The four figures a month was signed off
+ *                  on, as they stood, plus what the screen was refusing about
+ *                  if it was closed anyway. This is the only row in the
+ *                  database that says a human accepted a set of numbers, and
+ *                  it is the row an accountant reconciles a filed return to.
+ *   adjustments    `payroll_adjustments`. Bonuses, deductions, reimbursements
+ *                  and advances. `settlements` is what was HANDED OVER and
+ *                  these are the lines that made it that figure — a payslip a
+ *                  coach queries cannot be reconstructed from the total alone.
+ *   equipmentLog   `gym_equipment_log`. The maintenance history and the
+ *                  accident book. The equipment register says a machine
+ *                  exists; this says it was serviced in March and that
+ *                  somebody was hurt on it in June, which is the half an
+ *                  insurer and a claim actually turn on.
+ *   reconciles     `gym_reconcile_marks`. Which invoices and payments somebody
+ *                  ACCEPTED as explained and which they FLAGGED, with the
+ *                  reason the constraint makes them give. A reconciliation
+ *                  whose exceptions were taken off it by hand and left no
+ *                  exported trace is a reconciliation an auditor cannot check.
  */
 export type ExportPart =
   | 'plans'
@@ -272,13 +303,19 @@ export type ExportPart =
   | 'purchases'
   | 'agreements'
   | 'signatures'
-  | 'documents';
+  | 'documents'
+  | 'orders'
+  | 'closes'
+  | 'adjustments'
+  | 'equipmentLog'
+  | 'reconciles';
 
 export const EXPORT_PARTS: ExportPart[] = [
   'plans', 'members', 'memberRecords', 'memberships', 'payments', 'invoices',
+  'orders', 'reconciles', 'closes',
   'classes', 'attendance', 'sessions',
   'passTypes', 'passes', 'visits', 'invites',
-  'settlements', 'equipment', 'shifts',
+  'settlements', 'adjustments', 'equipment', 'equipmentLog', 'shifts',
   'interventions', 'promos', 'events', 'purchases',
   'agreements', 'signatures', 'documents',
 ];
@@ -450,6 +487,112 @@ export interface ExportDocument {
   uploadedById: string | null; uploadedByName: string | null; uploadedAt: string;
 }
 
+/* ── the five after those ──────────────────────────────────────────────────── */
+
+/**
+ * One row of `gym_orders` — card money taken online.
+ *
+ * `amountCents` is the QUOTE, and it is what the member was charged: the column
+ * is `not null` in supabase/parts/281, so a blank here means the read could not
+ * put a number on it rather than that the order was free. `stripeSessionId` and
+ * `stripePaymentIntent` travel because they are the join to the gym's own
+ * Stripe account — without them a payout line and an order line are two numbers
+ * that happen to be equal, and reconciling them afterwards is guesswork.
+ *
+ * `failureNote` is exported and is the reason this part is not merely nice to
+ * have. A 'failed' order is not a failed payment: part 281 defines it as Stripe
+ * having taken the money while the entitlement could not be written. A gym
+ * leaving the platform with those rows unexported takes no record that it owes
+ * somebody a membership it was paid for.
+ */
+export interface ExportOrder {
+  id: string; memberId: string | null; memberName: string | null;
+  kind: string | null; intent: string | null; status: string | null;
+  amountCents: number | null; currency: string | null;
+  planId: string | null; passTypeId: string | null;
+  termStartsOn: string | null; termEndsOn: string | null;
+  usesTotal: number | null; expiresOn: string | null;
+  membershipId: string | null; passId: string | null;
+  stripeAccountId: string | null; stripeSessionId: string | null;
+  stripePaymentIntent: string | null; failureNote: string | null;
+  createdAt: string | null; paidAt: string | null;
+}
+
+/**
+ * One row of `gym_month_closes` — a month somebody signed off, and on what.
+ *
+ * Every figure is nullable and every one of them exports blank rather than
+ * zero. Part 182 stores them nullable for exactly this reason: the screen was
+ * showing dashes, and a zero written into a filed record is a fabricated fact
+ * that reads as "this gym took nothing in March".
+ *
+ * `blockersAtClose` is the column that makes this row worth exporting at all.
+ * A month closed over a stated objection is a decision a person made, and the
+ * objection is what an auditor asks about. `reopenedAt` beside it means the
+ * close was undone — the row is kept, because a close that was later reopened
+ * is two facts and neither one cancels the other.
+ */
+export interface ExportClose {
+  id: string; monthKey: string;
+  closedAt: string | null; closedById: string | null; closedByName: string | null;
+  takenCents: number | null; invoicedCents: number | null;
+  outstandingCents: number | null; payrollCents: number | null;
+  currency: string | null; unmarkedSessions: number | null;
+  blockersAtClose: string | null; note: string | null;
+  reopenedAt: string | null; reopenedById: string | null;
+  reopenedByName: string | null; reopenReason: string | null;
+}
+
+/**
+ * One row of `payroll_adjustments` — a line that is not a session.
+ *
+ * `amountCents` is SIGNED and the sign is not cosmetic: part 183 constrains a
+ * deduction and an advance to be negative and a bonus and a reimbursement to be
+ * positive, so summing this column is the arithmetic and not an invitation to
+ * apply the kind twice. `kind` travels beside it anyway, because a bonus and a
+ * reimbursement add the same money and mean entirely different things on a
+ * payslip somebody files.
+ */
+export interface ExportAdjustment {
+  id: string; trainerId: string | null; trainerName: string | null;
+  kind: string | null; amountCents: number | null; currency: string | null;
+  note: string | null; appliesOn: string | null; settlementId: string | null;
+  createdAt: string | null; createdById: string | null; createdByName: string | null;
+}
+
+/**
+ * One row of `gym_equipment_log` — the maintenance history and the accident
+ * book, which are one table because they are one question after a claim.
+ *
+ * `equipmentLabel` is exported beside `equipmentId` and is not redundant: part
+ * 186 sets the id to NULL when a machine is retired precisely so that retiring
+ * it does not delete the record of the accident that happened on it, and the
+ * label is then the only thing saying what the machine was.
+ */
+export interface ExportEquipmentLog {
+  id: string; equipmentId: string | null; equipmentLabel: string | null;
+  kind: string | null; happenedOn: string | null; performedBy: string | null;
+  findings: string | null; costCents: number | null; currency: string | null;
+  documentId: string | null; reportedTo: string | null;
+  recordedById: string | null; recordedByName: string | null; createdAt: string | null;
+}
+
+/**
+ * One row of `gym_reconcile_marks` — an exception somebody took off the
+ * reconciliation, and why.
+ *
+ * `subjectId` is an invoice id OR a payment id and `subjectKind` says which:
+ * part 181 deliberately did not split it into two nullable foreign keys, so the
+ * two columns are read together or not at all. Both are exported, unresolved,
+ * because resolving them here would mean a join that can fail and a mark whose
+ * subject is missing is still a mark that was made.
+ */
+export interface ExportReconcileMark {
+  id: string; subjectKind: string | null; subjectId: string | null;
+  state: string | null; note: string | null;
+  markedById: string | null; markedByName: string | null; markedAt: string | null;
+}
+
 /** What each part is called in a sentence an owner reads. */
 export const EXPORT_LABEL: Record<ExportPart, string> = {
   plans: 'the price book',
@@ -475,6 +618,11 @@ export const EXPORT_LABEL: Record<ExportPart, string> = {
   agreements: 'the documents people are asked to sign',
   signatures: 'signatures',
   documents: 'the filing cabinet',
+  orders: 'what members bought online',
+  closes: 'the months that were signed off',
+  adjustments: 'payroll adjustments',
+  equipmentLog: 'the maintenance and accident book',
+  reconciles: 'the reconciliation marks',
 };
 
 /** What leaving a part out of the bundle actually costs. Named so the warning
@@ -503,6 +651,11 @@ export const EXPORT_COST: Record<ExportPart, string> = {
   agreements: 'the wording of every waiver, consent and set of terms, as each version stood',
   signatures: 'who signed what, when, and whether they signed it themselves',
   documents: 'what is in the filing cabinet — the contracts, insurance, certificates and incident reports the gym holds',
+  orders: 'every card payment the gym took online, and the Stripe reference each one reconciles to',
+  closes: 'the figures each month was signed off on, who signed it, and what they were told was wrong at the time',
+  adjustments: 'the bonuses, deductions, reimbursements and advances behind what the staff were actually paid',
+  equipmentLog: 'when each machine was serviced, what the engineer found, and every incident recorded on one',
+  reconciles: 'which payments and invoices somebody accepted as explained, and the reason they gave',
 };
 
 /** The basename each part writes to, before the bundle prefix. */
@@ -530,6 +683,11 @@ export const EXPORT_FILE: Record<ExportPart, string> = {
   agreements: 'agreements.csv',
   signatures: 'signatures.csv',
   documents: 'documents.csv',
+  orders: 'online-orders.csv',
+  closes: 'month-closes.csv',
+  adjustments: 'payroll-adjustments.csv',
+  equipmentLog: 'equipment-log.csv',
+  reconciles: 'reconciliation-marks.csv',
 };
 
 /* ── what a period does and does not narrow ────────────────────────────────── */
@@ -573,6 +731,17 @@ export const EXPORT_DATE_FIELD: Record<ExportPart, string | null> = {
   agreements: null,
   signatures: 'signed_at',
   documents: 'uploaded_at',
+  orders: 'created_at',
+  // The month the close is ABOUT, not the day somebody pressed the button. An
+  // accountant asking for a financial year means the twelve closes for those
+  // months, and bounding on `closed_at` would drop a December close signed off
+  // in the January after it — the one every year-end actually has.
+  closes: 'month_key',
+  // `applies_on` and not `created_at`, for the reason part 183 gives it: an
+  // adjustment for last month entered this month belongs to last month.
+  adjustments: 'applies_on',
+  equipmentLog: 'happened_on',
+  reconciles: 'marked_at',
 };
 
 /**
@@ -651,6 +820,11 @@ export interface GymExportInput {
   agreements: Slice<ExportAgreement>;
   signatures: Slice<ExportSignature>;
   documents: Slice<ExportDocument>;
+  orders: Slice<ExportOrder>;
+  closes: Slice<ExportClose>;
+  adjustments: Slice<ExportAdjustment>;
+  equipmentLog: Slice<ExportEquipmentLog>;
+  reconciles: Slice<ExportReconcileMark>;
 }
 
 /** The slice a part is read from. `members` rides on `memberships`. */
@@ -681,6 +855,15 @@ export function partSlice(input: GymExportInput, part: ExportPart): Slice<unknow
     case 'agreements': return input.agreements;
     case 'signatures': return input.signatures;
     case 'documents': return input.documents;
+    case 'orders': return input.orders;
+    case 'closes': return input.closes;
+    case 'adjustments': return input.adjustments;
+    // Its own read, and deliberately not riding on `equipment`. A gym whose
+    // register would not load still has an accident book, and an accident book
+    // that came back empty because a different table failed is the worst file
+    // in this bundle to be silently wrong about.
+    case 'equipmentLog': return input.equipmentLog;
+    case 'reconciles': return input.reconciles;
   }
 }
 
@@ -718,6 +901,18 @@ export function rowDate(part: ExportPart, row: unknown): string | null {
     case 'purchases': return str('createdAt');
     case 'signatures': return str('signedAt');
     case 'documents': return str('uploadedAt');
+    case 'orders': return str('createdAt');
+    // 'YYYY-MM' is not a date and `instantOf` will not parse one, so the month
+    // is placed at its first day. A close is then INSIDE any window that
+    // contains the start of the month it is about — which is the reading an
+    // accountant asking for a quarter means, and the file says so.
+    case 'closes': {
+      const k = str('monthKey');
+      return k && /^\d{4}-\d{2}$/.test(k) ? `${k}-01` : null;
+    }
+    case 'adjustments': return str('appliesOn');
+    case 'equipmentLog': return str('happenedOn');
+    case 'reconciles': return str('markedAt');
   }
 }
 
@@ -755,6 +950,11 @@ export function windowSlices(input: GymExportInput, w: ExportWindow): GymExportI
     purchases: cut('purchases', input.purchases),
     signatures: cut('signatures', input.signatures),
     documents: cut('documents', input.documents),
+    orders: cut('orders', input.orders),
+    closes: cut('closes', input.closes),
+    adjustments: cut('adjustments', input.adjustments),
+    equipmentLog: cut('equipmentLog', input.equipmentLog),
+    reconciles: cut('reconciles', input.reconciles),
   };
 }
 
@@ -932,6 +1132,15 @@ export const MEMBER_PARTS: ExportPart[] = [
   'memberRecords',
   'memberships', 'payments', 'invoices', 'attendance', 'sessions',
   'passes', 'visits', 'invites', 'interventions', 'purchases', 'events',
+  // What they bought online. `payments` is the DESK's register and holds none
+  // of these, so a member who has only ever paid by card on their phone had an
+  // empty payments.csv and nothing else — a subject-access response saying the
+  // gym holds no record of their money.
+  'orders',
+  // What somebody wrote against their money. A mark reading "accepted — member
+  // says they paid cash in March" is a note the gym made ABOUT this person, and
+  // it is the kind of note a subject-access request is usually made to find.
+  'reconciles',
   // The paperwork. `agreements` is here because a signature without the wording
   // it points at names a document the bundle does not contain.
   'agreements', 'signatures', 'documents',
@@ -979,6 +1188,13 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
     equipment: none(input.equipment),
     shifts: none(input.shifts),
     promos: none(input.promos),
+    // The gym's own books and its own building. A month close is four totals
+    // for the whole gym, an adjustment is a coach's pay, and the accident book
+    // carries no member column at all — none of the three is this person's
+    // record, and handing them over would answer a request nobody made.
+    closes: none(input.closes),
+    adjustments: none(input.adjustments),
+    equipmentLog: none(input.equipmentLog),
 
     memberRecords: keep(input.memberRecords, (r) => r.memberId === memberId),
     memberships: keep(input.memberships, (m) => m.memberId === memberId),
@@ -1008,6 +1224,10 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
     // wrong here — a document that no longer names anybody cannot be handed to
     // somebody as theirs on the strength of once having named someone.
     documents: keep(input.documents, (d) => d.memberId === memberId),
+    orders: keep(input.orders, (o) => o.memberId === memberId),
+    // Narrowed through the register the mark points AT, because the mark itself
+    // names an invoice or a payment and never a person.
+    reconciles: memberMarks(input, memberId),
     // The wording they agreed to, and only that. Narrowable only where the
     // signatures actually read: with that query refused there is no way to know
     // WHICH versions they signed, so the agreements travel whole rather than
@@ -1018,6 +1238,43 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
       ? keepSigned(input.agreements, input.signatures.rows, memberId)
       : input.agreements,
   };
+}
+
+/**
+ * The reconciliation marks that are about ONE member's money.
+ *
+ * `gym_reconcile_marks` names an invoice id or a payment id and never a member,
+ * so the only way to place a mark on a person is through the register it points
+ * at. That makes this the one part of a member bundle whose scope DEPENDS on
+ * two other reads, and the failure mode is the one this whole module exists to
+ * prevent: with the invoices refused, filtering on the ids that did load would
+ * produce a shorter list of marks and nothing anywhere would say it was short.
+ *
+ * So an unnarrowable part is UNREADABLE rather than empty. It comes out as the
+ * same loudly-named stub, with INCOMPLETE in the filename and a line in the
+ * README, and the sentence names the reason: the marks exist, they could not be
+ * matched to this person, and this bundle is not their whole record.
+ */
+function memberMarks(input: GymExportInput, memberId: string): Slice<ExportReconcileMark> {
+  const marks = input.reconciles;
+  if (marks.state !== 'ready') return marks;
+  if (input.invoices.state !== 'ready' || input.payments.state !== 'ready') {
+    const which = input.invoices.state !== 'ready' && input.payments.state !== 'ready'
+      ? 'the invoice register and the payments'
+      : input.invoices.state !== 'ready' ? 'the invoice register' : 'the payments';
+    return {
+      state: 'failed',
+      reason:
+        `a reconciliation mark names an invoice or a payment and never a member, so these could only be `
+        + `narrowed to this person through ${which} — which did not read. The marks are NOT empty and they `
+        + `are not included: they could not be matched.`,
+    };
+  }
+  const mine = new Set<string>([
+    ...input.invoices.rows.filter((i) => i.memberId === memberId).map((i) => i.id),
+    ...input.payments.rows.filter((p) => p.memberId === memberId).map((p) => p.id),
+  ]);
+  return { state: 'ready', rows: marks.rows.filter((m) => m.subjectId != null && mine.has(m.subjectId)) };
 }
 
 /** The agreement versions one member has a signature against. */
@@ -1283,6 +1540,11 @@ function tableFor(part: ExportPart, input: GymExportInput): Table {
     case 'agreements': return agreementsTable(readyRows(input.agreements));
     case 'signatures': return signaturesTable(readyRows(input.signatures));
     case 'documents': return documentsTable(readyRows(input.documents));
+    case 'orders': return ordersTable(readyRows(input.orders));
+    case 'closes': return closesTable(readyRows(input.closes));
+    case 'adjustments': return adjustmentsTable(readyRows(input.adjustments));
+    case 'equipmentLog': return equipmentLogTable(readyRows(input.equipmentLog));
+    case 'reconciles': return reconcilesTable(readyRows(input.reconciles));
   }
 }
 
@@ -1497,6 +1759,124 @@ function purchasesTable(rows: ExportPurchase[]): Table {
       p.sessionsTotal, p.sessionsUsed, p.status, p.id,
     ]),
     note: '`client_purchases` carries no tenant column, so these rows are scoped by the trainers on this gym\u2019s roster — a purchase against a coach who has since left the roster is not here. A blank currency means the package it was sold from has been deleted and the unit is unrecoverable; it is never guessed.',
+  };
+}
+
+/* ── the five after those ──────────────────────────────────────────────────── */
+
+/**
+ * The order book — card money taken online.
+ *
+ * Two money columns and both of them go through `minorToDecimal`, so a row
+ * whose amount could not be read is blank rather than free. `stripe_session_id`
+ * and `stripe_payment_intent` are here because they are the only join between
+ * this file and the gym's own Stripe payouts; without them an owner
+ * reconciling a settlement has two lists of amounts and no key.
+ */
+function ordersTable(rows: ExportOrder[]): Table {
+  return {
+    header: [
+      'created_at', 'paid_at', 'status', 'member_name', 'member_id', 'kind', 'intent',
+      'amount', 'currency', 'amount_cents',
+      'term_starts_on', 'term_ends_on', 'uses_total', 'expires_on',
+      'plan_id', 'pass_type_id', 'membership_id', 'pass_id',
+      'stripe_account_id', 'stripe_session_id', 'stripe_payment_intent', 'failure_note', 'order_id',
+    ],
+    rows: rows.map((o) => [
+      o.createdAt, o.paidAt, o.status, o.memberName, o.memberId, o.kind, o.intent,
+      minorToDecimal(o.amountCents), o.currency, o.amountCents,
+      o.termStartsOn, o.termEndsOn, o.usesTotal, o.expiresOn,
+      o.planId, o.passTypeId, o.membershipId, o.passId,
+      o.stripeAccountId, o.stripeSessionId, o.stripePaymentIntent, o.failureNote, o.id,
+    ]),
+    note:
+      'Card money taken online, which is NOT in payments.csv — that file is the desk\u2019s own register. '
+      + 'A status of "failed" does not mean the payment failed: it means Stripe took the money and the '
+      + 'membership or pass could not be written, so a row with status=failed and an empty membership_id '
+      + 'is somebody who paid and got nothing. A "pending" row older than a day or two is an order Stripe '
+      + 'never told us the end of.',
+  };
+}
+
+/**
+ * The months that were signed off, and what was wrong at the time.
+ *
+ * Every figure is written blank where none was recorded. A close with an empty
+ * `taken` is a month somebody signed off while the takings were showing a dash,
+ * and printing a 0 there would turn "we did not know" into "we took nothing" in
+ * a file an accountant reconciles a return against.
+ */
+function closesTable(rows: ExportClose[]): Table {
+  return {
+    header: [
+      'month_key', 'closed_at', 'closed_by', 'closed_by_id',
+      'taken', 'invoiced', 'outstanding', 'payroll', 'currency',
+      'taken_cents', 'invoiced_cents', 'outstanding_cents', 'payroll_cents',
+      'unmarked_sessions', 'blockers_at_close', 'note',
+      'reopened_at', 'reopened_by', 'reopened_by_id', 'reopen_reason', 'close_id',
+    ],
+    rows: rows.map((c) => [
+      c.monthKey, c.closedAt, c.closedByName, c.closedById,
+      minorToDecimal(c.takenCents), minorToDecimal(c.invoicedCents),
+      minorToDecimal(c.outstandingCents), minorToDecimal(c.payrollCents), c.currency,
+      c.takenCents, c.invoicedCents, c.outstandingCents, c.payrollCents,
+      c.unmarkedSessions, c.blockersAtClose, c.note,
+      c.reopenedAt, c.reopenedByName, c.reopenedById, c.reopenReason, c.id,
+    ]),
+    note:
+      'The figures AS THEY STOOD when the month was signed off. They are snapshots and are never '
+      + 'recomputed, so a close will disagree with a fresh sum over the same month once anything is '
+      + 'backdated into it \u2014 that disagreement is the record, not an error. `blockers_at_close` is what '
+      + 'the screen was refusing about when somebody closed it anyway. A row with `reopened_at` set was '
+      + 'undone afterwards and is kept: a close and its reopening are two facts.',
+  };
+}
+
+/** Payroll adjustments — the lines that made a settlement the figure it was. */
+function adjustmentsTable(rows: ExportAdjustment[]): Table {
+  return {
+    header: ['applies_on', 'trainer_name', 'trainer_id', 'kind', 'amount', 'currency', 'amount_cents', 'note', 'settlement_id', 'created_at', 'created_by', 'created_by_id', 'adjustment_id'],
+    rows: rows.map((a) => [
+      a.appliesOn, a.trainerName, a.trainerId, a.kind,
+      minorToDecimal(a.amountCents), a.currency, a.amountCents,
+      a.note, a.settlementId, a.createdAt, a.createdByName, a.createdById, a.id,
+    ]),
+    note:
+      'Amounts are SIGNED and the sign already carries the kind: a deduction and an advance are negative, '
+      + 'a bonus and a reimbursement positive. Sum the column as it stands; applying the kind a second time '
+      + 'doubles it. `applies_on` is the period the line belongs to, which is not the day it was entered. '
+      + 'A blank settlement_id is a line not yet paid out.',
+  };
+}
+
+/** The maintenance history and the accident book. */
+function equipmentLogTable(rows: ExportEquipmentLog[]): Table {
+  return {
+    header: ['happened_on', 'kind', 'equipment_label', 'equipment_id', 'performed_by', 'findings', 'cost', 'currency', 'cost_cents', 'reported_to', 'document_id', 'recorded_by', 'recorded_by_id', 'created_at', 'entry_id'],
+    rows: rows.map((e) => [
+      e.happenedOn, e.kind, e.equipmentLabel, e.equipmentId, e.performedBy, e.findings,
+      minorToDecimal(e.costCents), e.currency, e.costCents,
+      e.reportedTo, e.documentId, e.recordedByName, e.recordedById, e.createdAt, e.id,
+    ]),
+    note:
+      'Servicing, repairs, inspections and INCIDENTS, in one file because they are one question after a '
+      + 'claim. A blank equipment_id beside a filled equipment_label is a machine that has since been '
+      + 'retired \u2014 the entry outlives it deliberately, because the record of an accident must not be '
+      + 'deleted by disposing of the machine it happened on. `document_id` points into documents.csv; the '
+      + 'file itself is bytes in a bucket and does not travel in a CSV bundle.',
+  };
+}
+
+/** Which lines somebody accepted, which they flagged, and why. */
+function reconcilesTable(rows: ExportReconcileMark[]): Table {
+  return {
+    header: ['marked_at', 'subject_kind', 'subject_id', 'state', 'note', 'marked_by', 'marked_by_id', 'mark_id'],
+    rows: rows.map((m) => [m.markedAt, m.subjectKind, m.subjectId, m.state, m.note, m.markedByName, m.markedById, m.id]),
+    note:
+      '`subject_id` is an invoice id when subject_kind is "invoice" and a payment id when it is "payment" '
+      + '\u2014 join it to invoices.csv or payments.csv accordingly. One live mark per line: changing your mind '
+      + 'replaced the row rather than adding one, so this file is the current answer and not a history of '
+      + 'the arguing. An "accepted" row always carries a reason, because the database refuses one without.',
   };
 }
 

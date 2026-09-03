@@ -187,6 +187,33 @@ const base: GymExportInput = {
   documents: sliceReady([
     { id: 'd1', memberId: 'm1', memberAttached: true, equipmentId: null, kind: 'contract', title: 'Signed membership agreement', storagePath: 'T1/2026-02-04-abc-sara.pdf', mime: 'application/pdf', sizeBytes: 91234, expiresOn: null, note: null, uploadedById: 'o1', uploadedByName: 'Reception', uploadedAt: '2026-02-04T00:00:00Z' },
   ]),
+  // One inside the quarter and one outside it, on every one of the five parts
+  // added last, so a filter that was never wired up fails here rather than in
+  // a bundle somebody files.
+  orders: sliceReady([
+    { id: 'oIn', memberId: 'm1', memberName: 'Sara', kind: 'membership', intent: 'renew', status: 'paid', amountCents: 6000, currency: 'GBP', planId: 'pl1', passTypeId: null, termStartsOn: '2026-02-01', termEndsOn: '2026-03-01', usesTotal: null, expiresOn: null, membershipId: 'ms1', passId: null, stripeAccountId: 'acct_1', stripeSessionId: 'cs_in', stripePaymentIntent: 'pi_in', failureNote: null, createdAt: '2026-02-01T00:00:00Z', paidAt: '2026-02-01T00:00:10Z' },
+    { id: 'oOut', memberId: 'm1', memberName: 'Sara', kind: 'membership', intent: 'new', status: 'paid', amountCents: 6000, currency: 'GBP', planId: 'pl1', passTypeId: null, termStartsOn: '2025-02-01', termEndsOn: '2025-03-01', usesTotal: null, expiresOn: null, membershipId: null, passId: null, stripeAccountId: 'acct_1', stripeSessionId: 'cs_out', stripePaymentIntent: 'pi_out', failureNote: null, createdAt: '2025-02-01T00:00:00Z', paidAt: '2025-02-01T00:00:10Z' },
+  ]),
+  // A close is dated by the MONTH it is about. 'closed_at' on the March row is
+  // in April deliberately: bounding on it would drop the close a quarter-end
+  // actually has, which is the bug `rowDate` places at the first of the month
+  // to avoid.
+  closes: sliceReady([
+    { id: 'cIn', monthKey: '2026-03', closedAt: '2026-04-04T09:00:00Z', closedById: 'o1', closedByName: 'Owner', takenCents: 120000, invoicedCents: 130000, outstandingCents: 10000, payrollCents: 40000, currency: 'GBP', unmarkedSessions: 2, blockersAtClose: 'two sessions with no outcome', note: null, reopenedAt: null, reopenedById: null, reopenedByName: null, reopenReason: null },
+    { id: 'cOut', monthKey: '2025-03', closedAt: '2025-04-04T09:00:00Z', closedById: 'o1', closedByName: 'Owner', takenCents: null, invoicedCents: null, outstandingCents: null, payrollCents: null, currency: null, unmarkedSessions: null, blockersAtClose: null, note: null, reopenedAt: null, reopenedById: null, reopenedByName: null, reopenReason: null },
+  ]),
+  adjustments: sliceReady([
+    { id: 'aIn', trainerId: 't1', trainerName: 'Dee', kind: 'bonus', amountCents: 5000, currency: 'GBP', note: 'covered two classes', appliesOn: '2026-02-28', settlementId: null, createdAt: '2026-03-04T00:00:00Z', createdById: 'o1', createdByName: 'Owner' },
+    { id: 'aOut', trainerId: 't1', trainerName: 'Dee', kind: 'deduction', amountCents: -2000, currency: 'GBP', note: 'kit', appliesOn: '2025-02-28', settlementId: null, createdAt: '2025-03-04T00:00:00Z', createdById: 'o1', createdByName: 'Owner' },
+  ]),
+  equipmentLog: sliceReady([
+    { id: 'lIn', equipmentId: 'e1', equipmentLabel: 'Rower', kind: 'service', happenedOn: '2026-03-02', performedBy: 'Precor UK', findings: 'chain replaced', costCents: 9000, currency: 'GBP', documentId: null, reportedTo: null, recordedById: 'o1', recordedByName: 'Owner', createdAt: '2026-03-03T00:00:00Z' },
+    { id: 'lOut', equipmentId: null, equipmentLabel: 'Treadmill 3 (retired)', kind: 'incident', happenedOn: '2025-03-02', performedBy: null, findings: 'member slipped', costCents: null, currency: null, documentId: null, reportedTo: 'insurer', recordedById: 'o1', recordedByName: 'Owner', createdAt: '2025-03-02T00:00:00Z' },
+  ]),
+  reconciles: sliceReady([
+    { id: 'rIn', subjectKind: 'payment', subjectId: 'pIn', state: 'accepted', note: 'paid by card at the desk, matches the Stripe line', markedById: 'o1', markedByName: 'Owner', markedAt: '2026-02-02T00:00:00Z' },
+    { id: 'rOut', subjectKind: 'payment', subjectId: 'pOut', state: 'flagged', note: 'no invoice found', markedById: 'o1', markedByName: 'Owner', markedAt: '2025-02-02T00:00:00Z' },
+  ]),
 };
 
 const Q1: GymExportInput = { ...base, ...windowFromDays('2026-01-01', '2026-03-31') };
@@ -217,6 +244,20 @@ ok(EXPORT_PARTS.filter((p) => !EXPORT_DATE_FIELD[p]).every((p) => EXPORT_UNBOUND
   eq(undatedRows(cut, 'equipment'), null, 'an unbounded part has no such count — the question does not arise');
   eq(undatedRows({ ...cut, visits: sliceFailed('down') }, 'visits'), null,
     'and neither does an unread one: 0 there would say there were none');
+
+  eq(rows('orders'), 1, 'the online order placed inside the quarter stays and the one a year earlier does not');
+  eq(rows('adjustments'), 1, 'a payroll adjustment is placed by applies_on, not by the day it was typed');
+  eq(rows('equipmentLog'), 1, 'and a service is placed by the day the engineer came');
+  eq(rows('reconciles'), 1, 'a reconciliation mark is placed by when somebody made it');
+
+  // The one nobody would guess. A March close is signed off in APRIL, so
+  // bounding it on `closed_at` would drop the close every quarter-end actually
+  // has. It is placed at the first of the month it is ABOUT.
+  eq(rows('closes'), 1, 'the close FOR March is inside a January–March window even though it was signed off in April');
+  eq(rowDate('closes', { monthKey: '2026-03', closedAt: '2026-04-04T09:00:00Z' }), '2026-03-01',
+    'a close is dated by the month it covers, at that month’s first day');
+  eq(rowDate('closes', { monthKey: 'not-a-month' }), null,
+    'and a month key that is not one is unplaceable rather than guessed at');
 
   eq(rowDate('memberships', { startedOn: '2019-01-01' }), null,
     'nothing dates a membership for this purpose, and the switch says so rather than reaching for a field');

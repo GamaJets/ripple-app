@@ -74,6 +74,7 @@
 // table each row came from and this screen asks it — see
 // src/lib/clientRecord.ts, and `handAdded` in src/lib/trainerMock.ts.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
@@ -175,6 +176,7 @@ import {
   type FollowUpRead,
 } from '../../src/lib/interventions';
 import type { WorkoutEntry } from '../../src/lib/mockData';
+import { END_ALIGN } from '../../src/ui/direction';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
 // The summary row's read, and no more: enough to count the days trained, date
@@ -263,10 +265,24 @@ export default function ClientScreen() {
   useFocusEffect(useCallback(() => { void r.refresh(); }, [r.refresh]));
 
   const ap = useAssignedPrograms();
+  /* ── the nonce every read on this screen hangs off ──────────────────────
+   *
+   * Thirteen separate effects read the server here — the drift, the goals, the
+   * planned week, what they trained, their uid, their packages and passes and
+   * credits, the money strands, the shared photos, the scans, their gym, the
+   * contact log and the check-ins. They are separate on purpose: each fails
+   * independently, and this screen says so section by section rather than
+   * collapsing thirteen answers onto one spinner.
+   *
+   * Collapsing them into one loader to make a refresh easy would undo that.
+   * So the refresh does the opposite: it bumps this, every one of those
+   * effects has it in its dependency array, and all thirteen re-read through
+   * the code that already knows how to report each of them. */
+  const [readNonce, setReadNonce] = useState(0);
   // `status` as well as the tenant: a null tenant under 'error' is a read that
   // failed, not a coach with no gym, and the contact log below decides whether
   // it applies to this client off exactly that distinction.
-  const { tenant, status: tenantStatus } = useTenant();
+  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
   // Who a logged contact is filed under. `member_interventions_staff_w`
   // requires `by_id = auth.uid()` in its WITH CHECK — a coach must not be able
   // to file a call under a colleague's name, because "who has already tried" is
@@ -379,7 +395,7 @@ export default function ClientScreen() {
       }
     })();
     return () => { live = false; };
-  }, [canRead, id, tenant?.id, joinedAt]);
+  }, [canRead, id, tenant?.id, joinedAt, readNonce]);
 
   /* ── what they are working toward ───────────────────────────────────────── */
 
@@ -407,7 +423,7 @@ export default function ClientScreen() {
       setGoalStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   // 'error' is the only thing that may produce an unreadable board, and an
   // unreadable board is the only thing that may print as "could not be read".
@@ -438,7 +454,7 @@ export default function ClientScreen() {
       setWeekStatus(read.days == null ? 'error' : read.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   // The programme is the coach's own row and null covers three situations —
   // none assigned, the read failed, and one assigned by a different coach,
@@ -492,7 +508,7 @@ export default function ClientScreen() {
       setTrainedStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   // Null under 'error', for the same reason every other board on this screen
   // gets one: an empty list is the only shape "they have never trained" and
@@ -533,7 +549,7 @@ export default function ClientScreen() {
       } catch { if (live) { setUid(null); setUidStatus('error'); } }
     })();
     return () => { live = false; };
-  }, [authRev]);
+  }, [authRev, readNonce]);
 
   const [items, setItems] = useState<ChecklistRow[] | null>(null);
   const [itemStatus, setItemStatus] = useState<LoadStatus>('loading');
@@ -591,7 +607,7 @@ export default function ClientScreen() {
       }
     })();
     return () => { live = false; };
-  }, [canRead, id, uid, uidStatus]);
+  }, [canRead, id, uid, uidStatus, readNonce]);
 
   /* ── what pays for their sessions ───────────────────────────────────────── */
 
@@ -672,7 +688,7 @@ export default function ClientScreen() {
       }
     })();
     return () => { live = false; };
-  }, [canRead, id, uid, uidStatus]);
+  }, [canRead, id, uid, uidStatus, readNonce]);
 
   // The gym pass has to be live on a DATE, and the date is local: a pass
   // expires at the gym, not at an instant in UTC.
@@ -741,7 +757,7 @@ export default function ClientScreen() {
       setSales(p); setRenewals(r); setReceipts(rec); setSubs(sb); setInvoices(inv);
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   /** The three statuses as one set, passed whole to `clientValue`. Never
    *  composed here — the set IS the argument, and a caller that took two of
@@ -827,7 +843,7 @@ export default function ClientScreen() {
       }
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   /* ── whether there is a body-composition trend to look at ───────────────── */
 
@@ -864,7 +880,7 @@ export default function ClientScreen() {
       setScanTop({ newestISO: rows[0]?.taken_at ?? null, hasEarlier: rows.length > 1 });
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   /* ── how the coach delivers to this person ──────────────────────────────── */
 
@@ -952,7 +968,7 @@ export default function ClientScreen() {
       setClientTenantStatus('ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [contactStatus, setContactStatus] = useState<LoadStatus>('loading');
@@ -987,7 +1003,7 @@ export default function ClientScreen() {
       setContactStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id, tenant?.id, contactTick]);
+  }, [canRead, id, tenant?.id, contactTick, readNonce]);
 
   /** The contact sheet's own state. Null when it is closed. */
   const [logging, setLogging] = useState<{ channel: Channel | null; outcome: ContactOutcome | null; note: string } | null>(null);
@@ -1071,18 +1087,11 @@ export default function ClientScreen() {
       setCiStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [canRead, id]);
+  }, [canRead, id, readNonce]);
 
   /* ── the briefing ───────────────────────────────────────────────────────── */
 
   const nowMs = Date.now();
-  const attn = attention({
-    who,
-    unread: client ? client.unread : null,
-    goalStatus, board, weekStatus, week,
-    driftFailed,
-    nowMs,
-  });
   const noAccount = noAccountNote(queryable, who);
   // Non-null when no read was issued at all. Every line below defers to it,
   // because the alternative is a screen full of "Reading their goals…" for a
@@ -1196,6 +1205,56 @@ export default function ClientScreen() {
   const ci = useClientIntake(canRead ? id : null);
   const intakeNudge = intakePrompt(ci.state, ci.progress, who);
 
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * This is the screen a coach opens before a session to find out what has
+   * happened to somebody, and almost everything on it is written by that
+   * person on their own phone: a check-in, a scan, a photo, a payment, a
+   * training day. None of it arrives here by itself.
+   *
+   * `readNonce` carries the thirteen effect reads; the roster, the programme
+   * assignments, the gym, the glucose series and the intake come from
+   * providers and are asked for beside them. All of them together, because
+   * the briefing at the top of this screen is composed ACROSS them — a
+   * sentence about somebody's silence built from a fresh contact log and a
+   * stale activity read is a sentence about nobody. */
+  const pull = usePullToRefresh(useCallback(() => {
+    setReadNonce((n) => n + 1);
+    return Promise.all([
+      r.refresh(), Promise.resolve(ap.reload()), Promise.resolve(refreshTenant()),
+      gl.refresh(), Promise.resolve(ci.reload()),
+    ]);
+  }, [r, ap, refreshTenant, gl, ci]));
+
+  /* ── the briefing ───────────────────────────────────────────────────────
+   *
+   * Composed HERE rather than three hundred lines up, because this is the first
+   * point at which every fact it is allowed to raise exists. It used to take
+   * unread messages, goals, the marked week and drift, and nothing else — while
+   * the same screen read and rendered a disclosure list, an intake and an
+   * ageing invoice book further down. A coach who read the short list at the
+   * top and did not scroll was not told that somebody had just disclosed a
+   * knee, that their intake was half answered, or that they were three weeks
+   * late paying. Every one of those was already on the screen and none of them
+   * was in the part written to say what needs doing.
+   */
+  const attn = attention({
+    who,
+    unread: client ? client.unread : null,
+    // Off the roster row, and null under a failed roster read: an empty
+    // disclosure list from a read that did not land is not a client who has
+    // disclosed nothing. Only the area and the recency flag — never the note,
+    // which is seeded from the line off an uploaded document.
+    injuries: r.status === 'error' ? null : (client?.injuries ?? null),
+    goalStatus, board, weekStatus, week,
+    intake: ci.state,
+    intakeLeft: ci.progress.of - ci.progress.done,
+    invoiceStatus: invoices.status,
+    overdueInvoices: owed.overdue.length,
+    driftFailed,
+    nowMs,
+  });
+
 
   const go = (pathname: string) => () => {
     if (!id) return;
@@ -1257,7 +1316,7 @@ export default function ClientScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -1533,10 +1592,18 @@ export default function ClientScreen() {
                 {gl.paired.filter((x) => x.rise != null).slice(-5).reverse().map((x, i) => (
                   <View key={x.meal.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                     <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>{x.meal.name}</Text>
+                    {/* rtl-ok: before → peak is a reading BEFORE a meal and the
+                        reading after it. The arrow is time, not layout, and a
+                        coach reading it backwards would see a rise as a fall.
+                        What this does not fix, and cannot from here: inside an
+                        Arabic paragraph the platform's bidi algorithm reorders
+                        the two numeric runs around the neutral arrow, so the
+                        honest long-term fix is two labelled fields rather than
+                        a glyph between them. Recorded rather than papered over. */}
                     <Text style={{ ...ty.label, color: t.ink3 }}>
                       {x.before ? x.before.mmol.toFixed(1) : '—'} → {x.peak ? x.peak.mmol.toFixed(1) : '—'}
                     </Text>
-                    <Text style={{ ...ty.label, color: t.ink, width: 48, textAlign: 'right' }}>
+                    <Text style={{ ...ty.label, color: t.ink, width: 48, textAlign: END_ALIGN }}>
                       {/* A rise of 0.04 mmol/L formatted as "0.0" and was
                           then given a plus. Shown as arithmetic, and a rise
                           the monitor did not record is not arithmetic. */}
@@ -1790,7 +1857,7 @@ export default function ClientScreen() {
             ]} />
             {(creditLines ?? []).map((l) => (
               <View key={l.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: sp.md }}>
-                <Text style={{ ...ty.label, color: t.ink2, flex: 1, paddingRight: sp.md }}>{l.label}</Text>
+                <Text style={{ ...ty.label, color: t.ink2, flex: 1, paddingEnd: sp.md }}>{l.label}</Text>
                 <Text style={{ ...ty.label, color: t.ink2 }}>{`${l.left} of ${l.sessions_total}`}</Text>
               </View>
             ))}
@@ -1931,7 +1998,7 @@ export default function ClientScreen() {
             </View>
 
             {latestCheckIn.note ? (
-              <View style={{ marginTop: sp.md, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.brand }}>
+              <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.brand }}>
                 <Text style={{ ...ty.body, color: t.ink }}>{latestCheckIn.note}</Text>
               </View>
             ) : (

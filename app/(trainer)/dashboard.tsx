@@ -24,7 +24,8 @@
 //     clients.
 // Both providers are still mounted (they are shared context) but nothing on this
 // screen renders one person's data as another's.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { num } from '../../src/lib/format';
 import {
   DELIVERED_WINDOW_DAYS, MARK_WINDOW_DAYS, awaitingOutcome, deliveredBetween, fetchMySessions, windowStart,
@@ -32,7 +33,7 @@ import {
 import type { PtSession } from '../../src/lib/gymSessions';
 import { useAuth } from '../../src/ui/auth';
 import {
-  assessDrift, fetchClientActivity, compareDrift, summariseDrift, bandTitle, bandNote,
+  assessDrift, readClientActivity, compareDrift, summariseDrift, bandTitle, bandNote,
   DRIFT_LABEL, DEFAULT_WINDOWS, localDayKey, type Drift,
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
@@ -129,7 +130,12 @@ import {
   departureTally, departureLine, END_REASON_LABEL,
   type EndReason, type EndedRelationship,
 } from '../../src/lib/endCoaching';
-import { promptUnmarkedBacklog } from '../../src/ui/coachReminders';
+import { promptBookAlerts } from '../../src/ui/coachReminders';
+import { useChannelPrefs } from '../../src/ui/coachNotify';
+import { channelAllows } from '../../src/lib/coachNotify';
+import { fetchMyInvoices } from '../../src/ui/coachInvoices';
+import { ageingBook, type CoachInvoice } from '../../src/lib/coachInvoice';
+import { FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
 
@@ -263,13 +269,20 @@ function Bar({ t, pct, good }: { t: Theme; pct: number; good: boolean }) {
  * still finds them by name — and they come back on their own the moment an
  * in-person client appears. See src/lib/coachDelivery.ts.
  *
- * Only Schedule qualifies today. It is written as a list anyway because the
+ * Schedule and Your Register qualify. It is written as a list because the
  * question "is this an in-person tool?" is the thing worth being able to answer
  * once, and the next chip added here is a one-line decision rather than a
  * rewrite of the branch below.
+ *
+ * Your Register is the other end of taking a class: it says what the registers
+ * a coach took actually came to, and until now nothing in the app linked to it
+ * — `/(trainer)/my-register` was named in src/lib/features.ts and nowhere else,
+ * so a coach could only reach it by searching Explore for a screen they had no
+ * reason to know existed.
  */
 const IN_PERSON_SHORTCUTS: [IconName, string, string][] = [
   ['calendar', 'Schedule', '/(trainer)/calendar'],
+  ['check', 'Your Register', '/(trainer)/my-register'],
 ];
 
 const SHORTCUTS: [IconName, string, string][] = [
@@ -279,6 +292,12 @@ const SHORTCUTS: [IconName, string, string][] = [
   ['video', 'Videos', '/(trainer)/videos'],
   ['chart', 'Analytics', '/(trainer)/analytics'],
   ['trophy', 'Leaderboard', '/(trainer)/leaderboard'],
+  // Beside Leaderboard because both are read for the same reason — who on this
+  // book is worth more than the sessions they buy. It had the same problem Your
+  // Register had: `/(trainer)/referrals` was named in src/lib/features.ts and
+  // nowhere else in the app, so the screen that says which clients are bringing
+  // in other clients could be reached only by searching for it.
+  ['people', 'Referrals', '/(trainer)/referrals'],
   ['message', 'Feedback', '/(trainer)/feedback'],
   // The coach's own tracking, last and together because these three are the
   // only things here that are not about a client. My Training was reachable
@@ -365,7 +384,21 @@ export default function TrainerClients() {
   // `status` was computed by the roster provider and read by nobody, so a
   // refused read reached this screen as an empty list and was announced as
   // "No clients yet" — to a coach who has clients.
-  const { roster, status: rosterStatus, addClient, removeClient, setClientMode } = useRoster();
+  const { roster, status: rosterStatus, addClient, removeClient, setClientMode, refresh: refreshRoster } = useRoster();
+  /* ── the nonce the screen's own reads hang off ──────────────────────────
+   *
+   * Four effects here read the server directly: the roster-wide drift, the
+   * coach's own delivered sessions, the coaching relationships that ended, and
+   * the Repple invoices behind the overdue banner. They stay four separate
+   * effects — each is reported separately and a shared loader would hide a
+   * working half behind a broken one — so the refresh bumps this and every one
+   * of them re-reads through the code that already knows how to report it.
+   *
+   * The two effects keyed on `sel` are deliberately NOT on this nonce. They
+   * belong to the open client sheet, one of them clears the generated summary
+   * the coach may be reading, and the pull below is on the scroll view
+   * underneath a modal that would have to be closed to reach it. */
+  const [readNonce, setReadNonce] = useState(0);
   // How this coach works: their own declared answer, widened by their roster.
   // Only ever narrows the screen when the coach said "online" AND the roster
   // came back WHOLE AND nobody on it trains in the room. Anything short of all
@@ -384,7 +417,7 @@ export default function TrainerClients() {
   // draws the same distinction.
   const coachUnit: WeightUnit = useSettings().weightUnit;
   const rosterUnread = rosterStatus === 'error';
-  const { tenant } = useTenant();
+  const { tenant, refresh: refreshTenant } = useTenant();
   // The signed-in coach. Their own sessions are keyed on this, not on a gym —
   // which is the whole reason an independent trainer saw nothing here.
   const { user: authUser, loading: authLoading } = useAuth();
@@ -406,20 +439,44 @@ export default function TrainerClients() {
   //                                 failed read look like "nobody is drifting".
   const [drift, setDrift] = useState<Record<string, Drift> | null>(null);
   const [driftErr, setDriftErr] = useState<string | null>(null);
+  /**
+   * The two things the events map cannot say, and which decide what may be
+   * ACTED on.
+   *
+   * This effect called `fetchClientActivity`, which is the thin wrapper that
+   * returns `byClient` alone — and an empty array in that map means three
+   * different things: asked and silent, never asked, or cut off at PostgREST's
+   * row ceiling with this client's events on the far side of it.
+   * src/lib/clientDrift.ts says so in as many words and offers
+   * `readClientActivity` for exactly this reason: ORDERING a list can live with
+   * the ambiguity, acting on it cannot, and drift here drives the suggested
+   * check-ins and the nudge the coach sends off them. "Where have you been" to
+   * somebody who trained yesterday looks, to the one client who was paying
+   * attention, like the coach who was not.
+   *
+   * Null until the read lands. `notAsked` names the ids with no Repple account
+   * behind them; `truncated` is true when any of the four reads hit its
+   * ceiling, and it disqualifies EVERY client's silence rather than some — the
+   * page is ordered by nothing in particular, so which client lost rows is
+   * unknowable. Same reasoning as src/ui/nudges.ts, which already reads this way.
+   */
+  const [driftRead, setDriftRead] = useState<{ notAsked: Set<string>; truncated: boolean } | null>(null);
   const rosterKey = roster.map((c) => c.id).join(',');
   useEffect(() => {
     const ids = rosterKey ? rosterKey.split(',') : [];
     let live = true;
     setDriftErr(null);
-    if (!ids.length) { setDrift({}); return; }
-    setDrift(null);
+    if (!ids.length) { setDrift({}); setDriftRead({ notAsked: new Set(), truncated: false }); return; }
+    setDrift(null); setDriftRead(null);
     (async () => {
       try {
-        const events = await fetchClientActivity(supabase, ids, {
+        const act = await readClientActivity(supabase, ids, {
           days: DEFAULT_WINDOWS.historyDays,
           tenantId: tenant?.id ?? null,
         });
+        const events = act.byClient;
         if (!live) return;
+        setDriftRead({ notAsked: new Set(act.notAsked), truncated: act.truncated });
         const map: Record<string, Drift> = {};
         // `since` is the client's join date, and passing it changes two things.
         // A client added yesterday and a client silent for eight weeks both
@@ -440,27 +497,57 @@ export default function TrainerClients() {
         if (!live) return;
         reportError('dashboard.clientDrift', e);
         setDrift(null);
+        setDriftRead(null);
         setDriftErr(e?.message || 'Could not read the training record.');
       }
     })();
     return () => { live = false; };
-  }, [rosterKey, tenant?.id]);
+  }, [rosterKey, tenant?.id, readNonce]);
   const driftFor = (c: RosterClient): Drift | null => (drift ? drift[c.id] ?? null : null);
+  /**
+   * Whether this client's drift verdict may be ACTED on, as opposed to merely
+   * ordered by.
+   *
+   * The distinction src/lib/clientDrift.ts draws and this screen was not
+   * keeping. A verdict off a truncated read, or off a client the database was
+   * never asked about, is still worth putting near the top of a list — the
+   * worst case is a name too high up. It is not worth writing "how is your week
+   * going?" to somebody on the strength of, because the rows that would have
+   * disproved their silence are exactly the ones that did not come back.
+   *
+   * False while the read is still in flight, for the same reason: the suggested
+   * check-ins fall back to the roster's own columns until it lands.
+   */
+  const driftActionable = (c: RosterClient): boolean =>
+    !!driftRead && !driftRead.truncated && !driftRead.notAsked.has(c.id);
+  /** Why the suggested check-ins are not built on the training record, or null
+   *  when they are. Said out loud, because a short list of names is otherwise
+   *  indistinguishable from a book with nothing wrong in it. */
+  const driftActingNote: string | null =
+    driftErr
+      ? 'Their training records could not be read, so nothing below is based on who has stopped training — only on what your roster rows already say.'
+      : !driftRead
+        ? null
+        : driftRead.truncated
+          ? 'More activity is on record than one request returns, so nobody\'s silence can be proved from it. Nothing below is based on who has stopped training — a nudge sent on a short read reaches somebody who trained yesterday.'
+          : driftRead.notAsked.size
+            ? `${driftRead.notAsked.size} of these were added by hand and have no Repple account, so there is no training record to judge them by and none of them appears here on one.`
+            : null;
   const bands = summariseDrift(drift ? roster.map((c) => drift[c.id]).filter((d): d is Drift => !!d) : null);
 
-  const { name: coachName } = useMyTrainerProfile();
+  const { name: coachName, reload: reloadProfile } = useMyTrainerProfile();
   // `status` as well as the two functions, for the reason the notes provider
   // below spells out: `getFeedback` returns `[]` under 'loading' AND under
   // 'error', so the sheet was reading an unread provider as a coach who had
   // never written to this client.
-  const { getFeedback, addFeedback, status: fbStatus } = useCoachFeedback();
+  const { getFeedback, addFeedback, status: fbStatus, reload: reloadFeedback } = useCoachFeedback();
   // A note that never reached the server has to say so, the same way a private
   // note does — `addFeedback` resolves false and the client never sees it.
   const [fbBusy, setFbBusy] = useState(false);
-  const { get: getNutri, setAdjust: setNutri, clear: clearNutri, status: nutriStatus } = useCoachNutrition();
+  const { get: getNutri, setAdjust: setNutri, clear: clearNutri, status: nutriStatus, reload: reloadNutri } = useCoachNutrition();
   const [mealPick, setMealPick] = useState<{ pos: number; slot: Slot } | null>(null);
   const [mealQuery, setMealQuery] = useState('');
-  const { getNotes, addNote, removeNote, status: notesStatus } = useCoachNotes();
+  const { getNotes, addNote, removeNote, status: notesStatus, reload: reloadNotes } = useCoachNotes();
   // Saving a private note is now a round trip (see src/ui/coachNotes.tsx: it
   // used to be a `useState` that lost every note on relaunch), so the Save
   // button has to be able to say "in flight" and "that did not save".
@@ -468,8 +555,8 @@ export default function TrainerClients() {
   // `mine` and `status` as well as the write: a coach who has posted notices
   // could not see one of them anywhere in this app, so "did that go out?" was
   // answered by posting it again. The sheet below lists them.
-  const { addAnnouncement, mine: myNotices, status: noticeStatus } = useAnnouncements();
-  const { sent: sentInvites, sendInvite, revokeInvite, status: inviteStatus } = useInvites();
+  const { addAnnouncement, mine: myNotices, status: noticeStatus, reload: reloadNotices } = useAnnouncements();
+  const { sent: sentInvites, sendInvite, revokeInvite, status: inviteStatus, reload: reloadInvites } = useInvites();
   /**
    * The addresses this coach already has an open invite for.
    *
@@ -489,13 +576,13 @@ export default function TrainerClients() {
       : []),
     [inviteStatus, sentInvites],
   );
-  const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite } = useTrainerInvites();
-  const { tagsFor, allTags, addTag, removeTag, status: tagStatus } = useClientTags();
-  const { templates } = useProgramTemplates();
+  const { received: trainerInvites, acceptTrainerInvite, declineTrainerInvite, reload: reloadTrainerInvites } = useTrainerInvites();
+  const { tagsFor, allTags, addTag, removeTag, status: tagStatus, reload: reloadTags } = useClientTags();
+  const { templates, reload: reloadTemplates } = useProgramTemplates();
   // `assignProgramTo` rather than `assignProgram`: this screen assigns to a
   // whole segment at once and has to report on each write by name, which needs
   // the sentence saying why one of them did not land.
-  const { assignProgramTo, getProgram, status: programStatus } = useAssignedPrograms();
+  const { assignProgramTo, getProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
   const [bulkTplOpen, setBulkTplOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   // Removing a whole segment is the one bulk action on this screen that cannot
@@ -845,7 +932,7 @@ export default function TrainerClients() {
       }
     })();
     return () => { live = false; };
-  }, [coachId, authLoading]);
+  }, [coachId, authLoading, readNonce]);
 
   const unmarked = mySessions === null ? null : awaitingOutcome(mySessions).length;
 
@@ -896,7 +983,7 @@ export default function TrainerClients() {
       })));
     })();
     return () => { live = false; };
-  }, [coachId, authLoading]);
+  }, [coachId, authLoading, readNonce]);
 
   const departures = useMemo(() => departureTally(ended), [ended]);
   const departureNote = useMemo(
@@ -913,14 +1000,71 @@ export default function TrainerClients() {
   // somebody's pay held up.
   //
   // `unmarked` is NULL when the read did not answer, and null never prompts.
-  // `backlogDue` enforces that and this is the caller that could get it wrong by
-  // coercing: a banner about a coach's own business built out of a failed query
-  // is how somebody learns to ignore the next one. Weekly, not daily — clearing
-  // it is a sit-down job.
+  // `bookAlert` enforces that for every figure it is given, and this is the
+  // caller that could get it wrong by coercing: a banner about a coach's own
+  // business built out of a failed query is how somebody learns to ignore the
+  // next one. Weekly, not daily — clearing any of this is a sit-down job.
+  //
+  // ── the other three things about a coach's own book ──────────────────────
+  //
+  // The unmarked queue used to be the only one of these the app would tell a
+  // coach about without being opened. An invoice ageing past its due date and a
+  // client who has stopped training were computed already, on screens somebody
+  // had to go and look at, and there is no trigger to hang either on — nothing
+  // about a coach's own book has another person's action behind it. So this
+  // phone works them out. See `bookAlert` in src/lib/coachNotify.ts for the
+  // order and why there is only ever one banner.
+  /**
+   * The coach's own unpaid book, read once for the banner.
+   *
+   * One call, and the same one app/(trainer)/client.tsx and the Invoices screen
+   * make. `{ rows: [], status: 'loading' }` until it lands, and 'error' is what
+   * makes `bookState` pass null rather than nought — an empty list from a read
+   * that did not answer is not a coach nobody owes money to.
+   */
+  /** The coach's answer for the `book` channel. Read here because this is where
+   *  the banner is fired from, and a preference applied anywhere else would be
+   *  a switch that governs nothing. */
+  const channels = useChannelPrefs();
+  const [invoices, setInvoices] = useState<{ rows: CoachInvoice[]; status: LoadStatus }>({ rows: [], status: 'loading' });
   useEffect(() => {
-    if (sessionsUnread) return;
-    void promptUnmarkedBacklog(unmarked);
-  }, [unmarked, sessionsUnread]);
+    if (!coachId || authLoading) return;
+    let live = true;
+    (async () => {
+      const inv = await fetchMyInvoices();
+      if (live) setInvoices(inv);
+    })();
+    return () => { live = false; };
+  }, [coachId, authLoading, readNonce]);
+  const invoiceAgeing = useMemo(
+    () => ageingBook(invoices.rows, invoices.status, localDayKey(Date.now())),
+    [invoices],
+  );
+  const bookState = useMemo(() => ({
+    unmarkedSessions: sessionsUnread ? null : unmarked,
+    // Null under anything but a whole read: `ageingBook` withholds its own
+    // outstanding figure on the same test, and a count over a page of somebody's
+    // book is a wrong number rather than a small one.
+    invoicesOverdue: invoices.status === 'ready' ? invoiceAgeing.overdue.length : null,
+    // Only from a read that can actually support a verdict about who has
+    // stopped. `driftActionable` is per client for the suggested check-ins; this
+    // is the same question asked of the whole book, and a truncated read
+    // disqualifies all of it — see src/lib/clientDrift.ts.
+    clientsDrifting: bands && driftRead && !driftRead.truncated && !driftRead.notAsked.size
+      ? bands.drifting : null,
+    // Nothing coach-wide reads pack balances yet, so this is honestly unknown
+    // rather than nought. `bookAlert` declares it so the day a screen does read
+    // them, nobody has to reopen the decision about where it ranks.
+    packsRunningOut: null,
+  }), [sessionsUnread, unmarked, invoiceAgeing, invoices.status, bands, driftRead]);
+  useEffect(() => {
+    // Defaults to allowed while the preference read has not landed, matching
+    // what supabase/functions/send-push does with the same table: a transient
+    // fault must not silently swallow the only thing that tells a coach their
+    // own money is sitting still.
+    const allowed = channels.status === 'ready' ? channelAllows('book', channels.muted) : true;
+    void promptBookAlerts(bookState, allowed);
+  }, [bookState, channels.status, channels.muted]);
   /** Sessions actually delivered in the last month — a count of recorded
    *  outcomes, not an inference from the clock. Null until the read lands. */
   const delivered = mySessions === null
@@ -1070,9 +1214,13 @@ export default function TrainerClients() {
   const attnReason = (c: RosterClient): string | null => {
     const d = driftFor(c);
     // Drift speaks first where it can, because it is the only signal that sees
-    // a client with no record at all.
-    if (d && (d.status === 'at_risk' || d.status === 'idle')) return d.reason;
-    if (!d && atRiskClient(c)) return (c.adherence != null && c.adherence < 80) ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
+    // a client with no record at all — but only where the read behind it can
+    // actually support a verdict about this person. A truncated read and a
+    // client the database was never asked about both produce a confident
+    // "nothing recorded in 56 days" out of rows that were never seen.
+    const acting = driftActionable(c);
+    if (acting && d && (d.status === 'at_risk' || d.status === 'idle')) return d.reason;
+    if ((!d || !acting) && atRiskClient(c)) return (c.adherence != null && c.adherence < 80) ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
     if (c.unread != null && c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
     return null;
   };
@@ -1426,12 +1574,39 @@ export default function TrainerClients() {
    *  them — which is fine for a list nobody counts. */
   const timelineStatus = worstStatus(notesStatus, fbStatus);
 
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * The coach's home screen, and almost nothing on it is written by the coach.
+   * A client joins, trains, goes quiet, accepts an invitation, is added to a
+   * gym; a Repple invoice falls overdue; a gym owner sends a coaching
+   * invitation. Every one of those arrives from somewhere else, and this
+   * screen had no gesture that went and looked.
+   *
+   * Fourteen sources. The screen already refuses to state a figure whose read
+   * was short — `isWhole` gates them one by one — and the same reasoning
+   * decides the shape of this: a refresh that moved some of them would leave
+   * the roster count and the drift assessment describing different books, and
+   * a coach reading "3 going quiet" out of 11 when it was measured against 9. */
+  const pull = usePullToRefresh(useCallback(() => {
+    setReadNonce((n) => n + 1);
+    return Promise.all([
+      refreshRoster(), Promise.resolve(refreshTenant()), reloadProfile(),
+      Promise.resolve(reloadFeedback()), Promise.resolve(reloadNutri()),
+      Promise.resolve(reloadNotes()), Promise.resolve(reloadNotices()),
+      Promise.resolve(reloadInvites()), Promise.resolve(reloadTrainerInvites()),
+      Promise.resolve(reloadTags()), Promise.resolve(reloadTemplates()),
+      Promise.resolve(reloadPrograms()), Promise.resolve(channels.reload()),
+    ]);
+  }, [refreshRoster, refreshTenant, reloadProfile, reloadFeedback, reloadNutri, reloadNotes,
+      reloadNotices, reloadInvites, reloadTrainerInvites, reloadTags, reloadTemplates,
+      reloadPrograms, channels]));
+
   const studio = (coachName || 'Your Studio').replace('Coach ', '');
   const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
@@ -1578,7 +1753,7 @@ export default function TrainerClients() {
                         the plans without asserting a consequence. */}
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{trial.expired ? 'Nothing has been switched off. Subscribe when you are ready.' : 'Subscribe any time — see what each plan includes.'}</Text>
                   </View>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Upgrade ›</Text>
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Upgrade {FORWARD_CHAR}</Text>
                 </View>
               </Card>
             ) : (
@@ -1606,6 +1781,18 @@ export default function TrainerClients() {
                   </View>
                 </Notice>
               ))}
+            </View>
+          ) : null}
+
+          {/* Why this list is shorter than it should be, or null when it is not.
+              Shown whether or not there is anybody in it: an empty list of
+              suggested check-ins over a read that could not prove anybody's
+              silence is an all-clear made out of our own failure, and a coach
+              cannot tell it from a book with nothing wrong in it. */}
+          {driftActingNote && active > 0 ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Notice tone={t.ink3} kicker="Suggested check-ins" title="These are not built on their training"
+                note={driftActingNote} />
             </View>
           ) : null}
 
@@ -2002,7 +2189,7 @@ export default function TrainerClients() {
               </View>
 
               {((c.unread != null && c.unread > 0) || showDrift || (!d && atRiskClient(c)) || (c.injuries && c.injuries.length)) ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginLeft: 38 + sp.md }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginStart: 38 + sp.md }}>
                   {showDrift ? <Flag t={t} tone={driftTone(t, d!)} text={DRIFT_LABEL[d!.status]} /> : null}
                   {!d && atRiskClient(c) ? <Flag t={t} tone={t.warn} text="Needs a check-in" /> : null}
                   {c.unread != null && c.unread > 0 ? <Flag t={t} tone={t.brand} text={`${c.unread} unread`} /> : null}
@@ -2011,15 +2198,15 @@ export default function TrainerClients() {
               ) : null}
 
               {showDrift ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginLeft: 38 + sp.md }}>{d!.reason}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginStart: 38 + sp.md }}>{d!.reason}</Text>
               ) : null}
 
               {drift && !d ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginLeft: 38 + sp.md }}>Not read yet — no drift assessment for this client.</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, marginStart: 38 + sp.md }}>Not read yet — no drift assessment for this client.</Text>
               ) : null}
 
               {tagsFor(c.id).length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: sp.sm, marginLeft: 38 + sp.md }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: sp.sm, marginStart: 38 + sp.md }}>
                   {tagsFor(c.id).map((tg) => (
                     <View key={tg} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 2 }}>
                       <Text style={{ ...ty.caption, color: t.ink3, textTransform: 'capitalize' }}>{tg}</Text>
@@ -2072,7 +2259,7 @@ export default function TrainerClients() {
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize', flex: 1 }} numberOfLines={1}>{sel.name}</Text>
               <Pressable onPress={() => setSel(null)} accessibilityRole="button"
                 accessibilityLabel={`Close ${sel.name}`} hitSlop={12}
-                style={{ marginLeft: sp.md, width: 32, height: 32, borderRadius: 16, alignItems: 'center',
+                style={{ marginStart: sp.md, width: 32, height: 32, borderRadius: 16, alignItems: 'center',
                          justifyContent: 'center', backgroundColor: t.surface2 }}>
                 <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
               </Pressable>
@@ -2318,7 +2505,7 @@ export default function TrainerClients() {
                   const picked = ovIdx != null ? mealAt(dietForPick, slot, ovIdx, (sel.avoid ?? []) as any) : null;
                   return (
                     <View key={pos} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                      <View style={{ flex: 1, marginRight: sp.sm }}>
+                      <View style={{ flex: 1, marginEnd: sp.sm }}>
                         <Text style={{ ...ty.micro, color: t.ink3 }}>{slot}</Text>
                         <Text style={{ ...ty.label, fontWeight: picked ? '500' : '400', color: picked ? t.ink : t.ink3, marginTop: 2 }} numberOfLines={1}>{picked ? picked.n : 'Auto (client picks)'}</Text>
                       </View>
@@ -2355,7 +2542,7 @@ export default function TrainerClients() {
                   {clientMeals.map((m, i) => (
                     <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>{m.name}</Text>
-                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: sp.sm }}>{num(m.kcal)} kcal · {m.via}</Text>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginStart: sp.sm }}>{num(m.kcal)} kcal · {m.via}</Text>
                     </View>
                   ))}
                 </View>
@@ -2592,11 +2779,11 @@ export default function TrainerClients() {
                 {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40, (sel.avoid ?? []) as any).map((m) => (
                   <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }}
                     style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
-                    <View style={{ flex: 1, marginRight: sp.md }}>
+                    <View style={{ flex: 1, marginEnd: sp.md }}>
                       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{m.n}</Text>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{m.k} kcal · P{m.p} / C{m.c} / F{m.f}</Text>
                     </View>
-                    <Icon name="chevron" size={16} color={t.ink3} />
+                    <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                   </Pressable>
                 ))}
               </ScrollView>
@@ -3422,7 +3609,7 @@ function CoachSetupRow() {
                 : 'Some of this could not be checked just now, so it is worth a look before you rely on it.'}
             </Text>
           </View>
-          <Icon name="chevron" size={15} color={t.ink3} />
+          <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
         </View>
       </Card>
     </View>

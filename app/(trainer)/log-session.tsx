@@ -11,13 +11,31 @@
 //
 // Two things this screen refuses to do:
 //
-//   · say "logged" when it is not. `logForClient` reports the write rather than
-//     returning a boolean, and a failure names what happened and states plainly
-//     that nothing was saved — including the one cause a coach can act on,
-//     which is the person not being on their roster.
+//   · say "logged" when it is not. The write goes through the floor queue,
+//     which reports the three answers apart — the server took it, the server
+//     refused it, or nobody answered — and a queued write is never reported as
+//     saved. See rule 1 in src/lib/floorQueue.ts.
 //   · invent a calorie figure. Strength work records reps and weight, not
 //     energy, and the client's own screens render an absent burn as a dash.
 //     Guessing here would put a fabricated number into somebody else's history.
+//
+// ── One send per press of Save ────────────────────────────────────────────
+//
+// It wrote with `logForClient` and then, on any failure, re-issued the same
+// insert through the queue. Two sends for one press — and an insert whose
+// acknowledgement was lost has already landed, so the retry put the same hour
+// of somebody's training in their history twice. `logForClient` also reports a
+// PARTIAL insert as a failure, so the retry duplicated exactly the rows that
+// had made it. The queue is now the only sender; see `save`.
+//
+// ── And it asks when the session happened ─────────────────────────────────
+//
+// Every entry was stamped `new Date().toISOString()` at the moment Save was
+// pressed, and there was no way to say otherwise — so a Monday evening session
+// written up on the Tuesday landed on the Tuesday in the client's own log,
+// their streak, their weekly report and plan-versus-actual. Writing up at the
+// end of the day is the ordinary case, not the awkward one. src/lib/sessionWhen.ts
+// holds the day arithmetic and the sentence that says what turns on it.
 //
 // ── Who it is for, and why that is a picker rather than a param ────────────
 //
@@ -43,7 +61,8 @@
 // away. A client seeded from the param stays selectable through all of that,
 // because that id came from the person's own screen and does not depend on this
 // screen's read of anything.
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -58,11 +77,18 @@ import { useRoster } from '../../src/ui/roster';
 import { searchRoster, rosterSearchLine } from '../../src/lib/rosterSearch';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
-import { logForClient } from '../../src/lib/coachLog';
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, flushResultLine, keptOfflineLine } from '../../src/lib/floorQueue';
+import { floorPendingNote, flushResultLine, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
+// When the session happened, which this screen never asked. See the module
+// header: `new Date().toISOString()` at the moment Save was pressed put a
+// Monday evening session on the Tuesday it was written up.
+import {
+  hourLabel, logDayOptions, logStamp, logStampProblem, logWhenLine,
+} from '../../src/lib/sessionWhen';
+import { isoDay } from '../../src/lib/weekStart';
 import { notifySuccess } from '../../src/ui/haptics';
 import type { WorkoutEntry } from '../../src/lib/mockData';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** The same starter list the program builder offers. */
 const LIB = [
@@ -101,6 +127,9 @@ export default function LogSession() {
   // mount, so a session typed in a basement yesterday goes up as soon as this
   // screen is opened anywhere with signal.
   const queue = useFloorQueue(auth.user?.id ?? null);
+  // Pulled out because the hook hands back a fresh object each render while
+  // the callback inside it is stable.
+  const flushQueue = queue.flush;
   // Send what this phone is still carrying, now. The queue is emptied on the
   // app's own reconnect and foreground triggers too, through the registry in
   // src/lib/offlineQueue.ts; this is the button beside the banner that used to
@@ -119,11 +148,44 @@ export default function LogSession() {
   const coachEx = useCoachExercises();
   const r = useRoster();
 
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Two reads behind the form: the book this session is logged against, and
+   * the coach's own saved exercise names — the latter written from other
+   * screens and from other devices, so a movement saved on an iPad is not
+   * here until somebody asks.
+   *
+   * The queue is flushed with them, for the same reason it is on the class
+   * register: a session typed in a basement is sitting on this handset, and
+   * the gesture somebody reaches for when they want the screen to be right
+   * should not leave it there. Repeating it is safe — an empty queue sends
+   * nothing.
+   *
+   * What is typed into the form is untouched. Nothing here writes to the
+   * draft, and a refresh that cleared a half-logged session would be the
+   * worst thing this screen could do. */
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([r.refresh(), Promise.resolve(coachEx.reload()), flushQueue()]),
+    [r, coachEx, flushQueue],
+  ));
+
   // Seeded from the route, so the way in from a client's own screen is exactly
   // what it was: their name in the title and nothing to choose. `null` is the
   // state this screen could not previously get out of.
   const [picked, setPicked] = useState<string | null>(clientId ?? null);
   const [clientQ, setClientQ] = useState('');
+
+  /* ── when it happened ──────────────────────────────────────────────────
+   *
+   * The day and the hour, both defaulted to now, so a coach typing up a session
+   * they have just finished touches neither. What it ends is the ordinary case
+   * that used to be silently wrong: a coach with back-to-back clients writes
+   * the lot up at the end of the day, or the next morning, and every one of
+   * them landed on the day they were typed. See src/lib/sessionWhen.ts for what
+   * the stamp is made of and why the day is the part that matters.
+   */
+  const [logDay, setLogDay] = useState(() => isoDay(new Date()));
+  const [logHour, setLogHour] = useState(() => new Date().getHours());
 
   const [rows, setRows] = useState<Row[]>([]);
   const [picker, setPicker] = useState(false);
@@ -190,8 +252,7 @@ export default function LogSession() {
   // readLift refuses instead of coercing, and converts from whatever unit the
   // coach reads in. `loadProblem` below surfaces the refusal rather than
   // letting a bad figure through quietly.
-  const entriesToWrite = (): WorkoutEntry[] => {
-    const at = new Date().toISOString();
+  const entriesToWrite = (at: string): WorkoutEntry[] => {
     return rows
       .map((r) => {
         const pairs = r.sets
@@ -222,6 +283,16 @@ export default function LogSession() {
     return null;
   };
 
+  /** Whether there is anything worth writing. The same rule `entriesToWrite`
+   *  applies — only a set with a rep count is a set — asked without needing a
+   *  timestamp, so the button can be held before one has been settled on. */
+  const hasSets = rows.some((r) => r.sets.some((st) => (parseInt(st.reps, 10) || 0) > 0));
+
+  /** Why the day and hour on the picker cannot be used, or null. A session
+   *  dated into the future counts towards a streak nobody has earned, and the
+   *  client cannot correct it because they did not type it. */
+  const whenProblem = logStampProblem(logDay, logHour, new Date());
+
   // Withheld while any load is unreadable. Saving a session with one bad
   // figure silently zeroed is the failure above; refusing the save is the
   // only honest alternative, because this is a write to a client's record
@@ -231,10 +302,18 @@ export default function LogSession() {
   // listed for. The check existed — at save, after the hour was typed. Held
   // here it costs a coach one tap at the top of the screen instead of the whole
   // session.
-  const ready = picked != null && entriesToWrite().length > 0 && loadProblem() == null;
+  const ready = picked != null && hasSets && loadProblem() == null && whenProblem == null;
 
   const save = async () => {
-    const entries = entriesToWrite();
+    // The instant the session is filed under, settled ONCE and reused for every
+    // entry. Once, and not per call, because it is also what identifies this
+    // log to the offline queue — see `supersedeKey` in src/lib/floorQueue.ts.
+    const at = logStamp(logDay, logHour, new Date());
+    if (!at || whenProblem) {
+      setFailure(whenProblem ?? 'That day could not be read, so there is nothing to file this session under.');
+      return;
+    }
+    const entries = entriesToWrite(at);
     if (!entries.length) {
       Alert.alert('Nothing to log', 'Add at least one set with a rep count.');
       return;
@@ -259,49 +338,59 @@ export default function LogSession() {
     }
     setBusy(true);
     setFailure(null);
-    const res = await logForClient(picked, coachId, entries);
-    if (res.ok) {
-      setBusy(false);
-      notifySuccess();
-      Alert.alert(
-        'Session logged',
-        `${res.written} exercise${res.written === 1 ? '' : 's'} added to ${first}'s record. They will see it on their own phone, marked as logged by you, and it counts towards their progress.`,
-        [{ text: 'Done', onPress: () => router.back() }],
-      );
-      return;
-    }
 
-    // ── the write did not land, and there are two very different reasons ──
-    //
-    // Gyms are in basements. Until now both of them produced the same red
-    // banner and the same outcome: an hour of somebody's training, typed set by
-    // set, gone. A coach does not type it again — they remember it wrong a week
-    // later, or they stop using the screen.
-    //
-    // `logForClient` reports the failure it saw, and the one thing this screen
-    // has to decide is whether the server ANSWERED. It did if the failure names
-    // a cause — the roster refusal is a policy decision and will be made again
-    // identically — and it did not if nothing came back at all. Only the second
-    // is worth keeping: the same bytes refused once are refused forever, and a
-    // coach told something is waiting to send when it never will has been given
-    // a worse lie than "it failed".
-    //
-    // `attempt` re-issues the write through the queue, so the ONE round trip a
-    // coach actually waits on is the one above; this second call is what
-    // classifies and keeps it. It is never reported as saved — see rule 1 in
-    // src/lib/floorQueue.ts.
+    /* ── ONE round trip, through the queue ─────────────────────────────────
+     *
+     * This used to write with `logForClient` and then, on any failure, re-issue
+     * the identical insert through `queue.attempt`. Two sends for one press of
+     * Save, and the second one is the bug: an insert whose ACKNOWLEDGEMENT was
+     * lost has already landed, and re-issuing it puts the same hour of somebody
+     * else's training in their history twice. Worse, `logForClient` reports a
+     * PARTIAL insert as a failure — some rows in, some not — and the retry
+     * duplicated exactly the rows that had made it. Neither the client nor the
+     * coach can tell which of the two copies to delete, and the client cannot
+     * delete either: their coach typed them.
+     *
+     * So the queue is the only sender. It classifies the answer itself — the
+     * server took it, the server refused it, or nobody answered — and keeps
+     * only the third, which is the one worth keeping. A queued write is never
+     * reported as saved; see rule 1 in src/lib/floorQueue.ts.
+     */
     const out = await queue.attempt({
       kind: 'session-log', clientId: picked, clientName: pickedName, entries,
     });
     setBusy(false);
     if (out === 'stored') {
       notifySuccess();
-      Alert.alert('Session logged',
-        `${entries.length} exercise${entries.length === 1 ? '' : 's'} added to ${first}'s record.`,
-        [{ text: 'Done', onPress: () => router.back() }]);
+      Alert.alert(
+        'Session logged',
+        `${entries.length} exercise${entries.length === 1 ? '' : 's'} added to ${first}'s record. They will see it on their own phone, marked as logged by you, and it counts towards their progress.`,
+        [{ text: 'Done', onPress: () => router.back() }],
+      );
       return;
     }
-    if (out === 'refused') { setFailure(res.reason); return; }
+    if (out === 'refused') {
+      // The server read it and declined, so it is NOT waiting to send and the
+      // same bytes offered again would be declined again. The reason is not
+      // re-fetched by writing a second time: that is the retry this whole
+      // change exists to remove, and a refusal that was really a partial insert
+      // would duplicate the half that landed. The one cause a coach can act on
+      // is named instead, and the screen already says so above the button when
+      // it can see it.
+      //
+      // The roster refusal is the one cause a coach can act on, and this screen
+      // can tell when it is certainly that: a whole read of the book that does
+      // not contain the person chosen. `logForClient` used to name it from the
+      // 42501 the server sent back, which cost a second write to find out.
+      const notMine = picked && !pickedRow && r.status === 'ready';
+      setFailure(refusedLine(
+        'This session',
+        notMine
+          ? `${pickedName || 'That person'} is not on your roster, and a session can only be logged for somebody on your book. Add them as a client first, then log this again.`
+          : 'The usual cause is that the person is not on your roster — a session can only be logged for somebody on your book. If they are on it, open their record before typing this in again: part of it may have reached them.',
+      ));
+      return;
+    }
     // Kept. Said as a sentence and not as a success: the client cannot see this
     // yet and neither can anybody else.
     Alert.alert('Kept on this phone',
@@ -312,11 +401,11 @@ export default function LogSession() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" refreshControl={pull}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg }}>
             <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back"
               style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="back" size={18} color={t.ink} />
+              <Icon name={BACK_ICON} size={18} color={t.ink} />
             </Pressable>
             <View>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Log a session</Text>
@@ -446,6 +535,66 @@ export default function LogSession() {
             ) : null}
           </Section>
 
+          {/* ── when it happened ──────────────────────────────────────────
+              Second, after who and before what: a coach writing up yesterday's
+              work needs to change this once and then not think about it. It
+              used to not exist at all — the record said the session happened
+              at the moment Save was pressed. */}
+          <Section>
+            <SectionHead title="When" />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+              style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: sp.sm, paddingHorizontal: 2 }}>
+              {logDayOptions(new Date()).map((d) => {
+                const on = d.day === logDay;
+                return (
+                  <Pressable key={d.day} onPress={() => setLogDay(d.day)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    accessibilityLabel={on ? `${d.label}, chosen` : `File this session under ${d.label}`}
+                    hitSlop={{ top: hitSlopFor(34), bottom: hitSlopFor(34), left: 0, right: 0 }}
+                    style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>{d.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            {/* The hour, on a stepper rather than a row of twenty-four chips.
+                The minute is not asked for and is written as zero — an hour is
+                what a coach remembers about a session they ran yesterday, and a
+                minute they had to invent would be invented detail in somebody
+                else's record. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
+              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>Start hour</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: t.surface2, borderRadius: radius.sm }}>
+                <Pressable onPress={() => setLogHour((h) => (h + 23) % 24)} hitSlop={8}
+                  accessibilityRole="button" accessibilityLabel="An hour earlier"
+                  style={{ paddingHorizontal: 14, paddingVertical: 10 }}>
+                  <Icon name="minus" size={15} color={t.ink2} />
+                </Pressable>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, minWidth: 64, textAlign: 'center' }}>
+                  {hourLabel(logHour)}
+                </Text>
+                <Pressable onPress={() => setLogHour((h) => (h + 1) % 24)} hitSlop={8}
+                  accessibilityRole="button" accessibilityLabel="An hour later"
+                  style={{ paddingHorizontal: 14, paddingVertical: 10 }}>
+                  <Icon name="plus" size={15} color={t.ink2} />
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Where this lands and what turns on it, or why it cannot land
+                there. Never both. */}
+            {whenProblem ? (
+              <View style={{ marginTop: sp.md }}>
+                <Flag tone={t.warn}>{whenProblem}</Flag>
+              </View>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
+                {logWhenLine(logDay, logHour, new Date(), first)}
+              </Text>
+            )}
+          </Section>
+
           <Section>
             <SectionHead title="Exercises" note={rows.length ? `${rows.length}` : undefined} />
             {rows.length === 0 ? (
@@ -512,15 +661,15 @@ export default function LogSession() {
               // 3.87–4.08:1 on the light palettes, and this is the sentence
               // that explains why the button will not move.
               <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, marginTop: sp.sm }}>
-                {loadProblem() ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} /> : null}
-                <Text style={{ ...ty.caption, color: loadProblem() ? t.ink2 : t.ink3, textAlign: 'center' }}>
+                {loadProblem() || whenProblem ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} /> : null}
+                <Text style={{ ...ty.caption, color: loadProblem() || whenProblem ? t.ink2 : t.ink3, textAlign: 'center' }}>
                   {/* The client comes first of the three, because it is the one
                       that used to be reported at save — and a coach told to add
                       a set, who adds one and is then told about the client, has
                       been sent looking twice. */}
                   {!picked
                     ? 'Pick who this session was with, at the top of this screen.'
-                    : loadProblem() ?? 'Add at least one set with a rep count.'}
+                    : whenProblem ?? loadProblem() ?? 'Add at least one set with a rep count.'}
                 </Text>
               </View>
             ) : null}

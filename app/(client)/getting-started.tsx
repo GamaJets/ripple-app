@@ -47,18 +47,28 @@ import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
 import { checklist, checklistDone, checklistLeft, nextTodo, type ChecklistRow } from '../../src/lib/firstRun';
 import { ONBOARD_KEY } from './onboarding';
 import { GUIDE_SEEN_KEY } from '../guide';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 export default function GettingStarted() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { log, status: logStatus } = useWorkoutLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   const food = useFoodLog();
-  const { states } = useWearables();
+  const wearables = useWearables();
+  const { states } = wearables;
+  // Every tick on this checklist is a claim about a server read — profile,
+  // training log, food log, connected watch — and a read that failed leaves the
+  // step showing as not done. Telling a member they have not started when they
+  // have is the one thing this screen must not do twice.
+  const pull = usePullToRefresh(useCallback(() => {
+    c.reload(); reloadLog(); food.reload(); void wearables.syncAll();
+  }, [c.reload, reloadLog, food.reload, wearables]));
 
   // Two device-local marks, read on every focus so a tick appears the moment
   // somebody comes back from the screen that earned it. null while the read is
@@ -123,7 +133,7 @@ export default function GettingStarted() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -166,7 +176,7 @@ export default function GettingStarted() {
                 <Text style={{ ...ty.body, fontWeight: '500', color: r.state === 'done' ? t.ink3 : t.ink }}>{r.item.title}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.item.note}</Text>
               </View>
-              <Icon name="chevron" size={15} color={t.ink3} />
+              <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
             </Pressable>
           ))}
         </Section>

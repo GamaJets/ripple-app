@@ -50,6 +50,17 @@ export interface AuthLike {
   signInWithPassword(c: { email: string; password: string }): Promise<{ error: { message: string } | null }>;
   updateUser(a: { password?: string; email?: string }): Promise<{ error: { message: string } | null }>;
   getUser(): Promise<{ data: { user: AuthUserLike | null } | null; error: { message: string } | null }>;
+  /**
+   * End sessions. `scope: 'others'` ends every session EXCEPT the one making
+   * the call, which is the only scope this module ever asks for — see
+   * `endOtherSessions`.
+   *
+   * Optional because it is the one method here that a supabase-js older than
+   * 2.10 does not have, and a screen must be able to tell "this build cannot do
+   * it" from "it did not work". A caller that finds it absent gets a refusal
+   * with a sentence, not a crash.
+   */
+  signOut?(o: { scope: 'others' }): Promise<{ error: { message: string } | null }>;
 }
 
 /** What GoTrue returns for the signed-in user, as far as this file cares. */
@@ -214,6 +225,50 @@ export async function changePassword(
     // Deliberately not reporting the exception object anywhere it could be
     // serialised with the call's arguments still attached to it.
     return { ok: false, field: 'other', note: `Your password was not changed. (${(e as Error).message})` };
+  }
+}
+
+export type SessionsResult = { ok: true } | { ok: false; note: string };
+
+/**
+ * End every session except this one.
+ *
+ * ── Why the password screen offers this at all ─────────────────────────────
+ *
+ * Changing a password does NOT end anybody else's session. Supabase issues a
+ * refresh token per session and `updateUser({ password })` leaves them alone,
+ * so a phone somebody else is holding — a lost handset, an ex-partner's tablet,
+ * the gym's shared iPad — goes on being signed in to this account, with the
+ * member's messages, injuries, scans and coach in it, until that session's own
+ * token expires. The screen said as much and stopped there: "anywhere else you
+ * are signed in stays signed in until that session expires."
+ *
+ * That sentence is true and it is not enough, because Explore routes the
+ * keyword "hacked" to that screen. Somebody who arrives there has one question
+ * — how do I get them out — and the app knew the answer and did not offer it.
+ *
+ * ── Why it is a separate act and not part of the change ───────────────────
+ *
+ * Because most password changes are housekeeping, and signing somebody out of
+ * their own tablet mid-session is a rude thing to do uninvited. The screen asks;
+ * this performs. It is also deliberately NOT rolled into `changePassword`: a
+ * failure here must not read as a password that did not change, and the two
+ * outcomes are reported separately for that reason.
+ *
+ * `scope: 'others'` keeps THIS session. The member is on this phone, has just
+ * proved they know the password, and signing them out here would end with them
+ * looking at a sign-in screen wondering whether the change went through.
+ */
+export async function endOtherSessions(auth: AuthLike): Promise<SessionsResult> {
+  if (typeof auth.signOut !== 'function') {
+    return { ok: false, note: 'This version of the app can’t end your other sessions. Changing your password on a newer version will offer it.' };
+  }
+  try {
+    const { error } = await auth.signOut({ scope: 'others' });
+    if (error) return { ok: false, note: `Your other sessions were not ended. (${error.message})` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, note: `Your other sessions were not ended. (${(e as Error).message})` };
   }
 }
 

@@ -48,6 +48,7 @@ import type { IconName } from '../../src/ui/Icon';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useBrand } from '../../src/ui/brand';
 import { useAuth } from '../../src/ui/auth';
@@ -62,6 +63,7 @@ import {
 } from '../../src/lib/memberRecord';
 import { localDate } from '../../src/lib/localDate';
 import { appLocale } from '../../src/lib/locale';
+import { END_ALIGN } from '../../src/ui/direction';
 
 /** A bare ISO date as a member reads it. Local, because a date column means a
  *  calendar day in the reader's own life — see src/lib/localDate.ts. */
@@ -76,7 +78,7 @@ function Line({ t, label, value, first }: { t: ReturnType<typeof useTheme>; labe
   return (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.label, color: t.ink3 }}>{label}</Text>
-      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={2}>{value}</Text>
+      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: END_ALIGN }} numberOfLines={2}>{value}</Text>
     </View>
   );
 }
@@ -85,7 +87,7 @@ export default function Membership() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { log, status: logStatus } = useWorkoutLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   const { appName } = useBrand();
   const auth = useAuth();
   const uid = auth.user?.id || '';
@@ -168,6 +170,13 @@ export default function Membership() {
   }, [uid, auth.loading]);
   useEffect(() => { void loadMembership(); }, [loadMembership]);
 
+  // The three reads this screen shows: the gym's membership record (which has
+  // its own "Try Again" beside the failure, and this is the same read), the
+  // profile, and the training log the visit count is derived from.
+  const pull = usePullToRefresh(useCallback(() => {
+    void loadMembership(); c.reload(); reloadLog();
+  }, [loadMembership, c.reload, reloadLog]));
+
   // Recomputed per render rather than memoised on a date string: the screen can
   // be open across midnight, and a membership that expired at 00:00 should not
   // still read "Active" because the component has not re-rendered for a new day.
@@ -199,7 +208,7 @@ export default function Membership() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>

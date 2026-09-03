@@ -23,6 +23,7 @@ import { reportError } from '../lib/reportError';
 import { phoneAuthError, digitsOnly } from '../lib/phone';
 import { emailCodeError, emailResendError, type OtpOutcome } from './emailOtp';
 import { checkTenantBrand, stampTenantBrand, signUpWithBrand, brandSignUpMetadata } from '../lib/tenantBrand';
+import { clearPersonalDeviceState } from './signOutState';
 
 export type Role = 'owner' | 'trainer' | 'client';
 export interface AuthUser { id: string; name: string; email: string; role: Role }
@@ -77,7 +78,14 @@ interface AuthValue {
    * throttled resend is the common case and must never read as a sent one.
    */
   resendEmailCode: (email: string) => Promise<OtpOutcome>;
-  signOut: () => void;
+  /**
+   * End the session, and take this person's device-local state with it.
+   *
+   * Returns a promise so a caller that has something to do afterwards can wait,
+   * but nothing has to: the user is cleared from the tree immediately and the
+   * teardown continues on its own. See `clearPersonalDeviceState`.
+   */
+  signOut: () => Promise<void>;
   /**
    * Why the last session was refused, when nobody was there to be told.
    *
@@ -458,9 +466,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     throw new Error('Social sign-in is not set up yet — please use email for now.');
   };
 
-  const signOut = () => {
-    if (USE_SUPABASE) sbSignOut().catch(() => {});
+  const signOut = async (): Promise<void> => {
+    // The tree first. Signing out has to LOOK instant — the screens gate on
+    // `authed`, and making somebody watch a network round trip before the app
+    // admits they have gone is how a second tap arrives.
     setUser(null);
+    if (!USE_SUPABASE) return;
+    // ── Before the session ends ───────────────────────────────────────────
+    //
+    // This used to be one line: end the session, clear the user, done. What it
+    // did not do was take anything OFF the handset, and four of this app's
+    // preferences live there on purpose — the notification categories, the
+    // quiet hours, the biometric lock and the reminders, which are scheduled by
+    // the phone itself. So the next person to sign in on that handset inherited
+    // all four, and went on being buzzed at 6am by somebody else's reminders,
+    // while app/(client)/notification-prefs.tsx told them their choices were
+    // "kept on this phone".
+    //
+    // It also left this handset REGISTERED for push under the account that was
+    // leaving. `pt_self` is `user_id = auth.uid()`, so that row can only be
+    // deleted from inside the session being ended — which is why this is
+    // awaited here and not fired after `sbSignOut()`, where it could not
+    // succeed. app/(client)/settings.tsx had `revokePushToken` a scroll away
+    // from its own Sign Out and did not call it; now every sign-out in every
+    // one of the three apps does, because there is one of these.
+    try { await clearPersonalDeviceState({ revokePush: true }); }
+    catch (e) { reportError('auth.signOut.clear', e); }
+    try { await sbSignOut(); } catch (e) { reportError('auth.signOut', e); }
   };
 
   const sendPasswordReset = async (email: string) => {

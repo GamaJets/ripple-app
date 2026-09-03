@@ -28,7 +28,7 @@
 // establishes is a colour nobody chose rather than a colour to return to. What
 // replaces it CLEARS the gym's colour, which is a state the column can actually
 // hold and the honest opposite of having picked one.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeControls } from '../../src/ui/components';
@@ -37,6 +37,7 @@ import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/t
 import { DEFAULT_PALETTE } from '../../src/theme/tokens';
 import { useBrand } from '../../src/ui/brand';
 import { useTenant } from '../../src/ui/tenant';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { brandColorOf, parseGymName } from '../../src/lib/gymSettings';
 import { Icon } from '../../src/ui/Icon';
 
@@ -44,7 +45,7 @@ export default function OwnerBrand() {
   const t = useTheme();
   const { palette, setPalette, palettes, setAccent } = useThemeControls();
   const { appName, adoptGymName } = useBrand();
-  const { tenant, status, updateTenant } = useTenant();
+  const { tenant, status, updateTenant, refresh } = useTenant();
 
   // Under 'error' a null tenant means we could not find out, not that this
   // account has no gym — so nothing below may be offered as the gym's answer
@@ -59,6 +60,11 @@ export default function OwnerBrand() {
   const nameField = draft ?? (tenant?.name ?? '');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ bad: boolean; text: string } | null>(null);
+  // The gym row is what this screen shows and writes back to: its name and its
+  // brand colour. An owner who changed either in another session, or whose
+  // first read failed, had no way to ask for it again. The name field is not
+  // disturbed — `draft` is what the owner typed and `nameField` prefers it.
+  const pull = usePullToRefresh(useCallback(() => { refresh(); }, [refresh]));
 
   // The gym's colour, applied. `gymColor` is null for a gym that has not chosen
   // one — part 118 cleared the schema default precisely so that this cannot
@@ -131,7 +137,7 @@ export default function OwnerBrand() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Owner</Text>
@@ -189,7 +195,7 @@ export default function OwnerBrand() {
                 <Pressable key={p.key} onPress={() => { void pickColor(p.key, p.theme.brand); }} accessibilityRole="button" accessibilityLabel={p.name}
                   style={{ width: 52, height: 52, borderRadius: radius.md, backgroundColor: p.theme.bg, borderWidth: on ? 2 : hairline, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>
                   <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: p.theme.brand }} />
-                  {on ? <View style={{ position: 'absolute', bottom: 3, right: 3 }}><Icon name="check" size={13} color={t.brand} /></View> : null}
+                  {on ? <View style={{ position: 'absolute', bottom: 3, end: 3 }}><Icon name="check" size={13} color={t.brand} /></View> : null}
                 </Pressable>
               );
             })}

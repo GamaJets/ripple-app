@@ -72,6 +72,8 @@ import { fetchClientPurchases, type CoachPurchase } from '../../src/lib/connect'
 import { fetchMySubscriptionPayments, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import { fetchMyReceipts } from '../../src/ui/coachReceipts';
 import type { CoachReceipt } from '../../src/lib/coachReceipts';
+import { END_ALIGN } from '../../src/ui/direction';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 export default function TrainerAnalytics() {
   const t = useTheme();
@@ -88,9 +90,9 @@ export default function TrainerAnalytics() {
   // 'ready' and nothing else. 'partial' is refused alongside 'error' here on
   // purpose: a truncated read is the more dangerous of the two, because it
   // produces a plausible number rather than an obviously empty screen.
-  const { roster, status: rosterStatus } = useRoster();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
   const { sessionFee } = useMyTrainerProfile();
-  const { sessions, status: sessionsStatus } = useSessions();
+  const { sessions, status: sessionsStatus, refresh: refreshSessions } = useSessions();
   const rosterWhole = isWhole(rosterStatus);
   const sessionsWhole = isWhole(sessionsStatus);
   // Anything that crosses the two — revenue per client, revenue at risk, the
@@ -209,14 +211,15 @@ export default function TrainerAnalytics() {
   // it was only ever the explanation that was wrong. See src/lib/currencyGap.ts.
   const [curErr, setCurErr] = useState<string | null>(null);
   const [curLoading, setCurLoading] = useState(true);
-  useEffect(() => {
-    let alive = true;
-    myTenantCurrency().then((r) => {
-      if (!alive) return;
-      setGymCur(r.currency); setCurErr(r.error); setCurLoading(false);
-    });
-    return () => { alive = false; };
+  // Lifted out of the effect so the pull below asks for it again. A refused
+  // `tenants` read withholds every priced figure on this screen for the rest of
+  // the session, and it was the one read here with no way back.
+  const loadCurrency = useCallback(async () => {
+    setCurLoading(true);
+    const r = await myTenantCurrency();
+    setGymCur(r.currency); setCurErr(r.error); setCurLoading(false);
   }, []);
+  useEffect(() => { void loadCurrency(); }, [loadCurrency]);
   /** Why there is no code to print, or null when there is one. */
   const curGap = currencyGapOf({ currency: gymCur, error: curErr, loading: curLoading });
   /** The sentence that goes where a priced figure would have gone. Takes the
@@ -319,7 +322,7 @@ export default function TrainerAnalytics() {
         ? `Taken in ${takenPots.length} currencies this month, which are never added into one figure: ${takenPots.map((pt) => minorMoney(pt.minorUnits, pt.currency)).filter(Boolean).join(', ')}.`
         : TAKINGS_IS_GROSS;
 
-  const { goals, setGoals, status: goalsStatus } = useTrainerGoals();
+  const { goals, setGoals, status: goalsStatus, reload: reloadGoals } = useTrainerGoals();
   const [goalOpen, setGoalOpen] = useState(false);
   const [gRev, setGRev] = useState('');
   const [gCli, setGCli] = useState('');
@@ -427,10 +430,32 @@ export default function TrainerAnalytics() {
    * the people who did not leave, so a curve built from it is flat at 100%
    * forever with nothing on it to give that away. See src/ui/coachCohorts.ts. */
   const spans = useCoachingSpans();
+  // Destructured because the hook returns a fresh object each render; the
+  // callback itself is stable, and depending on the object instead would
+  // rebuild the refresh control on every render.
+  const reloadSpans = spans.reload;
   const cohortBlock = cohortsBlocker(spans.status);
   // Newest cohorts first — a coach reads the recent ones and the oldest are
   // the ones with the least left to say.
   const cohortRows = cohortBlock ? [] : cohorts(spans.spans, new Date()).slice().reverse();
+
+  /* ── pull to refresh ─────────────────────────────────────────────────────
+   *
+   * Six reads sit behind this screen and every figure on it is a combination of
+   * several: the roster and the sessions feed the headline counts, the three
+   * takings strands feed the money, the tenant's currency decides whether any
+   * money may be printed at all, the retention curve is its own read and the
+   * targets are another. Refreshing a subset would leave the screen stating a
+   * ratio whose halves came from different minutes, which is the failure the
+   * status plumbing above exists to prevent — so the gesture asks for all of
+   * them, and the worst status still governs what is stated. */
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([
+      refreshRoster(), refreshSessions(), loadTakings(), loadCurrency(),
+      Promise.resolve(reloadSpans()), Promise.resolve(reloadGoals()),
+    ]),
+    [refreshRoster, refreshSessions, loadTakings, loadCurrency, reloadSpans, reloadGoals],
+  ));
 
   const [exportBusy, setExportBusy] = useState(false);
   /* ── the screen, out of the app ───────────────────────────────────────
@@ -482,7 +507,7 @@ export default function TrainerAnalytics() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching business</Text>
@@ -900,7 +925,7 @@ export default function TrainerAnalytics() {
             <View style={{ flexDirection: 'row', paddingBottom: sp.sm }}>
               <Text style={{ ...ty.micro, color: t.ink3, flex: 1.4 }}>Started</Text>
               {MILESTONES.map((m) => (
-                <Text key={m} style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>{m}m</Text>
+                <Text key={m} style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>{m}m</Text>
               ))}
             </View>
             {cohortRows.map((row, i) => (
@@ -952,7 +977,7 @@ export default function TrainerAnalytics() {
               flexDirection: 'row', alignItems: 'center', paddingVertical: sp.md,
               borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
             }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, marginRight: sp.md, backgroundColor: (c.adherence != null && c.adherence < 82) ? t.crit : t.warn }} />
+              <View style={{ width: 6, height: 6, borderRadius: 3, marginEnd: sp.md, backgroundColor: (c.adherence != null && c.adherence < 82) ? t.crit : t.warn }} />
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>

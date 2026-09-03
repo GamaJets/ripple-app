@@ -43,6 +43,10 @@ import {
   type CustomReminder, type FixedKind, type FixedReminder, type SavedReminders, type Weekday,
 } from '../../src/lib/reminderPlan';
 import { jsDayForIndex } from '../../src/lib/weekStart';
+// The slop that brings a small control up to 44pt. See the Remove button on
+// each of the member's own reminders.
+import { hitSlopFor } from '../../src/lib/a11y';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 const two = (n: number) => String(n).padStart(2, '0');
 const fmt = (h: number, m: number) => `${two(((h + 11) % 12) + 1)}:${two(m)} ${h < 12 ? 'AM' : 'PM'}`;
@@ -370,8 +374,17 @@ export default function Reminders() {
                   <Text style={{ ...ty.body, color: t.ink2 }}>{s.name}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{daysLabel(s.days)}</Text>
                 </View>
-                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink, marginRight: sp.md }}>{fmt(s.hour, s.minute)}</Text>
-                <Pressable accessibilityLabel={`Remove ${s.name}`} accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={6}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
+                <Text style={{ ...ty.label, ...numeric, fontWeight: '600', color: t.ink, marginEnd: sp.md }}>{fmt(s.hour, s.minute)}</Text>
+                {/* 16pt of glyph with `hitSlop={6}` is a 28pt target — the
+                    smallest control on this screen, and the only destructive
+                    one on it. The two switches above it are 48 × 28 and each
+                    carries 8pt of slop for the same reason; this one was left
+                    at 6, which does not even reach what they reach.
+                    `hitSlopFor` takes a 16pt icon to the 44pt in
+                    src/lib/a11y.ts without moving anything on the row, which
+                    matters here because the row's time sits immediately to its
+                    left. */}
+                <Pressable accessibilityLabel={`Remove ${s.name}`} accessibilityRole="button" onPress={() => removeSupp(s.id)} hitSlop={hitSlopFor(16)}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
               </View>
               <DayPicker days={s.days} label={s.name} onToggle={(d) => setSupps((p) => p.map((x) => (x.id === s.id ? { ...x, days: toggleDay(x.days, d) } : x)))} />
             </View>
@@ -419,7 +432,7 @@ export default function Reminders() {
               <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Notification Settings</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Which kinds of notification reach you, and the hours to hold them until.</Text>
             </View>
-            <Icon name="chevron" size={14} color={t.ink3} />
+            <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
           </Pressable>
         </Section>
 

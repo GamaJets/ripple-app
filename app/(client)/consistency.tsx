@@ -190,7 +190,7 @@ export default function Consistency() {
                 strip holding one line of text clips that line the moment the
                 reader turns their text up, and this app has no ceiling on
                 text size on purpose (src/theme/scale.ts). */}
-            <View style={{ marginRight: 6, paddingVertical: 2 }}>
+            <View style={{ marginEnd: 6, paddingVertical: 2 }}>
               <View style={{ height: grown(13), marginBottom: 4 }} />
               {DOW.map((d, i) => (
                 <Text key={d} accessibilityLabel={d}

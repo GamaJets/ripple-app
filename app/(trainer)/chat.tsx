@@ -31,7 +31,8 @@
 // The bubble keeps sending, not-sent and unreadable apart for the reason the
 // client screen gives at length: a coach who thinks their demonstration went is
 // worse off than one who knows it did not.
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Image, Pressable, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -112,7 +113,7 @@ function Attachment({ m }: { m: ThreadMessage }) {
             : delivered ? <Clip uri={m.local.uri} label="The video you sent" />
             : note('This video did not send.')}
         {m.sending ? (
-          <View style={{ position: 'absolute', right: sp.sm, bottom: sp.sm }}>
+          <View style={{ position: 'absolute', end: sp.sm, bottom: sp.sm }}>
             <ActivityIndicator size="small" color={t.ink3} />
           </View>
         ) : null}
@@ -149,7 +150,7 @@ export default function CoachChat() {
   // Used where a sentence needs to address them. Falls back to the role word
   // rather than to a dash mid-sentence — "say hi to —" is not a sentence.
   const firstName = head.isName ? head.text.split(' ').filter(Boolean)[0] : null;
-  const { messages: msgs, send, status, unsent, cachedNote } = useThread(clientId, 'coach');
+  const { messages: msgs, send, status, unsent, cachedNote, reload: reloadThread } = useThread(clientId, 'coach');
   /* ── the way out ───────────────────────────────────────────────────────
    *
    * The database has supported blocking and reporting in BOTH directions since
@@ -272,6 +273,27 @@ export default function CoachChat() {
   const fmt = (iso: string) => { const d = new Date(iso); const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; return `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
   const G = layout.gutter;
   const { ref: barRef, lift } = useKeyboardLift();
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * There is no realtime subscription on a thread. A reply written on the
+   * client's phone reaches this screen only when the coach sends something
+   * themselves or leaves and comes back — so a coach waiting for an answer,
+   * looking straight at the conversation, was the one person the app would not
+   * tell.
+   *
+   * The block state goes with it: it is written from the other side too, and a
+   * composer enabled against a stale answer is a message sent into a thread
+   * that will refuse it. The saved templates come along because they are the
+   * other thing this screen puts into the box.
+   *
+   * What is typed is untouched. `reload` re-reads the thread; it does not go
+   * near the composer. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    Promise.resolve(reloadThread()), Promise.resolve(safety.reload()),
+    Promise.resolve(templates.reload()),
+  ]), [reloadThread, safety, templates]));
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
 
@@ -320,7 +342,7 @@ export default function CoachChat() {
             a live one believes they have heard everything — and the message
             that is missing is the one that arrived after the signal went. */}
         {cachedNote ? <Flag tone={t.warn} style={{ paddingHorizontal: G, paddingTop: sp.sm }}>{cachedNote}</Flag> : null}
-        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scRef} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} onContentSizeChange={() => scRef.current?.scrollToEnd({ animated: true })} keyboardShouldPersistTaps="handled" refreshControl={pull}>
           {/* A thread that failed to load has not been read, so it cannot be
               reported as one nobody has written in. */}
           {msgs.length === 0 && status !== 'loading' ? (

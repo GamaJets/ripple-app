@@ -30,7 +30,7 @@
 // whenever no churn had been observed. It rendered as "Trainer LTV $X · ~24 mo
 // lifespan" — a measured-looking unit economic derived from a magic number.
 // With no churn signal there is no lifespan and no LTV; the screen says so.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { num } from '../../src/lib/format';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,6 +51,8 @@ import { reportError } from '../../src/lib/reportError';
 // pull-to-refresh, so without a button there is nothing an owner can actually
 // do about it" — that button, and the stamp that says why it matters.
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 export default function OwnerRevenue() {
   const t = useTheme();
@@ -146,15 +148,23 @@ export default function OwnerRevenue() {
   // read leaves this where it was: the figures on screen are still the ones
   // from the earlier read, and moving the stamp would be the same wrong
   // sentence one layer up.
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [tillAt, setTillAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  /** And when the ROSTER landed — the other half of this screen, and the half
+   *  the sessions figures and the trend are computed from. It had no stamp, so
+   *  "Read just now" after a till refresh spoke for a roster nobody had asked
+   *  for again. */
+  const [rosterAt, setRosterAt] = useState<number | null>(null);
+  useEffect(() => { if (trainersStatus === 'ready') setRosterAt(Date.now()); }, [trainersStatus]);
+  /** One line over both, and it is the age of the older. */
+  const fetchedAt = oldestFetch(tillAt, rosterAt);
   useEffect(() => {
     let on = true;
     if (!tenantId) { setTakings(undefined); return; }
     setBusy(true);
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
     fetchPayments(supabase, tenantId, since)
-      .then((r) => { if (on) { setTakings(r); setFetchedAt(Date.now()); } })
+      .then((r) => { if (on) { setTakings(r); setTillAt(Date.now()); } })
       // fetchPayments throws on a PostgREST error and on a truncated read. Both
       // become null, which renders a dash and a sentence — never a zero.
       .catch((e) => { reportError('ownerRevenue.payments', e); if (on) setTakings(null); })
@@ -165,7 +175,11 @@ export default function OwnerRevenue() {
   // Both halves of the screen, together. The roster comes from the provider and
   // the till from the effect above, and an owner pressing one control expects
   // the whole screen to be current afterwards — not half of it.
-  const refreshAll = () => { setAgain((n) => n + 1); refresh(); };
+  const refreshAll = useCallback(() => { setAgain((n) => n + 1); refresh(); }, [refresh]);
+  // The screen said so itself: "the retry is the provider's own `refresh` —
+  // this screen has no pull-to-refresh, so without a button there is nothing an
+  // owner can actually do about it." There is now, and it runs both halves.
+  const pull = usePullToRefresh(refreshAll);
 
   /**
    * The till, and the currency it is honestly in.
@@ -197,7 +211,7 @@ export default function OwnerRevenue() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
@@ -318,6 +332,10 @@ export default function OwnerRevenue() {
             <Spark data={[roll.sessions30, ...forecast]} labels={forecastLabels} h={58} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.sm }}>
               <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Now {num(roll.sessions30)}</Text>
+              {/* rtl-ok: the arrow points into the FUTURE, not along the page.
+                  It is the same claim the Spark above it makes and the Spark is
+                  an <Svg> that cannot mirror, so a flipped arrow here would
+                  have the forecast running back towards "Now". */}
               <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>6 mo → {num(forecast[5])}</Text>
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>

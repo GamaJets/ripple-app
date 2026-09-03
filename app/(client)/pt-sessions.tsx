@@ -47,6 +47,7 @@
 // would have put one straight back into "Awaiting Your Approval", which is the
 // one place it must never appear.
 import { useMemo, useState, useEffect, useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, TextInput, Alert, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -72,7 +73,31 @@ import {
 import { appLocale } from '../../src/lib/locale';
 import type { Theme } from '../../src/theme/tokens';
 
-const fmt = (iso: string) => { const d = new Date(iso); return d.toLocaleDateString() + ' · ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
+/**
+ * The date and time beside Approve and Dispute.
+ *
+ * Two things were wrong with the line this replaces, and they were on the one
+ * screen where the member is being asked to agree that an hour was delivered.
+ *
+ *   · `d.toLocaleDateString()` with no locale and `toLocaleTimeString([], …)`
+ *     with an empty one. Both are the device's, which is right today — but the
+ *     `dayLabel` twelve lines down already goes through `appLocale()` and says
+ *     why in its own comment, so the same screen was formatting two dates two
+ *     ways, and `check:locale` exists because that is how "14 Aug" and
+ *     "Aug 14" came to sit in the same view.
+ *   · No NaN guard. `new Date('')` is an Invalid Date and every one of those
+ *     calls returns the literal "Invalid Date", so a session whose start time
+ *     did not parse rendered "Invalid Date · Invalid Date" over an Approve
+ *     button — and a member cannot approve an hour they cannot identify. A dash
+ *     is the honest version: it says nothing rather than saying nonsense, and
+ *     `dayLabel` already answers this shape the same way.
+ */
+const fmt = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' })
+    + ' · ' + d.toLocaleTimeString(appLocale(), { hour: 'numeric', minute: '2-digit' });
+};
 /** A bare day, for the sentence naming how far back the record has been read.
  *  Through `appLocale()` like every other formatted date in this app — a
  *  hardcoded tag is what `check:locale` exists to refuse. */
@@ -109,7 +134,7 @@ export default function PtSessions() {
   // approve right now." to a client with three sessions waiting on them — and
   // the coach on the other side, whose pay depends on those approvals, has no
   // way of telling that from a client who simply has not looked.
-  const { sessions, status: sessionStatus, approveSession, disputeSession } = useSessions();
+  const { sessions, status: sessionStatus, approveSession, disputeSession, refresh: refreshSessions } = useSessions();
   const sessionsWhole = isWhole(sessionStatus);
   const c = useClientData();
   const [note, setNote] = useState<Record<string, string>>({});
@@ -146,6 +171,14 @@ export default function PtSessions() {
     setLeft(b?.left ?? null); setHasPacks((b?.lines.length ?? 0) > 0); setLeftRead(true);
   }, []);
   useEffect(() => { loadLeft(); }, [loadLeft]);
+
+  // Two reads: the sessions themselves — including which of them a coach has
+  // marked and this member has yet to approve — and the pack balance above
+  // them. A session marked delivered while this screen was open is exactly the
+  // thing somebody pulls down to see.
+  const pull = usePullToRefresh(useCallback(() => {
+    void refreshSessions(); void loadLeft(); c.reload();
+  }, [refreshSessions, loadLeft, c.reload]));
 
   const mine = useMemo(() => sessions
     .filter((s) => s.clientId === c.id && s.status === 'booked' && Date.parse(s.startsAt) <= Date.now())
@@ -245,7 +278,7 @@ export default function PtSessions() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -294,6 +327,16 @@ export default function PtSessions() {
         <ListRow icon="calendar" title="Session Credits"
           note="Which sessions used a credit, and what your bookings are due to draw"
           onPress={() => router.push('/(client)/session-credits')} />
+
+        {/* The second way into asking, because this is the screen somebody is
+            on when they realise there is no session to be seen. The Book screen
+            has the other one, beside the open slots it could not offer. The
+            note says what it is not, in the row itself, because a row headed
+            "Ask for a Time" sitting under a list of credits is otherwise read
+            as another way to spend one. */}
+        <ListRow icon="calendar" title="Ask for a Time"
+          note="Ask your coach for an hour they haven’t opened. It asks — it doesn’t book"
+          onPress={() => router.push('/(client)/request-session')} />
 
         <Rule />
 

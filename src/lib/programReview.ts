@@ -72,7 +72,8 @@
  * boundary. See the header of src/lib/exerciseHistory.ts for why that is not
  * negotiable.
  */
-import type { Program } from './programs';
+import type { Program, ProgramDay } from './programs';
+import { programWeeks } from './programBlock';
 import type { Goal } from './types';
 import type { Injury } from './injuries';
 import { areaLabel, injuryFlag } from './injuries';
@@ -205,6 +206,16 @@ export interface Finding {
   /** The day as the coach named it — 'Mon', 'Day 1' — or null where the
    *  finding is about the whole programme. */
   day: string | null;
+  /**
+   * Which week of the block, 1-based, or null.
+   *
+   * Null on a one-week programme, which is every programme written before
+   * `Program.weeks` existed — a week number there would be counting something
+   * that does not exist, and src/lib/programs.ts is explicit that nothing
+   * renders one. Also null for a finding about the whole programme, which
+   * `goal-reps` is.
+   */
+  week: number | null;
   /** The movements, spelled as the coach wrote them. */
   exercises: string[];
   /** One sentence, sentence case. Every figure in it is one the coach can read
@@ -235,8 +246,11 @@ export interface ProgramReview {
   findings: Finding[];
   skipped: SkippedCheck[];
   /** What was read, so the screen can say how much the checks covered rather
-   *  than implying they covered a programme. */
-  counted: { days: number; exercises: number; sets: number };
+   *  than implying they covered a programme. `days` and `sets` are totals over
+   *  the WHOLE block — a twelve-week block is twelve weeks of days, and a
+   *  figure counting one of them under a heading about the draft would be the
+   *  same understatement this file was carrying. */
+  counted: { weeks: number; days: number; exercises: number; sets: number };
 }
 
 export interface ReviewInput {
@@ -287,6 +301,18 @@ const nameOf = (name: string | null | undefined): string =>
 /** A day as it will be printed, for the same reason. */
 const dayOf = (day: string | null | undefined): string =>
   (day ?? '').trim() || 'an unnamed day';
+
+/**
+ * Where in the block a finding is, as it reads inside a sentence.
+ *
+ * The day alone on a one-week programme, so nothing about those screens
+ * changes. The day AND the week on a block, because "back squat on Mon loads
+ * the knee" is unactionable across twelve Mondays — the coach has to be told
+ * which one to open. The number rather than the coach's own week label: a label
+ * is free text, may be blank, and two weeks may carry the same one.
+ */
+const whereOf = (day: string | null | undefined, week: number | null): string =>
+  week == null ? dayOf(day) : `${dayOf(day)} in week ${week}`;
 
 /** The sets of an exercise whose method counts as training volume. Warm-ups
  *  and cool-downs are not work being reviewed, and every rule below that talks
@@ -346,14 +372,35 @@ const sentence = (s: string): string => (s ? s[0].toUpperCase() + s.slice(1) : s
 
 /* ── the engine ───────────────────────────────────────────────────────────── */
 
+/** One day of the block, with the week it sits in. */
+interface WeekDay { d: ProgramDay; week: number | null }
+
 export function reviewProgram(input: ReviewInput): ProgramReview {
-  const days = input.program?.days ?? [];
+  /**
+   * EVERY WEEK, not week one.
+   *
+   * This was `input.program?.days ?? []`, which is week one by definition —
+   * see `ProgramWeek` in src/lib/programs.ts for why that field cannot be
+   * moved. So a coach writing a twelve-week block was told "7 checks run over
+   * this draft" while eleven twelfths of the draft had never been looked at:
+   * an injury conflict in week four, a volume jump in week nine and a set count
+   * that disagrees with its rows in week two all went unreported, and silence
+   * from a check reads as a pass. `programWeeks` is the one resolver of the
+   * block and it returns a single week built from `days` for a one-week
+   * programme, so nothing changes for one.
+   */
+  const weeks = programWeeks(input.program);
+  const multi = weeks.length > 1;
+  /** Every day of the block in order, each carrying its week number. Built once
+   *  because all seven rules walk it. */
+  const days: WeekDay[] = weeks.flatMap((w, i) =>
+    (w.days ?? []).map((d) => ({ d, week: multi ? i + 1 : null })));
   const findings: Finding[] = [];
   const skipped: SkippedCheck[] = [];
 
   let exercises = 0;
   let sets = 0;
-  for (const d of days) {
+  for (const { d } of days) {
     for (const ex of d.exercises) { exercises += 1; sets += setCount(ex); }
   }
 
@@ -375,13 +422,13 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
     });
   } else {
     const injuries = input.injuries as Injury[];
-    for (const d of days) {
+    for (const { d, week } of days) {
       for (const ex of d.exercises) {
         const flag = injuryFlag(ex.name, ex.group, injuries);
         if (!flag) continue;
         findings.push({
-          id: 'injury', day: d.day, exercises: [nameOf(ex.name)], volume: null,
-          detail: sentence(`${nameOf(ex.name)} on ${dayOf(d.day)} loads the ${areaLabel(flag.injury.area).toLowerCase()}, `
+          id: 'injury', day: d.day, week, exercises: [nameOf(ex.name)], volume: null,
+          detail: sentence(`${nameOf(ex.name)} on ${whereOf(d.day, week)} loads the ${areaLabel(flag.injury.area).toLowerCase()}, `
             + `which this client has disclosed as ${flag.injury.severity} and still active.`),
         });
       }
@@ -393,18 +440,18 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
   // so at length — and every progress reader in the client's app counts against
   // `sets` alone. A four-row exercise carrying `sets: 3` shows somebody
   // "3 of 3 sets" with a fourth row underneath that nothing will ever log.
-  for (const d of days) {
+  for (const { d, week } of days) {
     for (const ex of d.exercises) {
       if (!hasSetRows(ex)) continue;
       const rows = (ex.setRows ?? []).length;
       const stored = Number.isFinite(ex.sets) ? Math.floor(ex.sets) : null;
       if (stored === rows) continue;
       findings.push({
-        id: 'set-count', day: d.day, exercises: [nameOf(ex.name)], volume: null,
+        id: 'set-count', day: d.day, week, exercises: [nameOf(ex.name)], volume: null,
         detail: sentence(stored == null
-          ? `${nameOf(ex.name)} on ${dayOf(d.day)} has ${rows} sets written out but no usable stored set count, `
+          ? `${nameOf(ex.name)} on ${whereOf(d.day, week)} has ${rows} sets written out but no usable stored set count, `
             + 'and the client\'s app counts their progress against the stored figure.'
-          : `${nameOf(ex.name)} on ${dayOf(d.day)} has ${rows} sets written out but is stored as ${stored}, `
+          : `${nameOf(ex.name)} on ${whereOf(d.day, week)} has ${rows} sets written out but is stored as ${stored}, `
             + 'and the client\'s app counts their progress against the stored figure.'),
       });
     }
@@ -415,7 +462,7 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
   // Two that load the same primary group are the second one being done tired
   // by the first, which a coach may well want — so this reports the pair and
   // the group they share, and says nothing about whether it is wrong.
-  for (const d of days) {
+  for (const { d, week } of days) {
     const list = d.exercises;
     for (const run of groupRuns(list)) {
       const label = groupLabel(run.size).toLowerCase();
@@ -430,10 +477,10 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
         // another term already implies looks like.
         if (!ga || ga.toLowerCase() !== gb.toLowerCase()) continue;
         findings.push({
-          id: 'group-muscle', day: d.day,
+          id: 'group-muscle', day: d.day, week,
           exercises: [nameOf(a.name), nameOf(b.name)], volume: null,
           detail: sentence(`${nameOf(a.name)} and ${nameOf(b.name)} are next to each other in the same ${label} on `
-            + `${dayOf(d.day)}, and both are listed under ${ga}. There is no rest between them.`),
+            + `${whereOf(d.day, week)}, and both are listed under ${ga}. There is no rest between them.`),
         });
       }
     }
@@ -443,7 +490,7 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
   // Only ever reports what is written. The absent case is the one worth having:
   // a coach who left rest blank on a set of triples has not chosen 90 seconds,
   // they have not been told that is what their client's timer will run.
-  for (const d of days) {
+  for (const { d, week } of days) {
     for (const ex of d.exercises) {
       const top = topRep(ex);
       if (top == null || top > HEAVY_REPS) continue;
@@ -451,14 +498,14 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
         const secs = Math.round(ex.restSec as number);
         if (secs >= SHORT_REST_SEC) continue;
         findings.push({
-          id: 'heavy-rest', day: d.day, exercises: [nameOf(ex.name)], volume: null,
-          detail: sentence(`${nameOf(ex.name)} on ${dayOf(d.day)} is written at ${top} reps or fewer with ${secs} `
+          id: 'heavy-rest', day: d.day, week, exercises: [nameOf(ex.name)], volume: null,
+          detail: sentence(`${nameOf(ex.name)} on ${whereOf(d.day, week)} is written at ${top} reps or fewer with ${secs} `
             + `second${secs === 1 ? '' : 's'} of rest between sets.`),
         });
       } else {
         findings.push({
-          id: 'heavy-rest', day: d.day, exercises: [nameOf(ex.name)], volume: null,
-          detail: sentence(`${nameOf(ex.name)} on ${dayOf(d.day)} is written at ${top} reps or fewer and has no rest set, so `
+          id: 'heavy-rest', day: d.day, week, exercises: [nameOf(ex.name)], volume: null,
+          detail: sentence(`${nameOf(ex.name)} on ${whereOf(d.day, week)} is written at ${top} reps or fewer and has no rest set, so `
             + `the client's timer will run the ${DEFAULT_REST_SEC} second fallback between sets.`),
         });
       }
@@ -470,7 +517,7 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
   // whole point of `countsToVolume` in src/lib/setMethods.ts. So a movement a
   // coach NAMED as a warm-up while leaving its sets ordinary is a disagreement
   // between the two, and the one the app will act on is the method.
-  for (const d of days) {
+  for (const { d, week } of days) {
     for (const ex of d.exercises) {
       const isWarm = WARMUP_NAME.test(ex.name ?? '');
       const isCool = COOLDOWN_NAME.test(ex.name ?? '');
@@ -479,8 +526,8 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
       if (!counted) continue;
       const total = setCount(ex);
       findings.push({
-        id: 'warmup-volume', day: d.day, exercises: [nameOf(ex.name)], volume: null,
-        detail: sentence(`${nameOf(ex.name)} on ${dayOf(d.day)} is named as a ${isWarm ? 'warm-up' : 'cool-down'} but `
+        id: 'warmup-volume', day: d.day, week, exercises: [nameOf(ex.name)], volume: null,
+        detail: sentence(`${nameOf(ex.name)} on ${whereOf(d.day, week)} is named as a ${isWarm ? 'warm-up' : 'cool-down'} but `
           + `${counted} of its ${total} sets are ordinary working sets, so they will count towards this client's `
           + 'training volume.'),
       });
@@ -502,7 +549,7 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
     });
   } else {
     const log = input.log;
-    for (const d of days) {
+    for (const { d, week } of days) {
       for (const ex of d.exercises) {
         const tally = plannedVolume(ex);
         // A SHORT-CIRCUIT, and it is labelled as one rather than as a
@@ -530,8 +577,8 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
         // that cannot be false looks like.
         if (tally.lowKg <= bestKg * VOLUME_JUMP) continue;
         findings.push({
-          id: 'volume-jump', day: d.day, exercises: [nameOf(ex.name)],
-          detail: sentence(`${nameOf(ex.name)} on ${dayOf(d.day)} is written at more working volume than this client has `
+          id: 'volume-jump', day: d.day, week, exercises: [nameOf(ex.name)],
+          detail: sentence(`${nameOf(ex.name)} on ${whereOf(d.day, week)} is written at more working volume than this client has `
             + `logged for it in any of their last ${outings.length} sessions on record.`),
           volume: {
             // Neither figure is rounded again here. `plannedVolume` rounds its
@@ -572,7 +619,7 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
   } else {
     let high = 0;
     let readable = 0;
-    for (const d of days) {
+    for (const { d } of days) {
       for (const ex of d.exercises) {
         for (const s of workingSets(ex)) {
           const span = readRepSpan(s.reps);
@@ -584,7 +631,10 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
     }
     if (high >= MIN_GOAL_SETS && high * 2 > readable) {
       findings.push({
-        id: 'goal-reps', day: null, exercises: [], volume: null,
+        // No day and no week: this one counts across the whole block and the
+        // sentence says so. A week number on it would point a coach at a week
+        // that is not where the answer is.
+        id: 'goal-reps', day: null, week: null, exercises: [], volume: null,
         detail: `The goal on record is to build muscle, and ${high} of the ${readable} working sets with a readable `
           + `rep target are written at ${HIGH_REPS} reps or more.`,
       });
@@ -604,7 +654,7 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
     status: skipped.some((s) => s.kind === 'unread') ? 'partial' : 'ready',
     findings,
     skipped,
-    counted: { days: days.length, exercises, sets },
+    counted: { weeks: weeks.length, days: days.length, exercises, sets },
   };
 }
 
@@ -618,4 +668,20 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
 export function checksLine(): string {
   return `${CHECKS.length} checks run over this draft. They are rules, not a model, and each finding names the `
     + 'exercise, day or figure it came from.';
+}
+
+/**
+ * What was actually read, said out loud, or null on a one-week programme.
+ *
+ * Only for a block, and it is not decoration. "7 checks run over this draft"
+ * was true of week one and read as true of twelve weeks — so a coach who had
+ * written a block had no way to tell whether the eleven weeks they could not
+ * see on screen had been looked at. Now they can, and the figures are
+ * `counted`'s rather than a sentence written beside them.
+ */
+export function coverageLine(counted: ProgramReview['counted']): string | null {
+  if (counted.weeks <= 1) return null;
+  const s = (n: number) => (n === 1 ? '' : 's');
+  return `Every week of this block was read: ${counted.weeks} week${s(counted.weeks)}, `
+    + `${counted.days} training day${s(counted.days)} and ${counted.exercises} movement${s(counted.exercises)}.`;
 }

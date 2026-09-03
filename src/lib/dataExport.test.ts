@@ -7,7 +7,7 @@
 // everything, so a confident sentence over a short read is not a cosmetic bug.
 import {
   fileSizeLabel, filesRowNote, saveFileFailure, incompleteExportLine,
-  DELETION_FILES_NOTE, EXPORT_ROW_NOTE,
+  coachDataFilename, DELETION_FILES_NOTE, EXPORT_ROW_NOTE,
 } from './dataExport';
 
 const errors: string[] = [];
@@ -27,6 +27,24 @@ eq(fileSizeLabel(null), 'size unknown', 'a size storage did not report is not ze
 eq(fileSizeLabel(undefined), 'size unknown', 'and neither is a missing one');
 eq(fileSizeLabel(Number.NaN), 'size unknown', 'nor an unparseable one');
 eq(fileSizeLabel(0), '0 B', 'though a real zero is stated, because that is a fact about the file');
+
+/* ── what the file is called ───────────────────────────────────────────── */
+
+// The coach's half of the account had a literal, 'repple-coach-my-data.json',
+// so a coach at a white-labelled chain saved a file named after a company they
+// do not deal with — and the name is what they will search their downloads for
+// in two years. Same argument MY_DATA_FILENAME makes for the member's half.
+eq(coachDataFilename('repple'), 'repple-coach-my-data.json', 'the brand names the file');
+eq(coachDataFilename('atlas-fitness'), 'atlas-fitness-coach-my-data.json',
+  'and a white-labelled build gets its own name rather than somebody else\'s');
+// A registry key is lowercase and hyphenated and is therefore already safe on
+// every platform, so nothing here sanitises. What it does refuse is an EMPTY
+// prefix: '-coach-my-data.json' looks broken and sorts to the top of a
+// downloads folder under no name at all.
+eq(coachDataFilename(''), 'my-coach-my-data.json', 'a missing brand still produces a usable name');
+eq(coachDataFilename('   '), 'my-coach-my-data.json', 'and so does a blank one');
+ok(coachDataFilename('repple') !== 'repple-my-data.json',
+  'and it is distinct from the member export, which is a different file with different tables in it');
 
 /* ── the files row ─────────────────────────────────────────────────────── */
 

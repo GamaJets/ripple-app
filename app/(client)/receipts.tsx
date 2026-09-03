@@ -27,7 +27,8 @@
 // member who paid a Dubai gym in dirhams and a London one in pounds gets two
 // lines and both are true; they never get their sum.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -113,7 +114,11 @@ export default function Receipts() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const refresh = async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } };
+  const refresh = useCallback(async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }, [load]);
+  // Was four hand-written lines of RefreshControl, with its own spinner colour.
+  // The shared hook is the same gesture plus the guard against a second pull
+  // firing the read again while the first is still out.
+  const pull = usePullToRefresh(refresh);
 
   // Only ever computed from a whole read. 'partial' is excluded here for the
   // same reason 'error' is: the rows are real, the total over them is not.
@@ -124,7 +129,7 @@ export default function Receipts() {
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void refresh(); }} tintColor={t.ink3} />}
+        refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

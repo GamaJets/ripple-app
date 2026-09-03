@@ -57,6 +57,7 @@ import { readNumber } from '../../src/lib/units';
 // When the register was read, whether the phone can reach us, and a way to ask
 // again — the three things nineteen of the twenty owner screens did without.
 import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const KEY = 'repple.owner.financials';
 // One formatter for the whole owner app, rather than 'AED ' typed here and '$'
@@ -151,6 +152,12 @@ export default function Financials() {
    *  figures beside it are still from the earlier read. */
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The register read, asked for again. The typed P&L beside it is this
+   *  phone's own AsyncStorage and has nothing to re-read; the four checks on
+   *  this screen are that local figure against the register, and the register
+   *  is the half that can be out of date. */
+  const reread = useCallback(() => setAgain((n) => n + 1), []);
+  const pull = usePullToRefresh(reread);
 
   useEffect(() => {
     let live = true;
@@ -323,7 +330,7 @@ export default function Financials() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
@@ -331,7 +338,7 @@ export default function Financials() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial Checks</Text>
             {/* The typed figures are on this phone; the register they are
                 checked against is not. This line is about the register. */}
-            <Fetched at={fetchedAt} onRefresh={() => setAgain((n) => n + 1)} busy={busy} />
+            <Fetched at={fetchedAt} onRefresh={reread} busy={busy} />
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>

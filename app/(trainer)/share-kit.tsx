@@ -102,7 +102,8 @@
 // COACH_FEATURES in src/lib/features.ts. This note used to say the line was
 // still owed by another change; it has since landed, and `check:tabs` and
 // `check:reachable` both hold it.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 // React Native's own <Image>, which is in every binary ever built. The
 // thumbnails here are still photographs and nothing needs an animated format,
 // so this screen does not have to branch on HAS_NATIVE_IMAGE.
@@ -159,7 +160,7 @@ export default function ShareKit() {
   const { width } = useWindowDimensions();
   const { user: authUser, loading: authLoading } = useAuth();
   const coachId = authUser?.id ?? null;
-  const { tenant } = useTenant();
+  const { tenant, refresh: refreshTenant } = useTenant();
 
   const [mode, setMode] = useState<Mode>('week');
   const [shape, setShape] = useState<CardShape>('post');
@@ -220,7 +221,10 @@ export default function ShareKit() {
   // null NOTHING is read: there is no list of everybody's photos anywhere in
   // this screen, because a picker that showed one would be the wrong shape even
   // with every permission in place.
-  const { roster, status: rosterStatus } = useRoster();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  // Bumped by the pull below and read by the sessions effect, so the refresh
+  // goes through the one read rather than a duplicate of it.
+  const [sessionsNonce, setSessionsNonce] = useState(0);
   const [subject, setSubject] = useState<string | null>(null);
   /** What that client has SENT this coach. Null is unknown, never "none". */
   const [sent, setSent] = useState<SharedPhoto[] | null>(null);
@@ -235,26 +239,30 @@ export default function ShareKit() {
 
   // Changing the subject drops everything about the previous one. A photo id
   // left over from another client is the one bug this whole feature cannot have.
+  // Lifted out of the effect so the pull below can run it again. It still
+  // clears first: this is also what runs when the SUBJECT changes, and a
+  // photo left over from another client is the one bug this feature cannot
+  // have.
+  const loadSentPhotos = useCallback(async () => {
+    if (!subject) { setSent(null); setSentStatus('loading'); return; }
+    setSent(null);
+    setSentStatus('loading');
+    try {
+      const rows = await fetchPhotosSharedWithMe(subject);
+      setSent(rows); setSentStatus('ready');
+    } catch (e) {
+      reportError('shareKit.sharedPhotos', e);
+      // Null, not []. An empty list here would say this client has sent
+      // nothing, which is a claim about them.
+      setSent(null); setSentStatus('error');
+    }
+  }, [subject]);
+
   useEffect(() => {
     setPickedId(null);
     setPickedUri(null);
-    if (!subject) { setSent(null); setSentStatus('loading'); return; }
-    let live = true;
-    setSent(null);
-    setSentStatus('loading');
-    (async () => {
-      try {
-        const rows = await fetchPhotosSharedWithMe(subject);
-        if (live) { setSent(rows); setSentStatus('ready'); }
-      } catch (e) {
-        reportError('shareKit.sharedPhotos', e);
-        // Null, not []. An empty list here would say this client has sent
-        // nothing, which is a claim about them.
-        if (live) { setSent(null); setSentStatus('error'); }
-      }
-    })();
-    return () => { live = false; };
-  }, [subject]);
+    void loadSentPhotos();
+  }, [loadSentPhotos]);
 
   /** The photos this coach may actually use: what they can see, narrowed by
    *  what the client agreed to. Null while either read is unknown, and the
@@ -317,7 +325,27 @@ export default function ShareKit() {
       }
     })();
     return () => { live = false; };
-  }, [coachId, authLoading]);
+  }, [coachId, authLoading, sessionsNonce]);
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * This screen composes something that gets POSTED, publicly, under the
+   * coach's name, and every read behind it can be refused. The two that
+   * matter most are the photos a client has SENT and the separate grants
+   * saying which of them may be published: a client withdrawing permission
+   * happens on the client's phone, and this is the only way the coach's copy
+   * of that answer is asked for again before they post.
+   *
+   * The sessions read goes through the nonce the effect already watches
+   * rather than a second copy of it — the null-not-empty rule in there is the
+   * thing that stops a card saying the coach did nothing this week. */
+  const pull = usePullToRefresh(useCallback(() => {
+    setSessionsNonce((n) => n + 1);
+    return Promise.all([
+      loadSentPhotos(), Promise.resolve(grants.reload()), refreshRoster(),
+      Promise.resolve(logo.reload()), Promise.resolve(ig.reload()), Promise.resolve(refreshTenant()),
+    ]);
+  }, [loadSentPhotos, grants, refreshRoster, logo, ig, refreshTenant]));
 
   const brand = (tenant?.name || authUser?.name || '').trim();
   const span = SPANS.find((s) => s.days === days) ?? SPANS[0];
@@ -561,7 +589,7 @@ export default function ShareKit() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -759,7 +787,7 @@ export default function ShareKit() {
                 {/* Drawn at export size and scaled about its centre, so the
                     bitmap `toDataURL` takes is the full 1080-wide one whether or
                     not the native side honours the size options. */}
-                <View style={{ position: 'absolute', left: (previewW - size.w) / 2, top: (previewH - size.h) / 2, width: size.w, height: size.h, transform: [{ scale }] }}>
+                <View style={{ position: 'absolute', start: (previewW - size.w) / 2, top: (previewH - size.h) / 2, width: size.w, height: size.h, transform: [{ scale }] }}>
                   <CardArt ref={svgRef} card={build.card} w={size.w} h={size.h} accent={t.brand} />
                 </View>
               </View>

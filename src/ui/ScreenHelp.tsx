@@ -30,6 +30,7 @@ import { sp, radius, hairline, type as ty } from '../theme/scale';
 import {
   SCREEN_HELP, dismissedFrom, isDismissed, withDismissed, type ScreenHelpKey,
 } from '../lib/screenHelp';
+import { FORWARD_ICON } from './direction';
 
 const KEY = 'repple.screenHelp.dismissed';
 
@@ -82,7 +83,7 @@ export function ScreenHelp({ screen }: { screen: ScreenHelpKey }) {
       >
         <Icon name="info" size={16} color={t.brand} />
         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{help.title}</Text>
-        <Icon name="chevron" size={14} color={t.ink3} />
+        <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
       </Pressable>
 
       {open ? (

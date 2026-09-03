@@ -38,9 +38,10 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { scheduleLocal, cancelReminders } from './pushNotifications';
 import { weekKey } from '../lib/nudge';
+import { bookAlert, type BookState } from '../lib/coachNotify';
 import {
   toArm, staleReminders, expiredReminders, remindAt, reminderBody,
-  backlogDue, backlogBody, BACKLOG_PROMPT_KEY,
+  backlogDue, BACKLOG_PROMPT_KEY,
   type ArmedMap, type RemindableSession,
 } from '../lib/coachReminders';
 
@@ -134,39 +135,75 @@ export async function syncCoachReminders(
 }
 
 /**
- * The weekly prompt about sessions nobody has marked.
+ * The weekly prompt about the coach's OWN book.
  *
- * `unmarked` is null when the read did not answer, and null never prompts —
- * `backlogDue` enforces it, and this is the one caller that could get it wrong
- * by coercing. A banner about a coach's own business built out of a failed
- * query is how somebody learns to ignore the next one.
+ * ── What this used to be, and why it grew ─────────────────────────────────
+ *
+ * `promptUnmarkedBacklog`, which said one thing: sessions nobody has marked.
+ * That was the only fact about a coach's own business anything in this app ever
+ * told them without being opened — every other notification in
+ * src/lib/coachNotify.ts is somebody ELSE doing something, because everything
+ * else has a trigger or a handset behind it to send it. An invoice ageing past
+ * its due date and a client who has stopped training have neither, and both
+ * were computed on screens the coach had to go and look at.
+ *
+ * So the decision moved to `bookAlert` in src/lib/coachNotify.ts, which is pure
+ * and tested, ranks the four by what it costs to leave them alone, and returns
+ * ONE banner. One and not four: a phone that fires four notifications about the
+ * same business on the same morning is a phone whose notifications get turned
+ * off, and turning them off is how the money channel went down with the chat
+ * channel in the first place.
+ *
+ * ── Two gates, and they are different questions ───────────────────────────
+ *
+ * `allowed` is the coach's answer for the `book` channel — `channelAllows` over
+ * the muted set. It defaults to TRUE at the caller when the preference read did
+ * not land, matching what supabase/functions/send-push does with the same table
+ * and for the same reason: a transient fault must not silently swallow the only
+ * thing that tells a coach their own money is sitting still.
+ *
+ * `'reminders'` is the DEVICE category, and it stays. That one is about quiet
+ * hours and this is the app's own idea rather than an hour the coach agreed to,
+ * so it can wait for the morning.
+ *
+ * Every figure in `state` is null when its read did not answer, and a null
+ * never prompts and never counts — `bookAlert` enforces it. A banner about a
+ * coach's own business built out of a failed query is how somebody learns to
+ * ignore the next one.
  *
  * Fired as a local notification a minute out rather than shown on a screen,
- * because the whole point of the item is that a coach who has not opened the
- * app is the one whose queue is longest. It is `reminders`, which IS quietable:
- * unlike a session warning this is the app's own idea and can wait for morning.
+ * because the whole point is that the coach who has not opened the app is the
+ * one whose queue is longest.
  */
-export async function promptUnmarkedBacklog(
-  unmarked: number | null,
+export async function promptBookAlerts(
+  state: BookState,
+  allowed: boolean,
   now: number = Date.now(),
 ): Promise<boolean> {
   try {
+    if (!allowed) return false;
     let seen: string | null = null;
     try { seen = await AsyncStorage.getItem(BACKLOG_PROMPT_KEY); } catch { seen = null; }
-    if (!backlogDue(unmarked, seen, now)) return false;
-    const n = unmarked as number;
+    const alert = bookAlert(state);
+    if (!alert) return false;
+    // `backlogDue` still owns the CADENCE — weekly, on `weekKey`, and tolerant
+    // of a stored key from a future week. It is asked with 1 rather than the
+    // unmarked count because `bookAlert` has already decided there is something
+    // to say and applied every floor, including the one this module owns; what
+    // is left to ask is only "has this week already had its prompt".
+    if (!backlogDue(1, seen, now)) return false;
     const id = await scheduleLocal(
-      'Sessions waiting on an outcome', backlogBody(n),
+      alert.title, alert.body,
       new Date(now + 60_000), { route: '/(trainer)/sessions' }, 'reminders',
     );
     // The week is recorded whether or not the banner was scheduled. A coach who
     // has muted the `reminders` category has said they do not want this, and
-    // re-trying it on every launch would burn a scheduling call a hundred times
-    // a week to be refused a hundred times.
+    // re-trying on every launch would burn a scheduling call a hundred times a
+    // week to be refused a hundred times.
     await AsyncStorage.setItem(BACKLOG_PROMPT_KEY, weekKey(now));
     return !!id;
   } catch (e) {
-    reportError('coachReminders.backlog', e);
+    reportError('coachReminders.book', e);
     return false;
   }
 }

@@ -29,6 +29,7 @@ import {
   readTaxRate,
   statesTax,
   INVOICE_NOT_A_RECEIPT,
+  INVOICE_SETTLEMENT_IS_YOUR_WORD,
   INVOICE_PROVENANCE,
   INVOICE_VOID_NOTICE,
   type CoachInvoice,
@@ -453,6 +454,61 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
   const noBrand = coachInvoiceDoc(base({ issuer: { status: 'ready', name: 'Sam Whitfield', brand: null } }));
   ok(!noBrand.html.includes('Repple'), 'a missing brand prints no brand rather than substituting the platform');
   ok(!noBrand.html.includes('undefined') && !noBrand.html.includes('null'), 'and never prints the word undefined or null');
+}
+
+/* ── 14. THE FIFTH CLAIM, WHICH IS AN ADDITION AND NOT AN EDIT ────────────
+   Part 660 lets a coach record that a 'requested' invoice was paid. The header
+   of coachInvoice.ts lists exactly five things this document claims and is
+   careful to claim no sixth; the whole risk of the fifth is that it looks like
+   a change to the fourth.
+
+   It is not. `kind` is untouched, on the row and on the page, and the
+   settlement is printed beside it as a separate statement with its own date and
+   its own hedge. Every assertion here is aimed at somebody "simplifying" this
+   later by flipping `kind` to 'received' instead. */
+
+{
+  const paid = withInv({ kind: 'requested', settledOn: '2026-08-20', settledAt: '2026-08-20T09:00:00.000Z', settleNote: 'Bank transfer' });
+  const d = coachInvoiceDoc(paid);
+
+  ok(d.text.includes('The issuer states this amount is being requested.'),
+    'the claim the document was issued with survives a settlement, word for word');
+  ok(d.text.includes('the issuer states this was paid on 20 Aug 2026'),
+    'and the settlement is printed beside it, dated');
+  ok(d.text.includes('How the issuer says it arrived: Bank transfer'),
+    'with the coach’s own words about how, where they gave any');
+  ok(d.text.includes(INVOICE_SETTLEMENT_IS_YOUR_WORD),
+    'and the hedge that says nothing checked it, exactly as `kind` carries one');
+  ok(d.html.includes('Settled:'), 'and it is on the HTML document as well as in the text');
+
+  // Not on a document that does not carry one. A paragraph about a claim the
+  // document does not make is how the tax sentence came to need two versions.
+  const unsettled = coachInvoiceDoc(withInv({ kind: 'requested' }));
+  ok(!unsettled.text.includes(INVOICE_SETTLEMENT_IS_YOUR_WORD),
+    'and appears on no document that has not been settled');
+  ok(!unsettled.text.includes('Settled:'), 'which prints no settlement line either');
+
+  // A note with no settlement behind it prints nothing — the column has a CHECK
+  // saying the same thing, and this is the reader agreeing with it.
+  const orphan = coachInvoiceDoc(withInv({ kind: 'requested', settleNote: 'Bank transfer' }));
+  ok(!orphan.text.includes('Bank transfer'), 'a settle note with no settlement behind it prints nothing');
+
+  // The escaping still holds. `settle_note` is a fifth value a person typed, so
+  // it goes through the same five replacements as the other four — a note
+  // reading "cash <in hand>" must not take the rest of the invoice with it.
+  const nasty = coachInvoiceDoc(withInv({
+    kind: 'requested', settledOn: '2026-08-20', settledAt: '2026-08-20T09:00:00.000Z',
+    settleNote: 'cash <in hand> & counted',
+  }));
+  ok(nasty.html.includes('cash &lt;in hand&gt; &amp; counted'), 'a typed settle note is escaped like every other typed value');
+  ok(!nasty.html.includes('<in hand>'), 'and reaches the page as text rather than as markup');
+
+  // And a chase date reaches no document at all. It is the coach's own working
+  // note, the client never agreed to it, and printing it would turn it into the
+  // term `CHASE_FROM_IS_NOT_A_DUE_DATE` says it is not.
+  const planned = coachInvoiceDoc(withInv({ kind: 'requested', dueOn: null, chaseFrom: '2026-09-15' }));
+  ok(!planned.text.includes('15 Sep 2026'), 'a chase date is on no document');
+  ok(!planned.html.includes('15 Sep 2026'), 'in either form');
 }
 
 declare const process: { exit(code: number): void };

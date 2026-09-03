@@ -30,7 +30,8 @@
 // what is on screen is an empty form standing in for one that may be full, and
 // saving it would replace a real disclosure with a blank. The Save control is
 // withheld and says why — the same gesture as src/lib/overwriteGuard.ts.
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import {
   View, Text, ScrollView, Pressable, TextInput, Alert,
@@ -42,6 +43,9 @@ import type { Theme } from '../../src/theme/tokens';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+// 44pt. Every answer on this form is a tap target and they sit in rows — see
+// the note on `Pill`.
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { useMyIntake } from '../../src/ui/intake';
 import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
@@ -66,10 +70,35 @@ const SLEEP = [5, 6, 7, 8, 9];
     end after every single character typed. It is the kind of thing that only
     shows up on a device, and it makes a form of this length unusable. */
 
+/**
+ * One answer on this form.
+ *
+ * ── The height, which was 34pt ────────────────────────────────────────────
+ *
+ * `sp.sm` above and below a `ty.label` line draws about 34 points — ten short
+ * of the 44 in src/lib/a11y.ts. These are not decorative chips: they are the
+ * ANSWERS to a health-history form, sat in rows of five or seven, and the
+ * screens they are on are filled in by somebody new to the gym, often standing
+ * up, often on a phone they are holding in one hand. Two wrong taps in a row of
+ * "1 2 3 4 5" is a different training age, a different injury history and a
+ * different starting programme, and nothing on the form says which answer was
+ * meant.
+ *
+ * `minHeight` rather than `hitSlop`, deliberately, and it is the opposite of
+ * what a11y.ts's own note recommends for an icon button: these pills sit
+ * SHOULDER TO SHOULDER in a wrapping row, so slop on each one would overlap its
+ * neighbour and the overlap goes to whichever renders last — which is the same
+ * mis-tap, minus the honesty of it being visible. Growing the box moves the
+ * boundary and the drawing together, and the row simply gets taller.
+ */
 function Pill({ t, label, on, onPress }: { t: Theme; label: string; on: boolean; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: on }}
-      style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
+      style={{
+        paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.sm,
+        minHeight: MIN_TARGET, justifyContent: 'center',
+        backgroundColor: on ? t.brand : t.surface2,
+      }}>
       <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{label}</Text>
     </Pressable>
   );
@@ -133,6 +162,11 @@ export default function IntakeScreen() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const reach = useReachability();
+  // The form on the server, read again. This is not a pure form: what is shown
+  // is whatever the member has already answered, and a failed read leaves the
+  // screen saying so with nothing to press. The local draft survives the
+  // re-read — see `useMyIntake`.
+  const pull = usePullToRefresh(useCallback(() => { m.reload(); }, [m.reload]));
   // Which document is on screen, and how it got there.
   //
   //   'server'   the read landed and this is what came back.
@@ -233,7 +267,7 @@ export default function IntakeScreen() {
           computes in window coordinates and therefore gets right under a header
           of any height, in either orientation. See src/ui/keyboardLift.ts. */}
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 60 }}
-        showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+        showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

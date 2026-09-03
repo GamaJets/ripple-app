@@ -18,9 +18,11 @@
 import {
   COACH_CHANNELS, channelDef, mutedFromRows, channelState, channelAllows,
   channelsNote, CHANNEL_MASTER_NOTE, CHANNEL_STILL_RECORDED, CHANNEL_QUIET_COST,
-  CHANNEL_ACCOUNT_WIDE, CHANNEL_UNKNOWN_LABEL,
-  type CoachChannel,
+  CHANNEL_QUIET_COST_BOOK, CHANNEL_ACCOUNT_WIDE, CHANNEL_LOCAL_NOTE,
+  CHANNEL_UNKNOWN_LABEL, bookAlert, BOOK_FLOOR,
+  type CoachChannel, type BookState,
 } from './coachNotify';
+import { BACKLOG_FLOOR, backlogBody } from './coachReminders';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -29,20 +31,107 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 
 /* ── the catalogue ─────────────────────────────────────────────────────── */
 
-eq(COACH_CHANNELS.length, 5, 'five channels');
+eq(COACH_CHANNELS.length, 6, 'six channels');
 const keys = COACH_CHANNELS.map((c) => c.key);
-eq(new Set(keys).size, 5, 'each named once');
-for (const k of ['chat', 'bookings', 'money', 'clients', 'admin'] as CoachChannel[]) {
+eq(new Set(keys).size, 6, 'each named once');
+for (const k of ['chat', 'bookings', 'money', 'clients', 'admin', 'book'] as CoachChannel[]) {
   ok(keys.includes(k), `${k} is one of them`);
   ok(channelDef(k) != null, `and has a definition`);
 }
 eq(channelDef('nonsense'), null, 'a channel this build has never heard of has no definition');
 
-// Exactly one channel carries the quiet cost, so the warning means something
-// when it appears. Five identical warnings is a wall nobody reads.
-eq(COACH_CHANNELS.filter((c) => c.quietCost).length, 1, 'one channel is the one that hurts quietly');
-eq(COACH_CHANNELS.find((c) => c.quietCost)?.key, 'money',
-  'and it is money — a missed chat message is visible next time they open the app, a declined card is not');
+// ── the sixth, and why the first five were all one thing ────────────────
+//
+// Every one of the first five is somebody ELSE doing something, and that was
+// not a decision about what a coach wants to know — it is the whole of what the
+// platform could tell them, because another person's action is what a trigger
+// needs in order to exist. So the coach heard about everything their clients
+// did and nothing about their own book going wrong.
+eq(COACH_CHANNELS.filter((c) => c.local).length, 1, 'exactly one channel is worked out by the handset');
+eq(COACH_CHANNELS.find((c) => c.local)?.key, 'book',
+  'and it is the coach\'s own book, which has no other person\'s action behind it to hang a trigger on');
+for (const c of COACH_CHANNELS) {
+  if (c.key === 'book') continue;
+  eq(c.local, false, `${c.key} is remote and its preference is applied where the recipients are resolved`);
+}
+
+// The quiet cost is a SENTENCE per channel and not a shared one, because a
+// second channel earned it and the two costs are different things.
+const costly = COACH_CHANNELS.filter((c) => c.quietCost);
+eq(costly.length, 2, 'two channels hurt quietly, and no more — six identical warnings is a wall nobody reads');
+eq(costly.map((c) => c.key).join(','), 'money,book',
+  'money and the coach\'s own book: a declined card and an unmarked session are both invisible until somebody goes looking');
+eq(new Set(costly.map((c) => c.quietCost)).size, 2,
+  'and they say DIFFERENT things — one shared warning would have named the wrong consequence under one of them');
+ok(/statement|revenue/i.test(CHANNEL_QUIET_COST_BOOK),
+  'the book warning names what an unmarked session actually costs');
+ok(!/personalis|personaliz|may miss/i.test(CHANNEL_QUIET_COST_BOOK), 'and does not soften it');
+
+/* ── the coach's own book, as one banner ───────────────────────────────── */
+
+const NOTHING: BookState = {
+  unmarkedSessions: 0, invoicesOverdue: 0, clientsDrifting: 0, packsRunningOut: 0,
+};
+eq(bookAlert(NOTHING), null, 'a book with nothing wrong in it is not news and gets no banner');
+
+// THE rule. Every figure is null when its read did not answer, and a banner
+// about a coach's own business composed out of a failed query is how somebody
+// learns to ignore the next one — and the next one is the one that matters.
+const UNKNOWN: BookState = {
+  unmarkedSessions: null, invoicesOverdue: null, clientsDrifting: null, packsRunningOut: null,
+};
+eq(bookAlert(UNKNOWN), null, 'and neither is a book nobody could read — null never prompts');
+eq(bookAlert({ ...UNKNOWN, invoicesOverdue: 2 })?.title, '2 invoices past their due date',
+  'a caller that read one of the four and not the others still gets the one it read');
+
+// One banner, not four. A phone that fires four notifications about the same
+// business on the same morning is a phone whose notifications get turned off,
+// and turning them off is how the money channel went down with the chat one.
+const everything: BookState = {
+  unmarkedSessions: 9, invoicesOverdue: 2, clientsDrifting: 4, packsRunningOut: 1,
+};
+const all = bookAlert(everything)!;
+ok(all != null, 'a book with four things wrong in it still gets a banner');
+ok(/9 sessions/.test(all.title), 'and the unmarked queue leads, because it is somebody\'s pay held up');
+ok(/2 overdue invoice/.test(all.body) && /1 pack/.test(all.body) && /4 clients/.test(all.body),
+  'while the other three are counted after it rather than dropped');
+// The unmarked wording is `backlogBody`'s and not a second copy of it: that
+// sentence names the CONSEQUENCE rather than the chore, and it was the whole of
+// this channel before the channel had a name.
+ok(all.body.startsWith(backlogBody(9)), 'and the sentence itself comes from src/lib/coachReminders.ts');
+
+// The order is by what it costs to leave alone, and each step down is only
+// reached when everything above it is clear.
+eq(bookAlert({ ...NOTHING, invoicesOverdue: 3, clientsDrifting: 1 })?.title,
+  '3 invoices past their due date', 'with nothing unmarked, the money already earned speaks');
+eq(bookAlert({ ...NOTHING, packsRunningOut: 2, clientsDrifting: 1 })?.title,
+  '2 packs about to run out', 'then a client about to arrive with nothing left to draw on');
+eq(bookAlert({ ...NOTHING, clientsDrifting: 1 })?.title, '1 client has gone quiet',
+  'and drift last, which is the slowest of the four and has a screen of its own');
+
+// Singulars read as singulars. This is a banner on a lock screen and "1
+// invoices past their due date" is the kind of thing that makes a coach trust
+// the number less.
+ok(!/s past their/.test(bookAlert({ ...NOTHING, invoicesOverdue: 1 })!.title), 'one invoice is singular');
+ok(/have gone quiet/.test(bookAlert({ ...NOTHING, clientsDrifting: 2 })!.title), 'and two clients are plural');
+
+// The floors. Everything takes one, EXCEPT the unmarked queue, which keeps the
+// bar it was already given in src/lib/coachReminders.ts — imported rather than
+// restated, because "below this it is a normal week's work" is one decision.
+eq(BOOK_FLOOR, 1, 'one overdue invoice is worth saying to a coach with three clients');
+eq(bookAlert({ ...NOTHING, unmarkedSessions: BACKLOG_FLOOR - 1 }), null,
+  'a queue below the backlog floor is a normal week and says nothing');
+ok(bookAlert({ ...NOTHING, unmarkedSessions: BACKLOG_FLOOR }) != null, 'and at the floor it does');
+// A sub-floor queue must not silence the rest of the book either.
+eq(bookAlert({ ...NOTHING, unmarkedSessions: BACKLOG_FLOOR - 1, invoicesOverdue: 1 })?.title,
+  '1 invoice past its due date',
+  'and a queue too small to mention does not swallow an overdue invoice');
+
+// Never a cheerful all-clear. A notification saying nothing is wrong is
+// indistinguishable from one composed out of four failed reads.
+for (const st of [NOTHING, UNKNOWN]) {
+  eq(bookAlert(st), null, 'nothing to say produces no banner rather than an all-clear');
+}
 
 /* ── the stored rows ───────────────────────────────────────────────────── */
 
@@ -108,6 +197,10 @@ ok(/paying/i.test(CHANNEL_QUIET_COST), 'the money warning names the consequence 
 ok(!/personalis|personaliz|may miss/i.test(CHANNEL_QUIET_COST), 'and does not soften it');
 ok(/account/i.test(CHANNEL_ACCOUNT_WIDE) && /phone|handset/i.test(CHANNEL_ACCOUNT_WIDE),
   'and the per-account / per-handset difference is stated, because it is discovered by accident otherwise');
+ok(/no signal|without signal/i.test(CHANNEL_LOCAL_NOTE) && /opened the app/i.test(CHANNEL_LOCAL_NOTE),
+  'the local channel says both of the things that are true only of it: it arrives offline, and it is only as current as the last time the app was opened');
+ok(/account/i.test(CHANNEL_LOCAL_NOTE),
+  'and that the answer still follows the coach between phones, so CHANNEL_ACCOUNT_WIDE stays true of all six');
 
 if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);

@@ -41,6 +41,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { fmtDay } from '../../src/lib/format';
 import {
@@ -142,6 +143,10 @@ export default function CoachDocumentsScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+  // The one read on this screen, and the same one focus runs. A refused read
+  // draws "could not be read" over the coach's whole paperwork list, and a
+  // coach who cannot get past that sentence uploads everything a second time.
+  const pull = usePullToRefresh(load);
 
   /* ── Adding one ────────────────────────────────────────────────────────── */
 
@@ -399,7 +404,7 @@ export default function CoachDocumentsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

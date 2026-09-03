@@ -9,12 +9,13 @@
 // became <Spark> trends with a KpiRow carrying the numbers they annotated, the
 // 8.5px labels are gone, and the est-1RM delta no longer paints itself in a
 // reserved status colour — it carries a coloured mark beside ink text.
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
 import { volumeIn, est1RMIn, weightDeltaIn, convertedNote } from '../../src/lib/units';
@@ -45,7 +46,7 @@ function bestOf(e: WorkoutEntry, history: BodyweightHistory): number {
 export default function Trends() {
   const t = useTheme();
   const router = useRouter();
-  const { log, status: logStatus } = useWorkoutLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   // Every figure on this screen is a lifted load or a sum of them, and the
   // tester's report was about exactly these: "Don't have choice of units for
   // exercise / weights being used." The arithmetic below stays in the
@@ -58,7 +59,11 @@ export default function Trends() {
   // weighed ON OR BEFORE the day of it. Never today's figure carried backwards:
   // this is a ten-week chart, and a chart whose past redraws itself every time
   // somebody steps on a scale is not a record of anything.
-  const { weightSeries } = useClientData();
+  const cd = useClientData();
+  const { weightSeries } = cd;
+  // The volume and frequency curves come from the log; the weight curve drawn
+  // beside them comes from the scan history. Two reads, both asked again.
+  const pull = usePullToRefresh(useCallback(() => { reloadLog(); cd.reload(); }, [reloadLog, cd.reload]));
   // Under 'error' the log is empty because it could not be read, so every
   // tonnage below reduces to zero and gets printed with a thousands separator
   // and a unit — the full costume of a measured figure. "Best week" is the
@@ -139,7 +144,7 @@ export default function Trends() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -222,7 +227,7 @@ export default function Trends() {
             </Text>
           ) : (
             <>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingRight: G }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: G }}>
                 {exercises.map((n) => {
                   const on = n === selName;
                   return (

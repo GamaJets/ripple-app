@@ -2,7 +2,24 @@
 // today?" and "is a device connected?". Holds per-provider connection state and
 // today's metrics, persists which providers were connected (AsyncStorage), and
 // re-syncs available ones on launch.
-import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
+//
+// ── Whether the number on screen is today's ───────────────────────────────
+//
+// This file had no `LoadStatus` at all, and the whole of what it did about a
+// failed sync was one line in a catch: `/* otherwise leave last metrics in
+// place */`. Keeping the metrics is right — a WHOOP that could not be reached
+// at three o'clock did not un-burn the morning's calories — but it was the only
+// thing that happened. The figures went on being rendered as "Active Today"
+// with nothing anywhere saying they were four hours old and had stopped moving,
+// and the member's own evidence for the failure (the burn not going up) is
+// indistinguishable from a quiet afternoon.
+//
+// So each provider now carries the vocabulary src/ui/loadStatus.ts exists for,
+// and `todayStatus` is the whole row's answer: 'error' means what is on screen
+// is the last thing we had, not a current reading. Nothing is withheld and no
+// figure changes — the only thing added is the ability of a screen to say which
+// of the two it is looking at, which is the one thing it could not do.
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -10,6 +27,7 @@ import { PROVIDERS, providerById } from '../lib/wearables/registry';
 import type { ConnectionState, DailyMetrics, ProviderId } from '../lib/wearables/types';
 import { WearableNotConnectedError } from '../lib/wearables/oauth';
 import { reportError } from '../lib/reportError';
+import { worstStatus, type LoadStatus } from './loadStatus';
 
 const STORE_KEY = 'repple.wearables.connected';
 
@@ -28,6 +46,22 @@ interface Value {
   metrics: Record<string, DailyMetrics | null>;
   busy: Record<string, boolean>;
   lastSync: Record<string, number>;
+  /**
+   * Per provider: is what is in `metrics` for it a CURRENT reading?
+   *
+   *   'loading' — connected, and its first read has not come back yet.
+   *   'ready'   — the provider answered. Whatever is in `metrics` is today's.
+   *   'error'   — the read failed. `metrics` still holds the last figures we
+   *               had, which are real and are not current.
+   *
+   * There is no 'partial' here: a provider returns one day's roll-up or it does
+   * not, and there is no row cap to be truncated by.
+   */
+  syncStatus: Record<string, LoadStatus>;
+  /** The same question about the whole `today` row — the least trustworthy of
+   *  the connected providers, per `worstStatus`. A screen printing a figure off
+   *  `today` should say so when this is not 'ready'. */
+  todayStatus: LoadStatus;
   connect: (id: ProviderId) => Promise<void>;
   disconnect: (id: ProviderId) => Promise<void>;
   sync: (id: ProviderId) => Promise<void>;
@@ -47,27 +81,48 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
   const [metrics, setMetrics] = useState<Record<string, DailyMetrics | null>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [lastSync, setLastSync] = useState<Record<string, number>>({});
+  const [syncStatus, setSyncStatus] = useState<Record<string, LoadStatus>>({});
 
   const setState = (id: string, s: ConnectionState) => setStates((p) => ({ ...p, [id]: s }));
   const setBusyFor = (id: string, b: boolean) => setBusy((p) => ({ ...p, [id]: b }));
+  const setStatusFor = (id: string, s: LoadStatus) => setSyncStatus((p) => ({ ...p, [id]: s }));
 
   const sync = useCallback(async (id: ProviderId) => {
     const p = providerById(id);
     if (!p || !p.isAvailable()) return;
     setBusyFor(id, true);
+    // 'loading' only on the FIRST read. A sixty-second refresh that re-enters
+    // this would otherwise flip a screen's whole row back to "still reading"
+    // every minute, over figures that are already on it.
+    setSyncStatus((prev) => (prev[id] ? prev : { ...prev, [id]: 'loading' }));
     try {
       const m = await p.fetchToday();
       setMetrics((prev) => ({ ...prev, [id]: m }));
       setLastSync((prev) => ({ ...prev, [id]: Date.now() }));
+      setStatusFor(id, 'ready');
     } catch (e) {
       if (e instanceof WearableNotConnectedError) {
         // The server has no usable token. Stop showing this as connected —
         // otherwise the UI reads "connected" forever while nothing works.
+        //
+        // 'ready' rather than 'error', and the difference matters: this is a
+        // read that SUCCEEDED in telling us something. The device is not
+        // connected, its metrics are cleared, and it drops out of the roll-up
+        // below because that only counts connected providers — so there is no
+        // stale figure left over for a status to warn about.
         setState(id, 'disconnected');
         setMetrics((prev) => ({ ...prev, [id]: null }));
+        setStatusFor(id, 'ready');
         forgetRemembered(id).catch(() => {});
+      } else {
+        // The metrics stay, and that is deliberate: a watch that could not be
+        // reached at three o'clock did not un-burn the morning's calories. What
+        // is added is the admission that they are the last ones we had — see
+        // the header. Without it "Active Today" reads as a live figure that has
+        // simply stopped going up, which is what a quiet afternoon looks like
+        // too.
+        setStatusFor(id, 'error');
       }
-      /* otherwise leave last metrics in place */
     } finally {
       setBusyFor(id, false);
     }
@@ -99,6 +154,11 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     if (p) { try { await p.disconnect(); } catch (e) { reportError('wearables.disconnect', e, { provider: id }); } }
     setState(id, 'disconnected');
     setMetrics((prev) => ({ ...prev, [id]: null }));
+    // Cleared, not left at whatever the last read said. A device that has been
+    // unplugged deliberately is not a device whose read failed, and a stale
+    // 'error' here would put a warning about missing figures on a row the
+    // member has just chosen to empty.
+    setSyncStatus((prev) => { const next = { ...prev }; delete next[id]; return next; });
     await forgetRemembered(id);
     // The sleep this device measured goes with it.
     //
@@ -246,11 +306,39 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     // mostly-resting energy on a screen that meant exercise.
     totalKcal: totals ? Math.max(...totals) : null,
     steps: steps ? Math.max(...steps) : null,
-    heartRateAvg: hrs ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null,
+    // One device's figure, like every other field on this row — NOT the mean of
+    // two.
+    //
+    // This line used to average them, and app/(client)/devices.tsx renders the
+    // result four rows under a paragraph promising the opposite: "Where two
+    // disagree, Recovery shows the figure one device actually reported and
+    // names it — it never averages them into a number no device recorded." A
+    // member wearing an Apple Watch all day and a WHOOP overnight was shown a
+    // day's average heart rate that neither had measured and neither app would
+    // agree with, on the screen whose whole job is explaining where the figures
+    // come from.
+    //
+    // `Math.max`, for the same reason steps and calories take it: two devices
+    // measuring the same body disagree mostly by COVERAGE — the one that was on
+    // the wrist through the session recorded the session, the one in a drawer
+    // recorded the drawer — so the higher figure is the more complete
+    // measurement rather than the more flattering one. And whatever else is
+    // true of it, it is a number a device really reported.
+    heartRateAvg: hrs ? Math.round(Math.max(...hrs)) : null,
     heartRateLatest: hrl && hrl.length ? Math.round(hrl[hrl.length - 1]) : null,
   };
 
-  return <Ctx.Provider value={{ states, metrics, busy, lastSync, connect, disconnect, sync, syncAll, today, liveMode, setLiveMode }}>{children}</Ctx.Provider>;
+  // How much of that row is current. A provider that is connected and has never
+  // answered is 'loading' rather than absent, because a roll-up missing one of
+  // three devices is not a whole answer either — and `worstStatus` puts
+  // 'loading' ahead of the rest for exactly that reason.
+  const todayStatus = useMemo(() => {
+    const live = PROVIDERS.filter((p) => states[p.meta.id] === 'connected');
+    if (!live.length) return 'ready' as LoadStatus;
+    return worstStatus(...live.map((p) => syncStatus[p.meta.id] ?? 'loading'));
+  }, [states, syncStatus]);
+
+  return <Ctx.Provider value={{ states, metrics, busy, lastSync, syncStatus, todayStatus, connect, disconnect, sync, syncAll, today, liveMode, setLiveMode }}>{children}</Ctx.Provider>;
 }
 
 export function useWearables(): Value {

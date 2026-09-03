@@ -51,7 +51,7 @@
 // reads it back as an email, a phone number, or NEITHER, and 'unknown' is a real
 // answer: an Instagram handle gets no dial button, because a coach finds out
 // that a tel: link over a handle dials nothing only after they have tapped it.
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { View, Text, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -60,6 +60,7 @@ import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, PartialRead } fro
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { num } from '../../src/lib/format';
 import { useLeads } from '../../src/ui/leads';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   FOLLOW_UP_IS_MANUAL, ENQUIRY_IS_ANNOUNCED, MISTYPED_CODE_NOTE, LEAD_STATE_LABEL, LEAD_STATE_NOTE, MAX_FOLLOW_UP,
   FOLLOW_UP_LABEL, FOLLOW_UP_WHEN, followUpDraft, followUpLink, followUpRecord,
@@ -117,21 +118,32 @@ export default function TrainerLeads() {
   // not meet the coach's supplier in it, and a chain's member must not meet a
   // competitor: the same violation the join page was fixed for, on the one
   // message somebody reads before they are anybody's customer.
-  const { name: coachName } = useMyTrainerProfile();
+  const { name: coachName, reload: reloadProfile } = useMyTrainerProfile();
   const [tradingName, setTradingName] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const b = await fetchMyCoachBrand();
+  const loadTradingName = useCallback(async () => {
+    try {
+      const b = await fetchMyCoachBrand();
         // A failed read is no trading name, which reads perfectly well — the
-        // draft simply does not name a business. It is NOT a reason to fall
-        // back to the app's own name, which is the one name it must not use.
-        if (live) setTradingName(b?.brandName ?? null);
-      } catch { if (live) setTradingName(null); }
-    })();
-    return () => { live = false; };
+      // draft simply does not name a business. It is NOT a reason to fall
+      // back to the app's own name, which is the one name it must not use.
+      setTradingName(b?.brandName ?? null);
+    } catch { setTradingName(null); }
   }, []);
+  useEffect(() => { void loadTradingName(); }, [loadTradingName]);
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Enquiries arrive from OUTSIDE the app — somebody filling in a join page —
+   * so nothing on this list moves because of anything the coach did, and
+   * there is no other gesture that goes and looks.
+   *
+   * The two name reads go with it. Both are stamped into the message a
+   * prospect receives, and a draft written from a stale trading name is a
+   * message sent under a business name the coach has since changed. */
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([book.reload(), reloadProfile(), loadTradingName()]),
+    [book, reloadProfile, loadTradingName],
+  ));
 
   const listed = book.rows.filter((r) => filter === 'all' || r.state === filter);
 
@@ -336,7 +348,7 @@ export default function TrainerLeads() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>

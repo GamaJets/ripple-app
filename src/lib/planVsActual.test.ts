@@ -74,6 +74,53 @@ const ramp = planVsActual({
 eq(ramp.movements[0].plannedTopKg, 140,
   'a ramp is prescribed at its top set, and the warm-up row is not what the coach asked for');
 
+/* ── one movement, two days, two prescriptions ──────────────────────────── */
+//
+// A squat on Monday at 100 and on Friday at 140 is ONE movement the client
+// either does or does not do — which is why the week-level list is
+// de-duplicated by slug — but it is NOT one prescription. First-one-wins kept
+// Monday's 100 and dropped Friday's 140, so `loadCheck` measured the client's
+// week against a load their coach had already superseded and called them 40 kg
+// over a target that was not theirs.
+const twoDays = planVsActual({
+  days: [
+    { day: 'Mon', focus: 'Squat', exercises: [ex('Back Squat', 100)] },
+    { day: 'Fri', focus: 'Squat', exercises: [ex('Back Squat', 140)] },
+  ],
+  programStatus: 'ready',
+  log: [{ t: at('2026-08-29'), exercise: 'Back Squat', sets: [[5, 135]] }],
+  logStatus: 'ready',
+  todayISO: TODAY,
+});
+eq(twoDays.movements.length, 1, 'the same movement on two days is one row at week level');
+eq(twoDays.movements[0].plannedTopKg, 140,
+  'and the week prescribes the HEAVIEST of the two, not whichever day came first');
+eq(loadCheck(twoDays.movements[0]).verdict, 'under',
+  'so 135 against a week that asks for 140 is under it, where Monday alone would have called it over');
+// Each day still carries its own figure, because the load belongs to the day
+// the coach wrote it on.
+eq(JSON.stringify(twoDays.days.map((d) => d.movements[0].plannedTopKg)), JSON.stringify([100, 140]),
+  'the per-day rows are untouched — merging happens only in the week-level list');
+// The order the days are written in must not decide the answer.
+const reversed = planVsActual({
+  days: [
+    { day: 'Mon', focus: 'Squat', exercises: [ex('Back Squat', 140)] },
+    { day: 'Fri', focus: 'Squat', exercises: [ex('Back Squat', 100)] },
+  ],
+  programStatus: 'ready', log: [], logStatus: 'ready', todayISO: TODAY,
+});
+eq(reversed.movements[0].plannedTopKg, 140, 'heaviest wins whichever day it is written on');
+// A day with no load on it cannot erase a day that has one.
+const oneLoaded = planVsActual({
+  days: [
+    { day: 'Mon', focus: 'Squat', exercises: [ex('Back Squat', 140)] },
+    { day: 'Fri', focus: 'Squat', exercises: [ex('Back Squat')] },
+  ],
+  programStatus: 'ready', log: [], logStatus: 'ready', todayISO: TODAY,
+});
+eq(oneLoaded.movements[0].plannedTopKg, 140,
+  'a bodyweight day beside a loaded one does not turn the week into a prescription of nothing');
+
 /* ── off-plan work, which nothing in this app could see before ──────────── */
 
 eq(base.offPlan, ['Leg Press'], 'a movement logged but not prescribed is named, spelled as the CLIENT typed it');

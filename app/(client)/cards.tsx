@@ -13,7 +13,7 @@
 // they are built to be screenshotted and posted — so a client reading pounds
 // was being handed a card announcing a number in a unit they never use, to an
 // audience with no way to know that. Both now read in the client's unit.
-import { useRef, useState } from 'react';
+import { useRef, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import Svg, { Rect, Text as SvgText, Line } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,11 +28,13 @@ import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightDeltaIn } from '../../src/lib/units';
 import { deltaLabel, deltaMoved } from '../../src/lib/deltaLabel';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useBrand } from '../../src/ui/brand';
 import { currentStreak, longestStreak, personalRecords } from '../../src/lib/streaks';
 import { charsPerLine, wrapLines } from '../../src/lib/shareAsset';
 import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
+import { FORWARD_CHAR } from '../../src/ui/direction';
 
 /**
  * The card as an EXPORTABLE GRAPHIC, drawn in SVG so `toDataURL` can turn it
@@ -135,7 +137,7 @@ function ShareCard({ t, appName, kicker, big, unit, sub }: { t: Theme; appName: 
       <View>
         <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
           <Text style={{ ...value(56), color: t.brandInk }}>{big}</Text>
-          {unit ? <Text style={{ ...ty.title, color: t.brandInk, marginLeft: 6, letterSpacing: 0 }}>{unit}</Text> : null}
+          {unit ? <Text style={{ ...ty.title, color: t.brandInk, marginStart: 6, letterSpacing: 0 }}>{unit}</Text> : null}
         </View>
         <Text style={{ ...ty.body, fontWeight: '500', color: t.brandInk, opacity: 0.9, marginTop: sp.xs }}>{sub}</Text>
       </View>
@@ -147,7 +149,10 @@ export default function Cards() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { log, status: logStatus } = useWorkoutLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
+  // Every figure printed on a card comes from the profile or the training log,
+  // and a card is the one thing on this screen that leaves the phone.
+  const pull = usePullToRefresh(useCallback(() => { c.reload(); reloadLog(); }, [c.reload, reloadLog]));
   const { appName } = useBrand();
   const wu = useSettings().weightUnit;
   const [idx, setIdx] = useState(0);
@@ -293,7 +298,7 @@ export default function Cards() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
@@ -325,7 +330,7 @@ export default function Cards() {
               goes and there is nothing to export. */}
           {card.available ? (
             <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-              style={{ position: 'absolute', left: -EXPORT_W * 2, top: 0, width: EXPORT_W, height: EXPORT_H, opacity: 0 }}>
+              style={{ position: 'absolute', start: -EXPORT_W * 2, top: 0, width: EXPORT_W, height: EXPORT_H, opacity: 0 }}>
               <CardArt ref={svgRef} accent={t.brand} appName={appName} kicker={card.kicker} big={card.big} unit={card.unit} sub={card.sub} />
             </View>
           ) : null}
@@ -351,7 +356,7 @@ export default function Cards() {
           <Pressable onPress={() => router.push('/(client)/social')} accessibilityRole="button" accessibilityLabel="Connect Instagram or TikTok"
             style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, alignSelf: 'center' }}>
             <Icon name="share" size={15} color={t.ink3} />
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Connect Instagram / TikTok ›</Text>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Connect Instagram / TikTok {FORWARD_CHAR}</Text>
           </Pressable>
         </Section>
       </ScrollView>

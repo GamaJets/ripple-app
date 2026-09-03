@@ -83,6 +83,7 @@ import type { StatusLevel } from '../../src/lib/status';
 import { rankClients, readClientActivity, type DriftInput } from '../../src/lib/clientDrift';
 import { packLeft } from '../../src/lib/coachMoney';
 import { fetchClientPurchases } from '../../src/lib/connect';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   COMPUTED_SEGMENTS, segmentDef, segmentMembers, unassessed, unassessedNote,
   type ClientFacts, type SegmentKey,
@@ -91,9 +92,9 @@ import {
 export default function Broadcast() {
   const t = useTheme();
   const router = useRouter();
-  const { roster, status: rosterStatus } = useRoster();
-  const { allTags, tagsFor, status: tagStatus } = useClientTags();
-  const { tenant } = useTenant();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  const { allTags, tagsFor, status: tagStatus, reload: reloadTags } = useClientTags();
+  const { tenant, refresh: refreshTenant } = useTenant();
   /**
    * What the coach has chosen to write to.
    *
@@ -135,6 +136,11 @@ export default function Broadcast() {
   // than the state above: the state is set asynchronously and two renders in
   // the same tick would both see null.
   const asked = useRef<{ drift: boolean; packs: boolean }>({ drift: false, packs: false });
+  // Bumped by the pull below, and in the selection effect's dependency array.
+  // Clearing `asked` on its own would not be enough: it is a ref, so nothing
+  // re-runs on the strength of it, and whether the effect fired again would
+  // depend on the roster provider happening to hand back a new array.
+  const [sourceNonce, setSourceNonce] = useState(0);
 
   const readDrift = useCallback(async (ids: string[], tenantId: string | undefined) => {
     setDrift({ status: 'loading', byId: new Map() });
@@ -204,7 +210,27 @@ export default function Broadcast() {
       asked.current.packs = true;
       void readPacks();
     }
-  }, [def, rosterStatus, roster, tenant?.id, readDrift, readPacks]);
+  }, [def, rosterStatus, roster, tenant?.id, readDrift, readPacks, sourceNonce]);
+
+  /* ── pull to refresh ─────────────────────────────────────────────────────
+   *
+   * This screen decides who a message goes to, and every input to that decision
+   * is a read that can be refused: the roster, the tag map the segment chips
+   * are built from, the gym the activity query is scoped by, and — for the two
+   * computed segments — the drift or the packs read behind them.
+   *
+   * The segment read is asked for again only if it has already been asked once.
+   * `asked` exists to stop the effect firing the same expensive read on every
+   * render, and clearing it here rather than calling the reads directly means
+   * the refresh goes back through the same 'roster must be whole' gate: a
+   * refresh that ran the drift read against a partial roster would assess a
+   * page of the coach's book and size a segment by the read, which is the
+   * defect this whole screen is built against. */
+  const pull = usePullToRefresh(useCallback(() => {
+    asked.current = { drift: false, packs: false };
+    setSourceNonce((n) => n + 1);
+    return Promise.all([refreshRoster(), Promise.resolve(reloadTags()), Promise.resolve(refreshTenant())]);
+  }, [refreshRoster, reloadTags, refreshTenant]));
 
   /** Everything a segment asks about one client, in the roster's own order. */
   const facts: ClientFacts[] = useMemo(() => roster.map((c) => {
@@ -316,7 +342,7 @@ export default function Broadcast() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

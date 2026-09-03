@@ -28,6 +28,7 @@ import { subscribeToPlan, openBillingPortal, fetchMySubscription, PRICE_IDS, typ
 import { readTrial, trialDisagreement, TRIAL_NOT_YET_ENFORCED, type TrialReading } from '../../src/lib/trialGate';
 import { fetchAccountTrial } from '../../src/ui/trialAccount';
 import { trialInfo } from '../../src/lib/trial';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const STATUS_LABEL: Record<string, string> = { active: 'Active', trialing: 'Trial', past_due: 'Past due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Incomplete' };
 
@@ -82,6 +83,11 @@ export default function TrainerBilling() {
   // folder re-reads on focus; this one was the outlier.
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
+  // The same read the focus effect runs. Stripe's own state can change while
+  // the coach is looking at this screen — a card declining, a portal
+  // cancellation settling — and refocusing is not always available to them.
+  const pull = usePullToRefresh(load);
+
   const subscribe = async (plan: string) => {
     setBusy(plan);
     const r = await subscribeToPlan(plan);
@@ -101,7 +107,7 @@ export default function TrainerBilling() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
@@ -222,7 +228,7 @@ export default function TrainerBilling() {
                         list, where the truth is that Stripe decides it. */}
                     <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                       <Text style={{ ...value(20), color: t.ink }}>{pl.price}</Text>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 2 }}>/mo</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginStart: 2 }}>/mo</Text>
                     </View>
                   </View>
                   {pl.feats.map((f) => (

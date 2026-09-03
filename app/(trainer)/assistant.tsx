@@ -54,7 +54,7 @@
 // thread about their own sleep and a coach-side thread about their own revenue.
 // Keying on the account alone would let one screen restore the other's
 // conversation. See src/lib/coachChat.ts.
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -69,6 +69,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { atRiskClient } from '../../src/lib/trainerMock';
 import { myTenantCurrency } from '../../src/lib/subscriptions';
+import { deliveredValue, monthToDate, sessionMonth } from '../../src/lib/coachRevenue';
 import { askAboutMyBusiness, coachAvailable, type ChatMsg } from '../../src/lib/coach';
 import { useCoachChat } from '../../src/ui/coachChat';
 import { COACH_THREAD_KEPT_NOTE } from '../../src/lib/coachChat';
@@ -76,6 +77,8 @@ import {
   COACH_ASK_WHAT_GOES, COACH_ASK_WHAT_NEVER_GOES, COACH_ASK_NOT_ADVICE,
 } from '../../src/lib/coachShare';
 import { useEffect } from 'react';
+import { BACK_ICON } from '../../src/ui/direction';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const SUGGESTIONS = [
   'How is my month going?',
@@ -88,7 +91,16 @@ const SYSTEM =
   'You are a business assistant for a self-employed fitness coach. Answer only from the figures in the context. '
   + 'Never invent a figure, never name a client (you have not been given any names), and never state an amount of money '
   + 'unless the currency field gives you an ISO code — write the code before the amount and never a currency symbol. '
-  + 'Where a figure is null or says "unknown", say you were not given it rather than guessing. Be short and specific.';
+  + 'Where a figure is null or says "unknown", say you were not given it rather than guessing. '
+  // The same two rules the Monday digest carries, in the same words, because
+  // they are about the same two fields and a second wording is a second
+  // definition. sessionsDeliveredThisMonth is counted from recorded outcomes
+  // now, not from the clock, and the unmarked ones are their own state.
+  + 'sessionsDeliveredThisMonth counts only sessions whose outcome was recorded as completed — never describe it as '
+  + 'sessions booked. sessionsStillUnmarked are sessions that happened and have no outcome recorded: they are neither '
+  + 'delivered nor missed, so never add them to the delivered figure, and if there are any, say they are waiting to be '
+  + 'marked. revenueAtOwnRate is those delivered sessions multiplied by the coach own session rate and is the coach own '
+  + 'arithmetic, not a payout. Be short and specific.';
 
 export default function TrainerAssistant() {
   const t = useTheme();
@@ -96,9 +108,9 @@ export default function TrainerAssistant() {
   const { ref: barRef, lift } = useKeyboardLift();
   const scroller = useRef<ScrollView>(null);
 
-  const { roster, status: rosterStatus } = useRoster();
-  const { sessions, status: sessionsStatus } = useSessions();
-  const { sessionFee } = useMyTrainerProfile();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  const { sessions, status: sessionsStatus, refresh: refreshSessions } = useSessions();
+  const { sessionFee, reload: reloadProfile } = useMyTrainerProfile();
 
   // The same gate analytics.tsx uses, and the same reason: every figure here is
   // a sum or a count over one of these two sets, and a sum over part of a set
@@ -107,22 +119,66 @@ export default function TrainerAssistant() {
   const figuresWhole = isWhole(figureStatus);
 
   const [gymCur, setGymCur] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    myTenantCurrency().then((r) => { if (alive) setGymCur(r.currency); });
-    return () => { alive = false; };
+  const loadCurrency = useCallback(async () => {
+    const r = await myTenantCurrency();
+    setGymCur(r.currency);
   }, []);
+  useEffect(() => { void loadCurrency(); }, [loadCurrency]);
 
-  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-  const deliveredMo = sessions.filter((sx) => sx.status === 'booked'
-    && Date.parse(sx.startsAt) >= monthStart.getTime()
-    && Date.parse(sx.startsAt) <= Date.now());
-  const sessionsMo = figuresWhole ? deliveredMo.length : null;
+  /* ── pull to refresh ─────────────────────────────────────────────────────
+   *
+   * This screen refuses to ask anything at all until the roster and the
+   * sessions have both come back whole, and it says so in the notice below. A
+   * coach whose roster read was refused therefore had an assistant that would
+   * not answer for the rest of the session and no way to make it try again —
+   * the one shape this gesture exists for. The session rate comes from the
+   * profile and the currency from the tenant; both are read once and both are
+   * asked for again here, because a refreshed roster paired with a stale rate
+   * is a revenue figure with halves from different minutes.
+   *
+   * The stored conversation is not re-read: it lives on this handset, this
+   * screen is the only thing that writes it, and there is no other copy of it
+   * for a refresh to go and find. */
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([refreshRoster(), refreshSessions(), reloadProfile(), loadCurrency()]),
+    [refreshRoster, refreshSessions, reloadProfile, loadCurrency],
+  ));
+
+  /**
+   * The month, counted from what the record says became of each session.
+   *
+   * This screen was the last place in the app still inferring delivery from the
+   * clock: `status === 'booked'` with a start time in the past, which counts a
+   * no-show, a late cancellation and an hour nobody has marked as work that
+   * happened. That is verbatim the inference src/lib/coachRevenue.ts was
+   * written to end, and 33-session-outcomes.sql before it — and here it fed
+   * PROSE and was then multiplied by the coach's own rate. A wrong figure in a
+   * cell can be caught by a dash; a wrong figure in a paragraph a coach reads
+   * on a Monday morning cannot be caught by anything.
+   *
+   * `now` is fixed for the render: the window's upper bound is "now", and a
+   * bound that moved on every re-render would recompute the month against a
+   * different instant each time.
+   */
+  const now = useMemo(() => new Date(), []);
+  const { from: monthFrom, to: monthTo } = useMemo(() => monthToDate(now), [now]);
+  const month = useMemo(
+    () => sessionMonth(sessions, sessionsStatus, monthFrom, monthTo),
+    [sessions, sessionsStatus, monthFrom, monthTo],
+  );
+  // Null unless the read was whole — `sessionMonth` enforces that itself, so no
+  // caller can forget. `figuresWhole` still gates the roster-derived figures
+  // below, which have no such guard of their own.
+  const sessionsMo = month.delivered;
+  /** Sessions that happened and carry no outcome. Its own field, never added to
+   *  the one above and never dropped: a model handed only "delivered: 4" from a
+   *  month with nine unmarked sessions writes a sentence about a quiet month. */
+  const unmarkedMo = month.unmarked;
   const clients = figuresWhole ? roster.length : null;
   const adhKnown = roster.map((c) => c.adherence).filter((a): a is number => a != null);
   const avgAdh = figuresWhole && adhKnown.length
     ? Math.round(adhKnown.reduce((a, x) => a + x, 0) / adhKnown.length) : null;
-  const revenue = sessionFee == null || sessionsMo == null ? null : sessionsMo * sessionFee;
+  const revenue = deliveredValue(month, sessionFee);
 
   // Kept between visits, on this phone, under this account and under this side
   // of the app. `ready` is unconditionally true and `health` unconditionally
@@ -149,6 +205,7 @@ export default function TrainerAssistant() {
     // system prompt tells it to say so rather than fill the gap.
     const ctx = {
       sessionsDeliveredThisMonth: sessionsMo,
+      sessionsStillUnmarked: unmarkedMo,
       revenueAtOwnRate: revenue ?? 'unknown — no session rate set',
       currency: gymCur ?? 'unknown — the gym has not set one, so state no amount',
       clients,
@@ -183,7 +240,7 @@ export default function TrainerAssistant() {
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
           <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
-            <Icon name="back" size={20} color={t.ink2} />
+            <Icon name={BACK_ICON} size={20} color={t.ink2} />
           </Pressable>
           <View style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="sparkle" size={17} color={t.brandInk} />
@@ -198,7 +255,7 @@ export default function TrainerAssistant() {
         </View>
         <Rule />
 
-        <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scroller} contentContainerStyle={{ paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.sm }} keyboardShouldPersistTaps="handled" refreshControl={pull}>
 
           {/* Withheld rather than warned about. A paragraph written from nulls
               is a confident answer about a business that does not exist, and

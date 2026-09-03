@@ -60,6 +60,7 @@
 //     trainer to share a clip a second time, or to swear they never shared one
 //     they did — so a failed read draws no toggles at all, and says why.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, Alert, Modal, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -306,7 +307,7 @@ export default function TrainerVideos() {
   // Whose clips are this coach's own. `coverageFor` below was already given
   // this and already told own clips from the rest; the row list was not.
   const myId = auth.user?.id ?? null;
-  const { templates, status: tplStatus } = useProgramTemplates();
+  const { templates, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
   // ── Whose programmes this section is about ─────────────────────────────
   //
   // The heading says "What Your Programmes Need", and the list under it has to
@@ -380,6 +381,18 @@ export default function TrainerVideos() {
   const grantsAsked = useRef<Set<string>>(new Set());
   const openIsHosted = !!openId && openId.startsWith('db');
   const clients = useGrantableClients(openIsHosted);
+  // Three reads: the clips themselves, the movement catalogue they are matched
+  // against, and the programme templates the coverage figure is counted over.
+  // Coverage is a ratio across all three, so refreshing one of them would print
+  // a fraction whose halves came from different reads.
+  //
+  // The grantable-client list is deliberately NOT in here. It is read per
+  // sheet, only when a hosted clip is open, and it comes off `clients` and
+  // not the roster — pulling the page down behind a closed sheet has no list
+  // to refresh, and opening the sheet reads it fresh either way.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    reload(), cat.reload(), Promise.resolve(reloadTemplates()),
+  ]), [reload, cat, reloadTemplates]));
 
   const loadGrants = async (id: string) => {
     grantsAsked.current.add(id);
@@ -538,7 +551,7 @@ export default function TrainerVideos() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>You choose who sees these</Text>

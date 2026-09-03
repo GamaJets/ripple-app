@@ -38,6 +38,7 @@ import { fetchPasses } from '@lib/gymPasses';
 import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
+import { Banner } from '@/components/Banner';
 import {
   buildPassConversion, suppressionSentence,
   CAUSAL_CAVEAT, MONEY_NOTE, CONVERSION_LABEL, CONVERSION_COST,
@@ -872,16 +873,6 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
       </div>
       {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
     </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
   );
 }
 

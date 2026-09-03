@@ -30,7 +30,14 @@ export default function Records() {
  // way to ask again was the Try Again button inside the failure notice, and
  // there is no such button on a screen that merely went stale. Pull to refresh
  // is the gesture people already try — see src/ui/pullToRefresh.tsx.
- const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
+ //
+ // It asked for the LOG alone. Every bodyweight record on this board is priced
+ // from `weightSeries` — the scan history, a second read with its own way of
+ // failing — so a member whose profile read had failed could pull all day and
+ // watch their pull-ups stay off the board. Both reads now.
+ const cd = useClientData();
+ const pull = usePullToRefresh(useCallback(() => { reload(); cd.reload(); }, [reload, cd.reload]));
+
  const wu = useSettings().weightUnit;
  const note = convertedNote(wu);
  // The member's own weight over time, which is what lets a pull-up onto this
@@ -40,7 +47,7 @@ export default function Records() {
  // that did not exist then. Empty when nobody has ever been scanned or typed a
  // weight, and then a bodyweight set has no load and belongs on the reps board
  // below rather than being given an invented body here.
- const { weightSeries } = useClientData();
+ const { weightSeries } = cd;
  // Ranked in the kilograms the board is stored in, and only then read out. The
  // order would come out the same either way today, but an estimate rounded to
  // the whole pound can tie two lifts that are a kilogram apart, and a board

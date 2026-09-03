@@ -45,7 +45,8 @@
 // held behind a whole read of BOTH the membership and `assigned_programs`,
 // because "three of eight have it" computed off part of either is a wrong
 // sentence, not a smaller one.
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -70,6 +71,7 @@ import type { Program } from '../../src/lib/programs';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { notifySuccess } from '../../src/ui/haptics';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /** What a member's chip says. Never "not assigned yet" off an unread
  *  `assigned_programs` — that is the sentence a coach acts on by assigning. */
@@ -83,11 +85,22 @@ const STATE_LABEL: Record<MemberState, string> = {
 export default function Groups() {
   const t = useTheme();
   const router = useRouter();
-  const { groups, status: groupStatus, createGroup, deleteGroup, setGroupProgram, addMembers, removeMember } = useProgramGroups();
-  const { roster, status: rosterStatus } = useRoster();
-  const { getProgram, assignProgram, status: programStatus } = useAssignedPrograms();
-  const { templates, status: tplStatus } = useProgramTemplates();
+  const { groups, status: groupStatus, createGroup, deleteGroup, setGroupProgram, addMembers, removeMember, refresh: refreshGroups } = useProgramGroups();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  const { getProgram, assignProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
+  const { templates, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
   const acks = useInjuryAcks();
+  // Five reads, and a fan-out to a group crosses every one of them: who is in
+  // the group, who is on the book, what each member is already on, which
+  // template is being sent, and whose injuries have been acknowledged. Each
+  // fails independently and an empty answer from any of them is a wrong
+  // answer rather than a gap — a fan-out sized by a partial read assigns over
+  // people it never saw.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    Promise.resolve(refreshGroups()), refreshRoster(),
+    Promise.resolve(reloadPrograms()), Promise.resolve(reloadTemplates()),
+    acks.refresh(),
+  ]), [refreshGroups, refreshRoster, reloadPrograms, reloadTemplates, acks]));
 
   const [newName, setNewName] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
@@ -307,7 +320,7 @@ export default function Groups() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
@@ -356,7 +369,7 @@ export default function Groups() {
                       {g.program ? ` · ${g.program.title}` : ' · no programme yet'}
                     </Text>
                   </View>
-                  <Icon name="chevron" size={16} color={t.ink3} />
+                  <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                 </View>
               </Pressable>
             );

@@ -177,27 +177,83 @@ ok(programmeLine('ready', 'Push Pull Legs', 3, WHO) === 'Push Pull Legs · 3 day
 
 const base = {
   who: WHO, unread: 0 as number | null,
+  injuries: [] as { area: string; isNew?: boolean }[] | null,
   goalStatus: 'ready' as const, board: goalBoard([]),
   weekStatus: 'ready' as const, week: empty,
+  intake: 'complete' as const, intakeLeft: 0,
+  invoiceStatus: 'ready' as const, overdueInvoices: 0,
   driftFailed: false, nowMs: NOW,
 };
 
 const clear = attention(base);
 ok(clear.items.length === 0 && clear.blind === null,
-  'three whole reads with nothing in them is a genuine all-clear and may say so');
+  'seven whole reads with nothing in them is a genuine all-clear and may say so');
 
-const late = attention({
+/* ── the three the list could not raise ──────────────────────────────────
+ *
+ * All three were read and rendered further down the same screen and none of
+ * them could reach the part of it written to say what needs doing. A coach who
+ * read the short list at the top and did not scroll was not told that somebody
+ * had just disclosed a knee.
+ */
+
+const hurt = attention({ ...base, injuries: [{ area: 'knee', isNew: true }, { area: 'shoulder' }] });
+ok(hurt.items.length === 1, 'a newly disclosed injury is something to do');
+ok(/knee/i.test(hurt.items[0]), 'and the area is named');
+ok(!/shoulder/i.test(hurt.items[0]),
+  'while one disclosed months ago is not — the list is what changed, not everything on file');
+ok(hurt.items[0].endsWith('.'), 'and it reads as a sentence');
+// Injuries lead. It is the only item about somebody getting hurt and the only
+// one that changes what the coach must not write next.
+const hurtAndUnread = attention({ ...base, unread: 2, injuries: [{ area: 'knee', isNew: true }] });
+ok(/knee/i.test(hurtAndUnread.items[0]),
+  'and it leads the list, ahead of an unread message');
+
+// The note never travels. It is seeded from the line off an uploaded medical
+// document, and this sentence is read at a glance on a roster screen.
+const noted = attention({
+  ...base,
+  injuries: [{ area: 'knee', isNew: true, note: 'grade 2 MCL sprain per MRI' } as never],
+});
+ok(!noted.items.some((x) => /MRI|sprain/i.test(x)),
+  'the injury NOTE is not in the sentence, whatever the row carries');
+
+const noRosterInjuries = attention({ ...base, injuries: null });
+ok(noRosterInjuries.items.length === 0
+   && /anything they have disclosed/.test(noRosterInjuries.blind ?? ''),
+  'a roster that did not come back cannot say they have disclosed nothing');
+
+const halfIntake = attention({ ...base, intake: 'started', intakeLeft: 3 });
+ok(halfIntake.items.some((x) => /3 parts/.test(x)), 'an unfinished intake is something to chase');
+const noIntake = attention({ ...base, intake: 'none', intakeLeft: 6 });
+ok(noIntake.items.some((x) => /not started their intake/.test(x)), 'and one never started says so');
+const unknownIntake = attention({ ...base, intake: 'unknown', intakeLeft: 0 });
+ok(unknownIntake.items.length === 0
+   && /filled in their intake/.test(unknownIntake.blind ?? ''),
+  'an intake that could not be read is a blind spot, never an instruction to chase somebody');
+
+const late = attention({ ...base, overdueInvoices: 2 });
+ok(late.items.some((x) => /2 invoices/.test(x) && /past their due date/.test(x)),
+  'invoices past their due date are something to do');
+for (const st of ['error', 'partial'] as const) {
+  const short = attention({ ...base, invoiceStatus: st, overdueInvoices: 2 });
+  ok(short.items.every((x) => !/invoice/.test(x)),
+    `an invoice count over a ${st} read is a wrong number and is not stated`);
+  ok(/owe|invoice/.test(short.blind ?? ''), `and the ${st} read is named as a blind spot instead`);
+}
+
+const busy = attention({
   ...base,
   unread: 2,
   board: goalBoard([goal({ targetDateISO: '2026-08-01' })]),
   week: clash,
 });
-ok(late.items.length === 3, `unread, an overdue goal and a clash are three separate things to do, got ${late.items.length}`);
-ok(late.items[0] === '2 unread messages from Sam.', 'the message a client has already sent leads');
-ok(late.items.some((x) => /past its target date/.test(x)), 'the overdue goal is named');
-ok(late.items.some((x) => /2 days they have marked ahead disagree with your programme/.test(x)),
+ok(busy.items.length === 3, `unread, an overdue goal and a clash are three separate things to do, got ${busy.items.length}`);
+ok(busy.items[0] === '2 unread messages from Sam.', 'with nothing disclosed, the message a client has already sent leads');
+ok(busy.items.some((x) => /past its target date/.test(x)), 'the overdue goal is named');
+ok(busy.items.some((x) => /2 days they have marked ahead disagree with your programme/.test(x)),
   'the clash is named');
-ok(late.blind === null, 'nothing was missed, so nothing is claimed to have been');
+ok(busy.blind === null, 'nothing was missed, so nothing is claimed to have been');
 
 const noRoster = attention({ ...base, unread: null });
 ok(noRoster.items.length === 0 && noRoster.blind != null && /anything unread/.test(noRoster.blind),

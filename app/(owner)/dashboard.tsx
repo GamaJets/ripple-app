@@ -6,7 +6,7 @@
 // (`src/theme/scale`). Same numbers, same routes, same modal — the four tinted
 // stat boxes and eleven bordered cards became one hero figure plus
 // hairline-separated sections, and the Georgia serif header is gone.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -19,6 +19,8 @@ import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { num } from '../../src/lib/format';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { gymRollup, trainerHealth, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { riskLabel } from '../../src/lib/status';
 import { HealthPill } from '../../src/ui/charts';
@@ -49,18 +51,33 @@ export default function OwnerOverview() {
   /** When the roster every figure on this console is a roll-up of last came
    *  back. Derived from the provider's `status`, so a refresh that FAILED
    *  leaves the stamp on the read the figures actually came from. */
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  useEffect(() => { if (trainersStatus === 'ready') setFetchedAt(Date.now()); }, [trainersStatus]);
+  const [trainersAt, setTrainersAt] = useState<number | null>(null);
+  useEffect(() => { if (trainersStatus === 'ready') setTrainersAt(Date.now()); }, [trainersStatus]);
   // `loading` covered the in-flight case. It does not cover the read having
   // FAILED — that also leaves `trainers` empty, and every roll-up below then
   // computes a confident 0 over it. Same wrong sentence, arrived at a second
   // later: an owner told their gym delivered nothing last month.
   const trainersUnread = trainersStatus === 'error';
   const trainersUnknown = loading || trainersUnread;
-  const { tenant } = useTenant();
+  const { tenant, status: tenantStatus, refresh: refreshTenant } = useTenant();
   // The gym's own currency (`tenants.currency`, part 99). Null until the tenant
   // read returns, and gymMoney falls back to GYM_CURRENCY for that window.
   const cur = tenant?.currency ?? null;
+  // The tenant is the OTHER read this console renders — the gym's name in the
+  // header and the currency every money figure below is denominated in — and it
+  // has its own stamp for the same reason the roster does.
+  const [tenantAt, setTenantAt] = useState<number | null>(null);
+  useEffect(() => { if (tenantStatus === 'ready') setTenantAt(Date.now()); }, [tenantStatus]);
+  /** One line over two reads, and it is the age of the older of them. A stamp
+   *  that took whichever landed last would label an hour-old roster with the
+   *  age of a tenant read that had just come back. */
+  const fetchedAt = oldestFetch(trainersAt, tenantAt);
+  // The failed-read card below ends "pull down to try again". Until this it did
+  // not: the ScrollView had no RefreshControl and the gesture the card names did
+  // nothing. Both of this screen's reads are asked again, because both of them
+  // are on it.
+  const refreshAll = useCallback(() => { refresh(); refreshTenant(); }, [refresh, refreshTenant]);
+  const pull = usePullToRefresh(refreshAll);
   const roll = gymRollup(trainers as TrainerLike[], tenant?.sessionFee ?? null);
   // This hook PERSISTS what it is handed, so a figure we are unsure of is not
   // wrong for a second — it is saved as this month's history and nothing later
@@ -138,7 +155,7 @@ export default function OwnerOverview() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
@@ -156,7 +173,7 @@ export default function OwnerOverview() {
             {/* The console's own age. Every figure below is a roll-up of one
                 read, and until now nothing on the page said when it happened
                 or whether the phone could still reach us. */}
-            <Fetched at={fetchedAt} onRefresh={refresh} busy={loading} />
+            <Fetched at={fetchedAt} onRefresh={refreshAll} busy={loading} />
           </View>
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 2 }}>
             <Ghost icon="search" onPress={() => router.push('/(owner)/explore')} />
@@ -380,7 +397,7 @@ export default function OwnerOverview() {
               </View>
               <View style={{ flexDirection: 'row', marginBottom: sp.xl }}>
                 {[['Clients', String(sel.clients)], ['Sessions · 30d', String(sel.sessions30)], ['Health', String(trainerHealth(sel).score)]].map(([l, v], i) => (
-                  <View key={l} style={{ flex: 1, paddingRight: sp.sm, paddingLeft: i === 0 ? 0 : sp.md, borderLeftWidth: i === 0 ? 0 : hairline, borderLeftColor: t.ring }}>
+                  <View key={l} style={{ flex: 1, paddingEnd: sp.sm, paddingStart: i === 0 ? 0 : sp.md, borderStartWidth: i === 0 ? 0 : hairline, borderStartColor: t.ring }}>
                     <Text style={{ ...ty.caption, color: t.ink3 }}>{l}</Text>
                     <Text style={{ ...value(15), color: t.ink, marginTop: 3 }} numberOfLines={1}>{v}</Text>
                   </View>

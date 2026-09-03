@@ -66,7 +66,7 @@
 //                                   invoice.payment_succeeded. One row per invoice.
 //   invoices                        the PLATFORM's, and nothing to do with a coach.
 //
-// And two writes that take money AWAY, added because under direct charges both
+// And three writes that take money AWAY, added because under direct charges all
 // of them happen somewhere this app was never looking:
 //
 //   refunded_cents                  from `charge.refunded`. A coach on a
@@ -75,6 +75,16 @@
 //                                   until this branch existed a refund made
 //                                   there reached nothing here — the sale went
 //                                   on showing the money as taken, forever.
+//   gym_payments (negative)         also from `charge.refunded`, for a GYM's
+//                                   online sale, which is in neither table
+//                                   `saleForCharge` looks in. Same defect, same
+//                                   dashboard, and it survived the fix above
+//                                   because the lookup only knew about the two
+//                                   client tables. A gym sale leaves money
+//                                   through a REVERSING ROW rather than a
+//                                   column — supabase/parts/180 argues why at
+//                                   length — keyed on the Stripe refund id by
+//                                   part 800 so a retry cannot record it twice.
 //   client_disputes                 from `charge.dispute.*`. The screen tells a
 //                                   coach a chargeback is theirs to answer
 //                                   while giving them no way to know one
@@ -98,7 +108,14 @@ import { renewalIsContiguous, supersedeRow } from '../../../src/lib/termDates.ts
 // The ledger row an online gym sale leaves behind, and the two refusals it can
 // answer with. Also a leaf, for the same reason. Asserted in
 // src/lib/gymOrderPayment.test.ts.
-import { gymOrderPaymentRow, isClosedMonthRefusal } from '../../../src/lib/gymOrderPayment.ts';
+// And the same module's other half: money going back OUT of a gym's ledger,
+// when the gym refunded an online sale from its own Stripe dashboard. Both
+// directions live in one leaf because they are one ledger and one argument.
+import {
+  gymOrderPaymentRow, isClosedMonthRefusal,
+  gymRefundRow, refundsToMirror, refundStateForOrder, refusalNote, overReversedBy,
+  type RefundFacts, type ReversibleSale,
+} from '../../../src/lib/gymOrderPayment.ts';
 // The day a session pack's validity window closes, worked out by the same
 // arithmetic the app reads it back with. A leaf, for the same reason. Asserted
 // in src/lib/packExpiry.test.ts.
@@ -372,6 +389,153 @@ Deno.serve(async (req) => {
     const row = (bySess ?? [])[0];
     if (!row?.id) return { sale: null, dbError: null };
     return { sale: { table: 'client_purchases', id: row.id, trainerId: row.trainer_id ?? null, clientId: row.client_id ?? null }, dbError: null };
+  };
+
+  /** A gym's own online sale, which is in neither of the two tables above. */
+  type GymSaleRef = {
+    orderId: string;
+    tenantId: string;
+    /** The ledger row to reverse, or null when the sale never reached the
+     *  ledger at all — a closed month, or a sale that stated no currency. */
+    payment: ReversibleSale | null;
+  };
+
+  /**
+   * The GYM sale a Stripe charge paid for, or null when this database has no
+   * record of one.
+   *
+   * ── Why this exists beside `saleForCharge` and not inside it ────────────
+   *
+   * `saleForCharge` answers "which of the two CLIENT money tables is this", and
+   * both of its answers are handled identically by the caller: assign Stripe's
+   * running total to `refunded_cents` on the row it found. A gym sale is not a
+   * third row of that shape. supabase/parts/180 settled that money leaves
+   * `gym_payments` as a NEGATIVE ROW naming what it undoes, never as an edit to
+   * the original, so the write is an INSERT with completely different
+   * arithmetic behind it — and folding a third variant into `SaleRef` would
+   * have produced a union whose every consumer had to switch on it anyway.
+   *
+   * ── The same two answers, kept apart ────────────────────────────────────
+   *
+   * A DATABASE read that fails is returned as `dbError` and becomes a 500, so
+   * Stripe retries. "No gym sale" is returned as null and becomes a 200. The
+   * distinction is the one `saleForCharge`'s header spends a paragraph on and
+   * it matters more on this path than on that one: treating "could not look" as
+   * "no such sale" here would silently leave a refund unmirrored while the
+   * ledger went on counting the money, and nothing would ever try again.
+   *
+   * ── Two ways back, and a third answer that is not a failure ─────────────
+   *
+   *   1. THE PAYMENT INTENT, on `gym_orders.stripe_payment_intent`. Stamped
+   *      when the order was closed as paid. One indexed read, no Stripe call.
+   *   2. THE CHECKOUT SESSION, through Stripe, for an order whose intent was
+   *      never stamped — an order fulfilled before that write existed, or one
+   *      that failed fulfilment and was closed without it. Same slow path
+   *      `saleForCharge` uses, and a listing that throws is "we could not find
+   *      it" rather than a reason to answer Stripe with a 500.
+   *
+   * A gym order found with NO `gym_payments` row against it is a real answer
+   * and not an error: part 480's own closed-month case leaves exactly that.
+   * There is nothing to reverse, and the caller records the refund on the order
+   * so the reconciliation screen says so, rather than logging into the void.
+   */
+  const gymSaleForCharge = async (
+    paymentIntent: string | null,
+  ): Promise<{ gym: GymSaleRef | null; dbError: string | null }> => {
+    if (!paymentIntent) return { gym: null, dbError: null };
+
+    // `.limit(1)` and an array rather than `.maybeSingle()`, because
+    // `gym_orders.stripe_payment_intent` carries no unique index — a member who
+    // abandoned a checkout and came back can leave two orders naming one intent
+    // — and `maybeSingle` answers a second row with an error, which would turn
+    // a findable sale into a 500 that never stops.
+    const { data: byPi, error: piErr } = await service.from('gym_orders')
+      .select('id, tenant_id').eq('stripe_payment_intent', paymentIntent)
+      .order('paid_at', { ascending: false }).limit(1);
+    if (piErr) return { gym: null, dbError: piErr.message };
+    let order = (byPi ?? [])[0] ?? null;
+
+    if (!order) {
+      let sessionIds: string[] = [];
+      try {
+        const list = await stripe.checkout.sessions.list({ payment_intent: paymentIntent, limit: 5 }, acctOpts);
+        sessionIds = (list.data ?? []).map((x) => x.id).filter(Boolean);
+      } catch (e) {
+        console.warn('stripe-webhook: could not list sessions for gym refund on ' + paymentIntent + ':', (e as Error).message);
+      }
+      if (!sessionIds.length) return { gym: null, dbError: null };
+      const { data: bySess, error: sessErr } = await service.from('gym_orders')
+        .select('id, tenant_id').in('stripe_session_id', sessionIds).limit(1);
+      if (sessErr) return { gym: null, dbError: sessErr.message };
+      order = (bySess ?? [])[0] ?? null;
+    }
+    if (!order?.id) return { gym: null, dbError: null };
+
+    // `maybeSingle` IS right here: part 480 put a partial UNIQUE index on
+    // `gym_payments.gym_order_id`, so there is at most one, and a second row
+    // would be the doubled takings that index exists to make impossible.
+    const { data: pay, error: payErr } = await service.from('gym_payments')
+      .select('id, tenant_id, member_id, membership_id, amount_cents, currency, method')
+      .eq('gym_order_id', order.id).maybeSingle();
+    if (payErr) return { gym: null, dbError: payErr.message };
+
+    return {
+      gym: {
+        orderId: String(order.id),
+        tenantId: String(order.tenant_id),
+        payment: pay?.id
+          ? {
+              paymentId: String(pay.id),
+              tenantId: String(pay.tenant_id),
+              memberId: pay.member_id ?? null,
+              membershipId: pay.membership_id ?? null,
+              amountCents: Number(pay.amount_cents),
+              currency: String(pay.currency ?? ''),
+              method: String(pay.method ?? ''),
+            }
+          : null,
+      },
+      dbError: null,
+    };
+  };
+
+  /**
+   * Every refund on a charge, as this mirror needs them.
+   *
+   * `charge.refunds` rides along on the event and is the cheap answer, but it
+   * is a paginated list: Stripe embeds the first ten and sets `has_more` when
+   * there are others. A charge refunded in eleven instalments is not a shape
+   * anybody plans for, and mirroring only the ten that happened to be embedded
+   * would be a ledger that is quietly short — so `has_more`, and an event that
+   * carries no list at all, both fall through to asking Stripe.
+   *
+   * A listing that throws returns what the event had rather than nothing, and
+   * the caller does not fail for it. Nothing is lost by that: the running total
+   * is written to `gym_orders.refunded_cents` regardless, so a refund this
+   * could not enumerate is still VISIBLE as a gap between what Stripe sent back
+   * and what the ledger took off. That property is what makes every partial
+   * failure on this path safe to accept rather than retry.
+   */
+  const refundsOnCharge = async (charge: Stripe.Charge): Promise<RefundFacts[]> => {
+    const asFacts = (list: readonly Stripe.Refund[]): RefundFacts[] => list.map((r) => ({
+      id: r.id,
+      amountCents: r.amount,
+      currency: r.currency,
+      createdSeconds: r.created,
+      status: r.status ?? null,
+    }));
+
+    const embedded = (charge.refunds?.data ?? []) as Stripe.Refund[];
+    if (embedded.length && !charge.refunds?.has_more) return asFacts(embedded);
+
+    try {
+      const list = await stripe.refunds.list({ charge: charge.id, limit: 100 }, acctOpts);
+      const all = (list.data ?? []) as Stripe.Refund[];
+      if (all.length) return asFacts(all);
+    } catch (e) {
+      console.warn('stripe-webhook: could not list refunds for charge ' + charge.id + ':', (e as Error).message);
+    }
+    return asFacts(embedded);
   };
 
   /**
@@ -1063,11 +1227,172 @@ Deno.serve(async (req) => {
         const { sale, dbError } = await saleForCharge(chargeInv, chargePi);
         if (dbError) return fail('refund lookup', dbError);
         if (!sale) {
-          // Money has gone back on a charge this database has no sale for.
-          // Retrying cannot conjure the row, so the event is accepted and the
-          // fact is logged as loudly as a log can be — Stripe is the surviving
-          // record and somebody has to reconcile it by hand.
-          console.error('stripe-webhook: REFUND WITH NO SALE TO MIRROR IT ON. Charge ' + charge.id + ', intent ' + (chargePi ?? 'none') + ', invoice ' + (chargeInv ?? 'none') + ', account ' + (eventAccount ?? 'platform') + '. The coach\'s takings figure still counts this money.');
+          // ── A GYM'S OWN ONLINE SALE, WHICH IS IN NEITHER OF THOSE TABLES ──
+          //
+          // This branch used to end here, at the log line below, and for a gym
+          // that was the whole story: `saleForCharge` looks in
+          // `client_subscription_payments` and `client_purchases`, and a
+          // membership or pass bought through supabase/functions/gym-checkout
+          // is in `gym_orders` and `gym_payments`. So an owner refunding a
+          // membership from their own Stripe dashboard — the ordinary way,
+          // because under direct charges the gym is the merchant of record and
+          // has the full dashboard — produced one log line and a `gym_payments`
+          // row still holding the entire original amount. The gym's ledger, its
+          // month-end close and its revenue screen all went on counting money
+          // that had gone back, and nothing on any screen looked wrong.
+          //
+          // Asked only when the client-side lookup found nothing, which costs a
+          // gym refund one extra read and costs a coach's refund nothing at
+          // all. The two are disjoint by construction: a gym checkout is
+          // stamped `repple_kind: 'gym_order'` and never writes either client
+          // table.
+          const { gym, dbError: gymErr } = await gymSaleForCharge(chargePi);
+          // A read that failed is a 500 and a retry, exactly as above. "We
+          // could not look" is not "there is nothing there", and collapsing
+          // them would leave a gym's takings permanently overstated with no
+          // second attempt.
+          if (gymErr) return fail('gym refund lookup', gymErr);
+
+          if (!gym) {
+            // Money has gone back on a charge this database has no sale for.
+            // Retrying cannot conjure the row, so the event is accepted and the
+            // fact is logged as loudly as a log can be — Stripe is the surviving
+            // record and somebody has to reconcile it by hand.
+            console.error('stripe-webhook: REFUND WITH NO SALE TO MIRROR IT ON. Charge ' + charge.id + ', intent ' + (chargePi ?? 'none') + ', invoice ' + (chargeInv ?? 'none') + ', account ' + (eventAccount ?? 'platform') + '. The coach\'s or gym\'s takings figure still counts this money.');
+          } else {
+            // ── WHAT STRIPE DID, WRITTEN BEFORE ANYTHING IS ATTEMPTED ──────
+            //
+            // First, unconditionally, and on `gym_orders` rather than on the
+            // ledger. Part 182's closed-month trigger guards `gym_payments` and
+            // `gym_invoices` and deliberately not this table, so this write
+            // always lands — which means the record of what Stripe did survives
+            // even when the ledger refuses the consequence of it. Written after
+            // the loop instead, it would be missing in exactly the case this
+            // work exists for.
+            //
+            // `refunded_cents` is Stripe's RUNNING TOTAL, assigned and never
+            // added, so a redelivery cannot inflate it. It is not a ledger
+            // figure and no money screen sums it. Its only job is to be one
+            // half of a comparison — against the sum of reversals actually
+            // recorded — that makes an unmirrored refund visible on
+            // /accounting, and that CLEARS ITSELF once somebody records the
+            // missing correction by hand.
+            const refundState = refundStateForOrder({
+              amountRefundedCents: refunded,
+              currency: charge.currency,
+              atISO: eventAt,
+            });
+            const { error: stateErr } = await service.from('gym_orders').update({
+              refunded_cents: refundState.refundedCents,
+              refunded_currency: refundState.refundedCurrency,
+              refunded_at: refundState.refundedAt,
+              updated_at: new Date().toISOString(),
+            }).eq('id', gym.orderId);
+            // A 500 here, and not a log: this is the write that makes every
+            // later failure visible, so losing it silently would put the whole
+            // path back to where it started.
+            if (stateErr) return fail('gym_orders refund', stateErr.message);
+
+            const refusals: string[] = [];
+
+            if (!gym.payment) {
+              // The sale itself never reached the ledger — part 480's own
+              // closed-month case leaves precisely this. Part 180's CHECK
+              // requires a reversal to name what it reverses, so there is
+              // nothing legal to write, and a bare negative row would be the
+              // unexplained figure that constraint exists to refuse.
+              refusals.push('This sale never reached the payment record, so there was no row to reverse. Record the sale and the refund together.');
+              console.error('stripe-webhook: gym order ' + gym.orderId + ' was refunded in Stripe and has no ledger row to reverse. Charge ' + charge.id + '. The sale is missing from this gym’s takings and so is the refund.');
+            } else {
+              const salePayment = gym.payment;
+              // What is already recorded against this payment: the refund ids,
+              // which is the cheap idempotency guard, and the amounts, which is
+              // what says whether Stripe has now sent back more than this app
+              // thinks was ever taken.
+              const { data: doneRows, error: doneErr } = await service.from('gym_payments')
+                .select('stripe_refund_id, amount_cents').eq('reverses_payment_id', salePayment.paymentId);
+              if (doneErr) return fail('gym refund lookup', doneErr.message);
+
+              const alreadyIds = (doneRows ?? [])
+                .map((d: { stripe_refund_id: string | null }) => d.stripe_refund_id)
+                .filter((x): x is string => !!x);
+              let reversedSoFar = (doneRows ?? [])
+                .reduce((a: number, d: { amount_cents: number | null }) => a + Math.abs(Number(d.amount_cents) || 0), 0);
+
+              const onCharge = await refundsOnCharge(charge);
+              for (const one of refundsToMirror(onCharge, alreadyIds)) {
+                const built = gymRefundRow({ sale: salePayment, refund: one, fallbackAtISO: eventAt });
+                if (!built.row) {
+                  // Refused rather than guessed — a currency that disagrees
+                  // with the payment it reverses, or an amount Stripe did not
+                  // state. Recorded where an owner reads it, not just logged.
+                  refusals.push(built.refusal ?? 'This refund could not be recorded.');
+                  console.error('stripe-webhook: refund ' + one.id + ' on gym order ' + gym.orderId + ' was not mirrored: ' + (built.refusal ?? 'no reason given'));
+                  continue;
+                }
+                const refundRow = built.row;
+
+                // Stripe has sent back more than this app has recorded as
+                // taken. Logged and still written: the money has already gone,
+                // and declining to record it would leave the ledger overstating
+                // the gym's takings by the whole refund — which is the defect
+                // being fixed — to keep one row's arithmetic tidy. Same call
+                // the client-side branch makes when part 192's CHECK fires.
+                const over = overReversedBy(salePayment.amountCents, reversedSoFar, Math.abs(refundRow.amount_cents));
+                if (over > 0) {
+                  console.error('stripe-webhook: refund ' + one.id + ' takes gym order ' + gym.orderId + ' past what this ledger records as taken, by ' + over + ' minor units of ' + salePayment.currency + '. Charge ' + charge.id + '. It is recorded anyway, because the money has gone; the sale’s amount and Stripe disagree and that needs a person.');
+                }
+
+                const { error: revErr } = await service.from('gym_payments').insert(refundRow);
+                if (revErr && String(revErr.code ?? '') === '23505') {
+                  // Two deliveries raced and part 800's unique index did its
+                  // job. Mirrored once, which is the whole point of keying on
+                  // the refund id: a refund recorded twice halves this gym's
+                  // takings a second time, and unlike a doubled SALE — money an
+                  // owner notices not arriving — a doubled refund only makes
+                  // the month look worse, which nobody goes looking for.
+                  console.warn('stripe-webhook: refund ' + one.id + ' on gym order ' + gym.orderId + ' was already mirrored when this delivery tried. The unique index refused the second.');
+                } else if (revErr && isClosedMonthRefusal(revErr)) {
+                  // The owner has signed off the month this refund falls in.
+                  // A refund is dated when it was MADE (part 180), so this is a
+                  // refund made inside a month already closed.
+                  //
+                  // FINAL, not transient: every retry is refused identically
+                  // until a person reopens the month, so a 500 would spend
+                  // Stripe's retry budget on a write that cannot land and then
+                  // the delivery would be abandoned. Same decision part 480
+                  // takes on the sale side — but it must NOT be dropped the
+                  // same way, because there the gap showed up as a paid order
+                  // with no payment row, and here the payment row exists and
+                  // reads as perfectly correct. It is simply too big. So the
+                  // reason goes on the order, where /accounting draws it.
+                  refusals.push('Stripe refunded this sale into a month this gym has closed, so the payment record refused the reversal. Reopen that month on Close, with a reason, and record the refund against the original payment.');
+                  console.error('stripe-webhook: refund ' + one.id + ' on gym order ' + gym.orderId + ' falls in a month this gym has closed: ' + revErr.message + ' The ledger still counts the original in full.');
+                } else if (revErr) {
+                  // An ordinary write failure. Worth a 500, because Stripe
+                  // retries one and the next attempt may well succeed — and the
+                  // refund ids already written are skipped when it does.
+                  return fail('gym_payments refund', revErr.message);
+                } else {
+                  reversedSoFar += Math.abs(refundRow.amount_cents);
+                }
+              }
+            }
+
+            // The reason, second and separately, because it is the outcome of
+            // trying. `refusalNote` answers null when nothing was refused,
+            // which is what clears a note left by an earlier delivery once a
+            // later one gets through.
+            const { error: noteErr } = await service.from('gym_orders').update({
+              refund_note: refusalNote(refusals),
+              updated_at: new Date().toISOString(),
+            }).eq('id', gym.orderId);
+            // Logged rather than fatal. The exception an owner sees is derived
+            // from the two figures above, both of which are already written;
+            // this note only says WHY. Answering with a 500 would risk
+            // re-running the loop for a sentence.
+            if (noteErr) console.error('stripe-webhook: could not record why a refund on gym order ' + gym.orderId + ' was not mirrored:', noteErr.message);
+          }
         } else {
           const { error: refErr } = await service.from(sale.table).update({
             refunded_cents: refunded,

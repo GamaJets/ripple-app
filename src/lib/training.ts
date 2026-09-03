@@ -3,6 +3,7 @@
 // the guided session (warm-ups) and the Train tab (deload nudge).
 import type { WorkoutEntry } from './mockData';
 import { weekStartIso } from './weekStart';
+import { todayISO } from './bodyFigures';
 
 const DAY = 86_400_000;
 
@@ -40,7 +41,16 @@ export function deloadCheck(log: WorkoutEntry[], now: number = Date.now(), thres
   for (const e of log) {
     const ts = Date.parse(e.t); if (isNaN(ts)) continue;
     const wk = weekKey(ts);
-    (counts[wk] ||= new Set()).add(new Date(ts).toISOString().slice(0, 10));
+    // The LOCAL calendar day, matching the week it is being counted into.
+    // `toISOString().slice(0, 10)` is the UTC day, and mixing the two is not a
+    // harmless inconsistency: `weekStartIso` opens the week at local midnight,
+    // so for a member in Auckland every session after 1pm was filed under
+    // tomorrow's UTC date. A Monday evening and a Tuesday evening session then
+    // shared one date and counted as ONE training day, and a member training
+    // five evenings a week could sit at two or three days by this count and
+    // never be told a deload was due. `todayISO` is the local day and its own
+    // header says a string slice is not it.
+    (counts[wk] ||= new Set()).add(todayISO(new Date(ts)));
   }
   // Walk back week by week from LAST week (skip the current, partial week).
   let cursor = now - 7 * DAY;

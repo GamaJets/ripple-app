@@ -39,8 +39,8 @@
 // excluded from the write, and the button says "Assign to 7 of 8". Nobody is
 // silently skipped — a bulk assign that quietly dropped somebody would be worse
 // than one that refused, because the coach would believe they had sent it.
-import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, Alert } from 'react-native';
+import { useCallback, useState } from 'react';
+import { View, Text, Pressable, ScrollView, Modal, Alert, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -49,10 +49,13 @@ import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } fro
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useInjuryAcks } from '../../src/ui/injuryAcks';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates, type ProgramTemplate } from '../../src/ui/programTemplates';
 import { notifySuccess } from '../../src/ui/haptics';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
+import { CLIENT_STARTS_NOW, isStartDate } from '../../src/lib/programStart';
+import { isBlock, weekCount } from '../../src/lib/programBlock';
 import { planFanOut, listNames, fanOutSubject, type FanOutMember } from '../../src/lib/groupProgram';
 import {
   overwriteBrief, bulkReport, selectAllOffer,
@@ -75,11 +78,38 @@ export default function Templates() {
   // returns null both for a client who has none and for a client whose row did
   // not come back. Ticking twelve names against an unread `assigned_programs`
   // silently overwrites however many of them were on something bespoke.
-  const { templates, removeTemplateFrom, isStarter, status: tplStatus } = useProgramTemplates();
-  const { roster, status: rosterStatus } = useRoster();
-  const { assignProgramTo, getProgram, status: programStatus } = useAssignedPrograms();
+  const { templates, removeTemplateFrom, isStarter, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
+  const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  const { assignProgramTo, getProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
   const acks = useInjuryAcks();
+  // Four reads, and this screen crosses all four on every tap: assigning a
+  // template to a ticked list needs the library, the book, what each of them
+  // is already on — the overwrite confirmation is counted off that — and the
+  // injury acknowledgements that decide who may be assigned at all. Every one
+  // of them under 'error' is a silent wrong answer rather than a gap, which
+  // is why the screen gates on all four and why the refresh asks for all four.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    Promise.resolve(reloadTemplates()), refreshRoster(),
+    Promise.resolve(reloadPrograms()), acks.refresh(),
+  ]), [reloadTemplates, refreshRoster, reloadPrograms, acks]));
   const [assignTpl, setAssignTpl] = useState<ProgramTemplate | null>(null);
+  /**
+   * The day the coach says this block begins, `YYYY-MM-DD`, or '' because they
+   * have not said.
+   *
+   * The builder has offered this since blocks landed and this screen did not,
+   * so `assignProgramTo` was called with no third argument and `starts_on` was
+   * left null on every assignment made from the library. A block assigned from
+   * here could therefore never count a week: `blockPosition` reads 'no-date',
+   * `clientWeek` resolves to week one, and a twelve-week template put the
+   * client on week one for twelve weeks — the exact failure src/lib/clientBlock.ts
+   * was written to end, arriving through the other door.
+   *
+   * Same semantics as the builder's, deliberately: blank means "assign it now",
+   * it never holds the programme back, and `CLIENT_STARTS_NOW` says so under
+   * the field.
+   */
+  const [startsOn, setStartsOn] = useState('');
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [assignBusy, setAssignBusy] = useState(false);
   const [delFailed, setDelFailed] = useState<string | null>(null);
@@ -90,7 +120,7 @@ export default function Templates() {
   // program they are on" marker on each row, which is a claim about a read.
   const assignGuard = guardOverwrite(programStatus, 'the programmes these clients are currently on');
 
-  const openAssign = (tpl: ProgramTemplate) => { setPicked({}); setAssignTpl(tpl); };
+  const openAssign = (tpl: ProgramTemplate) => { setPicked({}); setStartsOn(''); setAssignTpl(tpl); };
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
 
   // ── One ticked client, as both guards need to see them ───────────────────
@@ -190,7 +220,12 @@ export default function Templates() {
 
     setAssignBusy(true);
     const outcomes: WriteOutcome[] = await Promise.all(targets.map(async (tg) => {
-      const r = await assignProgramTo(tg.clientId, tpl.program);
+      // Only ever sent when the coach typed a real date. `undefined` leaves
+      // the column alone on an overwrite — a screen that did not offer a date
+      // must not silently clear one set from a screen that did — and an
+      // unparseable string is not sent at all rather than stored as a date
+      // nothing can read back. The same three-way call the builder makes.
+      const r = await assignProgramTo(tg.clientId, tpl.program, isStartDate(startsOn) ? startsOn : undefined);
       return { clientId: tg.clientId, name: tg.name, ok: r.ok, why: r.why };
     }));
     setAssignBusy(false);
@@ -220,7 +255,7 @@ export default function Templates() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
@@ -410,6 +445,50 @@ export default function Templates() {
                   no list — so it is withheld and says which of the two it is.
                   Individual ticks stay available throughout: a tick is a claim
                   about one person the coach can see and read. */}
+              {/* ── the day the block begins ──────────────────────────────
+                  Only on a block, because on a one-week programme there is no
+                  week for a date to count to and the field would be a control
+                  that changes nothing a coach can see.
+
+                  It does NOT hold the programme back. `CLIENT_STARTS_NOW` is
+                  printed under it saying so, for the reason the builder gives
+                  at length: a coach who believes the date is enforced, and
+                  assigns a block "starting Monday" on a Thursday, has replaced
+                  their client's Friday session while believing they did not. */}
+              {isBlock(assignTpl.program) ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>
+                    Starts on · {weekCount(assignTpl.program)} week block
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
+                    <TextInput value={startsOn} onChangeText={setStartsOn}
+                      placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
+                      autoCapitalize="none" autoCorrect={false}
+                      accessibilityLabel="The day this block begins, as year, month and day"
+                      style={{
+                        ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
+                        paddingHorizontal: 12, paddingVertical: 9, flex: 1,
+                      }} />
+                    {startsOn ? <Ghost label="Clear" onPress={() => setStartsOn('')} /> : null}
+                  </View>
+                  {/* Refused rather than corrected, and said while they type. A
+                      date this app cannot read is not stored at all — a stored
+                      value that will not parse puts every screen reading it
+                      into "unreadable" for ever. */}
+                  {startsOn && !isStartDate(startsOn) ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
+                      Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
+                      programme goes out with no start date rather than one nothing can read back.
+                    </Flag>
+                  ) : (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                      {CLIENT_STARTS_NOW} Without one, everybody you tick stays on week one of this
+                      block until you set a date.
+                    </Text>
+                  )}
+                </View>
+              ) : null}
+
               {selAll.note ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{selAll.note}</Text>
               ) : null}

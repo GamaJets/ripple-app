@@ -9,7 +9,7 @@ import { supabase } from './supabase';
 import { reportError } from './reportError';
 import { capLimit, capped, TruncatedRead, ROW_CAP } from './rowCap';
 import { writeFailure } from './wroteRows';
-import { packBalance, readDraw, drew, drawReason, type PackPurchase, type PackBalance } from './packDraw';
+import { packBalance, readDraw, drew, drawReason, type DrawOutcome, type PackPurchase, type PackBalance } from './packDraw';
 import { PACKAGE_NOT_SAVED, packageEditBlocker, packageUpdateRow, type PackagePatch } from './packageEdit';
 import { subState } from './subscriptionScope';
 import type { CreditSession } from './sessionCredits';
@@ -893,6 +893,53 @@ export async function refundSession(trainerId: string): Promise<{ ok: boolean; r
   } catch (e) {
     reportError('connect.refundSession', e);
     return { ok: false, reason: 'the server did not confirm it' };
+  }
+}
+
+/**
+ * Move one session credit on a pack the signed-in COACH sold (part 661).
+ *
+ * ── Why `refundSession` above is not this ────────────────────────────────
+ *
+ * That one is scoped `client_id = auth.uid()`: the CLIENT calls it, when they
+ * cancel outside the notice window, and it picks the pack for them. A coach
+ * calling it would match nothing. It also chooses "the newest pack with usage",
+ * which is right for a cancellation and wrong here — the coach is looking at
+ * ONE sale they have just refunded and means that one.
+ *
+ * ── The gap this closes ─────────────────────────────────────────────────
+ *
+ * `REFUND_DOES_NOT` in src/lib/refunds.ts is shown to the coach immediately
+ * before somebody's card is credited and says a refund "does not put a session
+ * credit back on a pack". That was true and there was no way to act on it
+ * anywhere in the product: a coach who refunded two sessions of a ten-pack gave
+ * the money back and left the credits, so the client had both.
+ *
+ * ── It does not refund money, and nothing bundles the two ────────────────
+ *
+ * Deliberately separate acts. A coach may take a credit off without giving
+ * money back (a session delivered off the books) and may give money back
+ * without taking a credit (a goodwill refund on a pack the client is keeping),
+ * and neither is rare. Bundling would make one of them impossible.
+ *
+ * `ok` is true only when the database says a credit moved — `readDraw` refuses
+ * to call anything a success that did not come back as exactly one row naming
+ * an outcome this build knows. `outcome` carries the answer for the sentence
+ * the screen says, including 'expired', which part 661 returns rather than
+ * putting a credit onto a pack no draw site will ever spend.
+ */
+export async function adjustPackCredit(purchaseId: string, delta: 1 | -1): Promise<{ ok: boolean; outcome: DrawOutcome; remaining: number | null }> {
+  try {
+    const { data, error } = await supabase.rpc('adjust_pack_credit', { p_purchase: purchaseId, p_delta: delta });
+    if (error) {
+      reportError('connect.adjustPackCredit', error);
+      return { ok: false, outcome: 'unknown', remaining: null };
+    }
+    const d = readDraw(data);
+    return { ok: drew(d), outcome: d.outcome, remaining: d.remaining };
+  } catch (e) {
+    reportError('connect.adjustPackCredit', e);
+    return { ok: false, outcome: 'unknown', remaining: null };
   }
 }
 

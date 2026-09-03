@@ -51,6 +51,7 @@
 // paying attention. `unitFor` decides it, refuses to read a NULL column as
 // kilograms, and hands back the sentence that says whose unit is on screen.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -65,7 +66,7 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { type LoadStatus } from '../../src/ui/loadStatus';
-import { isQueryableId } from '../../src/lib/clientDrift';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { setsSummary } from '../../src/lib/ownTraining';
@@ -204,16 +205,22 @@ export default function ClientTraining() {
    *  screen has always done and stays the default. */
   const [rangeDays, setRangeDays] = useState<number | null>(null);
 
-  const load = useCallback(async (id: string, days: number | null) => {
+  const load = useCallback(async (id: string, days: number | null, askable: boolean) => {
     wanted.current = id;
     setStatus('loading'); setUnitStatus('loading');
     setLog(null); setClientUnit(null);
 
     // A client the coach typed in by hand has a `coach_clients` row and no user
-    // account, so their id is not a uuid and Postgres refuses the whole
-    // statement rather than skipping the value. Nothing is asked for them, and
-    // the screen says why rather than drawing them as somebody who never trains.
-    if (!isQueryableId(id)) {
+    // account, so nothing server-backed is asked for them.
+    //
+    // This was `isQueryableId(id)` alone, on the belief that such a client
+    // carries an id the phone invented and Postgres would refuse. It does not:
+    // `coach_clients.id` is uuid DEFAULT gen_random_uuid(), so from the first
+    // round trip onward the guard passed, every read ran, each came back with
+    // zero rows and NO error, and this screen rendered that as a fact about the
+    // person. The roster is the only thing that knows which table the row came
+    // from — see src/lib/clientRecord.ts.
+    if (!askable) {
       setStatus('error'); setUnitStatus('error');
       return;
     }
@@ -292,12 +299,20 @@ export default function ClientTraining() {
   // own: changing the range is a NEW READ, not a filter over the page already
   // on screen, and two effects both calling `load` would fire it twice on every
   // focus.
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  /** Whether the server may be asked about this person at all. Computed at
+   *  render rather than inside `load`, so a roster that arrives AFTER the read
+   *  and says this row was typed in by hand re-runs the effect and withdraws
+   *  the answer, instead of leaving an empty screen standing as a fact about
+   *  them. `handAdded` undefined is "the roster has not said", which goes on
+   *  asking — only an explicit true withholds. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
   useFocusEffect(useCallback(() => {
     if (!USE_SUPABASE || !picked) return;
-    void load(picked, rangeDays);
-  }, [picked, rangeDays, load]));
+    void load(picked, rangeDays, askable);
+  }, [picked, rangeDays, askable, load]));
 
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
   const fullName = client?.name ?? (typeof params.name === 'string' ? params.name : '') ?? '';
   const who = (fullName || 'They').split(' ')[0];
   // A name we do not have must not become "They's". The fallback voice is
@@ -501,6 +516,22 @@ export default function ClientTraining() {
 
   /* ── what they were on before ──────────────────────────────────────────── */
   const history = useProgramHistory(picked);
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Six reads: what this client actually trained (`load`, which is already the
+   * focus read), the book, the programme assigned to them, what they were on
+   * before, the movement catalogue, and the injury acknowledgements.
+   *
+   * The plan-versus-actual comparison on this screen is drawn ACROSS the
+   * assignment and the logged sessions, so refreshing the sessions without the
+   * assignment would compare this week's work against last week's plan and
+   * report the difference as the client's. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(), Promise.resolve(assigned.reload()), Promise.resolve(history.reload()),
+    cat.reload(), acks.refresh(),
+    ...(picked ? [load(picked, rangeDays, askable)] : []),
+  ]), [r, assigned, history, cat, acks, picked, rangeDays, askable, load]));
   const hist = useMemo(
     () => historyBoard(history.rows, history.status, program, startsOn, assigned.status),
     [history.rows, history.status, program, startsOn, assigned.status],
@@ -672,7 +703,7 @@ export default function ClientTraining() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -860,7 +891,7 @@ export default function ClientTraining() {
                           const did = lc.verdict === 'not-logged' ? null : liftLabel(lc.loggedKg, unit);
                           if (!wrote || (lc.verdict !== 'not-logged' && !did)) return null;
                           return (
-                            <View key={`load-${m.slug || m.name}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2, paddingLeft: 14 + sp.sm }}>
+                            <View key={`load-${m.slug || m.name}`} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2, paddingStart: 14 + sp.sm }}>
                               {/* A 6pt dot beside the caption ink. The tone is
                                   never the text colour. */}
                               <View style={{
@@ -1015,7 +1046,7 @@ export default function ClientTraining() {
                     {status === 'partial' ? (
                       <Section>
                         <PartialRead what="training days" shown={board.days.length}
-                          onPress={() => { if (picked) void load(picked, rangeDays); }} />
+                          onPress={() => { if (picked) void load(picked, rangeDays, askable); }} />
                       </Section>
                     ) : null}
 

@@ -25,7 +25,7 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { LoadStatus } from './loadStatus';
 import type { CoachingSpan } from '../lib/coachCohorts';
 
@@ -75,16 +75,23 @@ export async function fetchCoachingSpans(): Promise<SpansRead> {
   }
 }
 
-/** The hook. Re-reads when the signed-in account changes, and nothing else —
- *  a retention curve does not move between renders. */
-export function useCoachingSpans(): SpansRead {
+/** The hook. Re-reads when the signed-in account changes, and when the screen
+ *  asks — a retention curve does not move between renders, but the read behind
+ *  it can be refused, and Analytics can now be pulled down to ask again.
+ *
+ *  `reload` bumps a nonce rather than calling `fetchCoachingSpans` directly, so
+ *  the reload and the mount go through exactly one code path and the 'loading'
+ *  reset cannot drift between them. */
+export function useCoachingSpans(): SpansRead & { reload: () => void } {
   const rev = useAuthRevision();
+  const [nonce, setNonce] = useState(0);
   const [read, setRead] = useState<SpansRead>({ spans: [], status: 'loading' });
   useEffect(() => {
     let alive = true;
     setRead({ spans: [], status: 'loading' });
     void fetchCoachingSpans().then((r) => { if (alive) setRead(r); });
     return () => { alive = false; };
-  }, [rev]);
-  return read;
+  }, [rev, nonce]);
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  return { ...read, reload };
 }

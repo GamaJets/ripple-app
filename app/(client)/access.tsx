@@ -5,14 +5,25 @@
 // as possible. Type comes from the scale; the colours here are a hardware
 // requirement, not a palette choice.
 //
+// ── The brand this screen names, and the one it used to name ──────────────
+//
+// `useBrand().appName`, not `BRAND.label`. The two are different answers: the
+// first is the GYM's own name as `tenants.name` has it, cached on this device
+// (src/ui/brand.tsx), and the second is the build's compiled-in family label.
+// The member number is derived from a three-letter prefix of whichever it is
+// given, so on a white-label build Membership showed "REP-…" from one and this
+// barcode encoded "EXA-…" from the other — a member giving reception one number
+// and holding a different one up to the turnstile, which is precisely the
+// failure the instruction below asks them to walk into. One source, and it is
+// the same one app/(client)/membership.tsx reads.
+//
 // The encoded number is `memberNoFrom(...)` — derived from the signed-in user and
 // stable for them. No gym billing system issues it, so a turnstile will NOT open
 // on it unless the gym has been given this exact number and loaded it against the
 // member. The screen used to read "Hold this to the scanner at the gym entrance",
 // which promised a door that opens; it now says what the number is and what has
 // to happen before it works.
-import { useMemo } from 'react';
-import { BRAND } from '../../src/lib/brands';
+import { useMemo, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -20,15 +31,25 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { sp, radius, type as ty, numeric, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useBrand } from '../../src/ui/brand';
 import { memberNoFrom, MEMBER_NO_CHANGED_NOTE } from '../../src/lib/membership';
 import { code39Segments } from '../../src/lib/barcode';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Access() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const memberNo = memberNoFrom(c.name, c.id, BRAND.label);
+  const { appName } = useBrand();
+  const memberNo = memberNoFrom(c.name, c.id, appName);
   const segs = useMemo(() => code39Segments(memberNo), [memberNo]);
+  // The number on the card is derived from the member's own name and id, both
+  // of which come from the profile read. A profile that failed to read hands
+  // this screen a name of '' and therefore a DIFFERENT barcode — one reception
+  // has never seen — printed at full size with nothing saying so. The read
+  // behind it can be asked for again.
+  const pull = usePullToRefresh(useCallback(() => { c.reload(); }, [c.reload]));
   // The bar width used to be a pinned 2. The number is longer now — nine base-36
   // characters instead of four digits, because four digits was nine thousand
   // buckets and two members of one gym could share one — so a fixed unit runs
@@ -42,12 +63,12 @@ export default function Access() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: sp.xl }}>
-        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ position: 'absolute', top: 10, left: 6, padding: 10 }}>
-          <Icon name="back" size={20} color="#fff" />
+      <ScrollView contentContainerStyle={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: sp.xl }} refreshControl={pull}>
+        <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" style={{ position: 'absolute', top: 10, start: 6, padding: 10 }}>
+          <Icon name={BACK_ICON} size={20} color="#fff" />
         </Pressable>
         <Text style={{ ...ty.title, color: '#fff', marginBottom: 4 }}>{c.name || 'Member'}</Text>
-        <Text style={{ ...ty.body, ...numeric, color: '#8a8a8a', marginBottom: sp.huge }}>{BRAND.label} ID {memberNo}</Text>
+        <Text style={{ ...ty.body, ...numeric, color: '#8a8a8a', marginBottom: sp.huge }}>{appName} ID {memberNo}</Text>
 
         <View style={{ backgroundColor: '#fff', borderRadius: radius.md, paddingVertical: sp.xl, paddingHorizontal: sp.xl, alignItems: 'center' }}>
           <View style={{ flexDirection: 'row', alignItems: 'stretch', height: 130 }}>
@@ -58,7 +79,7 @@ export default function Access() {
           <Text style={{ ...value(15), letterSpacing: 3, color: '#000', marginTop: sp.md }}>{memberNo}</Text>
         </View>
 
-        <Text style={{ ...ty.label, color: '#8a8a8a', textAlign: 'center', marginTop: sp.xxl }}>This is your {BRAND.label} ID, not a membership number your gym issued.{'\n'}Give it to reception once and they can link it to your account — after that the entrance scanner will read it.{'\n'}Turn your screen brightness up for a clean read.</Text>
+        <Text style={{ ...ty.label, color: '#8a8a8a', textAlign: 'center', marginTop: sp.xxl }}>This is your {appName} ID, not a membership number your gym issued.{'\n'}Give it to reception once and they can link it to your account — after that the entrance scanner will read it.{'\n'}Turn your screen brightness up for a clean read.</Text>
         {/* The number widened and therefore changed. This is the screen the
             instruction above is on, so it is the screen that owes somebody who
             followed that instruction an explanation. */}

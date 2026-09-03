@@ -31,7 +31,7 @@
 // again in a minute; and an empty window is a real answer. `importNote` below
 // is the one place that maps them, so no two of them can end up sharing a
 // wording.
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Modal, TextInput, Switch, Platform, Alert, KeyboardAvoidingView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -40,19 +40,40 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { useGlucose } from '../../src/ui/glucoseData';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import {
   band, formatGlucose, parseTyped, TYPICAL_LOW_MMOL, TYPICAL_HIGH_MMOL,
   type GlucoseUnit, type GlucoseBand, type GlucoseReadStatus,
 } from '../../src/lib/glucose';
 import { glucoseSource } from '../../src/lib/wearables/glucoseSource';
+// The shared date and clock, in the reader's own locale — see `when` below for
+// what this screen was printing instead.
+import { fmtDay, fmtTime } from '../../src/lib/format';
 
 const UNITS: GlucoseUnit[] = ['mmol/L', 'mg/dL'];
 
+/**
+ * When a reading was taken — "Mon 24 Aug · 08:14".
+ *
+ * The weekday and the clock were the whole of it, inside a FOURTEEN-DAY window.
+ * Two Mondays fit in fourteen days, so a member looking at their list saw two
+ * rows both reading "Mon 08:14" with different numbers on them and no way to
+ * tell which was this week's — on the screen whose entire purpose is watching a
+ * figure move over time. Worse where it matters most: an 11.2 and a 5.8 an hour
+ * after the same breakfast are the before and after of a change that worked,
+ * and unlabelled they are a contradiction.
+ *
+ * `fmtDay` carries the date and the weekday in the reader's own locale;
+ * `fmtTime` carries their own clock, so a 12-hour phone stops being handed a
+ * 24-hour reading. The NaN guard stays — a dash is what an unreadable timestamp
+ * is worth, and "Invalid Date" beside a blood sugar figure reads as the figure
+ * being wrong.
+ */
 function when(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  return `${fmtDay(iso)} · ${fmtTime(iso)}`;
 }
 
 export default function Glucose() {
@@ -63,6 +84,15 @@ export default function Glucose() {
   const [typing, setTyping] = useState(false);
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
+  // The way back from a failed read, which this screen did not have.
+  // `useGlucose` has exposed `refresh` from the start and nothing called it:
+  // the provider reads once when the signed-in id settles, there is no retry
+  // inside it, and there was no gesture and no button here — so a single
+  // refused read left "could not be read" on screen for the whole session, on
+  // the one screen where that sentence must not be mistaken for "your sensor
+  // recorded nothing". Pull-to-refresh is the gesture people already try; the
+  // button below is for the person who does not.
+  const pull = usePullToRefresh(useCallback(() => { void g.refresh(); }, [g]));
 
   // A band is a position on a scale, not a verdict, so the colours stay the
   // theme's neutral accents rather than a green/amber/red that reads as marking.
@@ -142,7 +172,7 @@ export default function Glucose() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
@@ -159,9 +189,14 @@ export default function Glucose() {
           <SectionHead title="Last 14 Days"
             note={unreadable ? 'Could not be read' : known ? undefined : g.status === 'partial' ? 'More readings than shown' : undefined} />
           {unreadable ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              Your readings could not be read just now. This is not the same as having none — nothing below is confirmed.
-            </Text>
+            <>
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                Your readings could not be read just now. This is not the same as having none — nothing below is confirmed.
+              </Text>
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                <Ghost label="Try Again" onPress={() => { void g.refresh(); }} />
+              </View>
+            </>
           ) : null}
           <View style={{ flexDirection: 'row', marginTop: sp.md }}>
             {[

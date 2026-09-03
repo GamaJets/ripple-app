@@ -12,7 +12,7 @@
 // 16F "Meal (photo)" entry whenever vision was unavailable or failed. Nothing is
 // logged now — the app says it could not read the photo rather than making a
 // number up.
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { num } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
@@ -36,13 +36,15 @@ import { energyPlanFor, observedRateKg, MAX_DEFICIT_FRACTION_OF_TDEE, type Energ
 import { dayAdjust } from '../../src/lib/dayTarget';
 import { useGoalTracker } from '../../src/ui/goalTracker';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { unsentNote } from '../../src/lib/offlineQueue';
 import { Icon } from '../../src/ui/Icon';
 import { useRouter } from 'expo-router';
 import { useBrand } from '../../src/ui/brand';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
-import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
+import { parseFoodText, foodAIAvailable, type ParsedFood } from '../../src/lib/foodAI';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 // The same review sheet the Food Log tab uses. This tab's photo path COMMITTED
 // — with an alert — while the other offered an editable sheet for the same read
@@ -59,6 +61,7 @@ import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } f
 import { useSettings } from '../../src/ui/settings';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { weightLabel, kgToLb, type WeightUnit } from '../../src/lib/units';
+import { FORWARD_ICON, turn } from '../../src/ui/direction';
 
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
@@ -184,9 +187,24 @@ export default function Nutrition() {
   // src/lib/unitPreference.ts. What it is never again is a hardcoded 'kg'
   // typed after a figure, which is what every sentence on this screen did.
   const wu = useSettings().weightUnit;
-  const _adj = useCoachNutrition().get(c.id);
-  const coachAdjust = c.coachingMode === 'solo' ? null : _adj;
-  const goals = useGoalTracker().goals;
+  const coachNutrition = useCoachNutrition();
+  const _adj = coachNutrition.get(c.id);
+  const soloEater = c.coachingMode === 'solo';
+  const coachAdjust = soloEater ? null : _adj;
+  // A null from `get()` is two answers, and this screen was taking the wrong
+  // one. src/ui/coachNutrition.tsx says it in its own header: under 'error' a
+  // null means the adjustment could not be READ, not that there is none — "so
+  // a client whose coach had cut them 400 kcal was quietly handed the
+  // uncorrected targets and ate to them". Every calorie and macro figure below,
+  // and the whole week of meals scaled to them, is built on `coachAdjust`.
+  //
+  // src/ui/habits.tsx guards this with `adjustUnknown` and has since the
+  // checklist was written; the two screens the member actually eats from did
+  // not. Only for a COACHED member: nobody adjusts a solo member's macros, so
+  // a failed read tells us nothing there.
+  const adjustUnknown = !soloEater && coachNutrition.status === 'error' && _adj == null;
+  const goalTracker = useGoalTracker();
+  const goals = goalTracker.goals;
   // A meal plan is scaled to lean body mass. Without a weight and body fat there
   // is nothing to scale, and the whole screen used to run on a 70 kg / 20%
   // placeholder and present the result as the client's plan. Zeros here are
@@ -256,6 +274,33 @@ export default function Nutrition() {
   const [cook, setCook] = useState(false);
   const [cookStep, setCookStep] = useState(0);
   const fl = useFoodLog();
+  // Four reads feed this screen and every one of them changes what is on the
+  // plate: the profile (the lean mass the plan is scaled to), the coach's
+  // adjustment to the targets, the goals, and what has already been eaten
+  // today. `adjustUnknown` above is the sentence a member reads when the
+  // second of those failed — it tells them to check back in a moment, and this
+  // is how they check.
+  const pull = usePullToRefresh(useCallback(() => {
+    c.reload(); void coachNutrition.reload(); goalTracker.reload(); fl.reload();
+  }, [c.reload, coachNutrition, goalTracker.reload, fl.reload]));
+  /**
+   * Take a meal off today's record, and say so when it did not come off.
+   *
+   * `removeFood` resolves FALSE when the row is still there — src/ui/foodLog.tsx
+   * deliberately leaves it on screen until the server confirms the delete,
+   * because a row that vanishes and comes back at the next launch takes the
+   * day's calories with it in both directions. The × here dropped that promise,
+   * so a refused delete was a tap that did nothing at all: the meal stayed, no
+   * sentence appeared, and the member tapped it again. The Food Log tab has
+   * always said something; this one is where the same meal is deleted from.
+   */
+  const removeMeal = async (id: string, name: string) => {
+    const gone = await fl.removeFood(id);
+    if (!gone) {
+      Alert.alert('Still on today’s record',
+        `${name} could not be removed just now, so it is still counted toward today. Try again in a moment.`);
+    }
+  };
   useEffect(() => { setBatch(1); setCook(false); setCookStep(0); }, [recipe]);
   const [nl, setNl] = useState('');
   const [logBusy, setLogBusy] = useState(false);
@@ -315,19 +360,28 @@ export default function Nutrition() {
     // A macro the reader did not give us is blank, not nought — see
     // src/lib/foodAI.ts. Those foods go to the sheet to be completed rather
     // than into the log with a zero standing in for a measurement.
+    //
+    // Calories included. They used to be coerced to zero and the food then
+    // filtered out for being worth nothing, so an item the model could not
+    // price was removed from the reader's own description with no sentence
+    // anywhere — the one outcome that file's header refuses for the macros.
+    // `NaN` is what a FoodFacts carries for a figure nobody has supplied yet
+    // and the sheet seeds an empty calories box from it.
+    const whole = (it: ParsedFood): it is ParsedFood & { kcal: number; protein: number; carbs: number; fat: number } =>
+      it.kcal != null && it.protein != null && it.carbs != null && it.fat != null;
     const gaps: FoodFacts[] = parsed
-      ? parsed.filter((it) => it.protein == null || it.carbs == null || it.fat == null)
-        .map((it) => ({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, basis: null }))
+      ? parsed.filter((it) => !whole(it))
+        .map((it) => ({ name: it.name, kcal: it.kcal ?? NaN, protein: it.protein, carbs: it.carbs, fat: it.fat, basis: null }))
       : [];
     if (gaps.length) {
       setPendingVia('manual');
       setPendingPhoto(null);
       setPendingTitle('Check This One');
-      setPendingNote(`Read from what you typed. Some of the macros did not come back, so they are blank rather than nought — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
+      setPendingNote(`Read from what you typed. Some of the figures did not come back, so they are blank rather than nought — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
       setPending(gaps[0]);
       setQueue(gaps.slice(1));
     }
-    const items = parsed ? parsed.filter((it) => it.protein != null && it.carbs != null && it.fat != null) : null;
+    const items = parsed ? parsed.filter(whole) : null;
     if (items && items.length) {
       // `items.forEach` over an async write started every one of them and
       // waited for none, then fired the success haptic and cleared the box the
@@ -336,7 +390,7 @@ export default function Nutrition() {
       // — and the text they would have needed to try again was gone. The field
       // is cleared only for what actually landed.
       const outs = await Promise.all(items.map((it) =>
-        fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein ?? 0, carbs: it.carbs ?? 0, fat: it.fat ?? 0, via: 'manual' })));
+        fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' })));
       const refused = outs.filter((o) => o === 'refused').length;
       const unsent = outs.filter((o) => o === 'unsent').length;
       if (refused === outs.length) {
@@ -488,7 +542,13 @@ export default function Nutrition() {
   const cal = caloriesLeft(target.kcal, eaten.kcal, burn?.burned ?? 0, burn?.budgeted ?? 0, burn?.kind);
   const cycleNote = dayType === 'training' ? `+${CYCLE_KCAL} kcal, more carbs` : dayType === 'rest' ? `−${CYCLE_KCAL} kcal, fewer carbs` : undefined;
 
-  if (!hasBody) {
+  // The same door for the same reason, and `adjustUnknown` goes through it
+  // rather than getting a banner over a plan: this screen has no honest partial
+  // state. The targets, the meters, the seven-day week and the grocery list are
+  // all one arithmetic, and there is nowhere to show that arithmetic with the
+  // coach's correction missing from it without the member reading the result as
+  // their plan. So the screen says what it does not know instead.
+  if (!hasBody || adjustUnknown) {
     // 'loading' is the ONLY status that means "still reading". Written as
     // `!bodyKnown` this was also true under 'error', and 'error' is where this
     // screen sat: clientData clears the local cache at launch under
@@ -501,12 +561,14 @@ export default function Nutrition() {
     const looking = c.status === 'loading';
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Meals</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{looking
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{adjustUnknown
+                ? 'We couldn’t read your coach’s adjustment to your targets, so the plan below it can’t be worked out. The generic figures are not your coach’s plan and are not shown as though they were — check back in a moment.'
+                : looking
                 ? 'Reading your latest measurements…'
                 : c.status === 'error'
                   ? 'Your measurements could not be read just now, so the targets below them cannot be worked out. This is a connection problem, not a missing scan.'
@@ -520,7 +582,11 @@ export default function Nutrition() {
                 wrong thing to offer somebody whose measurements exist and
                 could not be fetched — it invites them to type in a duplicate
                 of a scan they already have. */}
-            {looking ? <ActivityIndicator color={t.brand} />
+            {/* No button on the adjustment path either, and for the same
+                reason: there is nothing for the member to add. The read has to
+                land, and it is retried by the provider rather than by them. */}
+            {adjustUnknown ? null
+              : looking ? <ActivityIndicator color={t.brand} />
               : c.status === 'error' ? null
               : <Cta label="Add Your Measurements" wide onPress={() => router.push('/(client)/scans')} />}
           </Section>
@@ -531,7 +597,7 @@ export default function Nutrition() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
@@ -699,6 +765,17 @@ export default function Nutrition() {
             </View>
           </Card>
 
+          {/* Meals on this phone the server has not taken. They count toward
+              today in the figures above and they are not lost — but they are
+              not in the log a coach reads, and nothing on this tab said so:
+              `unsent` was rendered on the Food Log and nowhere else, so the
+              member logging a meal in a basement gym saw it appear here, in the
+              day's total, with no hint that it had gone no further than the
+              handset. Same sentence as the other tab, deliberately. */}
+          {unsentNote(fl.unsent, 'meal') ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{unsentNote(fl.unsent, 'meal')}</Flag>
+          ) : null}
+
           {/* Today's entries — or an honest empty state, not a zero pretending
               to be data. */}
           {fl.entries.length > 0 ? (
@@ -709,7 +786,7 @@ export default function Nutrition() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                     <Text style={{ ...ty.body, color: t.ink2, flex: 1 }} numberOfLines={1}>{fe.name}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(fe.kcal)} kcal</Text>
-                    <Pressable onPress={() => fl.removeFood(fe.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
+                    <Pressable onPress={() => { void removeMeal(fe.id, fe.name); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={'Remove ' + fe.name}>
                       <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
                     </Pressable>
                   </View>
@@ -743,7 +820,7 @@ export default function Nutrition() {
           <Pressable onPress={() => setShowAvoid((v) => !v)} accessibilityRole="button" accessibilityLabel="Toggle diet and dietary filters"
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>{DIET_LABEL[diet]}{c.avoid.length ? ' · ' + c.avoid.length + ' filtered' : ' · tap to change'}</Text>
-            <View style={{ transform: [{ rotate: showAvoid ? '90deg' : '0deg' }] }}><Icon name="chevron" size={14} color={t.ink3} /></View>
+            <View style={{ transform: [{ rotate: turn(showAvoid ? 90 : 0) }] }}><Icon name={FORWARD_ICON} size={14} color={t.ink3} /></View>
           </Pressable>
           {showAvoid ? (
             <View style={{ marginTop: sp.lg }}>
@@ -838,7 +915,7 @@ export default function Nutrition() {
                   4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
                   plan and the macro split immediately. */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.sm }}>
-                <Text style={{ ...ty.label, color: t.ink3, marginRight: 2 }}>Meals per day</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginEnd: 2 }}>Meals per day</Text>
                 {([3, 4, 5] as const).map((n) => {
                   const on = c.mealsPerDay === n;
                   return (
@@ -884,7 +961,7 @@ export default function Nutrition() {
                       <Text style={{ ...value(20), color: t.ink }}>{m.K}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
                     </View>
-                    <Icon name="chevron" size={16} color={t.ink3} />
+                    <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                   </Pressable>
                 </View>
               ))}

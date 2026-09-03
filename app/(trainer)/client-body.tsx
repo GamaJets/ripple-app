@@ -71,7 +71,8 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { type LoadStatus } from '../../src/ui/loadStatus';
-import { isQueryableId } from '../../src/lib/clientDrift';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isoToday } from '../../src/lib/dayPlan';
 import { plain } from '../../src/lib/units';
 import {
@@ -126,16 +127,23 @@ export default function ClientBody() {
   // which is worse than showing nothing at all.
   const wanted = useRef<string | null>(null);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, askable: boolean) => {
     wanted.current = id;
     setScanStatus('loading'); setManualStatus('loading');
     setHistory(null); setManual(null);
     const today = isoToday(new Date());
 
     // A client the coach typed in by hand has a `coach_clients` row and no user
-    // account, so their id is not a uuid and Postgres refuses the whole
-    // statement rather than skipping the value. Nothing is asked for them.
-    if (!isQueryableId(id)) {
+    // account, so nothing server-backed is asked for them.
+    //
+    // This was `isQueryableId(id)` alone, on the belief that such a client
+    // carries an id the phone invented and Postgres would refuse. It does not:
+    // `coach_clients.id` is uuid DEFAULT gen_random_uuid(), so from the first
+    // round trip onward the guard passed, the read ran, it came back with zero
+    // rows and NO error, and this screen rendered that as "they have none". The
+    // roster is the only thing that knows which table the row came from — see
+    // src/lib/clientRecord.ts.
+    if (!askable) {
       setScanStatus('error'); setManualStatus('error');
       return;
     }
@@ -183,6 +191,15 @@ export default function ClientBody() {
     }
   }, []);
 
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  /** Whether the server may be asked about this person at all. Recomputed on
+   *  every render rather than inside `load`, so that a roster which arrives
+   *  AFTER the read — and says this row was typed in by hand — re-runs the
+   *  effect and withdraws the answer instead of leaving an empty screen
+   *  standing as a fact about them. `handAdded` undefined is "the roster has
+   *  not said", which goes on asking. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
   useEffect(() => {
     if (!USE_SUPABASE) return;
     if (!picked) {
@@ -193,10 +210,21 @@ export default function ClientBody() {
       setScanStatus('ready'); setManualStatus('ready');
       return;
     }
-    void load(picked);
-  }, [picked, load]);
+    void load(picked, askable);
+  }, [picked, askable, load]);
 
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  // The scans and the manual entries are written by the CLIENT, on their own
+  // phone, and this screen is where a coach finds out whether a weigh-in
+  // happened. `load` reads both together and is the whole of what this screen
+  // shows about the person; the roster beside it is the picker and the name.
+  //
+  // With nobody picked there is only the picker, so the roster is the whole of
+  // what a pull can honestly ask for.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(),
+    ...(picked ? [load(picked, askable)] : []),
+  ]), [r, picked, askable, load]));
+
   const who = client?.name.split(' ')[0] ?? 'They';
 
   // 'error' hands `bodyBoard` a null, which is the only way it can answer
@@ -248,7 +276,7 @@ export default function ClientBody() {
               {fig(latest ? plain(metricValue(latest.v, s.key, wu)) : null)}
             </Text>
             {latest ? (
-              <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 3 }}>{unit}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginStart: 3 }}>{unit}</Text>
             ) : null}
           </View>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{readingLine(s, wu)}</Text>
@@ -286,7 +314,7 @@ export default function ClientBody() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

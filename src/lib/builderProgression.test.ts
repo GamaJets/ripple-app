@@ -21,6 +21,9 @@ const LOG: WorkoutEntry[] = [
   entry('2026-08-24T09:00:00.000Z', 'Bench Press', [[12, 60], [12, 60], [12, 60]]),
   entry('2026-08-17T09:00:00.000Z', 'Bench Press', [[10, 60], [9, 60]]),
   entry('2026-08-20T09:00:00.000Z', 'Back Squat', [[8, 90], [8, 90]]),
+  // Bodyweight work, logged. Reps and no load, which is what a press-up, a
+  // pull-up and a plank all look like in this table.
+  entry('2026-08-22T09:00:00.000Z', 'Press Up', [[20, 0], [18, 0], [15, 0]]),
 ];
 
 const base = { clientPicked: true, log: LOG, status: 'ready' as const, exercise: 'Bench Press', reps: '8-12' };
@@ -89,10 +92,30 @@ if (never.kind === 'gap') {
   ok(/have not logged this movement/.test(never.note), 'and this is the only branch that may say so');
 }
 
-// The four gap sentences are four sentences.
-const notes = [loading, failed, truncated, never]
+// And the one that is about the client and is NOT an absence. A bodyweight
+// session has reps and no load, so `suggestNextWeight` finds no top weight and
+// returns null — the same null a movement nobody has ever done returns. Both
+// fell through to "they have not logged this movement", which is an accusation
+// of absence about somebody who did the work.
+const bodyweight = progressionOffer({ ...base, exercise: 'Press Up', status: 'ready' });
+eq(bodyweight.kind, 'gap', 'a bodyweight session offers no load to build from');
+if (bodyweight.kind === 'gap') {
+  ok(!/have not logged this movement/.test(bodyweight.note),
+    'but it is NOT reported as a movement they have never done — they did it, with nothing on the bar');
+  ok(/bodyweight/i.test(bodyweight.note), 'and the note says which of the two it is');
+}
+// The same session under a truncated read is still not an absence: the newest
+// row for the movement came back, so the answer is known.
+const bodyweightPartial = progressionOffer({ ...base, exercise: 'Press Up', status: 'partial' });
+if (bodyweightPartial.kind === 'gap') {
+  ok(/bodyweight/i.test(bodyweightPartial.note),
+    'and it outranks the truncation sentence, which would say nothing was logged when something was');
+}
+
+// The five gap sentences are five sentences.
+const notes = [loading, failed, truncated, never, bodyweight]
   .map((o) => (o.kind === 'gap' ? o.note : ''));
-eq(new Set(notes).size, 4, 'the four reasons for no suggestion read as four sentences');
+eq(new Set(notes).size, 5, 'the five reasons for no suggestion read as five sentences');
 
 /* ── a truncated read may still ANSWER, because the newest row survives ─── */
 

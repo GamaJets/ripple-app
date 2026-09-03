@@ -14,7 +14,9 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { useCallback } from 'react';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { buildProgram } from '../../src/lib/programs';
 import { scheduledDay } from '../../src/lib/checklist';
@@ -26,6 +28,7 @@ import { useClientWeek } from '../../src/ui/clientWeek';
 import { clientWeekLine } from '../../src/lib/clientBlock';
 import { weekLabel } from '../../src/lib/programBlock';
 import { WEEK_DAYS, jsDayForIndex, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /** The seven rows, in the order src/lib/weekStart.ts draws a week. `WEEK[i]`
  *  and `jsDayForIndex(i)` are the label and the weekday of the same row, which
@@ -36,9 +39,15 @@ export default function ThisWeek() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { getProgram, status: programStatus } = useAssignedPrograms();
+  const { getProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
   const coachProgram = getProgram(c.id);
-  const { log, status: logStatus } = useWorkoutLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
+  // What the coach assigned, what has been trained against it, and the profile
+  // the generic fallback programme is built from. A programme assigned this
+  // morning was invisible here until the app was killed.
+  const pull = usePullToRefresh(useCallback(() => {
+    reloadPrograms(); reloadLog(); c.reload();
+  }, [reloadPrograms, reloadLog, c.reload]));
   // Under 'error' a null from getProgram means "we could not find out", not
   // "your coach has not assigned you one" — and which of the two it is decides
   // what the client trains all week. The `??` below fell through to the generic
@@ -92,7 +101,7 @@ export default function ThisWeek() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
@@ -176,7 +185,7 @@ export default function ThisWeek() {
                   ) : isToday ? (
                     <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Today</Text>
                   ) : (
-                    <Icon name="chevron" size={16} color={t.ink3} />
+                    <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                   )}
                 </Pressable>
               </View>

@@ -16,6 +16,7 @@ import Constants from 'expo-constants';
 import { useTheme } from './components';
 import { WhatsNewSheet } from './WhatsNew';
 import { sp, radius, hairline, type as ty, numeric } from '../theme/scale';
+import { END_ALIGN, FORWARD_CHAR } from './direction';
 
 /** Short form of an update UUID — enough to match against `eas update:list`. */
 const shortId = (id: string | null): string => (id ? id.slice(0, 8) : '—');
@@ -58,7 +59,7 @@ export function BuildInfo() {
         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>What’s new</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>What changed in {appVersion}</Text>
       </View>
-      <Text style={{ ...ty.body, color: t.ink3 }}>›</Text>
+      <Text style={{ ...ty.body, color: t.ink3 }}>{FORWARD_CHAR}</Text>
     </Pressable>
     <WhatsNewSheet visible={notesOpen} force onClose={() => setNotesOpen(false)} />
 
@@ -70,7 +71,7 @@ export function BuildInfo() {
           paddingVertical: 9, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
         }}>
           <Text style={{ ...ty.label, color: t.ink2 }}>{k}</Text>
-          <Text style={{ ...ty.label, ...numeric, color: t.ink, flexShrink: 1, textAlign: 'right' }} numberOfLines={1}>{v}</Text>
+          <Text style={{ ...ty.label, ...numeric, color: t.ink, flexShrink: 1, textAlign: END_ALIGN }} numberOfLines={1}>{v}</Text>
         </View>
       ))}
       <Text style={{ ...ty.caption, color: copied ? t.brand : t.ink3, paddingVertical: sp.sm }}>

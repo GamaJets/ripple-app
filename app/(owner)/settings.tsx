@@ -51,18 +51,29 @@ import { shareTextFile } from '../../src/lib/exportShare';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
+import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { END_ALIGN } from '../../src/ui/direction';
 
 /** A label and its value. `value` is already a string — see `fig`. */
 function Line({ t, label, value, first }: { t: Theme; label: string; value: string; first?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.label, color: t.ink3 }}>{label}</Text>
-      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>{value}</Text>
+      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: END_ALIGN }} numberOfLines={1}>{value}</Text>
     </View>
   );
 }
 
-const ROLE_LABEL: Record<string, string> = { owner: 'Gym owner', trainer: 'Trainer', client: 'Member' };
+// Four, since supabase/parts/711 added the front desk. The line below falls
+// back to the raw value for anything not here, so an omission renders
+// 'receptionist' rather than nothing — but a person reading "Role" on their own
+// account settings should be told what they are in the product's words, not in
+// the column's.
+const ROLE_LABEL: Record<string, string> = {
+  owner: 'Gym owner', trainer: 'Trainer', client: 'Member', receptionist: 'Reception',
+};
 
 /** A timestamp as the day it happened, or a dash. Never the string "null". */
 function day(iso: string | null): string {
@@ -140,13 +151,23 @@ export default function OwnerSettings() {
       "Push notifications are off from now on, but we couldn't confirm this phone has been taken off the list — you may still get one until the next time you open the app. Nothing else has changed.");
   };
 
-  const { tenant, loading: tenantLoading } = useTenant();
+  const { tenant, loading: tenantLoading, status: tenantStatus, refresh: refreshTenant } = useTenant();
 
   // null = nothing read yet. A loaded object may still carry nulls, one per
   // read that failed — "not known" survives all the way into the dialog copy.
   const [facts, setFacts] = useState<OwnerFacts | null>(null);
+  /** When the three reads below last LANDED, and whether one is in flight.
+   *  The last owner screen with fetched figures on it and no way to ask again:
+   *  the deletion queue and the co-owner count are read once at mount and then
+   *  sat there, so an owner who had just approved a deletion on the console was
+   *  reading a count from whenever this screen happened to open. */
+  const [factsAt, setFactsAt] = useState<number | null>(null);
+  /** The gym's own row is the other server read on this screen — the "Gym"
+   *  line below — and it was outside both the stamp and the refresh. */
+  const [tenantAt, setTenantAt] = useState<number | null>(null);
+  const [reloading, setReloading] = useState(false);
 
-  const load = useCallback(async () => {
+  const readFacts = useCallback(async () => {
     if (!USE_SUPABASE) { setFacts({ waiting: null, coOwners: null, requestedAt: null, selfRead: false }); return; }
     let uid: string | null = null;
     try {
@@ -193,7 +214,30 @@ export default function OwnerSettings() {
     setFacts({ waiting, coOwners, requestedAt, selfRead });
   }, []);
 
+  const load = useCallback(async () => {
+    setReloading(true);
+    try {
+      await readFacts();
+      // Stamped once, at the end, because the three reads land together as far
+      // as this screen is concerned — `readFacts` settles all three and writes
+      // one object. A read that failed leaves its own field null and the stamp
+      // still moves, which is right: the screen DID ask, just now, and the
+      // nulls beside it are what came back.
+      setFactsAt(Date.now());
+    } finally {
+      setReloading(false);
+    }
+  }, [readFacts]);
+
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (tenantStatus === 'ready') setTenantAt(Date.now()); }, [tenantStatus]);
+
+  /** One line over both reads, and it is the age of the older. */
+  const fetchedAt = oldestFetch(factsAt, tenantAt);
+  /** Both. The button ran only the account facts, so the gym name beside them
+   *  stayed at whatever the first read returned. */
+  const refreshAll = useCallback(() => { void load(); refreshTenant(); }, [load, refreshTenant]);
+  const pull = usePullToRefresh(refreshAll);
 
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -339,7 +383,7 @@ export default function OwnerSettings() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -349,6 +393,13 @@ export default function OwnerSettings() {
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Who you are signed in as, your data & this build</Text>
+
+        {/* When the deletion queue and the co-owner count were read, whether
+            this phone is reaching us, and a way to ask again. The figures
+            further down are the only ones on this screen that come from the
+            server rather than from the session, and they were read once at
+            mount with no gesture that would refresh them. */}
+        <Fetched at={fetchedAt} onRefresh={refreshAll} busy={reloading} />
 
         <Rule />
 

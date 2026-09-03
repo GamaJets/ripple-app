@@ -36,6 +36,7 @@
 // its complexity — a failed read rendered as "no request" would tell somebody who
 // asked to be erased that they never asked, which is the one wrong answer here.
 import { useState, useEffect, useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, Pressable, ScrollView, Alert, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -73,6 +74,7 @@ import {
 } from '../../src/lib/dataExport';
 import { reportError } from '../../src/lib/reportError';
 import { appLocale } from '../../src/lib/locale';
+import { END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * Which phone the rest-timer sound note is about.
@@ -117,7 +119,7 @@ function Line({ t, label, value, first }: { t: Theme; label: string; value: stri
   return (
     <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md, paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.label, color: t.ink3 }}>{label}</Text>
-      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: 'right' }} numberOfLines={1}>{value}</Text>
+      <Text style={{ ...ty.body, color: t.ink, flex: 1, textAlign: END_ALIGN }} numberOfLines={1}>{value}</Text>
     </View>
   );
 }
@@ -125,7 +127,7 @@ function Line({ t, label, value, first }: { t: Theme; label: string; value: stri
 function Row({ t, label, sub, right, first }: { t: Theme; label: string; sub?: string; right: React.ReactNode; first?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md, borderTopWidth: first ? 0 : hairline, borderTopColor: t.ring }}>
-      <View style={{ flex: 1, paddingRight: sp.md }}>
+      <View style={{ flex: 1, paddingEnd: sp.md }}>
         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{label}</Text>
         {sub ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{sub}</Text> : null}
       </View>
@@ -248,7 +250,18 @@ export default function Settings() {
       // not on screen when somebody signs out from Settings. Without this the
       // session ends and the screen simply stays put, showing dashes where the
       // name and email were. Seen in the simulator, not in a test.
-      { text: 'Sign out', onPress: () => { try { auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('clientSettings.signOut', e); } } },
+      // `auth.signOut()` is not awaited on purpose, and it is not fire-and-
+      // forget either: it clears the user from the tree synchronously and then
+      // finishes the teardown — revoking this handset's push registration while
+      // the session is still alive, cancelling the reminders the phone itself
+      // is holding, and clearing the notification categories, quiet hours and
+      // biometric lock that used to be inherited by the next person to sign in
+      // here. That work used to be absent entirely: this screen had
+      // `revokePushToken` a scroll away in the provider it reads and signed out
+      // without it, so the previous member's coach could still reach this
+      // handset. It lives in src/ui/auth.tsx now rather than on this screen,
+      // because the coach and owner apps sign out too.
+      { text: 'Sign out', onPress: () => { try { void auth.signOut(); router.replace('/welcome'); } catch (e) { reportError('clientSettings.signOut', e); } } },
     ]);
   };
   // Said under the picker rather than left implied. Repple records weight in
@@ -304,6 +317,12 @@ export default function Settings() {
     catch (e) { reportError('settings.deletionStatus', e); setDeletion('failed'); }
   }, []);
   useEffect(() => { void loadDeletion(); }, [loadDeletion]);
+
+  // Whether this account has an open deletion request is the one thing on this
+  // screen read from the server — everything else is the session, this device's
+  // lock and this device's preferences. It is also the one worth being current:
+  // the 30-day clock it reports is the whole of what the screen promises.
+  const pull = usePullToRefresh(loadDeletion);
 
   const exportData = async () => {
     if (dataBusy) return; setDataBusy(true);
@@ -413,7 +432,7 @@ export default function Settings() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -521,13 +540,13 @@ export default function Settings() {
               accessibilityLabel="Save my files" disabled={files.length === 0}
               accessibilityState={{ disabled: files.length === 0 }}>
               <Row t={t} label="Save My Files" sub={filesRowNote(files.length, filesComplete)}
-                right={files.length > 0 ? <Icon name="chevron" size={15} color={t.ink3} /> : undefined} />
+                right={files.length > 0 ? <Icon name={FORWARD_ICON} size={15} color={t.ink3} /> : undefined} />
             </Pressable>
           ) : null}
           {deletion === null ? (
             // Not read yet. Deliberately not pressable: requesting again would
             // reset deletion_requested_at, restarting somebody's 30 days.
-            <Row t={t} label="Delete My Account" sub="Checking whether you already have a request in…" right={<Icon name="chevron" size={15} color={t.ink3} />} />
+            <Row t={t} label="Delete My Account" sub="Checking whether you already have a request in…" right={<Icon name={FORWARD_ICON} size={15} color={t.ink3} />} />
           ) : deletion === 'failed' ? (
             <>
               <Row t={t} label="Deletion Status Unknown" sub="We couldn't check whether you already have a request in. That's a read that failed, not an answer — it does not mean you have none." right={
@@ -540,7 +559,7 @@ export default function Settings() {
                 <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                    <Icon name="chevron" size={15} color={t.ink3} />
+                    <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
                   </View>
                 } />
               </Pressable>
@@ -552,7 +571,7 @@ export default function Settings() {
               } />
               <Pressable onPress={withdrawDeletion} disabled={withdrawBusy} accessibilityRole="button" accessibilityLabel="Withdraw my deletion request">
                 <Row t={t} label={withdrawBusy ? 'Withdrawing…' : 'Withdraw My Deletion Request'} sub="Keep your account. You can withdraw until the deletion is actioned, and ask again at any time."
-                  right={<Icon name="chevron" size={15} color={t.ink3} />} />
+                  right={<Icon name={FORWARD_ICON} size={15} color={t.ink3} />} />
               </Pressable>
             </>
           ) : (
@@ -560,7 +579,7 @@ export default function Settings() {
               <Row t={t} label="Delete My Account" sub="Request permanent erasure of your account and data" right={
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
-                  <Icon name="chevron" size={15} color={t.ink3} />
+                  <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
                 </View>
               } />
             </Pressable>
@@ -583,7 +602,7 @@ export default function Settings() {
         <Section>
           <SectionHead title="Legal" />
           <Pressable onPress={() => setLegal(legal === 'privacy' ? null : 'privacy')}>
-            <Row t={t} first label="Privacy Policy" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'privacy' ? '▾' : '›'}</Text>} />
+            <Row t={t} first label="Privacy Policy" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'privacy' ? '▾' : FORWARD_CHAR}</Text>} />
           </Pressable>
           {legal === 'privacy' ? (
             <View style={{ paddingVertical: sp.sm, gap: sp.md }}>
@@ -595,7 +614,7 @@ export default function Settings() {
             </View>
           ) : null}
           <Pressable onPress={() => setLegal(legal === 'terms' ? null : 'terms')}>
-            <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : '›'}</Text>} />
+            <Row t={t} label="Terms of Service" right={<Text style={{ ...ty.body, color: t.ink3 }}>{legal === 'terms' ? '▾' : FORWARD_CHAR}</Text>} />
           </Pressable>
           {legal === 'terms' ? (
             <View style={{ paddingVertical: sp.sm, gap: sp.md }}>

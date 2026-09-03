@@ -40,6 +40,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Hero, Card, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { appLocale } from '../../src/lib/locale';
+import { fmtFullDay } from '../../src/lib/format';
 import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../../src/lib/connect';
 import { coachPackLines, gymPtLines, chooseRoute, routeReason, creditsLeft, payingLines,
   buildLedger, expectedDraws, clientLedgerLine, shortfallLine,
@@ -177,11 +178,18 @@ export default function SessionCredits() {
             <SectionHead title="What Is Left" />
             {lines.map((l) => (
               <View key={l.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.md }}>
-                <View style={{ flex: 1, paddingRight: sp.md }}>
+                <View style={{ flex: 1, paddingEnd: sp.md }}>
                   <Text style={{ ...ty.label, color: t.ink }}>{l.label}</Text>
                   {l.expiresOn ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                      Expires {new Date(l.expiresOn).toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {/* `fmtFullDay`, which reads through src/lib/localDate.ts.
+                          `gym_passes.expires_on` and a pack's expiry are both
+                          bare `YYYY-MM-DD`, and `new Date('2026-08-01')` is UTC
+                          midnight — which every local getter west of Greenwich
+                          then reads back as 31 July. So a member in New York
+                          was told their pack expired the day before it does,
+                          about the last session they have paid for. */}
+                      Expires {fmtFullDay(l.expiresOn)}
                     </Text>
                   ) : null}
                 </View>

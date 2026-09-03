@@ -31,7 +31,9 @@ import { visionAvailable } from './vision';
 
 export interface ParsedFood {
   name: string;
-  kcal: number;
+  /** Null when the reader did not give us one, on the same rule as the three
+   *  below. See the note on the filter in `parseFoodText`. */
+  kcal: number | null;
   /** Null when the reader did not give us one. NEVER zero for an absent
    *  figure — see the header. */
   protein: number | null;
@@ -61,8 +63,21 @@ export async function parseFoodText(text: string): Promise<ParsedFood[] | null> 
     };
     return items.map((r: any) => ({
       name: String(r.name ?? 'Food'),
-      kcal: num(r.kcal) ?? 0,
+      // `?? 0` and then `.filter(r.kcal > 0)`, which is the header's own defect
+      // wearing the other hat: an absent calorie figure became a zero, and the
+      // zero then DELETED the food. A member who described three things and
+      // was handed two of them back was never told the third existed — it was
+      // not refused, not flagged, not left blank for them to fill in; it was
+      // dropped, and the difference between "we were not told" and "there is
+      // nothing there" is the whole subject of this file.
+      //
+      // So calories are nullable like the macros, and the gap is offered to the
+      // member the same way theirs are: src/lib/foodPortion.ts refuses to build
+      // a loggable food out of one, and the screen asks. Nothing is filtered
+      // out here any more except an item with no figures at all, which is
+      // nothing to ask about.
+      kcal: num(r.kcal),
       protein: num(r.protein), carbs: num(r.carbs), fat: num(r.fat),
-    })).filter((r: ParsedFood) => r.kcal > 0);
+    })).filter((r: ParsedFood) => r.kcal != null || r.protein != null || r.carbs != null || r.fat != null);
   } catch { return null; }
 }

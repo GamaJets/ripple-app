@@ -43,13 +43,19 @@ import { weightDeltaIn } from '../../src/lib/units';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { useRoster } from '../../src/ui/roster';
 import { isWhole } from '../../src/ui/loadStatus';
+import { useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 export default function Leaderboard() {
   // The COACH's unit, not the client's. This screen is read by the coach.
   const wu = useSettings().weightUnit;
   const t = useTheme();
   const router = useRouter();
-  const { roster, status } = useRoster();
+  const { roster, status, refresh } = useRoster();
+  // The roster is the whole of this screen. Every figure ranked here —
+  // adherence, weight change — arrives on the roster rows themselves, and
+  // they move when a client checks in on their own phone.
+  const pull = usePullToRefresh(useCallback(() => refresh(), [refresh]));
 
   // ── Who can be ranked at all ──────────────────────────────────────────────
   //
@@ -112,7 +118,7 @@ export default function Leaderboard() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>

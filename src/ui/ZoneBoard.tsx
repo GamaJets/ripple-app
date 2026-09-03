@@ -70,7 +70,7 @@ export function ZoneBoard({ seconds, current, showSplat = true }: {
       {showSplat ? (
         <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: sp.lg }}>
           <Text style={{ ...value(30), color: t.ink }}>{splat}</Text>
-          <Text style={{ ...ty.label, color: t.ink2, marginLeft: 7 }}>
+          <Text style={{ ...ty.label, color: t.ink2, marginStart: 7 }}>
             splat point{splat === 1 ? '' : 's'}
           </Text>
           <View style={{ flex: 1 }} />

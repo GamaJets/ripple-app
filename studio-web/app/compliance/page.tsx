@@ -73,6 +73,7 @@ import {
 } from '@lib/gymSigning';
 import { capLimit, readAll } from '@lib/rowCap';
 import { isoDate } from '@lib/format';
+import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 
 /**
  * What a read is when it holds no rows: still in flight, or refused.
@@ -1122,14 +1123,15 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px', padding: '11px 14px', borderRadius: 0, background: 'var(--surface2)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13, maxWidth: '84ch',
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page carried a byte-for-byte copy of it that rendered into a plain <div>,
+// so every sentence it printed — including the ones saying a write was
+// REFUSED and nothing was saved — was silent to a screen reader. The shared
+// component carries role="alert"/"status" and aria-live.
+// The wrapper stays only for this page's inset, surface and 84ch measure, which is passed
+// through the shared component's `style` rather than duplicating it.
+function Banner({ children, tone }: { children: React.ReactNode; tone?: BannerTone }) {
+  return <SharedBanner tone={tone} style={{ margin: '14px', background: 'var(--surface2)', maxWidth: '84ch' }}>{children}</SharedBanner>;
 }
 
 function Loading() {

@@ -229,6 +229,7 @@
 // A gym that has not set one cannot put a package on sale, and is told that,
 // rather than being given a price with a unit invented for it.
 import { useState, useEffect, useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -237,7 +238,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value, numeric } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
-import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, fetchMyPromoCodes, createPromoCode, archivePromoCode, fetchMyDisputes, type ConnectStatus, type TrainerPackage, type CoachPurchase, type CoachDispute } from '../../src/lib/connect';
+import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, adjustPackCredit, fetchMyPromoCodes, createPromoCode, archivePromoCode, fetchMyDisputes, type ConnectStatus, type TrainerPackage, type CoachPurchase, type CoachDispute } from '../../src/lib/connect';
 // A chargeback is the one thing on this screen with a clock on it. See
 // src/lib/disputes.ts: the deadline is the content, a missing deadline is its
 // own sentence, and none of it is a judgement about whether to fight the case.
@@ -276,6 +277,9 @@ import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, pack
 // `readMinorAmount`, which takes the decimal comma itself and refuses the
 // ambiguous separator rather than choosing a reading of somebody's price.
 import { accountTypeOf, accountForObject } from '../../src/lib/directCharges';
+// Why a credit did not move, in the words every other draw site uses. One copy
+// of those sentences, in the pure module that owns the outcome union.
+import { drawReason } from '../../src/lib/packDraw';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
   { key: null, label: 'One-off' },
@@ -474,6 +478,14 @@ export default function TrainerPayments() {
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
+  // Eight reads in one call, and they stay in one call. Stripe writes most of
+  // what this screen shows — a subscriber lapsing, a purchase settling, a
+  // DISPUTE opening with a fixed deadline on it — and none of it reaches the
+  // coach's phone by itself. The disputes are the reason this matters most:
+  // an empty list under a failed read is an all-clear made out of our own
+  // failure, on the one question where being wrongly reassured costs the
+  // whole amount while a deadline goes past.
+  const pull = usePullToRefresh(load);
 
   const onboard = async () => { setBusy(true); const r = await startTrainerOnboarding(); setBusy(false); if (!r.ok) Alert.alert('Payouts setup', r.error || 'Could not start setup. Make sure Stripe Connect is enabled.'); };
 
@@ -834,15 +846,100 @@ export default function TrainerPayments() {
     // Whose balance it leaves, read off THIS CHARGE rather than off the coach's
     // current setting: a coach who has moved to direct charges still has older
     // sales and older renewals on the platform, and the two sentences are not
-    // interchangeable. Null when the row does not say, and nothing is said in
-    // that case.
-    const balance = refundBalanceNote(accountForObject({ stripe_account_id: target.account }) ? 'direct' : 'destination');
+    // interchangeable.
+    //
+    // ── The third state, which this used to spend ────────────────────────
+    //
+    // It was `accountForObject(…) ? 'direct' : 'destination'`, so an absent
+    // account was read as a destination charge and the coach was told, in the
+    // confirm, that "the refund leaves Repple's balance and your next payout is
+    // smaller by that amount". For a row written before part 161 that is true.
+    // For a STANDARD-account coach whose row simply carries no account — the
+    // column is nullable and nothing backfills it — it is the opposite of what
+    // happens: Stripe debits THEIR balance, and if it is short it comes out of
+    // their bank. Told the other sentence, they budget for a payout that is
+    // about to be short by the whole amount rather than by nothing.
+    //
+    // So an absent account is only read as the platform where the coach's own
+    // account is one that could only ever have charged that way. A legacy
+    // Express account sells under destination charges and nothing else, so a
+    // platform charge on one is certain. On a standard account, or where Stripe
+    // has not said what the account is, NOTHING is said — which is
+    // `refundBalanceNote`'s own null branch, the rule the rest of this screen
+    // already keeps for a null `account_type`, and the honest answer.
+    const onAccount = accountForObject({ stripe_account_id: target.account });
+    const balance = refundBalanceNote(
+      onAccount ? 'direct' : accountTypeOf(conn) === 'express' ? 'destination' : null,
+    );
     Alert.alert(
       'Give this money back?',
       `${who}${money ? ` — ${money} was charged` : ''}\n\n${line}\n\n${REFUND_DOES_NOT}\n\n${REFUND_FEES_NOTE}${balance ? `\n\n${balance}` : ''}\n\n${REFUND_IS_FINAL}`,
       [
         { text: 'Leave It', style: 'cancel' },
         { text: 'Refund It', style: 'destructive', onPress: () => { setRefunding(null); void sendRefund(target, cents); } },
+      ],
+    );
+  };
+
+  // ── the credit a refund does not give back ───────────────────────────────
+  //
+  // `REFUND_DOES_NOT` has told the coach for months that a refund "does not put
+  // a session credit back on a pack", and there was nowhere in the product to
+  // act on it. This is that act, and it is deliberately NOT wired into the
+  // refund: the two are separate decisions, and a coach may want either one
+  // without the other.
+  //
+  // One row at a time, keyed by purchase id, so two taps on two clients cannot
+  // both claim the spinner and so a slow write on one row does not grey out the
+  // rest of the list.
+  const [creditBusy, setCreditBusy] = useState<string | null>(null);
+
+  /**
+   * Ask first, then move it, then say what the DATABASE said happened.
+   *
+   * The reported balance is the one that came back from the write and never one
+   * computed here — `adjustPackCredit` refuses to call anything a success that
+   * did not come back as exactly one row naming a known outcome, because
+   * PostgREST answers an UPDATE matching zero rows with no error at all. A
+   * credit the coach believes was returned and was not is one the client has
+   * paid for twice.
+   */
+  const moveCredit = async (b: CoachPurchase, delta: 1 | -1) => {
+    if (creditBusy) return;
+    setCreditBusy(b.id);
+    const r = await adjustPackCredit(b.id, delta);
+    setCreditBusy(null);
+    if (!r.ok) {
+      const why = drawReason({ outcome: r.outcome, remaining: r.remaining, purchaseId: b.id, total: null });
+      Alert.alert(
+        'Nothing was changed',
+        (why ? `That credit did not move — ${why}.` : 'That credit did not move.')
+        + '\n\nTheir balance is exactly what it was. Nothing has been refunded and nothing has been charged.',
+      );
+      load();
+      return;
+    }
+    Alert.alert(
+      delta === 1 ? 'Credit given back' : 'Credit taken off',
+      `${b.client_name || 'They'} now ${r.remaining == null ? 'have a different balance on that pack' : `${r.remaining === 1 ? 'has' : 'have'} ${r.remaining} left on that pack`}. Nobody has been told — their own screen is where they will see it, and no money has moved either way.`,
+    );
+    load();
+  };
+
+  /** The last thing between a tap and somebody's balance. Both directions get
+   *  one, because both change what a client can book and neither is undone by
+   *  tapping the other — a credit given back and then taken off again is two
+   *  writes on somebody's account, not a toggle. */
+  const confirmCredit = (b: CoachPurchase, delta: 1 | -1) => {
+    const who = b.client_name || 'this client';
+    Alert.alert(
+      delta === 1 ? 'Give a session credit back?' : 'Take a session credit off?',
+      delta === 1
+        ? `One credit goes back onto ${who}’s pack, so they can book one more session against it.\n\nNO MONEY MOVES. This is only the balance on their pack — if you also mean to give money back, refund the sale separately.\n\nThey are not told; their own screen is where they will see it.`
+        : `One credit comes off ${who}’s pack, so they can book one fewer session against it.\n\nNO MONEY MOVES, and nothing is charged. Use this where a session was delivered and never marked.\n\nThey are not told; their own screen is where they will see it.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: delta === 1 ? 'Give it back' : 'Take it off', onPress: () => { void moveCredit(b, delta); } },
       ],
     );
   };
@@ -876,10 +973,25 @@ export default function TrainerPayments() {
     setEditName(p.name);
     // Shown in MAJOR units, which is what the coach thinks in and what the Add
     // form above already takes. The conversion happens once, on save.
+    //
     // Divided by the currency's OWN factor, not by a hundred. Reading a KWD
     // price back as `price_cents / 100` showed the coach ten times what they
     // had set, which they would then correct — writing the error in properly.
-    setEditPrice(majorFromMinor(p.price_cents, currency));
+    //
+    // And it is THIS PACKAGE'S currency, not the gym's. `currency` above is
+    // `tenants.currency`, which is nullable on purpose (part 99) and is NULL
+    // for most live tenants: `majorFromMinor` answers '' for a currency it was
+    // not told, so the box opened EMPTY on a package that has a perfectly good
+    // price, and `readMinorAmount` then refused to save whatever was typed into
+    // it. A coach could not correct a price on a gym that had never set a
+    // currency. It is also wrong the other way round, and worse: a coach
+    // selling in sterling inside a gym denominated in dirhams had their
+    // sterling price read back through the dirham's decimal places, which is
+    // the same figure and a different amount of money. The package's own
+    // currency is the one it is charged in and it is the only one that can
+    // interpret its own price — which is exactly why `packageEdit.ts` refuses
+    // to let the currency itself be edited.
+    setEditPrice(majorFromMinor(p.price_cents, p.currency));
     setEditErr(null);
     setSubCount(null);
     void countActiveSubscribers(p.id).then(setSubCount);
@@ -896,7 +1008,11 @@ export default function TrainerPayments() {
     // major-unit figure is the only rounding in this path, and packageEdit
     // refuses a fractional minor unit rather than rounding a second time — two
     // roundings on one price is how 74.995 becomes a number nobody typed.
-    const readEdit = readMinorAmount(editPrice, currency);
+    //
+    // Read back through the PACKAGE's own currency, matching `openEdit` above.
+    // The reader and the writer have to agree about how many decimal places
+    // this price has, and the gym's currency is not the one it is charged in.
+    const readEdit = readMinorAmount(editPrice, editing.currency);
     if (!readEdit.ok) return null;
     const cents = readEdit.minorUnits;
     const patch: { name?: string; price_cents?: number } = {};
@@ -1046,7 +1162,18 @@ export default function TrainerPayments() {
   const recurring = subsStatus === 'ready' ? sumRecurring(liveSubs) : null;
   // The packs a coach has to know about: sold, and how much of each is left.
   // Listable under 'partial' (the rows are real); not countable.
-  const packs = buys.filter((b) => b.sessions_total != null);
+  //
+  // PAID, and that guard was missing. `client_purchases` carries a row from the
+  // moment a Checkout Session is created, and `status` is what says whether the
+  // money arrived — `paid` above filters on it for every takings figure on this
+  // screen, and `isLivePack` in src/lib/packDraw.ts filters on it for the
+  // client's own balance. This list did not, so an abandoned checkout — a
+  // client who opened the payment page and closed it — appeared here as a pack
+  // sold, with a full balance of credits on it, in a list a coach reads to find
+  // out who has sessions left. Every figure derived from it was wrong the same
+  // way: `stranded` counted credits nobody bought, and `runOut` told the coach
+  // to go and sell to somebody who had never paid in the first place.
+  const packs = buys.filter((b) => b.status === 'paid' && b.sessions_total != null);
   // Used up and RAN OUT OF TIME are the same two numbers by the time part 612's
   // nightly pass has been over a pack — it reduces `sessions_total` to
   // `sessions_used` so that every draw site in the database stops at it — and
@@ -1155,7 +1282,7 @@ export default function TrainerPayments() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
@@ -1527,16 +1654,54 @@ export default function TrainerPayments() {
                     {refundedLine(target) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{refundedLine(target)}</Text>
                     ) : null}
-                    {refundBlocker(target.rule) === null ? (
-                      <Pressable onPress={() => openRefund(target)} hitSlop={8} accessibilityRole="button"
-                        disabled={refundBusy === b.id}
-                        accessibilityLabel={`Refund the sale to ${b.client_name || 'this client'}`}
-                        style={{ paddingVertical: sp.xs, marginTop: sp.xs }}>
-                        <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === b.id ? t.ink3 : t.brand }}>
-                          {refundBusy === b.id ? 'Refunding…' : 'Refund'}
-                        </Text>
-                      </Pressable>
-                    ) : null}
+                    <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.xs, flexWrap: 'wrap' }}>
+                      {refundBlocker(target.rule) === null ? (
+                        <Pressable onPress={() => openRefund(target)} hitSlop={8} accessibilityRole="button"
+                          disabled={refundBusy === b.id}
+                          accessibilityLabel={`Refund the sale to ${b.client_name || 'this client'}`}
+                          style={{ paddingVertical: sp.xs }}>
+                          <Text style={{ ...ty.label, fontWeight: '500', color: refundBusy === b.id ? t.ink3 : t.brand }}>
+                            {refundBusy === b.id ? 'Refunding…' : 'Refund'}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                      {/* The act `REFUND_DOES_NOT` names and nothing in this
+                          product could do.
+                          "A refund gives money back and does nothing else … it
+                          does not put a session credit back on a pack" is shown
+                          to the coach in the confirm dialog, seconds before
+                          somebody's card is credited, and there was no control
+                          anywhere to act on it. A coach who refunded two
+                          sessions of a ten-pack gave the money back and left
+                          the credits, so the client had both — and neither
+                          screen mentioned the other.
+                          Separate from Refund, and staying separate: a credit
+                          may be given back without money (a session that never
+                          happened) and money without a credit (goodwill on a
+                          pack they are keeping). Hidden on a closed pack rather
+                          than offered and refused, because part 661 will not
+                          put a credit onto one no draw site can ever spend. */}
+                      {!gone && Number(b.sessions_used ?? 0) > 0 ? (
+                        <Pressable onPress={() => confirmCredit(b, 1)} hitSlop={8} accessibilityRole="button"
+                          disabled={creditBusy === b.id}
+                          accessibilityLabel={`Put a session credit back on the pack for ${b.client_name || 'this client'}`}
+                          style={{ paddingVertical: sp.xs }}>
+                          <Text style={{ ...ty.label, fontWeight: '500', color: creditBusy === b.id ? t.ink3 : t.brand }}>
+                            {creditBusy === b.id ? 'Working…' : 'Give a credit back'}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                      {!gone && left != null && left > 0 ? (
+                        <Pressable onPress={() => confirmCredit(b, -1)} hitSlop={8} accessibilityRole="button"
+                          disabled={creditBusy === b.id}
+                          accessibilityLabel={`Take a session credit off the pack for ${b.client_name || 'this client'}`}
+                          style={{ paddingVertical: sp.xs }}>
+                          <Text style={{ ...ty.label, fontWeight: '500', color: creditBusy === b.id ? t.ink3 : t.ink3 }}>
+                            Take one off
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
                   </View>
                 );
               })}

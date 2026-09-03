@@ -65,6 +65,7 @@
 // chart is bars rather than a line — a polyline from February to May paints ink
 // across two months nobody trained and invents a trajectory through them.
 import { useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -255,7 +256,8 @@ export default function History() {
   // weighed ON OR BEFORE the day of it — never at today's figure carried back
   // over three years of history, which would redraw every month on this page
   // the morning somebody steps on a scale. See src/lib/bodyweightSets.ts.
-  const { weightSeries } = useClientData();
+  const cd = useClientData();
+  const { weightSeries } = cd;
 
   // Read through a ref so the fetch is not re-created (and re-run) every time
   // the shared log changes underneath the screen.
@@ -331,6 +333,11 @@ export default function History() {
   // the long view keeps agreeing with the log it is drawn from.
   useFocusEffect(useCallback(() => { read(); }, [read]));
 
+  // The server-side history is `read`; the weight curve drawn beside it is the
+  // profile's scan record, which is a separate read and was not refreshed by
+  // anything on this screen.
+  const pull = usePullToRefresh(useCallback(() => { void read(); cd.reload(); }, [read, cd.reload]));
+
   const G = layout.gutter;
   const header = (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -343,7 +350,7 @@ export default function History() {
   );
   const frame = (children: ReactNode) => (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         {header}
         {children}
       </ScrollView>

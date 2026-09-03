@@ -1,4 +1,4 @@
-// What the three new outbox kinds carry, and the one expiry among them.
+// What the member-record outbox kinds carry, and the one expiry among them.
 //
 // ── Why these three, and why they are not the exclusions ──────────────────
 //
@@ -15,6 +15,13 @@
 // different for having waited — a goal set on Tuesday is the same goal on
 // Thursday, and a reading carries the moment it was taken rather than the
 // moment it was sent, exactly as a measurement does.
+//
+// A fourth has since joined them and the same paragraph admits it: accepting a
+// coach's own paperwork (`CoachDocAcceptIntent` below). Not scarce — nobody can
+// take a member's signature on their own coach's waiver. Not priced. It carries
+// no file: the document is already on the server and this holds a reference to
+// it. And it means the same thing whenever it lands. src/lib/outbox.ts sets out
+// why it has no expiry when the planned day does.
 //
 // `src/lib/crashQueue.ts` is the other side of the same argument and worth
 // reading beside this: a crash report is deliberately NOT an outbox kind
@@ -191,6 +198,190 @@ export function asGlucoseIntent(p: unknown): GlucoseIntent | null {
   const at = typeof o.at === 'string' && !Number.isNaN(Date.parse(o.at)) ? o.at : null;
   if (mmol == null || at == null) return null;
   return { mmol, at };
+}
+
+/* ── the body scan ─────────────────────────────────────────────────────── */
+
+/**
+ * An InBody scan the member typed in with no signal.
+ *
+ * ── Why this is queueable at all ─────────────────────────────────────────
+ *
+ * src/lib/outbox.ts refuses four kinds of write and one of its clauses used to
+ * name a scan: "anything carrying a file". A scan write carries no file. The
+ * INSERT is six columns of numbers — the date, weight, body fat, muscle mass
+ * and a source string — and `scans.image_path` is never written by this app;
+ * the photograph of the printout stays on the phone for the member's own
+ * reference. So there is no cache directory this intent depends on surviving.
+ *
+ * It passes the other three clauses outright: nothing is scarce (nobody else
+ * can take a member's own body composition), no money moves, and it says the
+ * same thing whenever it lands — a scan is dated by `takenAt`, which is the day
+ * they stood on the machine and not the day the row is written.
+ *
+ * ── What the gym floor actually looked like without it ───────────────────
+ *
+ * A member finishes on the InBody, walks to the corner of the gym where there
+ * is no signal, and types the four figures off the printout. The insert fails.
+ * The screen said "try again in a moment" — and every one of those numbers had
+ * to be typed again, off a sheet they may have already put in the bin, while
+ * measurements, glucose, check-ins and the workout log all had a queue.
+ *
+ * ── Idempotent by construction ───────────────────────────────────────────
+ *
+ * The row's `id` is minted on the DEVICE and travels in the payload. `scans.id`
+ * is a uuid primary key, so a replay of one the server already holds comes back
+ * 23505 rather than filing a second copy of the same body — which matters more
+ * here than almost anywhere, because the newest scan re-tunes the member's
+ * calorie target and a duplicate would make their history look like two
+ * weigh-ins on one day. The handler reads that particular refusal as 'stored',
+ * exactly as `sendCoachDocAccept` does and for the same reason: the row is
+ * there and the member's scan IS saved.
+ */
+export interface ScanIntent {
+  /** The row's own id, chosen on the device. See above. */
+  id: string;
+  /** The local calendar day the scan was taken — YYYY-MM-DD, never an instant.
+   *  `scans.taken_at` is a `date`, and a timestamp reaching it would move the
+   *  scan across the date line for everybody west of Greenwich. */
+  takenAt: string;
+  weightKg: number;
+  bodyFatPct: number;
+  /** Null where the printout did not give one. NOT zero: a zero muscle mass is
+   *  a reading nobody took, and it renders on the charts as a real one. */
+  skeletalMuscleKg: number | null;
+  source: string;
+  /** The richer InBody breakdown, where the sheet carried one. Plain JSON. */
+  metrics: Record<string, unknown> | null;
+}
+
+export function asScanIntent(p: unknown): ScanIntent | null {
+  if (!p || typeof p !== 'object') return null;
+  const o = p as Record<string, unknown>;
+  const id = typeof o.id === 'string' && o.id.trim() ? o.id.trim() : null;
+  const takenAt = typeof o.takenAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.takenAt) ? o.takenAt : null;
+  // Both bounds checked, because these are the two columns the scan cannot be
+  // filed without and a payload that lost one would be retried on every
+  // reconnect for ever. The ranges are the ones `scans` itself will accept.
+  const weightKg = typeof o.weightKg === 'number' && Number.isFinite(o.weightKg) && o.weightKg > 0 ? o.weightKg : null;
+  const bodyFatPct = typeof o.bodyFatPct === 'number' && Number.isFinite(o.bodyFatPct) && o.bodyFatPct > 0 ? o.bodyFatPct : null;
+  if (!id || !takenAt || weightKg == null || bodyFatPct == null) return null;
+  const muscle = typeof o.skeletalMuscleKg === 'number' && Number.isFinite(o.skeletalMuscleKg) && o.skeletalMuscleKg > 0
+    ? o.skeletalMuscleKg : null;
+  const metrics = o.metrics && typeof o.metrics === 'object' && !Array.isArray(o.metrics)
+    ? (o.metrics as Record<string, unknown>) : null;
+  return {
+    id,
+    takenAt,
+    weightKg,
+    bodyFatPct,
+    skeletalMuscleKg: muscle,
+    source: typeof o.source === 'string' && o.source.trim() ? o.source.trim() : 'InBody (manual)',
+    metrics,
+  };
+}
+
+/* ── the coach's paperwork ─────────────────────────────────────────────── */
+
+/**
+ * A coach's document the member accepted with no signal.
+ *
+ * The document itself is already on the server and stays there; this carries
+ * its id and nothing else that matters. `title` rides along ONLY so a screen
+ * can name what is waiting — it is never written, and the handler does not
+ * read it, because the title on the server is the coach's and a stale copy of
+ * it from a phone must not become the record of what somebody signed.
+ *
+ * There is no `at`. `coach_document_acceptances.accepted_at` defaults to now()
+ * and there is no UPDATE policy on that table, so the moment is the server's to
+ * decide either way — and an accepted_at supplied by a handset would be a
+ * timestamp on an evidence row chosen by the person the evidence is about.
+ * The outbox item's own `at` still records when they tapped, for the sentence.
+ *
+ * Idempotent by construction: the primary key is (document_id, client_id), so a
+ * replay of one already stored is a duplicate-key refusal rather than a second
+ * signature. See the handler in src/ui/recordOutbox.ts.
+ */
+export interface CoachDocAcceptIntent {
+  documentId: string;
+  /** What it was called when they accepted it, for a sentence on a screen.
+   *  Null when the payload did not carry one. */
+  title: string | null;
+}
+
+export function asCoachDocAcceptIntent(p: unknown): CoachDocAcceptIntent | null {
+  if (!p || typeof p !== 'object') return null;
+  const o = p as Record<string, unknown>;
+  // An id is the whole intent. Without one there is no row this could ever
+  // become, so it is refused and taken out rather than retried for ever.
+  const documentId = typeof o.documentId === 'string' && o.documentId.trim() ? o.documentId.trim() : null;
+  if (!documentId) return null;
+  const title = typeof o.title === 'string' && o.title.trim() ? o.title.trim() : null;
+  return { documentId, title };
+}
+
+/* ── the hour they asked their coach for ───────────────────────────────── */
+
+/**
+ * A request the member made with no signal.
+ *
+ * `src/lib/outbox.ts` argues why this one is admitted where BOOKING a slot is
+ * refused, and the argument is entirely about scarcity: a booking takes a seat
+ * somebody else could have taken, and a request takes nothing at all. Nothing is
+ * held by one, no credit moves for one, and the coach has to answer before
+ * anything exists. So "we will ask your coach when you have signal" is a promise
+ * this queue can actually keep, which is the test the booking fails.
+ *
+ * There is no `trainerId`, and that is the shape of the thing rather than an
+ * omission. `request_session` reads `clients.trainer_id` for the caller at the
+ * moment it runs (supabase/parts/740), so a coach is never on the wire and a
+ * member who changed coach between typing this and sending it asks the coach
+ * they actually have. A stored id would have asked the one they used to have.
+ */
+export interface SessionRequestIntent {
+  /** The instant asked for. */
+  startsAt: string;
+  durationMin: number;
+  /** The member's own words, or null. */
+  note: string | null;
+}
+
+export function asSessionRequestIntent(p: unknown): SessionRequestIntent | null {
+  if (!p || typeof p !== 'object') return null;
+  const o = p as Record<string, unknown>;
+  // An hour is the whole intent. Without one there is nothing a coach could be
+  // asked, so it is refused and taken out rather than retried for ever.
+  const startsAt = typeof o.startsAt === 'string' && !Number.isNaN(Date.parse(o.startsAt)) ? o.startsAt : null;
+  if (!startsAt) return null;
+  const durationMin = typeof o.durationMin === 'number' && Number.isFinite(o.durationMin)
+    && o.durationMin > 0 && o.durationMin <= 480 ? Math.round(o.durationMin) : null;
+  if (durationMin == null) return null;
+  const note = typeof o.note === 'string' && o.note.trim() ? o.note.trim() : null;
+  return { startsAt, durationMin, note };
+}
+
+/**
+ * When a queued request stops being worth sending: the hour it asks for.
+ *
+ * The second expiry in this file and the second one that exists because
+ * lateness changes the meaning rather than merely the timing. `planExpiry`
+ * refuses to let a plan become a claim about the past; this refuses to let a
+ * question become one nobody can answer — `answer_session_request` declines a
+ * request whose `starts_at` has gone, so an intent surfacing after it would put
+ * a row in a coach's queue that the server would then refuse them.
+ *
+ * The same boundary the server enforces and the same one the member's screen
+ * states (`EXPIRY_RULE` in src/lib/sessionRequests.ts). Three places, one rule,
+ * and none of them is told it by the others — which is why the test asserts it
+ * here rather than trusting the coincidence.
+ *
+ * Null when the instant will not parse, which is `partitionLapsed`'s tolerant
+ * reading: `asSessionRequestIntent` refuses the payload on the way out and drops
+ * it cleanly rather than it being discarded on the strength of a bad string.
+ */
+export function sessionRequestExpiry(startsAt: string): string | null {
+  const t = Date.parse(startsAt);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
 
 /* ── what the member is told when one of these is kept ─────────────────── */

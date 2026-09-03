@@ -21,27 +21,54 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 
 {
   const cents = (s: string) => {
-    const r = parseAmount(s);
-    return r.kind === 'amount' ? r.cents : null;
+    const r = parseAmount(s, 'GBP');
+    return r.kind === 'amount' ? r.minorUnits : null;
   };
 
   eq(cents('60'), 6000, 'a whole number is minor units');
   eq(cents('82.50'), 8250, 'two decimal places survive');
   eq(cents('0'), 0, 'a zero-value invoice is a real thing — a fully discounted joining fee');
 
-  // The one that costs an invoice. `parseFloat('1,250.00')` is ONE — not an
-  // error, not NaN — so an invoice for 1,250 would have gone out for a penny.
-  eq(cents('1,250.00'), 125000, 'a thousands comma is not a decimal point and is not a truncation');
-  eq(cents('£60'), 6000, 'a currency symbol is dropped, not refused — the gym’s currency is not typed here');
   eq(cents(' 60 '), 6000, 'surrounding whitespace is not an amount');
 
-  ok(parseAmount('').kind === 'bad', 'an empty box is not an invoice for nothing');
-  ok(parseAmount('-60').kind === 'bad', 'a negative invoice is refused — a bill taken back is a void');
-  ok(parseAmount('10.005').kind === 'bad',
+  // `1,250.00` used to be stripped to 125000. It is now REFUSED, and that is
+  // the improvement: in a two-place currency `1,234` is one thousand two
+  // hundred and thirty-four to a British typist and one and a bit to a German
+  // one, and neither reading may be picked on their behalf. Being asked costs
+  // a keystroke; guessing costs the invoice.
+  ok(parseAmount('1,250.00', 'GBP').kind === 'bad',
+    'a thousands separator is refused rather than guessed at');
+  ok(parseAmount('\u00a360', 'GBP').kind === 'bad',
+    'a symbol is refused rather than silently dropped — a box that quietly discards characters accepts a different number from the one on screen');
+
+  ok(parseAmount('', 'GBP').kind === 'bad', 'an empty box is not an invoice for nothing');
+  ok(parseAmount('-60', 'GBP').kind === 'bad', 'a negative invoice is refused — a bill taken back is a void');
+  ok(parseAmount('10.005', 'GBP').kind === 'bad',
     'a third decimal place is refused rather than rounded: 1000 and 1001 are both wrong and only the person typing knows which');
-  ok(parseAmount('sixty').kind === 'bad', 'words are not amounts');
-  ok(parseAmount('99999999999').kind === 'bad',
+  ok(parseAmount('sixty', 'GBP').kind === 'bad', 'words are not amounts');
+  ok(parseAmount('99999999999', 'GBP').kind === 'bad',
     'past a 32-bit integer the database raises 22003 after the form has closed');
+
+  // ── the whole reason this function gained a currency ─────────────────────
+  //
+  // It used to end `Math.round(Number(bare) * 100)` whatever the gym billed in.
+  const jpy = (s: string) => {
+    const r = parseAmount(s, 'JPY');
+    return r.kind === 'amount' ? r.minorUnits : null;
+  };
+  const kwd = (s: string) => {
+    const r = parseAmount(s, 'KWD');
+    return r.kind === 'amount' ? r.minorUnits : null;
+  };
+
+  eq(jpy('5000'), 5000, 'a Tokyo gym billing 5,000 yen files 5,000 minor units, not 500,000');
+  ok(parseAmount('5000.50', 'JPY').kind === 'bad', 'the yen has no smaller unit, so there is nothing after the point');
+  eq(kwd('82.500'), 82500, 'the dinar is thousandths — 82.500 is 82,500 fils, not 8,250');
+  ok(parseAmount('82.50', 'KWD').kind === 'amount', 'a short fraction is padded, not refused');
+  eq(kwd('82.50'), 82500, 'and padded to the right place — 82.50 KWD is 82,500 fils');
+
+  ok(parseAmount('60', null).kind === 'bad',
+    'with no currency there is no such thing as an amount, and no default is right for half the gyms running Repple');
 }
 
 /* ── a date that is actually a date ────────────────────────────────────────── */

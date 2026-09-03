@@ -78,7 +78,7 @@
 //    adjustment: coachNutrition.tsx documents that a failed read there hands
 //    back the uncorrected generic targets, and "Hit 152 g protein" is a worse
 //    thing to put in front of a client whose coach cut them 40 g than no line.
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -106,6 +106,20 @@ interface HabitsValue {
    *  'error' an unticked habit means unknown, not "not done" — and the list may
    *  be short of rows whose target could not be read. */
   status: LoadStatus;
+  /**
+   * Read again from the server.
+   *
+   * A real re-read, not a state reset: it bumps the key the load effect below
+   * is keyed on, so the same query runs and `status` goes back through
+   * 'loading' to whatever the server answers this time. Nothing local is
+   * cleared and nothing pending is dropped, so a refused re-read leaves what is
+   * on screen exactly where it was with the status saying it is not confirmed.
+   *
+   * Added for the pull-to-refresh gesture on the screens this provider feeds:
+   * without it those screens could show a failed read for the whole session
+   * with no way to ask again.
+   */
+  reload: () => void;
   /** Targets the checklist would carry if the app knew them, and what the
    *  client can do about it. Only raised where there is somewhere to go. */
   gaps: ChecklistGap[];
@@ -232,6 +246,9 @@ const Ctx = createContext<HabitsValue | null>(null);
 
 export function HabitsProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
+  /** Bumped by `reload`. A counter, so two pulls are two reads. */
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
   const c = useClientData();
   const coachNutrition = useCoachNutrition();
   const assigned = useAssignedPrograms();
@@ -503,7 +520,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readTick]);
 
   // ── The day's targets ─────────────────────────────────────────────────────
   //
@@ -761,7 +778,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // count past the number of rows on screen.
   const doneCount = habits.filter((h) => h.done).length;
 
-  return <Ctx.Provider value={{ habits, toggleHabit, status, gaps, doneCount, water, waterGoal, waterStatus, addWater, removeWater, unsent: pendingCount }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ habits, toggleHabit, status, gaps, doneCount, water, waterGoal, waterStatus, addWater, removeWater, unsent: pendingCount, reload }}>{children}</Ctx.Provider>;
 }
 
 export function useHabits(): HabitsValue {

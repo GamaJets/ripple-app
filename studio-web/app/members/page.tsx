@@ -41,6 +41,12 @@ import {
   type GymMemberRecord, type MemberRecordPatch,
 } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+import { isoDate } from '@lib/format';
+import {
+  fetchMemberNotes, addMemberNote, noteBlocker, withLegacy, noteAttribution, MAX_NOTE,
+  type MemberNote,
+} from '@lib/memberNotes';
+import { logBroadcast, loggingNote } from '@lib/gymBroadcastLog';
 import {
   buildSegments, segmentCsv, postToSegment, reachBlocker, deliveryNote,
   willTruncateInbox, MAX_BODY, INBOX_BODY,
@@ -215,6 +221,12 @@ export default function Members() {
 
   const warning = partialWarning(rec);
   const caveat = attendanceCaveat(rec);
+  // The gym's own calendar day. /door judges every pass against this and this
+  // screen judged the same passes against the UTC date, so for the four hours
+  // between local and UTC midnight the two screens gave a member two different
+  // answers about the same pass. One day, computed once, in the reader's own
+  // zone — the same expression `isoDate` gives the Door screen.
+  const today = isoDate(new Date());
   const chosen = sel && dossiers ? dossiers.find((d) => d.memberId === sel) ?? null : null;
 
   // The headline this page exists to produce: members whose classes stopped but
@@ -316,6 +328,7 @@ export default function Members() {
       {chosen ? (
         <Dossier
           d={chosen} rec={rec} active={active} onClose={() => pick(null)} ccy={ccy}
+          today={today}
           gymRec={gymRecs?.get(chosen.memberId) ?? null} gymRecsRead={gymRecs !== null}
           tenantId={tenantId} me={me} onSaved={() => load(tenantId)}
         />
@@ -538,9 +551,12 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy, gymRecs, query, onQuer
 
 /* ── one member ────────────────────────────────────────────────────────────── */
 
-function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, me, onSaved }: {
+function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, tenantId, me, onSaved }: {
   d: MemberDossier; rec: MemberRecord; active: boolean | null; onClose: () => void;
   ccy: TenantCurrency;
+  /** The gym's own calendar day, which is what a pass expiry is compared
+   *  against here and on /door. Passed in rather than computed twice. */
+  today: string;
   gymRec: GymMemberRecord | null;
   /** False when the gym-side records did not read. An empty form under a failed
    *  read invites the owner to retype an emergency contact that is already
@@ -802,8 +818,15 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
                 render: (p: GymPass) => p.paidCents == null
                   ? <span className="dash">not recorded</span>
                   : money(p.paidCents, p.currency) },
-              { key: 'state', header: 'Status',
-                value: (p: GymPass) => passStatus(p, new Date().toISOString().slice(0, 10)) },
+              // `today` — the GYM's calendar day — and not
+              // `new Date().toISOString().slice(0, 10)`, which is UTC's. This
+              // product sells in AED, so the UTC date does not turn over until
+              // 04:00 local: for those four hours every evening this table
+              // called a pass expired that /door, which has always compared
+              // against the local day, was still admitting on. One pass, two
+              // expiry dates, and the two screens disagreeing about whether a
+              // member may come in.
+              { key: 'state', header: 'Status', value: (p: GymPass) => passStatus(p, today) },
             ]}
             rowKey={(p: GymPass) => p.id}
             empty="No pass has ever been issued to this member."
@@ -814,6 +837,11 @@ function Dossier({ d, rec, active, onClose, ccy, gymRec, gymRecsRead, tenantId, 
       <GymRecordEditor
         memberId={d.memberId} name={d.name} rec={gymRec} read={gymRecsRead}
         tenantId={tenantId} me={me} onSaved={onSaved}
+      />
+
+      <Notes
+        memberId={d.memberId} name={d.name} legacy={gymRec?.note ?? null}
+        gymRecsRead={gymRecsRead} tenantId={tenantId} me={me}
       />
 
       <Invites d={d} rec={rec} />
@@ -855,7 +883,6 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
   const [eName, setEName] = useState(rec?.emergencyName ?? '');
   const [ePhone, setEPhone] = useState(rec?.emergencyPhone ?? '');
   const [medical, setMedical] = useState(rec?.medicalNote ?? '');
-  const [note, setNote] = useState(rec?.note ?? '');
   const [tags, setTags] = useState(tagsText(rec?.tags));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -866,15 +893,19 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
   useEffect(() => {
     setPhone(rec?.phone ?? ''); setEmail(rec?.email ?? '');
     setEName(rec?.emergencyName ?? ''); setEPhone(rec?.emergencyPhone ?? '');
-    setMedical(rec?.medicalNote ?? ''); setNote(rec?.note ?? '');
+    setMedical(rec?.medicalNote ?? '');
     setTags(tagsText(rec?.tags)); setMsg(null);
   }, [memberId, rec]);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
+    // `note` is deliberately absent, and absent is not null: `saveMemberRecord`
+    // only sends the keys it is given, so the one-line note this form used to
+    // overwrite is left exactly as it is. Notes are written in the section
+    // below now, where they carry an author and a date and cannot be typed over.
     const patch: MemberRecordPatch = {
       phone, email, emergencyName: eName, emergencyPhone: ePhone,
-      medicalNote: medical, note, tags: parseTags(tags),
+      medicalNote: medical, tags: parseTags(tags),
     };
     // An all-blank form on a person with no record would write a row that says
     // nothing and then read back as "a record exists".
@@ -927,9 +958,6 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
           <input value={medical} onChange={(e) => setMedical(e.target.value)}
                  placeholder="What the floor needs to know — e.g. asthma, inhaler in their bag"
                  aria-label="Operational medical note" style={field} />
-          <input value={note} onChange={(e) => setNote(e.target.value)}
-                 placeholder="The desk’s note about this member"
-                 aria-label="Desk note" style={field} />
           <input value={tags} onChange={(e) => setTags(e.target.value)}
                  placeholder="Tags — student, corporate, do not call"
                  aria-label="Tags" style={field} />
@@ -946,6 +974,135 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
           {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
         </form>
       )}
+    </div>
+  );
+}
+
+/* ── what the desk wrote, and when, and who wrote it ───────────────────────── */
+
+/**
+ * The running list of notes about one member.
+ *
+ * ── What this replaces ────────────────────────────────────────────────────
+ *
+ * A single text input, written in place. "She complained about the 6am in
+ * March" was gone the moment somebody typed "renewing in June" over it — no
+ * author, no date, no history and no undo, on the record an owner would reach
+ * for in a dispute. The box above no longer writes that column at all; it is
+ * still shown, at the bottom of this list, labelled for what it is.
+ *
+ * ── Read here rather than with the other seven ────────────────────────────
+ *
+ * Because it is per-member and the page reads per-gym. Fetching every note in
+ * the gym to show one member's is a bigger read that gets slower for the gyms
+ * that use the feature most. The cost is that this section has its own three
+ * states, which it renders itself.
+ */
+function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me }: {
+  memberId: string;
+  name: string | null;
+  /** The one-line note from `gym_member_records`, which predates this list. */
+  legacy: string | null;
+  /** False when that record could not be read — so the legacy line below is
+   *  unknown rather than absent, and this section has to say which. */
+  gymRecsRead: boolean;
+  tenantId: string;
+  me: Me;
+}) {
+  const [notes, setNotes] = useState<MemberNote[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      setNotes(await fetchMemberNotes(supabase, tenantId, memberId));
+    } catch (e: any) {
+      // Null, never []. A read that failed drawn as "no notes yet" is how an
+      // owner concludes nothing was ever written about a member.
+      setNotes(null);
+      setFailed(e?.message ?? 'The notes could not be read.');
+    }
+  }, [tenantId, memberId]);
+
+  useEffect(() => { setNotes(null); setBody(''); setMsg(null); void load(); }, [load]);
+
+  const blocker = noteBlocker(body);
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (blocker) { setMsg(blocker); return; }
+    setBusy(true); setMsg(null);
+    try {
+      await addMemberNote(supabase, tenantId, memberId, body, me.id ?? null);
+      setBody('');
+      setMsg('Added. It carries your name and the time, and nothing can type over it.');
+      await load();
+    } catch (x: any) {
+      // The words stay in the box on a failure: they were written once.
+      setMsg(x?.message ?? 'That note was not saved, so it is not on the record.');
+    } finally { setBusy(false); }
+  };
+
+  const shown = notes ? withLegacy(notes, memberId, gymRecsRead ? legacy : null) : null;
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--ring)' }}>
+      <div style={{ padding: '11px 14px' }}>
+        <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>Notes</h3>
+        <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12 }}>
+          Appended, never overwritten. Each one keeps who wrote it and when, and none of them can be
+          edited or deleted afterwards — a note somebody can quietly rewrite is worth nothing in the
+          argument it exists for. Correct one by writing another.
+        </p>
+      </div>
+
+      <form onSubmit={add} style={{ display: 'grid', gap: 8, padding: '0 14px 14px' }}>
+        <textarea
+          value={body} onChange={(e) => setBody(e.target.value)}
+          rows={2} maxLength={MAX_NOTE}
+          placeholder={`What happened, in your own words${name ? ` — about ${name}` : ''}`}
+          aria-label="Add a note about this member"
+          style={{ ...field, resize: 'vertical' }}
+        />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="submit" disabled={busy || !!blocker} style={{ ...btn, opacity: blocker ? 0.5 : 1 }}>
+            {busy ? 'Adding…' : 'Add note'}
+          </button>
+          {msg ? <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</span> : null}
+        </div>
+      </form>
+
+      {failed ? <Failed reason={failed} what="the notes on this member" /> : null}
+      {notes === null && !failed ? <Loading /> : null}
+      {shown ? (
+        shown.length === 0 ? (
+          <p style={{ margin: 0, padding: '0 14px 16px', fontSize: 13, color: 'var(--ink3)' }}>
+            Nothing has been written about {name ?? 'this member'} yet.
+          </p>
+        ) : (
+          <ul style={{ listStyle: 'none', margin: 0, padding: '0 14px 14px', display: 'grid', gap: 9 }}>
+            {shown.map((n) => (
+              <li
+                key={n.id ?? 'legacy'}
+                style={{
+                  border: '1px solid var(--ring)', background: 'var(--surface2)', padding: '9px 11px',
+                  // The unattributed line is drawn as what it is rather than
+                  // mixed in with the entries that carry a name.
+                  borderLeft: n.legacy ? '3px solid var(--ring2)' : '3px solid var(--brand)',
+                }}
+              >
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{n.body}</p>
+                <p style={{ margin: '5px 0 0', fontSize: 11.5, color: 'var(--ink3)' }}>
+                  {noteAttribution(n)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
     </div>
   );
 }
@@ -1129,14 +1286,34 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
     if (stop) { setMsg(stop); return; }
     setBusy(true); setMsg(null);
     try {
+      const memberIds = seg.members.map((m) => m.memberId);
       const res = await postToSegment(supabase, {
         tenantId,
         authorId: me.id,
         body,
-        memberIds: seg.members.map((m) => m.memberId),
+        memberIds,
         gymName,
       });
-      setMsg(deliveryNote(res, seg.members.length));
+      // Written AFTER the send and never before it, exactly as the export log
+      // below is written after the file exists: a row saying a message went to
+      // forty people, when it did not, is a false statement about what forty
+      // members were told.
+      //
+      // The announcement itself carries the author and the words. What it does
+      // not carry — and what nothing in this schema carried — is WHO IT WENT
+      // TO: `notify_users` returns a count and writes rows that point back at
+      // no announcement. That is the half this row exists for.
+      const logErr = await logBroadcast(supabase, {
+        tenantId,
+        sentBy: me.id,
+        segmentId: seg.id,
+        segmentLabel: seg.label,
+        memberIds,
+        delivered: res.delivered,
+        body,
+      });
+      setMsg([deliveryNote(res, seg.members.length), loggingNote(logErr)]
+        .filter((x): x is string => !!x).join(' '));
       // Cleared only on a success. The words stay in the box after a refusal:
       // they were written once, and a cleared field after a failed send is how
       // a notice is lost between the owner and the server.
@@ -1270,7 +1447,9 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
                 no unsubscribe register, so nothing here pretends to run a campaign. Taking it is
                 recorded, with who took it, when, and how many people were on it: the same record
                 the full export writes, because a route out of the console is a route out of the
-                console whichever screen it is on.
+                console whichever screen it is on. Posting is recorded the same way — who sent it,
+                the words, and the members it was addressed to — because a message in dozens of
+                inboxes that nothing can trace is the same gap pointing the other way.
               </p>
               {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)' }}>{msg}</p> : null}
             </>

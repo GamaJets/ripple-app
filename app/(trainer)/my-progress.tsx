@@ -61,7 +61,8 @@
 // A scan here is what feeds `weightKg` and `bodyFatPct` on `useClientData`,
 // which is what My Nutrition needs before it can build a daily calorie target.
 // That is the whole chain a coach could not complete: scan → body → target.
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -84,6 +85,7 @@ import {
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { num1 } from '../../src/lib/format';
+import { END_ALIGN } from '../../src/ui/direction';
 
 // The range a human weighs, in the kilograms this app stores. Metric because
 // the record is metric; the bounds are converted for whichever unit the coach
@@ -132,6 +134,14 @@ export default function MyProgress() {
   const ms = useMeasurements();
   const cd = useClientData();
   const settings = useSettings();
+  // A trainer's own progress, read off the client hooks: their check-ins,
+  // their tape measurements and the profile and scans behind them. Every
+  // change on this screen is one figure set against an earlier one, and the
+  // three reads fail independently — so all three, or the deltas would be
+  // drawn between numbers from different moments.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    Promise.resolve(ci.reload()), Promise.resolve(ms.reload()), Promise.resolve(cd.reload()),
+  ]), [ci, ms, cd]));
   const wu = settings.weightUnit;
   const lu = settings.lengthUnit;
   const today = todayISO();
@@ -382,7 +392,7 @@ export default function MyProgress() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
           {/* ── header. Whose body this is, said before anything else ─────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
@@ -554,7 +564,7 @@ export default function MyProgress() {
                           <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(d, { since: null, unit: lu })}</Text>
                         </View>
                       ) : (
-                        <Text style={{ ...ty.caption, color: t.ink3, minWidth: 62, textAlign: 'right' }}>—</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, minWidth: 62, textAlign: END_ALIGN }}>—</Text>
                       )}
                     </View>
                   </View>

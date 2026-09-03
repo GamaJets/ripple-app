@@ -50,8 +50,65 @@ export function zoneDef(no: ZoneNo): ZoneDef { return BY_NO[no]; }
 export function zoneColor(no: ZoneNo): string { return BY_NO[no].color; }
 export function zoneName(no: ZoneNo): string { return BY_NO[no].name; }
 
+/**
+ * The age this scale falls back to when the app does not know the member's.
+ *
+ * It is thirty because that is what this function has always used, and it is
+ * named because the number was doing something nobody had said out loud. A max
+ * heart rate of 190 puts zone 5 at 175 bpm; a fifty-five-year-old's own scale
+ * puts it at 152. So a member the app had no date of birth for was being told
+ * to push for a figure 23 bpm above the top of their range — on the one screen
+ * in this app that asks somebody to work harder, at the age where that is least
+ * safe to be wrong about.
+ *
+ * The guess is kept rather than the zones withheld, for the reason
+ * src/lib/unitPreference.ts sets out at length about units: a member mid-set
+ * with a live bpm on screen and no colour on it is a worse product AND a worse
+ * prompt to go and fill the field in. What made it a defect was never that
+ * thirty is a guess — it was that the guess was indistinguishable from a
+ * measurement. `hrScaleNote` is what keeps the two apart, and every screen that
+ * prints a zone prints it.
+ */
+export const ASSUMED_AGE = 30;
+
+/** Whether the zones are drawn against the member's OWN age or against
+ *  `ASSUMED_AGE`. Never guessed at by a caller — a screen asking "is this a
+ *  real age" and answering it with its own `age > 0` is a second copy of the
+ *  rule that can disagree with this one. */
+export type HrScaleBasis = 'age' | 'assumed';
+
+export function hrScaleBasis(age?: number | null): HrScaleBasis {
+  return typeof age === 'number' && Number.isFinite(age) && age > 0 ? 'age' : 'assumed';
+}
+
+/**
+ * Estimated maximum heart rate, on the studio's own 220 − age.
+ *
+ * Deliberately still 220 − age and not Tanaka (208 − 0.7 × age): the five zones
+ * at the top of this file are the Orange-Theory scale, the percentages are that
+ * scale's, and swapping the formula underneath them would move every band on
+ * every member's history by a few bpm to be differently approximate. It is an
+ * ESTIMATE either way, which is what `hrScaleNote` says.
+ */
 export function maxHr(age?: number | null): number {
-  return 220 - (age && age > 0 ? age : 30);
+  return 220 - (hrScaleBasis(age) === 'age' ? (age as number) : ASSUMED_AGE);
+}
+
+/**
+ * The line a screen shows beside a zone it drew without knowing the age.
+ *
+ * Null when the age is real, so a screen can render it unconditionally and say
+ * nothing to the member it is right for — the same rule `deviceUnitNote` and
+ * `localeNote` follow, and for the same reason: a line of apology on every
+ * screen is a nag that gets no field filled in.
+ *
+ * It names the number as well as the fault, because "your zones may be wrong"
+ * with nothing to act on is worse than silence. The route is stated in the
+ * words of the screen that fixes it.
+ */
+export function hrScaleNote(age?: number | null): string | null {
+  if (hrScaleBasis(age) === 'age') return null;
+  return `These zones are worked out from an age of ${ASSUMED_AGE}, because your date of birth is not on your profile — they are a guess, not your scale. Add it in Profile and they redraw around you.`;
 }
 
 /** Which zone a bpm reading falls in. */

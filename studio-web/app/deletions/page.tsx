@@ -40,6 +40,7 @@ import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { readTenant } from '@/lib/currency';
 import { readAll } from '@lib/rowCap';
+import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 
 /** A row of `pending_deletions`. Nulls stay null — a dash is not a zero. */
 interface Pending {
@@ -388,12 +389,13 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
   );
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface2)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13, maxWidth: '84ch',
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page carried a byte-for-byte copy of it that rendered into a plain <div>,
+// so every sentence it printed — including the ones saying a write was
+// REFUSED and nothing was saved — was silent to a screen reader. The shared
+// component carries role="alert"/"status" and aria-live.
+// The wrapper stays only for this page's surface and 84ch measure, which is passed
+// through the shared component's `style` rather than duplicating it.
+function Banner({ children, tone }: { children: React.ReactNode; tone?: BannerTone }) {
+  return <SharedBanner tone={tone} style={{ background: 'var(--surface2)', maxWidth: '84ch' }}>{children}</SharedBanner>;
 }

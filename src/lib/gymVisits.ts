@@ -702,6 +702,44 @@ async function doorFacts(
   };
 }
 
+/** The gym's own calendar day for an instant, which is what every admission
+ *  rule and every pass expiry is compared against. Local, never UTC: this
+ *  product sells in AED and the UTC date does not turn over until 04:00 there. */
+function localDayOf(iso?: string): string {
+  const d = iso ? new Date(iso) : new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Ask the gym's own record whether this person may come in, without writing
+ * anything.
+ *
+ * `checkIn` asks this and refuses on it. It is exported because the Door screen
+ * has a SECOND way in — the Take-a-visit button on the pass table — which
+ * writes through `redeemPass` and so never reached `checkIn`'s guard at all. A
+ * double scan, somebody already inside, and a rescan seconds apart were caught
+ * on the top form and on nothing else, and the figure they corrupt is the
+ * headcount somebody reads out in an evacuation.
+ *
+ * The read throws rather than defaulting, exactly as it does inside `checkIn`:
+ * `admissionCheck` can only tell "no membership" from "we could not ask" if it
+ * is never handed an empty array for a query that failed.
+ */
+export async function doorAdmission(
+  sb: Queryable,
+  tenantId: string,
+  input: { memberId: string; passId?: string | null; enteredAtIso?: string },
+): Promise<Admission> {
+  const facts = await doorFacts(sb, tenantId, input.memberId);
+  return admissionCheck({
+    memberId: input.memberId,
+    passId: input.passId ?? null,
+    memberships: facts.memberships,
+    recent: facts.recent,
+    today: localDayOf(input.enteredAtIso),
+  });
+}
+
 /**
  * Record an arrival, having first asked whether this person may come in.
  *
@@ -727,8 +765,6 @@ async function doorFacts(
  */
 export async function checkIn(sb: Queryable, tenantId: string, v: CheckIn = {}): Promise<void> {
   const override = (v.overrideReason ?? '').trim();
-  const today = (v.enteredAtIso ? new Date(v.enteredAtIso) : new Date());
-  const localDay = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   let admission: Admission = { verdict: 'ok', code: 'anonymous', reason: null };
   if (v.memberId) {
@@ -739,13 +775,10 @@ export async function checkIn(sb: Queryable, tenantId: string, v: CheckIn = {}):
       // on — including one that fails.
       admission = { verdict: 'warn', code: 'unknown', reason: null };
     } else {
-      const facts = await doorFacts(sb, tenantId, v.memberId);
-      admission = admissionCheck({
+      admission = await doorAdmission(sb, tenantId, {
         memberId: v.memberId,
         passId: v.passId ?? null,
-        memberships: facts.memberships,
-        recent: facts.recent,
-        today: localDay,
+        enteredAtIso: v.enteredAtIso,
       });
       if (admission.verdict === 'refuse') throw new AdmissionRefused(admission);
     }
@@ -798,17 +831,41 @@ export async function checkIn(sb: Queryable, tenantId: string, v: CheckIn = {}):
  * timestamp from the flush would put a 06:02 entry into the log at 06:47, and
  * the busiest-hour figure, the average stay and the class it reconciles against
  * would all be wrong in a way nobody could ever see.
+ *
+ * ── Why departures are in the same queue ──────────────────────────────────
+ *
+ * They were in no queue at all. The Door screen held an arrival that the
+ * network refused and answered the identical failure on a CHECK-OUT with one
+ * line of message text — so the same two-minute wifi drop that was carefully
+ * survived in one direction left the gym believing everybody who left during it
+ * was still in the building. That is the evacuation headcount, over-counting,
+ * with nothing on screen saying so; and the visits stay open, so the average
+ * stay quietly loses them too.
+ *
+ * A departure replays as honestly as an arrival and for the same reason: the
+ * minute is stamped when the person leaves and carried on the row, so writing
+ * it later writes exactly the same fact. `checkOut` only closes a visit that is
+ * still open, so a replay cannot overwrite a departure another desk recorded in
+ * the meantime — it matches nothing and says so.
  */
-export interface PendingCheckIn {
+export interface PendingDoorWrite {
   /** Stable id, so a flush can drop exactly what it wrote. */
   id: string;
   tenantId: string;
+  /**
+   * Which way through the door. 'in' is an arrival with nothing on the record
+   * yet; 'out' is a departure off a visit that IS on the record and is holding
+   * a person in the headcount until this lands.
+   */
+  kind: 'in' | 'out';
   memberId: string | null;
   memberName: string | null;
   passId: string | null;
   classId: string | null;
-  /** The moment the person actually walked in. */
-  enteredAtIso: string;
+  /** The moment it actually happened — walked in, or walked out. */
+  atIso: string;
+  /** The open visit a departure closes. Null on an arrival. */
+  visitId: string | null;
   /** When this was queued, for the age rules below. */
   queuedAt: number;
   /** How many times a flush has tried it. */
@@ -824,7 +881,12 @@ export interface PendingCheckIn {
 
 /** The browser key the desk's queue lives under. One per gym, because a
  *  shared machine can be signed into more than one over its life and one
- *  gym's arrivals must never flush into another's log. */
+ *  gym's arrivals must never flush into another's log.
+ *
+ *  Still v1 after departures joined it: `readPending` fills `kind` in as 'in'
+ *  for a row written by the older build, which is what those rows are. Bumping
+ *  the key would have thrown away the arrivals a desk was holding at the moment
+ *  it reloaded, which is the one thing this queue exists to stop. */
 export const PENDING_PREFIX = 'door-queue:v1:';
 export const pendingKey = (tenantId: string): string => `${PENDING_PREFIX}${tenantId}`;
 
@@ -850,26 +912,37 @@ export const PENDING_CAP = 200;
 export const PENDING_HOURS = 12;
 
 /** Read a queue back off the browser, without ever throwing at a front desk. */
-export function readPending(raw: string | null | undefined): { items: PendingCheckIn[]; read: boolean } {
+export function readPending(raw: string | null | undefined): { items: PendingDoorWrite[]; read: boolean } {
   if (raw == null) return { items: [], read: true };
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return { items: [], read: false };
-    const items = parsed.filter((x: any) =>
-      x && typeof x.id === 'string' && typeof x.tenantId === 'string'
-      && typeof x.enteredAtIso === 'string' && !Number.isNaN(Date.parse(x.enteredAtIso)),
-    ).map((x: any): PendingCheckIn => ({
-      id: x.id,
-      tenantId: x.tenantId,
-      memberId: x.memberId ?? null,
-      memberName: x.memberName ?? null,
-      passId: x.passId ?? null,
-      classId: x.classId ?? null,
-      enteredAtIso: x.enteredAtIso,
-      queuedAt: Number.isFinite(x.queuedAt) ? x.queuedAt : Date.parse(x.enteredAtIso),
-      tries: Number.isFinite(x.tries) ? x.tries : 0,
-      refusedWhy: typeof x.refusedWhy === 'string' ? x.refusedWhy : null,
-    }));
+    const items = parsed.filter((x: any) => {
+      // `enteredAtIso` is what the build before departures wrote. Read as well
+      // as `atIso` so a desk that reloads mid-outage keeps what it is holding.
+      const at = typeof x?.atIso === 'string' ? x.atIso : x?.enteredAtIso;
+      return x && typeof x.id === 'string' && typeof x.tenantId === 'string'
+        && typeof at === 'string' && !Number.isNaN(Date.parse(at))
+        // A departure with no visit to close is not a departure. It would flush
+        // for ever against nothing, so it is not admitted to the queue at all.
+        && (x.kind !== 'out' || typeof x.visitId === 'string');
+    }).map((x: any): PendingDoorWrite => {
+      const at: string = typeof x.atIso === 'string' ? x.atIso : x.enteredAtIso;
+      return {
+        id: x.id,
+        tenantId: x.tenantId,
+        kind: x.kind === 'out' ? 'out' : 'in',
+        memberId: x.memberId ?? null,
+        memberName: x.memberName ?? null,
+        passId: x.passId ?? null,
+        classId: x.classId ?? null,
+        atIso: at,
+        visitId: typeof x.visitId === 'string' ? x.visitId : null,
+        queuedAt: Number.isFinite(x.queuedAt) ? x.queuedAt : Date.parse(at),
+        tries: Number.isFinite(x.tries) ? x.tries : 0,
+        refusedWhy: typeof x.refusedWhy === 'string' ? x.refusedWhy : null,
+      };
+    });
     return { items, read: true };
   } catch {
     // `read: false` rather than an empty queue, for the same reason every read
@@ -881,38 +954,49 @@ export function readPending(raw: string | null | undefined): { items: PendingChe
 }
 
 /** Add one, oldest first, dropping the oldest if the queue is at its cap. */
-export function addPending(list: PendingCheckIn[], item: PendingCheckIn): PendingCheckIn[] {
+export function addPending(list: PendingDoorWrite[], item: PendingDoorWrite): PendingDoorWrite[] {
   const next = [...list.filter((i) => i.id !== item.id), item]
-    .sort((a, b) => Date.parse(a.enteredAtIso) - Date.parse(b.enteredAtIso) || a.id.localeCompare(b.id));
+    .sort((a, b) => Date.parse(a.atIso) - Date.parse(b.atIso) || a.id.localeCompare(b.id));
   // From the FRONT: at the cap the oldest arrival is the one least likely still
   // to be worth writing, and dropping the newest would lose the person standing
   // at the desk right now.
   return next.length > PENDING_CAP ? next.slice(next.length - PENDING_CAP) : next;
 }
 
-export const dropPending = (list: PendingCheckIn[], id: string): PendingCheckIn[] =>
+export const dropPending = (list: PendingDoorWrite[], id: string): PendingDoorWrite[] =>
   list.filter((i) => i.id !== id);
 
 /** Split into what is still worth writing and what has gone stale. */
 export function partitionPending(
-  list: PendingCheckIn[], now: number = Date.now(),
-): { live: PendingCheckIn[]; lapsed: PendingCheckIn[] } {
+  list: PendingDoorWrite[], now: number = Date.now(),
+): { live: PendingDoorWrite[]; lapsed: PendingDoorWrite[] } {
   const cutoff = now - PENDING_HOURS * 3600_000;
-  const live: PendingCheckIn[] = [];
-  const lapsed: PendingCheckIn[] = [];
-  for (const i of list) (Date.parse(i.enteredAtIso) >= cutoff ? live : lapsed).push(i);
+  const live: PendingDoorWrite[] = [];
+  const lapsed: PendingDoorWrite[] = [];
+  for (const i of list) (Date.parse(i.atIso) >= cutoff ? live : lapsed).push(i);
   return { live, lapsed };
 }
 
-/** The sentence the desk reads while arrivals are waiting. Null when none are. */
-export function pendingNote(list: PendingCheckIn[]): string | null {
+/** The sentence the desk reads while writes are waiting. Null when none are. */
+export function pendingNote(list: PendingDoorWrite[]): string | null {
   if (list.length === 0) return null;
   const stuck = list.filter((i) => i.refusedWhy !== null).length;
-  const waiting = list.length - stuck;
+  const held = list.filter((i) => i.refusedWhy === null);
+  const waiting = held.filter((i) => i.kind === 'in').length;
+  const leaving = held.filter((i) => i.kind === 'out').length;
   const parts: string[] = [];
   if (waiting > 0) {
     parts.push(
       `${waiting} ${waiting === 1 ? 'arrival is' : 'arrivals are'} held on this machine and not yet on the record — they go up on their own as soon as the connection is back, stamped with the minute the person actually came in.`,
+    );
+  }
+  // Said separately from the arrivals, because the cost is the other way round
+  // and it is the one on this screen somebody could be hurt by: until a held
+  // departure lands, the gym believes that person is still in the building and
+  // Inside now counts them.
+  if (leaving > 0) {
+    parts.push(
+      `${leaving} ${leaving === 1 ? 'check-out is' : 'check-outs are'} held here too, with the minute they left on ${leaving === 1 ? 'it' : 'them'}. Until ${leaving === 1 ? 'it lands' : 'they land'} the gym still has ${leaving === 1 ? 'that person' : 'those people'} inside, so Inside now is over-counting by ${leaving}.`,
     );
   }
   if (stuck > 0) {

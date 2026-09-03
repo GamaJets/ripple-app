@@ -53,7 +53,7 @@
 // again on the draft sheet, and the draft itself never names a cause — see
 // `NEVER_SAYS` in src/lib/nudge.ts, which is checked against every sentence
 // this screen can print.
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -62,6 +62,7 @@ import { Rule, Section, SectionHead, Ghost, Cta, Notice, Flag, Card } from '../.
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { useNudges } from '../../src/ui/nudges';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useThread } from '../../src/ui/messaging';
 import { DRIFT_LABEL, bandNote, type Drift } from '../../src/lib/clientDrift';
 import {
@@ -89,6 +90,10 @@ export default function Nudges() {
   const t = useTheme();
   const router = useRouter();
   const n = useNudges();
+  // One read, and it is about SILENCE — who has not been heard from. Nothing
+  // the coach does on this screen changes it; what changes it is a client
+  // finally training or replying, somewhere else.
+  const pull = usePullToRefresh(useCallback(() => n.reload(), [n]));
 
   // Two sheets, two independent flags. A sibling pair whose `visible`
   // expressions share an identifier is the bug check-runtime-traps.mjs exists
@@ -166,7 +171,7 @@ export default function Nudges() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

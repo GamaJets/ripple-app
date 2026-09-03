@@ -34,7 +34,7 @@
 // and a viewer that never hands the file to another app
 // (src/lib/injuryDocView.ts). Editing the injury a report produced changes the
 // injury and nothing else.
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -47,6 +47,7 @@ import { INJURY_AREAS, areaLabel, newInjuryId, type Injury, type InjurySeverity 
 import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle } from '../../src/lib/injuryEdit';
 import { ackState } from '../../src/lib/injuryGate';
 import { useMyInjuryAcks } from '../../src/ui/injuryAcks';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { fmtDay, num } from '../../src/lib/format';
 
 const SEVS: { id: InjurySeverity; label: string }[] = [
@@ -77,6 +78,10 @@ export default function Injuries() {
   // and program_inj_ack_client_r), and the second one exists specifically so
   // somebody who disclosed a knee can see that leg press was assigned knowing.
   const mine = useMyInjuryAcks();
+  // The disclosures themselves live on the profile; whether the coach has read
+  // them is a second, independent read. "Your coach has seen this" is exactly
+  // the line somebody pulls a screen down to check.
+  const pull = usePullToRefresh(useCallback(() => { c.reload(); mine.reload(); }, [c.reload, mine.reload]));
   // The coach's side asks the same function. Two screens, one definition of
   // "read": a confirmation covers the disclosures it was made against, so a
   // client who has added one since is told it is waiting rather than read.
@@ -159,7 +164,7 @@ export default function Injuries() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>

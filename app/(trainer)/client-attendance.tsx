@@ -33,7 +33,7 @@
 // been recorded. `staffScopeNote` is what is said instead, and it is a rule in
 // the module rather than a sentence in this file so that the next reader of
 // this record inherits it.
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -48,6 +48,7 @@ import { useRoster } from '../../src/ui/roster';
 import { useTenant } from '../../src/ui/tenant';
 import { RHYTHM_WEEKS } from '../../src/ui/attendance';
 import { useClientAttendance } from '../../src/ui/clientAttendance';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   dwellMinutes, staffScopeNote, STAFF_RECORD_NOTE,
   type AttendanceEvent, type ClassOutcome,
@@ -128,6 +129,14 @@ export default function ClientAttendanceScreen() {
   const a = useClientAttendance(picked);
 
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+
+  // Three reads: the attendance itself, the roster the picker and the header
+  // name come from, and the gym whose week-start decides which days fall in
+  // which week on the strip below.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([a.reload(), r.refresh(), Promise.resolve(tenant.refresh())]),
+    [a, r, tenant],
+  ));
 
   // Only from a whole read. 'partial' is excluded for the same reason 'error'
   // is: the rows are real and a count over them is a subtotal shown as a total.
@@ -210,7 +219,7 @@ export default function ClientAttendanceScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

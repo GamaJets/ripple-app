@@ -372,7 +372,19 @@ export function overlaps(
  * relying on generated slots, so nothing here is news to them and nothing is
  * said.
  */
-export type SlotWindowState = 'unknown' | 'idle' | 'empty' | 'ending' | 'healthy';
+export type SlotWindowState =
+  | 'unknown'
+  /** No weekly availability, and nobody on the book yet. Nothing to say. */
+  | 'idle'
+  /**
+   * No weekly availability, and clients ARE on the book. The one state every
+   * coach on this platform has actually been in, and the one it used to say
+   * nothing about — see the note on `openSlotWindow`.
+   */
+  | 'never-set'
+  | 'empty'
+  | 'ending'
+  | 'healthy';
 
 export interface SlotWindow {
   state: SlotWindowState;
@@ -392,12 +404,30 @@ export const SLOT_WARN_DAYS = 7;
 
 export function openSlotWindow(
   sessions: readonly { startsAt: string; status?: string | null }[],
-  opts: { known: boolean; hasWeekly: boolean; now?: number; warnDays?: number },
+  opts: { known: boolean; hasWeekly: boolean; clientsOnBook?: number | null; now?: number; warnDays?: number },
 ): SlotWindow {
   const now = opts.now ?? Date.now();
   const warnDays = opts.warnDays ?? SLOT_WARN_DAYS;
-  // Order matters. An unread diary is unknown whatever else is true, and a
-  // coach with no weekly slots is told nothing even when the read succeeded.
+  // Order matters. An unread diary is unknown whatever else is true.
+  //
+  // ── The state this screen used to be silent in ──────────────────────────
+  //
+  // Until now `!hasWeekly` returned 'idle' and `slotWindowLine` said nothing
+  // about it, on the reasoning that a coach who does not take one-to-ones
+  // should not be nagged. That reasoning is sound and the outcome was not: a
+  // coach who INTENDS to take bookings and has simply never found the step is
+  // in exactly the same state, and was told nothing either. Their clients open
+  // the booking screen, see an empty week, and are given no reason — which is
+  // indistinguishable, from the client's side, from a coach with no free time.
+  //
+  // The two are separated by whether anybody is waiting. A coach with nobody on
+  // their book may genuinely not do this; a coach with clients on their book and
+  // no weekly hours has a booking screen that is dead to every one of them, and
+  // that is worth one sentence.
+  //
+  // An unknown client count is NOT treated as zero. It stays 'idle' — silence —
+  // because the alternative is telling a coach their book is unbookable on the
+  // strength of a number we could not read.
   if (!opts.known) return { state: 'unknown', open: 0, lastAt: null, daysLeft: null };
   const future = sessions
     .filter((s) => s.status === 'available')
@@ -408,7 +438,10 @@ export function openSlotWindow(
   const lastMs = open > 0 ? future[future.length - 1] : null;
   const lastAt = lastMs === null ? null : new Date(lastMs).toISOString();
   const daysLeft = lastMs === null ? null : Math.floor((lastMs - now) / 86_400_000);
-  if (!opts.hasWeekly) return { state: 'idle', open, lastAt, daysLeft };
+  if (!opts.hasWeekly) {
+    const waiting = opts.clientsOnBook != null && opts.clientsOnBook > 0;
+    return { state: waiting ? 'never-set' : 'idle', open, lastAt, daysLeft };
+  }
   if (open === 0) return { state: 'empty', open, lastAt, daysLeft };
   return { state: (daysLeft as number) <= warnDays ? 'ending' : 'healthy', open, lastAt, daysLeft };
 }
@@ -421,7 +454,18 @@ export function openSlotWindow(
  * already tells the coach their calendar could not be read; a second sentence
  * about a slot count nobody knows would be inventing one.
  */
-export function slotWindowLine(w: SlotWindow): string | null {
+export function slotWindowLine(w: SlotWindow, clientsOnBook?: number | null): string | null {
+  if (w.state === 'never-set') {
+    // Deliberately says what the CLIENT sees, not what the coach has not done.
+    // "You have not set your availability" is a reprimand about a form; "your
+    // clients cannot book you" is the consequence, and it is the consequence
+    // that makes anybody open the sheet.
+    const n = clientsOnBook ?? 0;
+    const who = n === 1 ? 'Your client cannot book you' : `Your ${n} clients cannot book you`;
+    return `${who}. You have no weekly hours set, so there is nothing for them to take — `
+      + 'their booking screen is empty and nothing on it says why. '
+      + 'Set the times you offer, then open the next four weeks.';
+  }
   if (w.state === 'empty') {
     return 'You have weekly availability set and no open slots left, so nobody can book you. Clients see an empty booking screen and nothing tells them why.';
   }

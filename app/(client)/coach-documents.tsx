@@ -14,6 +14,21 @@
 // the copy says so — a member who thinks Repple drafted their coach's waiver
 // takes a dispute to the wrong party.
 //
+// ── Accepting offline still counts ────────────────────────────────────────
+//
+// The insert used to be bare. It failed, an alert said the acceptance was not
+// saved, and the tap was gone — in a basement studio with no signal, which is
+// where a coach's own paperwork is most often signed. The member then arrives
+// for a session they have paid for and is turned away for a waiver they
+// completed on their phone in the doorway.
+//
+// It is an outbox kind now ('coach-doc-accept', src/lib/outbox.ts), and that
+// file argues at length why this one qualifies where a booking does not: it is
+// not scarce, it costs nothing, it carries no file, and it says the same thing
+// whenever it lands. Only a write nobody ANSWERED is kept — a refusal offered
+// again gets the same refusal, so that path still says plainly that nothing was
+// recorded.
+//
 // ── Accepting is permanent, so the screen says it is ──────────────────────
 //
 // `coach_document_acceptances` has no UPDATE policy, no DELETE policy and no
@@ -22,6 +37,7 @@
 // nothing here offers one, and the confirmation says so before the tap rather
 // than after it.
 import { useCallback, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -33,6 +49,10 @@ import { sp, layout, type as ty } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
+import { classifyWrite } from '../../src/lib/offlineQueue';
+import { keptOnPhoneNote, notKeptNote } from '../../src/lib/recordQueue';
+import { outboxNote } from '../../src/lib/outbox';
+import { useOutbox } from '../../src/ui/outbox';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import {
   COACH_DOC_ACCEPT_RULE, COACH_DOC_NOT_REPPLE, docLine, outstanding,
@@ -57,6 +77,14 @@ export default function ClientCoachDocumentsScreen() {
   /** Which document the reader has opened at least once this session. Accepting
    *  is gated on it — see the note on `accept`. */
   const [opened, setOpened] = useState<string[]>([]);
+  /** The device's queue. Null when there is no provider above this screen,
+   *  which is a real state and not an error — see `useOutbox`. */
+  const outbox = useOutbox();
+  /** How many acceptances are on this phone and not on the server. Said out
+   *  loud below, because it is the one thing the list itself cannot show: a
+   *  queued acceptance deliberately does NOT mark the document as accepted,
+   *  since that mark comes from the server's own row. */
+  const waitingToSend = outbox?.countOf('coach-doc-accept') ?? 0;
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
@@ -90,6 +118,10 @@ export default function ClientCoachDocumentsScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // What the coach has sent, and what has been acknowledged. A document sent
+  // while this screen was open only appeared on the next focus.
+  const pull = usePullToRefresh(load);
 
   async function open(d: CoachDoc) {
     // Private bucket: a short-lived signed URL, never getPublicUrl(), which
@@ -131,17 +163,54 @@ export default function ClientCoachDocumentsScreen() {
           onPress: async () => {
             setBusyId(d.id);
             try {
-              const { error } = await supabase.from('coach_document_acceptances')
-                .insert({ document_id: d.id, client_id: uid });
-              if (error) {
-                reportError('clientCoachDocs.accept', error, { id: d.id });
+              // Counted, not merely error-checked. An INSERT that RLS narrows
+              // to zero rows does not fail — it succeeds having stored nothing
+              // — which on this table would be an acceptance the coach never
+              // receives, reported to the member as done.
+              let out;
+              try {
+                const { data, error } = await supabase.from('coach_document_acceptances')
+                  .insert({ document_id: d.id, client_id: uid })
+                  .select('document_id');
+                // A duplicate key is not a refusal of anything. The primary
+                // key is (document_id, client_id), so 23505 means this person
+                // has already accepted this document — from another handset, or
+                // from a queued intent that has since gone up. `classifyWrite`
+                // reads it as 'refused', which is right for every other write
+                // and wrong here: the row is there and the member's acceptance
+                // stands. Reload and show it.
+                if ((error as { code?: string } | null)?.code === '23505') { await load(); return; }
+                if (error) reportError('clientCoachDocs.accept', error, { id: d.id });
+                out = classifyWrite(error as any, data ? data.length : 0);
+              } catch (e) { reportError('clientCoachDocs.accept', e, { id: d.id }); out = 'unsent' as const; }
+
+              if (out === 'stored') { await load(); return; }
+              // 'refused' is the server having read the row and declined it —
+              // the document retired, the coach no longer theirs. Offering the
+              // same bytes again gets the same answer, so it is not queued and
+              // the sentence does not pretend otherwise.
+              if (out === 'refused') {
                 Alert.alert(
                   'Not recorded',
                   'That acceptance was not saved, so as far as your coach can see you have not accepted it yet. Try again.',
                 );
                 return;
               }
-              await load();
+              // Nobody answered. The acceptance is kept rather than dropped.
+              if (!outbox) {
+                Alert.alert('Not recorded', notKeptNote('acceptance', 'unavailable'));
+                return;
+              }
+              const { result } = await outbox.enqueue('coach-doc-accept', { documentId: d.id, title: d.title });
+              if (result !== 'queued') {
+                Alert.alert('Not recorded', notKeptNote('acceptance', result === 'full' ? 'full' : 'unavailable'));
+                return;
+              }
+              // Deliberately NOT followed by a reload that would mark it
+              // accepted. The tick on this list comes from the server's own
+              // row, and drawing one now would tell somebody their coach has
+              // their signature while it is still on the phone.
+              Alert.alert('Saved on this phone', keptOnPhoneNote('acceptance'));
             } finally { setBusyId(null); }
           },
         },
@@ -154,7 +223,7 @@ export default function ClientCoachDocumentsScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -191,6 +260,18 @@ export default function ClientCoachDocumentsScreen() {
                       : `${waiting} document${waiting === 1 ? '' : 's'} waiting on you.`}
               </Text>
             )}
+
+            {/* An acceptance on this phone that the server has not taken. It
+                has to be SAID, because it is the one thing this list cannot
+                show: the tick beside a document comes from the server's own
+                row, so a queued acceptance looks exactly like one that never
+                happened — and the difference is whether the member is turned
+                away at the door. */}
+            {outboxNote(waitingToSend, 'coach-doc-accept') ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
+                {outboxNote(waitingToSend, 'coach-doc-accept')} Until then your coach cannot see it, and it is not ticked below.
+              </Flag>
+            ) : null}
 
             {ready && docs.length ? (
               <Section>

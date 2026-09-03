@@ -66,6 +66,15 @@ interface GoalValue {
    *  somebody who already has three. */
   status: LoadStatus;
   /**
+   * Read the goals again.
+   *
+   * A real re-read: it bumps the same `rev` a settled queued goal bumps, which
+   * the load effect is keyed on, so the server's own rows come back. Pending
+   * rows waiting in the outbox are preserved by that effect exactly as they are
+   * on any other pass, so a refresh never drops a goal the member set offline.
+   */
+  reload: () => void;
+  /**
    * One target per measured metric, so this replaces any existing goal of the
    * same kind.
    *
@@ -115,6 +124,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
   // on looking at a goal that says the right thing under an id nothing can act
   // on until the next launch.
   const [rev, setRev] = useState(0);
+  const reload = useCallback(() => setRev((n) => n + 1), []);
   // The three record handlers live here. See src/ui/recordOutbox.ts for why they
   // are registered together and why this provider is the mount.
   useRecordOutboxHandlers({
@@ -354,7 +364,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ goals, status, setMeasuredGoal, addCustomGoal, removeGoal, setAchieved }}>
+    <Ctx.Provider value={{ goals, status, setMeasuredGoal, addCustomGoal, removeGoal, setAchieved, reload }}>
       {children}
     </Ctx.Provider>
   );

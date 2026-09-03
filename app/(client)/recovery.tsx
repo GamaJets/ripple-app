@@ -54,6 +54,7 @@ import { formatSleepHours, markNightsUnread, type MergedNight, type SleepRead } 
 import type { ProviderId } from '../../src/lib/wearables/types';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { readNumber } from '../../src/lib/units';
+import { END_ALIGN, FORWARD_ICON, turn } from '../../src/ui/direction';
 
 const MOBILITY = [
  { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
@@ -123,15 +124,15 @@ export default function Recovery() {
  // the app is used in gyms with no reception — so what they hold can now be
  // either a server-confirmed answer or this device's cached copy, and the
  // screen has to say which. See src/ui/loadStatus.ts.
- const { sleep, addSleep, status: sleepStatus, unsent: unsentNights } = useWellness();
- const { water: cups, waterGoal: goalCups, waterStatus, addWater: addCup, removeWater: removeCup } = useHabits();
+ const { sleep, addSleep, status: sleepStatus, unsent: unsentNights, reload: reloadSleep } = useWellness();
+ const { water: cups, waterGoal: goalCups, waterStatus, addWater: addCup, removeWater: removeCup, reload: reloadHabits } = useHabits();
  const cd = useClientData();
  const wear = useWearables();
  // Bumped whenever the server proves something new about a device — including
  // by a reconnect started on the other screen. It is both a re-render trigger
  // and an effect key below.
  const linkRev = useLinkRevision();
- const { log: workoutLog, status: logStatus } = useWorkoutLog();
+ const { log: workoutLog, status: logStatus, reload: reloadLog } = useWorkoutLog();
  // Sauna, cold plunge and the rest are logged on Train like every other
  // session. They belong on this screen too — a member who logs a sauna looks
  // for it under Recovery, and finding nothing here while a screen called
@@ -302,7 +303,13 @@ export default function Recovery() {
  // sleep list for as long as it has existed, over a ScrollView that had no
  // refresh control on it. Both reads it names are here: the watch data and the
  // nights the device holds.
- const pull = usePullToRefresh(useCallback(() => { deviceSleep.refresh(); wear.syncAll(); }, [deviceSleep, wear]));
+ // It asked for the WATCH and nothing else. This screen also prints the typed
+ // sleep log, the water count, the recovery sessions off the training log and
+ // the profile behind readiness — five more reads, none of which the gesture
+ // touched, on the screen whose own copy says "pull down to try again".
+ const pull = usePullToRefresh(useCallback(() => {
+   deviceSleep.refresh(); void wear.syncAll(); reloadSleep(); reloadHabits(); reloadLog(); cd.reload();
+ }, [deviceSleep, wear, reloadSleep, reloadHabits, reloadLog, cd.reload]));
  const G = layout.gutter;
 
  return (
@@ -356,7 +363,7 @@ export default function Recovery() {
      style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
       gap: sp.md, paddingVertical: sp.sm, marginTop: sp.sm, borderTopWidth: hairline, borderTopColor: t.ring }}>
      <Text style={{ ...ty.caption, color: t.ink2 }}>{l.title}</Text>
-     <Text style={{ ...ty.caption, color: l.state === 'scored' ? t.ink2 : t.ink3, flex: 1, textAlign: 'right' }}>
+     <Text style={{ ...ty.caption, color: l.state === 'scored' ? t.ink2 : t.ink3, flex: 1, textAlign: END_ALIGN }}>
       {l.detail}
      </Text>
     </View>
@@ -652,8 +659,8 @@ export default function Recovery() {
         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.dur}</Text>
        </View>
-       <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}>
-        <Icon name="chevron" size={16} color={t.ink3} />
+       <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}>
+        <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
        </View>
       </Pressable>
       {open ? (

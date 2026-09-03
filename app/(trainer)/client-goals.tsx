@@ -82,6 +82,7 @@ import {
 import { isoToday } from '../../src/lib/dayPlan';
 import { kgToLb, lengthLabel, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
@@ -306,6 +307,16 @@ export default function ClientGoals() {
     void load(picked);
   }, [picked, load]);
 
+  // `load` is one call over four reads — the goals, the scans, the weigh-ins
+  // and the tape — and they are asked for together on purpose: every delta on
+  // this screen crosses two of them, and a refresh that moved one would date
+  // a change from one read against a starting point from another. The roster
+  // is the picker and the name at the top.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(),
+    ...(picked ? [load(picked)] : []),
+  ]), [r, picked, load]));
+
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
   const who = client?.name.split(' ')[0] ?? 'They';
 
@@ -448,7 +459,7 @@ export default function ClientGoals() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

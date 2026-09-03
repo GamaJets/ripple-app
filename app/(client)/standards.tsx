@@ -22,7 +22,9 @@ import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel } from '../../src/lib/units';
+import { useCallback } from 'react';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { personalRecords } from '../../src/lib/streaks';
 import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
 import { gradeLift } from '../../src/lib/strengthLevel';
@@ -56,7 +58,11 @@ export default function Standards() {
  // already beaten. The bodyweight has the same problem in the header: under a
  // failed profile read `bw` is null and the screen told a member who weighs in
  // every week to "add your weight for ratios".
- const { log, status: logStatus } = useWorkoutLog();
+ const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
+ // This screen GRADES somebody, off two reads: the training log the best sets
+ // come from and the profile the bodyweight comes from. Both can fail, both
+ // grade the member low when they do, and both are asked for again here.
+ const pull = usePullToRefresh(useCallback(() => { reloadLog(); c.reload(); }, [reloadLog, c.reload]));
  const wu = useSettings().weightUnit;
  const liftsWhole = isWhole(logStatus);
  const prs = personalRecords(log, c.weightSeries);
@@ -88,7 +94,7 @@ export default function Standards() {
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -124,7 +130,7 @@ export default function Standards() {
             printed only when there was something to divide by — "0.00×" beside
             a real lift is not a small multiple, it is a missing bodyweight
             wearing the clothes of one. */}
-        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginLeft: 4 }}>
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginStart: 4 }}>
          {wu}{grade.kind === 'graded' ? ` · ${grade.ratio.toFixed(2)}×` : ''}
         </Text>
        </View>

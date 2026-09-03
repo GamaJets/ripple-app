@@ -52,6 +52,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isoToday } from '../../src/lib/dayPlan';
 import { isQueryableId } from '../../src/lib/clientDrift';
 import { minorMoney } from '../../src/lib/coachMoney';
@@ -105,6 +106,14 @@ export default function Receipts() {
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  // `load` is the receipts, the currency they are printed in and who is
+  // signed in, in one call; the roster beside it is where the client names on
+  // these rows come from. The currency travels with the amounts on purpose —
+  // a refreshed list under a stale currency is a wrong number, not an old one.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(), roster.refresh()]),
+    [load, roster],
+  ));
 
   // The date the DEVICE is on, not the server's UTC date. A coach in Auckland
   // recording a payment at 10am would otherwise date it yesterday.
@@ -182,7 +191,7 @@ export default function Receipts() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>

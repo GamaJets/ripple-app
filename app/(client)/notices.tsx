@@ -15,7 +15,7 @@
 // is the other half of the fix; the fan-out in src/ui/announcements.tsx is the
 // first half.
 //
-// ── It re-reads nothing ────────────────────────────────────────────────────
+// ── It owns no query ───────────────────────────────────────────────────────
 //
 // Every row here comes from the provider that app/_layout.tsx already mounts,
 // which is the same store the dashboard block reads. That matters beyond the
@@ -23,6 +23,11 @@
 // arrived, and the two would disagree the first time one of them failed. There
 // is one read and one `status`, and this screen states what that status means
 // rather than deciding it again.
+//
+// The Try Again below is not an exception to that. It calls the provider's own
+// `reload`, so the second attempt is the same read as the first and its answer
+// reaches the dashboard block at the same moment it reaches this screen — which
+// a private retry here could not have done.
 //
 // ── An empty list is two different sentences ───────────────────────────────
 //
@@ -34,15 +39,20 @@ import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
+import { useCallback } from 'react';
 import { useAnnouncements } from '../../src/ui/announcements';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { inboxAge } from '../../src/lib/notifyInbox';
 
 export default function Notices() {
   const t = useTheme();
   const router = useRouter();
-  const { announcements, status } = useAnnouncements();
+  const { announcements, status, reload } = useAnnouncements();
+  // The provider's own reload — it puts the status back to 'loading' first, so
+  // a screen showing a cached list says so while the read is out.
+  const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
 
   // A client authors nothing here, so everything they can read is addressed to
   // them. `mine` is filtered anyway rather than assumed: this store is shared
@@ -53,7 +63,7 @@ export default function Notices() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -70,10 +80,20 @@ export default function Notices() {
 
         {status === 'error' ? (
           <Section>
+            {/* "Try again in a moment" used to be the whole remedy on this
+                screen, and there was nothing on it to try again WITH: the
+                provider read once per sign-in, so the only way to ask a second
+                time was to close the app. A notice is how a gym says it is shut
+                tomorrow, and telling somebody to retry while offering no way to
+                is worse than saying nothing. */}
             <Notice tone={t.crit} kicker="Not read" title="We couldn’t read your notices"
               note={rows.length
                 ? 'What is below is what we had before the read failed. There may be a newer notice that is not on this list.'
-                : 'This is not an empty noticeboard — it is one we could not open. Try again in a moment, or ask at the desk.'} />
+                : 'This is not an empty noticeboard — it is one we could not open. Try again, or ask at the desk.'}>
+              <View style={{ marginTop: sp.lg }}>
+                <Cta label="Try Again" wide onPress={reload} />
+              </View>
+            </Notice>
           </Section>
         ) : null}
 

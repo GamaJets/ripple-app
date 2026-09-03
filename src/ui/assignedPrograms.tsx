@@ -9,7 +9,7 @@
 // auto program and presented it as their plan, so a client on a bespoke program
 // trained the wrong session and had no way to tell. `status` separates "your
 // coach has not assigned you a program" from "we could not find out".
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -36,6 +36,10 @@ interface AssignedProgramsValue {
    *  name — "8 of 12 saved" tells a coach something is wrong and nothing about
    *  which four or what to do. See src/lib/bulkActions.ts. */
   assignProgramTo: (clientId: string, program: Program, startsOn?: string | null) => Promise<{ ok: boolean; why: string | null }>;
+  /** Read the assignments again. Under 'error' every `getProgram` null means
+   *  "unknown", which is a whole coach app's worth of screens saying nothing
+   *  is assigned when they do not know. */
+  reload: () => void;
   /**
    * The day the COACH said each client's block begins, `YYYY-MM-DD`, for the
    * clients whose row carried one.
@@ -79,6 +83,9 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
   const [startsOn, setStartsOn] = useState<Record<string, string>>({});
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`. Beside `authRev` in the read's dependency array so a
+  // refresh runs the one read this provider has.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -135,7 +142,22 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
       } catch { setStatus('error'); /* stay in-memory, but say the read failed */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  /**
+   * Read the assignments again.
+   *
+   * Safe to run over the optimistic map, and that is not an accident: a write
+   * that does not land is already PUT BACK by `assignProgramTo` and
+   * `clearProgram`, so what is in `programs` when this fires is either the
+   * server's or on its way to being. A provider that left failed writes in
+   * place would have to refuse this, because the re-read would silently undo
+   * what the coach could see on their own screen.
+   */
+  const reload = useCallback(() => {
+    if (USE_SUPABASE) setStatus('loading');
+    setNonce((n) => n + 1);
+  }, []);
 
   const getProgram = (clientId: string) => programs[clientId] ?? null;
   /**
@@ -314,7 +336,7 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
     (await clearProgramFrom(clientId)).ok;
 
   return (
-    <Ctx.Provider value={{ programs, getProgram, status, startsOn, assignProgram, assignProgramTo, clearProgram, clearProgramFrom }}>
+    <Ctx.Provider value={{ programs, getProgram, status, startsOn, assignProgram, assignProgramTo, clearProgram, clearProgramFrom, reload }}>
       {children}
     </Ctx.Provider>
   );

@@ -48,7 +48,7 @@
 // somebody forgot one, and an owner reading a gap cannot tell a quiet Tuesday
 // from a missing writer. Nothing holds insert rights on it, so it cannot be
 // forged either.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Switch, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -64,6 +64,8 @@ import { useTenant, gymMoney, GYM_CURRENCY } from '../../src/ui/tenant';
 import { parseSessionFee, sessionFeeFieldValue } from '../../src/lib/gymSettings';
 import { fetchGymMerchant, merchantState, startGymOnboarding, type GymMerchant } from '../../src/lib/gymMerchant';
 import { Fetched } from '../../src/ui/fetched';
+import { oldestFetch } from '../../src/lib/freshness';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { WEB_ORIGIN } from '../../src/lib/deepLink';
 
 /**
@@ -148,7 +150,7 @@ export default function OwnerOps() {
   // (src/ui/announcements.tsx); only the ticket half of that provider is read
   // here.
   const { tickets, resolveTicket, openTickets } = useOwnerOps();
-  const { addGymAnnouncement, mine: myNotices, status: noticeStatus } = useAnnouncements();
+  const { addGymAnnouncement, mine: myNotices, status: noticeStatus, reload: reloadNotices } = useAnnouncements();
 
   // ── the session fee ──────────────────────────────────────────────────────
   //
@@ -164,7 +166,7 @@ export default function OwnerOps() {
   // 31 of them, none of them chosen) and payroll, value-per-client and the
   // revenue hero were all quietly multiplying by it. The fallback copy those
   // three screens carry for a null fee could never have drawn.
-  const { tenant, status: tenantStatus, updateTenant } = useTenant();
+  const { tenant, status: tenantStatus, updateTenant, refresh: refreshTenant } = useTenant();
   const cur = tenant?.currency ?? null;
   // Null means "the owner has not touched the field", so it mirrors the tenant
   // as that read lands. A useState seeded from `tenant` would seed from null —
@@ -188,10 +190,25 @@ export default function OwnerOps() {
   const [merchantMsg, setMerchantMsg] = useState<string | null>(null);
   /** Bumped by the Refresh control. */
   const [merchantTick, setMerchantTick] = useState(0);
+  /**
+   * Bumped by the same control, and read by the three effects below that had no
+   * way to be run twice at all: the resolved-ticket map, the gym event feed and
+   * the support inbox. All three were `useEffect(..., [])` — read once at mount
+   * and then fixed for the life of the screen — on the console tab an owner
+   * leaves open on a desk all day. The Refresh line only ever re-read the
+   * merchant row, so "Read just now" sat over a support inbox from this morning.
+   */
+  const [readTick, setReadTick] = useState(0);
   /** When the merchant read LANDED. `r.ok` only — a refusal leaves the stamp
    *  on the answer currently on screen, which is what "payouts are on" was
    *  read off. */
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  const [merchantAt, setMerchantAt] = useState<number | null>(null);
+  /** And the other three server reads on this tab, each stamped where it lands
+   *  and each leaving the stamp alone when it does not. */
+  const [resolvedAtStamp, setResolvedAtStamp] = useState<number | null>(null);
+  const [eventsAt, setEventsAt] = useState<number | null>(null);
+  const [inboxAt, setInboxAt] = useState<number | null>(null);
+  const [noticesAt, setNoticesAt] = useState<number | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -201,7 +218,7 @@ export default function OwnerOps() {
       setMerchantStatus('loading');
       const r = await fetchGymMerchant(supabase as any, tenant.id);
       if (!live) return;
-      if (r.ok) { setMerchant(r.value); setMerchantStatus('ready'); setFetchedAt(Date.now()); }
+      if (r.ok) { setMerchant(r.value); setMerchantStatus('ready'); setMerchantAt(Date.now()); }
       else { reportError('ops.gymMerchant', new Error(r.reason)); setMerchantStatus('error'); }
     })();
     return () => { live = false; };
@@ -289,10 +306,10 @@ export default function OwnerOps() {
       if (error) { reportError('ownerOps.resolved', error); setResolvedAt(null); setResolvedFailed(true); return; }
       const map: Record<string, string> = {};
       for (const r of data ?? []) { if (r.resolved_at) map[String(r.id)] = String(r.resolved_at); }
-      setResolvedAt(map); setResolvedFailed(false);
+      setResolvedAt(map); setResolvedFailed(false); setResolvedAtStamp(Date.now());
     })();
     return () => { off = true; };
-  }, []);
+  }, [readTick]);
 
   // The feed. Read here rather than through a provider because exactly one
   // screen shows it, and a provider would be a second place for it to go stale.
@@ -313,9 +330,10 @@ export default function OwnerOps() {
         id: String(r.id), kind: String(r.kind), summary: String(r.summary), at: String(r.created_at),
       })));
       setEvStatus('ready');
+      setEventsAt(Date.now());
     })();
     return () => { off = true; };
-  }, []);
+  }, [readTick]);
   // null is the inbox we do not have: it is the initial value AND what
   // fetchAllFeedback returns for a refused read, which is deliberate — see the
   // note on that function. It used to be collapsed here with `d ?? []`, one line
@@ -333,15 +351,31 @@ export default function OwnerOps() {
   useEffect(() => {
     let c = false;
     (async () => {
-      try { const d = await fetchAllFeedback(); if (!c) { setFbRows(d); setFbFailed(d === null); } }
+      try { const d = await fetchAllFeedback(); if (!c) { setFbRows(d); setFbFailed(d === null); if (d !== null) setInboxAt(Date.now()); } }
       catch (e) { reportError('ownerOps.feedback', e); if (!c) { setFbRows(null); setFbFailed(true); } }
     })();
     return () => { c = true; };
-  }, []);
+  }, [readTick]);
   // BOTH reads. Which tickets there are, and which of them are dealt with, are
   // two questions and the tab answers with both — "3 open" over a resolved-state
   // read that failed is every ticket counted as open, which reads as a backlog
   // that is not there.
+  useEffect(() => { if (noticeStatus === 'ready') setNoticesAt(Date.now()); }, [noticeStatus]);
+  /** One line over five reads, and it is the age of the oldest of them. */
+  const fetchedAt = oldestFetch(merchantAt, resolvedAtStamp, eventsAt, inboxAt, noticesAt);
+  /**
+   * Everything on this tab, read again — the merchant row, the support inbox
+   * and its resolved-state map, the event feed, the notices this owner has sent
+   * and the gym row the session fee is stored on.
+   */
+  const refreshAll = useCallback(() => {
+    setMerchantTick((n) => n + 1);
+    setReadTick((n) => n + 1);
+    reloadNotices();
+    refreshTenant();
+  }, [reloadNotices, refreshTenant]);
+  const pull = usePullToRefresh(refreshAll);
+
   const inboxKnown = fbRows != null && resolvedAt != null;
   const fbTickets = (fbRows ?? []).map((r) => ({
     id: 'fb' + r.id,
@@ -378,7 +412,7 @@ export default function OwnerOps() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ paddingTop: sp.md }}>
           {/* "Platform" named Repple, not this gym — the same drift Overview
@@ -387,12 +421,13 @@ export default function OwnerOps() {
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Operations</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your session fee · notices to members · support · gym activity</Text>
-          {/* Whether card payments are switched on is read off one query. An
-              owner in a plant room with no signal reading "payouts enabled"
-              from a read half an hour old is being told something about their
-              money that may no longer be true. */}
-          <Fetched at={fetchedAt} busy={merchantStatus === 'loading'}
-            onRefresh={() => setMerchantTick((n) => n + 1)} />
+          {/* The age of this screen. It began as the merchant read alone —
+              "payouts enabled" from a read half an hour old, read by an owner
+              in a plant room with no signal, is something about their money
+              that may no longer be true — and it now speaks for all five reads
+              the tabs below draw on, at the age of the oldest. Refresh and the
+              pull gesture both run every one of them. */}
+          <Fetched at={fetchedAt} busy={merchantStatus === 'loading'} onRefresh={refreshAll} />
         </View>
 
         {/* ── the three jobs this screen does ────────────────────────────── */}

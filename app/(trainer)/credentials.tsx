@@ -34,6 +34,7 @@
 // they are insured. Both reads carry a LoadStatus and both empties are gated on
 // it.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, TextInput, Alert, ActivityIndicator, Pressable, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -129,6 +130,10 @@ export default function TrainerCredentials() {
   }, [uid, authLoading]);
 
   useEffect(() => { void load(); }, [load, attempt]);
+  // Two reads in one call: the coach's own credentials, and the reviews their
+  // clients wrote. The second arrives entirely from other people, so nothing
+  // the coach does on this screen brings a new one in.
+  const pull = usePullToRefresh(load);
 
   const openNew = () => { setEditing(null); setDraft(EMPTY); setFormOpen(true); };
   const openEdit = (c: Credential) => {
@@ -209,7 +214,7 @@ export default function TrainerCredentials() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 48 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 48 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -372,7 +377,7 @@ export default function TrainerCredentials() {
                   {r.body ? <Text style={{ ...ty.body, color: t.ink2, marginTop: 6 }}>{r.body}</Text> : null}
 
                   {r.coachReply ? (
-                    <View style={{ marginTop: sp.md, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.ring }}>
+                    <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
                       <Text style={{ ...ty.micro, color: t.ink3 }}>YOUR REPLY</Text>
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: 3 }}>{r.coachReply}</Text>
                     </View>

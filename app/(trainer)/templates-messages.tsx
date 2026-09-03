@@ -20,7 +20,8 @@
 // library they cannot tell their own work from. `startersToOffer` drops any
 // whose title the coach already has, so a coach who has written their own
 // Welcome is not offered a second one, and each is added by a tap.
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, TextInput, ScrollView, Pressable, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -38,6 +39,11 @@ export default function SavedMessages() {
   const t = useTheme();
   const router = useRouter();
   const lib = useMyTemplates();
+  // One read. Under 'error' the library renders empty, which is
+  // indistinguishable from a coach who has saved nothing — and the offer to
+  // install the six starters is withheld for exactly that reason, so a
+  // refused read left the screen with nothing on it and nothing to do.
+  const pull = usePullToRefresh(useCallback(() => lib.reload(), [lib]));
 
   const [editing, setEditing] = useState<MessageTemplate | null>(null);
   const [title, setTitle] = useState('');
@@ -90,7 +96,7 @@ export default function SavedMessages() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>

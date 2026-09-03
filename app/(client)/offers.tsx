@@ -24,7 +24,25 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 
-interface Redeemed { code: string; discount: number; redeemedAt: string }
+interface Redeemed {
+  code: string;
+  /** The percentage off, or NULL when the row did not carry a number we could
+   *  read. `Number(r.discount) || 0` collapsed those two into one, and the
+   *  screen then printed "0% off" beside a code the member had spent — a
+   *  specific, wrong claim about what their gym owes them, and one they would
+   *  take to the desk. See the note on the row below. */
+  discount: number | null;
+  redeemedAt: string;
+}
+
+/** A percentage, or null when there is not one. Zero is a real answer here — a
+ *  gym may record a code worth nothing off — so it is kept, and only an absent,
+ *  unparseable or nonsensical figure becomes null. */
+function discountOf(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
+  return n;
+}
 
 /** Why a code was refused, in words the person holding the phone can act on. */
 function refusal(reason: string | undefined, code: string): string {
@@ -51,7 +69,7 @@ export default function Offers() {
     const { data, error } = await supabase.rpc('my_promo_redemptions');
     if (error) { setStatus('error'); return; }
     setMine((data ?? []).map((r: any) => ({
-      code: String(r.code), discount: Number(r.discount) || 0, redeemedAt: String(r.redeemed_at),
+      code: String(r.code), discount: discountOf(r.discount), redeemedAt: String(r.redeemed_at),
     })));
     setStatus('ready');
   }, []);
@@ -73,9 +91,15 @@ export default function Offers() {
     if (!res.ok) { Alert.alert('Not redeemed', refusal(res.reason, c)); return; }
     setCode('');
     await refresh();
+    // Same rule one line later: the RPC's own `discount` goes through the same
+    // reader, so a response that carried no figure says the code is recorded
+    // rather than announcing "undefined% off" — or a nought.
+    const pct = discountOf(res.discount);
     Alert.alert(
       'Code redeemed',
-      `${res.code} · ${res.discount}% off is recorded against your account and your gym has been told. They apply the discount to your billing.`,
+      pct == null
+        ? `${res.code ?? c} is recorded against your account and your gym has been told. We couldn’t read how much it takes off — your gym applies it to your billing and can tell you.`
+        : `${res.code} · ${pct}% off is recorded against your account and your gym has been told. They apply the discount to your billing.`,
     );
   };
 
@@ -141,7 +165,13 @@ export default function Offers() {
             }}>
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, letterSpacing: 1 }}>{r.code}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.discount}% off</Text>
+                {/* The code is what the member takes to the desk; the
+                    percentage is what they expect off. An unreadable figure
+                    says so rather than printing a nought, which is a number
+                    somebody would argue with reception about. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                  {r.discount == null ? 'Redeemed — we couldn’t read how much off' : `${r.discount}% off`}
+                </Text>
               </View>
               <Text style={{ ...ty.caption, color: t.ink3 }}>{when(r.redeemedAt)}</Text>
             </View>

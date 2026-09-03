@@ -279,9 +279,43 @@ eq(ordinal(22), '22nd', '22nd');
   eq(unread.state, 'unknown', 'an unread calendar is unknown, never empty');
   eq(slotWindowLine(unread), null, 'and nothing is said about a diary nobody read');
 
-  // A coach with no weekly availability is not relying on generated slots.
+  // ── the state the screen used to be silent in ────────────────────────────
+  //
+  // A coach with no weekly availability AND nobody on their book may simply not
+  // take one-to-ones. Silence is right there.
   eq(openSlotWindow([], { known: true, hasWeekly: false, now: NOW }).state, 'idle',
-    'a coach with no weekly slots is told nothing');
+    'a coach with no weekly slots and no clients is told nothing');
+  eq(slotWindowLine(openSlotWindow([], { known: true, hasWeekly: false, now: NOW })), null,
+    'and nothing is drawn for them');
+
+  // A coach with clients waiting is a different case entirely, and it is the
+  // one every coach on this platform has actually been in: their booking screen
+  // is dead to every one of those clients and nothing said so.
+  {
+    const never = openSlotWindow([], { known: true, hasWeekly: false, clientsOnBook: 3, now: NOW });
+    eq(never.state, 'never-set', 'no weekly hours plus clients on the book is never-set');
+    const line = slotWindowLine(never, 3)!;
+    ok(line.includes('Your 3 clients cannot book you'), 'which names how many people are waiting');
+    // Says the consequence, not the omission. "You have not set availability" is
+    // a note about a form; this has to be about the clients.
+    ok(line.includes('their booking screen is empty'), 'and what those clients actually see');
+    ok(!/you have not set/i.test(line.split('.')[0]), 'and does not open by telling them off');
+
+    const one = slotWindowLine(openSlotWindow([], { known: true, hasWeekly: false, clientsOnBook: 1, now: NOW }), 1)!;
+    ok(one.includes('Your client cannot book you'), 'one client reads as English, not "1 clients"');
+  }
+
+  // An unknown client count is NOT treated as zero and NOT treated as waiting.
+  // Telling a coach their book is unbookable on the strength of a number we
+  // could not read is the failure this whole module exists to refuse.
+  eq(openSlotWindow([], { known: true, hasWeekly: false, clientsOnBook: null, now: NOW }).state, 'idle',
+    'an unread client count stays silent rather than guessing either way');
+  eq(openSlotWindow([], { known: true, hasWeekly: false, clientsOnBook: 0, now: NOW }).state, 'idle',
+    'and nobody on the book is genuinely idle');
+
+  // An unread diary still beats everything: never-set must not outrank unknown.
+  eq(openSlotWindow([], { known: false, hasWeekly: false, clientsOnBook: 5, now: NOW }).state, 'unknown',
+    'an unread calendar is unknown even with clients waiting');
 
   const empty = openSlotWindow([slot(-3)], { known: true, hasWeekly: true, now: NOW });
   eq(empty.state, 'empty', 'slots that have all been and gone are an empty window');

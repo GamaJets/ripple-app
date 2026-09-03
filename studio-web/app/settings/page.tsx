@@ -1,6 +1,6 @@
 'use client';
 
-// Settings — the five things about this gym that everything else is computed
+// Settings — the six things about this gym that everything else is computed
 // from, and the first screen in this console that writes any of them.
 //
 // ── Why this had to exist ──────────────────────────────────────────────────
@@ -51,6 +51,31 @@
 // what was there before — and, beside it, the four columns deliberately left out
 // and why. That list is the decision; this screen is only the form for it.
 //
+// ── The sixth field, and the one that had nothing behind it at all ─────────
+//
+// The timezone. The other five were columns this console could read and not
+// write; this one was not a column. Six screens in here print the phrase "in
+// the gym's own timezone" over figures bucketed with `new Date()` on whatever
+// machine the page is open on — /accounting over a week, /analytics over door
+// entries BY HOUR, /payroll and the coach's earnings over a calendar month.
+// Read at the front desk those sentences are true by accident. Read by a
+// bookkeeper in another country they are false, and nothing on the page says
+// which of the two is happening.
+//
+// `tenants.timezone` (supabase/parts/710) is the column, and this is its only
+// writer. Two things about the way it is offered here are deliberate:
+//
+//   · There is NO default and no "detect from this browser" button. The
+//     browser's zone is a fact about a laptop — part 710's header spells this
+//     out — and one press of such a button would turn a bookkeeper in Lisbon
+//     into a permanent, invisible claim about where the gym is. The field
+//     starts empty and stays empty until somebody types where the gym is.
+//   · The field is accompanied by the gym's own wall clock, live. An owner
+//     cannot check whether 'Asia/Dubai' is the right STRING, and can check
+//     whether the clock next to it says what the clock behind them says. That
+//     is the only test of this setting a person can actually perform, so the
+//     screen performs it in front of them.
+//
 // ── What it writes with ────────────────────────────────────────────────────
 //
 // The anon key and the signed-in owner's session, like every other screen here.
@@ -69,8 +94,12 @@ import {
   type GymProfile, type PayPolicyCode,
 } from '@lib/gymPolicy';
 import { applyBrandColour } from '@/app/Console';
+import {
+  parseGymZone, zoneOptions, gymTimeLabel, gymDay, readerZone, zoneGapNote,
+} from '@lib/gymZone';
 import { parseSessionFee, parseGymName, sessionFeeFieldValue } from '@lib/gymSettings';
 import { NO_CURRENCY_NOTE } from '@/lib/currency';
+import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 
 /**
  * What a piece of state is when it is still null: a read in flight, or one that
@@ -90,7 +119,7 @@ export default function Settings() {
   const [gym, setGym] = useState<GymProfile | null>(null);
   const [readErr, setReadErr] = useState<string | null>(null);
 
-  // The five fields, as typed. Seeded from the stored row once it arrives and
+  // The six fields, as typed. Seeded from the stored row once it arrives and
   // not touched again — a re-read after a save reseeds them deliberately, so
   // what is on screen is what is in the database.
   const [name, setName] = useState('');
@@ -98,6 +127,25 @@ export default function Settings() {
   const [fee, setFee] = useState('');
   const [policy, setPolicy] = useState<PayPolicyCode | ''>('');
   const [colour, setColour] = useState('');
+  const [zone, setZone] = useState('');
+
+  /**
+   * A clock, ticking, so the zone in the field can be checked against a wall.
+   *
+   * A minute is the resolution the field shows and there is no point re-drawing
+   * faster than the thing being drawn changes. It starts at null rather than at
+   * `Date.now()` and is set in an effect, because Next renders this on the
+   * server first and a clock rendered there is the SERVER's second — a
+   * hydration mismatch, and one that would be showing the reader a time from a
+   * machine in another country, which on this particular screen would be a
+   * quietly hilarious way to fail.
+   */
+  const [tick, setTick] = useState<number | null>(null);
+  useEffect(() => {
+    setTick(Date.now());
+    const t = setInterval(() => setTick(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
@@ -120,6 +168,10 @@ export default function Settings() {
       // where it sits would invite them to save the blank over it — the same
       // failure the banner about a failed read warns about, one field down.
       setColour(profile.brandColor ?? '');
+      // As stored, for the reason the colour is: a value this build cannot
+      // resolve is still what the column holds, and showing a blank over it
+      // would invite the owner to save the blank.
+      setZone(profile.timezone ?? '');
       // The console reads this column once, on mount. A save that re-seeds the
       // field without repainting would leave this screen telling the owner a
       // colour it is not drawn in.
@@ -190,11 +242,13 @@ export default function Settings() {
   const feeCheck = parseSessionFee(fee);
   const ccyCheck = parseTenantCurrency(currency);
   const colCheck = parseBrandColor(colour);
+  const tzCheck = parseGymZone(zone);
   const blocker =
     nameCheck.kind === 'bad' ? nameCheck.reason
     : feeCheck.kind === 'bad' ? feeCheck.reason
     : ccyCheck.kind === 'bad' ? ccyCheck.reason
     : colCheck.kind === 'bad' ? colCheck.reason
+    : tzCheck.kind === 'bad' ? tzCheck.reason
     : null;
 
   const save = async (e: React.FormEvent) => {
@@ -218,6 +272,12 @@ export default function Settings() {
         // picked. Part 118 dropped the default on this column for exactly that
         // reason, and every surface already draws its own accent over a null.
         brandColor: colCheck.kind === 'color' ? colCheck.color : null,
+        // Cleared means the gym has not said where it is — which puts every
+        // date and hour in this console back onto whichever device is reading
+        // them. That is a worse state than having a zone and it is a real one,
+        // so it is reachable; the note under the field is what stops it being
+        // reached by accident.
+        timezone: tzCheck.kind === 'zone' ? tzCheck.zone : null,
       });
       setSaved('Saved.');
       // Re-read rather than trust the patch. The trigger normalises what was
@@ -233,9 +293,9 @@ export default function Settings() {
     <Shell me={me} gymName={gym?.name ?? null} gymNameUnread={!!readErr} current="/settings">
       <h1>Gym</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13, maxWidth: '72ch' }}>
-        Five settings, and everything else in this console is computed from them or drawn in them. A
-        blank field is a setting this gym has not made — which is a different thing from a zero, and
-        every screen here already knows how to say so.
+        Six settings, and everything else in this console is computed from them, dated by them or
+        drawn in them. A blank field is a setting this gym has not made — which is a different thing
+        from a zero, and every screen here already knows how to say so.
       </p>
 
       {readErr ? (
@@ -316,6 +376,99 @@ export default function Settings() {
               style={{ ...field, width: 200 }}
             />
             {feeCheck.kind === 'bad' ? <Bad>{feeCheck.reason}</Bad> : null}
+          </Field>
+
+          <Field
+            label="Timezone"
+            note={
+              gym?.timezone
+                ? 'The gym’s own day. Every “today”, every week, every calendar month and the by-hour door chart are measured against this clock rather than against the clock of whoever opened the page.'
+                // `readerZone()` is asked only once the clock has started,
+                // which is to say only in the browser. Asked during Next's
+                // server render it would report the SERVER's zone and then
+                // change on hydration — a wrong answer about zones, printed by
+                // the timezone field, which is the one place it would be least
+                // forgivable.
+                : `Not set — so every date and hour in this console is your own device’s${
+                    tick != null && readerZone() ? `, which is ${readerZone()}` : ''
+                  }. That is invisible and it is usually close enough to look right: it goes wrong for a colleague reading from somewhere else, and it goes wrong for everybody in the hours either side of midnight.`
+            }
+          >
+            <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                value={zone} onChange={(e) => setZone(e.target.value)}
+                placeholder="Europe/London"
+                list="gym-zone-options"
+                disabled={state === 'failed'}
+                style={{ ...field, width: 260 }}
+                aria-label="The gym's IANA timezone"
+              />
+              {/* A datalist rather than a <select>. `Intl.supportedValuesOf`
+                  returns several hundred zones and a dropdown of those is
+                  unusable; typed against a list, "Dub" reaches Dublin and Dubai
+                  in two keystrokes. Where the browser has no such list the
+                  datalist is simply empty and the input is an ordinary text
+                  field, which still works — `parseGymZone` is what refuses a
+                  wrong answer, not the picker. */}
+              <datalist id="gym-zone-options">
+                {zoneOptions().map((z) => <option key={z} value={z} />)}
+              </datalist>
+              {/* The proof. Not a formatted date — the wall clock, because the
+                  wall clock is the thing an owner can look up at. */}
+              {tzCheck.kind === 'zone' && tick != null ? (
+                <span className="mono" style={{ fontSize: 12.5, color: 'var(--ink2)' }}>
+                  {gymTimeLabel(tick, tzCheck.zone)} · {gymDay(tick, tzCheck.zone)}
+                </span>
+              ) : null}
+            </div>
+            {tzCheck.kind === 'bad' ? <Bad>{tzCheck.reason}</Bad> : null}
+            {/* Said where it is actionable. An owner who has just typed the zone
+                of the city they are sitting in, which is not the city the gym is
+                in, gets to see that before they save rather than after a month
+                of takings has been filed a day out. */}
+            {tzCheck.kind === 'zone' && tick != null && zoneGapNote(tzCheck.zone) ? (
+              <Bad tone="warn">{zoneGapNote(tzCheck.zone)}</Bad>
+            ) : null}
+            {/* The stored value cannot be resolved. Same shape as the brand
+                colour's: the column holds something, nothing can render in it,
+                and without this the field looks fine while every screen quietly
+                falls back to the reader's clock. `tenants_timezone_check`
+                refuses these at the write now, so this can only be a row from
+                before part 710 — or a zone this browser is too old to know,
+                which is why it says both. */}
+            {gym?.timezone && parseGymZone(gym.timezone).kind !== 'zone' ? (
+              <Bad>
+                The stored timezone is <span className="mono">{gym.timezone}</span>, which this
+                browser does not recognise, so every date and hour in this console is falling back
+                to your own device&rsquo;s. Either it was written before the database began checking
+                them, or this browser&rsquo;s zone list is older than the zone. Type one above to
+                replace it.
+              </Bad>
+            ) : null}
+            {/* Changing it, rather than setting it. Nothing is rewritten — every
+                timestamp in this database is an instant — but which DAY a figure
+                is filed under moves, for the past as well as the future, and an
+                owner who has just reconciled a week deserves to know that before
+                they press Save rather than when the week no longer adds up. */}
+            {gym?.timezone && tzCheck.kind === 'zone' && tzCheck.zone !== gym.timezone ? (
+              <Bad tone="warn">
+                Changing this does not alter a single stored figure — every time in this database is
+                an instant and stays exactly where it is. What moves is which day and which hour a
+                screen files it under, for what has already happened as well as for what has not. A
+                week you have already reconciled may come out to a different total.
+              </Bad>
+            ) : null}
+            {/* The other direction, and the one the currency field has no
+                equivalent of: clearing this does not leave a blank on screen, it
+                leaves an answer that looks exactly as confident as before and is
+                a different answer per reader. */}
+            {gym?.timezone && tzCheck.kind === 'clear' ? (
+              <Bad tone="warn">
+                Emptying this does not leave the dates blank. It puts them back to whichever device
+                is reading them, with nothing on any screen saying so — two people in two countries
+                would then see the same gym&rsquo;s Saturday differently and neither would be told.
+              </Bad>
+            ) : null}
           </Field>
 
           <Field
@@ -427,6 +580,23 @@ export default function Settings() {
             every screen in this console, and both phone apps, draw their accent in — it takes
             effect here as soon as it saves, and everywhere else on the next load.
           </p>
+
+          {/* Said plainly rather than implied by the field above it. The column
+              is new; most of the screens that print "in the gym's own timezone"
+              have not been moved onto it yet, and an owner who sets this and
+              assumes /accounting followed would be worse off than one who knows
+              it has not — because they would stop checking. */}
+          <p style={{ marginTop: 14, color: 'var(--ink3)', fontSize: 12.5, maxWidth: '68ch' }}>
+            The timezone is read today by this screen, by{' '}
+            <a href="/staff" style={{ color: 'var(--brand)' }}>Staff</a> — the rota&rsquo;s times and
+            a coach&rsquo;s join date — and by the &ldquo;read&nbsp;…&nbsp;ago&rdquo; line in the
+            owner app. <strong style={{ color: 'var(--ink2)' }}>Accounting, Analytics, the Door
+            log, Payroll, Close and the coach&rsquo;s earnings still draw their days and hours in
+            your own browser&rsquo;s zone</strong>, whatever this field says, and some of them
+            already carry the words &ldquo;in the gym&rsquo;s own timezone&rdquo; over figures that
+            are not. They are listed at the foot of{' '}
+            <span className="mono">supabase/parts/710</span> so nobody has to go looking.
+          </p>
         </form>
       )}
     </Shell>
@@ -471,12 +641,13 @@ function Bad({ children, tone }: { children: React.ReactNode; tone?: 'warn' }) {
   );
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13, maxWidth: '72ch',
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page carried a byte-for-byte copy of it that rendered into a plain <div>,
+// so every sentence it printed — including the ones saying a write was
+// REFUSED and nothing was saved — was silent to a screen reader. The shared
+// component carries role="alert"/"status" and aria-live.
+// The wrapper stays only for this page's own 72ch measure, which is passed
+// through the shared component's `style` rather than duplicating it.
+function Banner({ children, tone }: { children: React.ReactNode; tone?: BannerTone }) {
+  return <SharedBanner tone={tone} style={{ maxWidth: '72ch' }}>{children}</SharedBanner>;
 }

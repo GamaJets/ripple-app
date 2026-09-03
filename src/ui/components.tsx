@@ -225,7 +225,7 @@ export function PasswordField({
           secureTextEntry={!visible}
           autoCapitalize="none"
           autoCorrect={false}
-          style={[fieldStyle, { paddingRight: 44 }]}
+          style={[fieldStyle, { paddingEnd: 44 }]}
           accessibilityLabel={accessibilityLabel}
           autoFocus={autoFocus}
         />
@@ -234,7 +234,7 @@ export function PasswordField({
           accessibilityRole="button"
           accessibilityLabel={visible ? 'Hide password' : 'Show password'}
           hitSlop={10}
-          style={{ position: 'absolute', right: 12, top: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' }}
+          style={{ position: 'absolute', end: 12, top: 0, bottom: 0, justifyContent: 'center', alignItems: 'center' }}
         >
           <Icon name={visible ? 'eye-off' : 'eye'} size={20} color={t.ink3} />
         </Pressable>

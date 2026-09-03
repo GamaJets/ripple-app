@@ -97,17 +97,57 @@ export const floorQueueKey = (uid: string): string => `repple.floorQueue:${uid}`
  * no use for, with the final answer depending on the order they happen to land
  * in. Same for a session outcome: the last thing the coach chose is the answer.
  *
- * A session LOG is an event and is never collapsed. Two logs for one client are
- * two sessions, and merging them would delete an hour of somebody's training on
- * the grounds that it looked similar. Its key is therefore unique per entry,
- * which is what the queue id gives.
+ * ── And the third, which used to return null ──────────────────────────────
+ *
+ * A session LOG is an event, and the note here used to stop at that: two logs
+ * for one client are two sessions, so it was given no key at all and every
+ * offer of one appended.
+ *
+ * That is right about two SESSIONS and wrong about one session offered twice.
+ * app/(trainer)/log-session.tsx writes through the server first and falls back
+ * to this queue, and a flush re-offers whatever it could not send — so the same
+ * hour of training could be queued behind a copy of itself, and what a client
+ * ends up with is the session in their history twice, on a day they trained
+ * once. Nobody can tell which of the two to delete, and the client cannot
+ * delete either: their coach typed them.
+ *
+ * So the key is the act's CONTENTS — the client, and every entry exactly as it
+ * will be written. That keeps the promise the old note was making, because two
+ * real sessions cannot agree on it: `logStamp` in src/lib/sessionWhen.ts carries
+ * the second and millisecond of saving into every entry's timestamp, so two
+ * sessions typed on the same evening differ even when the exercises and the
+ * sets are identical. What DOES agree on it is the one thing that should: the
+ * same array of entries, offered again because the first offer was not
+ * answered.
+ *
+ * Contents rather than a hash of them. A hash is shorter and a collision here
+ * deletes an hour of somebody's training, which is the exact harm this is
+ * being added to prevent — so there is no hash.
  */
 export function supersedeKey(a: FloorAct): string | null {
   switch (a.kind) {
     case 'class-attendance': return `class:${a.classId}:${a.userId}`;
     case 'session-outcome': return `session:${a.sessionId}`;
-    case 'session-log': return null;
+    case 'session-log': {
+      const body = logBody(a.entries);
+      // Entries that will not serialise cannot reach the device either, so
+      // there is nothing to key on. Falls back to the old behaviour — never
+      // collapsed — which is the safe direction: a duplicate can be deleted,
+      // and a session collapsed into another one cannot be got back.
+      return body == null ? null : `log:${a.clientId}:${body}`;
+    }
   }
+}
+
+/** The entries as one comparable string, or null when they will not serialise.
+ *
+ *  `JSON.stringify` and not a field-by-field walk, because the entries are
+ *  `unknown[]` here on purpose — this module does not own the shape of a
+ *  workout entry and must not start deciding which of its fields count. The
+ *  same bytes go to the device, so an act read back off disk keys the same as
+ *  the one that was written. */
+function logBody(entries: readonly unknown[]): string | null {
+  try { return JSON.stringify(entries) ?? null; } catch { return null; }
 }
 
 /**
@@ -250,6 +290,37 @@ export function floorPendingNote(n: number): string | null {
  */
 export function keptOfflineLine(what: string): string {
   return `${what} is saved on this phone and has not reached the server yet, so nobody else can see it. It goes up next time this app has signal.`;
+}
+
+/**
+ * The footnote under a class register: who can see the ticks that have just
+ * been made.
+ *
+ * app/(trainer)/class-checkin.tsx printed one sentence unconditionally —
+ * "Check-ins are saved as you tap. Your gym owner sees attendance per class for
+ * payroll and class analytics." — including while this queue was holding every
+ * tick on the phone. That is rule 1 in the header of this file broken on the
+ * one screen it was written for: a trainer who believes the gym has the
+ * attendance does not check it, and they are paid on it. The banner above the
+ * roster said the opposite at the same moment, and the footnote is the calmer
+ * of the two sentences, which is the one a person believes.
+ *
+ * Three answers and they are three different facts:
+ *
+ *   · the queue could not be read — whether anything is waiting is UNKNOWN, so
+ *     neither "the gym has it" nor "the gym does not" may be said.
+ *   · something is waiting — the gym has the ticks that went up and not the
+ *     ones on this phone, and the coach is told which state they are in.
+ *   · nothing is waiting — the ordinary sentence, and now it is true.
+ */
+export function registerVisibilityLine(unsent: number, queueRead: boolean): string {
+  if (!queueRead) {
+    return 'What this phone is still carrying could not be read, so whether your gym owner has today’s check-ins is not known. Open this class again once you have signal before payroll is settled.';
+  }
+  if (unsent > 0) {
+    return `${unsent} check-in${unsent === 1 ? '' : 's'} ${unsent === 1 ? 'is' : 'are'} still on this phone and your gym owner cannot see ${unsent === 1 ? 'it' : 'them'} yet. Everything that has reached the server is on their payroll and class analytics; the rest goes up next time this app has signal.`;
+  }
+  return 'Check-ins are saved as you tap. Your gym owner sees attendance per class for payroll and class analytics.';
 }
 
 /**

@@ -57,10 +57,12 @@ import { reportError } from '../../src/lib/reportError';
 import { fmtDay } from '../../src/lib/format';
 import { money } from '../../src/lib/gymRecord';
 import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   fetchGymOrders, orderLine, orderTrouble, paidPots,
   ORDER_STATUS_LABEL, type GymOrderRow,
 } from '../../src/lib/gymOrders';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /** How far back the order book is read. Ninety days is a quarter — long enough
  *  to cover a Stripe payout cycle and every dispute window an owner is likely
@@ -115,6 +117,10 @@ export default function OwnerOrders() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // The order book is the one read on this screen; the hero, the KPIs and the
+  // trouble list are all derived from it.
+  const pull = usePullToRefresh(load);
+
   const loaded = rows !== null;
   const list = rows ?? [];
   const trouble = orderTrouble(list);
@@ -138,10 +144,11 @@ export default function OwnerOrders() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
+            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Online Orders</Text>
         </View>

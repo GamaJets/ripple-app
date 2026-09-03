@@ -158,7 +158,9 @@ export interface PlanVsActual {
   days: DayCoverage[];
   /** Every prescribed movement across the whole week, de-duplicated by slug —
    *  a squat on Monday and Friday is one movement the client either does or
-   *  does not do. */
+   *  does not do. `plannedTopKg` on these is the HEAVIEST the week prescribes
+   *  for that movement, across every day it appears on; the per-day figure is
+   *  on `days[].movements`, where the day is what the load belongs to. */
   movements: MovementCheck[];
   /**
    * Movements LOGGED in the window that the programme does not contain.
@@ -343,7 +345,25 @@ export function planVsActual(input: PlanVsActualInput): PlanVsActual {
     for (const ex of d.exercises ?? []) {
       const c = check(ex.name ?? '', ex);
       movements.push(c);
-      if (c.slug) { planSlugs.add(c.slug); if (!bySlug.has(c.slug)) bySlug.set(c.slug, c); }
+      if (c.slug) {
+        planSlugs.add(c.slug);
+        // De-duplicated by slug — a squat on Monday and on Friday is ONE
+        // movement the client either does or does not do — but the PRESCRIPTION
+        // is not one fact. `plannedTopKg` is the heaviest working set the coach
+        // wrote for that day, and first-one-wins kept Monday's 100 and threw
+        // Friday's 140 away, so `loadCheck` compared a client's week against a
+        // load the coach had superseded and reported them as exceeding a
+        // prescription that was not theirs. The week's prescription for a
+        // movement is the heaviest of the days it appears on, which is the same
+        // rule `plannedTop` applies within one exercise and for the same
+        // reason. Everything else on the check is derived from the LOG by slug
+        // and is identical between the two, so only the load is merged.
+        const seen = bySlug.get(c.slug);
+        if (!seen) bySlug.set(c.slug, c);
+        else if (c.plannedTopKg != null && (seen.plannedTopKg == null || c.plannedTopKg > seen.plannedTopKg)) {
+          bySlug.set(c.slug, { ...seen, plannedTopKg: c.plannedTopKg });
+        }
+      }
       if (c.coverage === 'logged') logged += 1;
       else if (c.coverage === 'not-logged') notLogged += 1;
       else unknown += 1;

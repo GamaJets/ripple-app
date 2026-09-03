@@ -34,7 +34,8 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useMeasurements } from '../../src/ui/measurements';
 import { useCheckIns } from '../../src/ui/checkins';
 import { currentStreak, weekStats, personalRecords, streakMilestone } from '../../src/lib/streaks';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { askAboutMyWeek, coachAvailable } from '../../src/lib/coach';
 import { useCoachShare } from '../../src/ui/coachShare';
 import {
@@ -61,13 +62,19 @@ export default function WeeklyReport() {
   // Every figure here is a weekly or lifetime aggregate, so the gate is
   // `isWhole` throughout: 'partial' is a prefix and 'loading' is nothing yet.
   const c = useClientData();
-  const { log, status: logStatus } = useWorkoutLog();
-  const { entries, status: mStatus } = useMeasurements();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
+  const { entries, status: mStatus, reload: reloadMeasurements } = useMeasurements();
   // `latestSent`, not `latest`. A weekly report is a summary of what the coach
   // can see, and `latest` may be a check-in still sitting on this phone with no
   // signal — reporting it as part of the record would tell the client their
   // coach has read something nobody has sent.
-  const { latestSent: checkIn, status: ciStatus } = useCheckIns();
+  const { latestSent: checkIn, status: ciStatus, reload: reloadCheckins } = useCheckIns();
+  // Four reads make this report and `reportWhole` below is only as good as the
+  // worst of them, so the gesture asks for all four rather than leaving the
+  // report assembled from three fresh sources and one that failed.
+  const pull = usePullToRefresh(useCallback(() => {
+    c.reload(); reloadLog(); reloadMeasurements(); reloadCheckins();
+  }, [c.reload, reloadLog, reloadMeasurements, reloadCheckins]));
   const trainingWhole = isWhole(logStatus);
   const bodyWhole = isWhole(c.status);
   const mWhole = isWhole(mStatus);
@@ -249,7 +256,7 @@ export default function WeeklyReport() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>

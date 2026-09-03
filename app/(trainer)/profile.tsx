@@ -9,7 +9,8 @@
 //
 // The Find a Trainer directory opt-in keeps its switch affordance and its
 // explanatory copy verbatim — only its styling moved onto the scale.
-import { useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Image, Alert } from 'react-native';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,6 +30,10 @@ import { deliveryNote, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
 import { useMyCancellationPolicy } from '../../src/ui/sessions';
 import { feeAmountLine, noticeLabel } from '../../src/lib/booking';
 import { readNumber } from '../../src/lib/units';
+// Whether the autosave landed. This screen has no Save button and had no
+// answer: the write discarded both outcomes, so a refused one looked exactly
+// like a stored one. See src/lib/profileSave.ts.
+import { saveLine } from '../../src/lib/profileSave';
 import { RepdbAttribution } from '../../src/ui/Attribution';
 import { HAS_NATIVE_CLIPBOARD, CLIPBOARD_UNAVAILABLE_NOTE, copyToClipboard } from '../../src/ui/nativeModules';
 import { BRAND } from '../../src/lib/brands';
@@ -101,6 +106,20 @@ export default function CoachProfile() {
   // (`trainers_late_cancel_fee_stated`) that a debounced write of five other
   // fields would trip on the coach's behalf, taking their bio down with it.
   const lc = useMyCancellationPolicy();
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Two reads: the profile provider (`profiles` and `trainers`) and the
+   * cancellation policy, which is deliberately not part of it.
+   *
+   * `p.reload` flushes a pending edit BEFORE re-reading — see its docstring
+   * in src/ui/coachProfile.tsx. That ordering is what makes this gesture safe
+   * on a screen that is almost entirely text fields: the server's answer
+   * lands on top of the coach's own values rather than on top of a debounced
+   * edit that had not gone out yet. */
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([p.reload(), Promise.resolve(lc.reload())]),
+    [p, lc],
+  ));
   const [newOffer, setNewOffer] = useState('');
   const [newSpec, setNewSpec] = useState('');
   /**
@@ -137,6 +156,15 @@ export default function CoachProfile() {
 
   const pageHandle = handleDraft ?? p.publicHandle ?? '';
   const pageState = publicPageState({ listed: p.listed, handle: p.publicHandle, on: p.publicPage });
+  // Ticked so "Saved a moment ago" ages while the screen is open, and only
+  // while there is something whose age matters.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (p.save.state !== 'saved') return;
+    const h = setInterval(() => setNowMs(Date.now()), 5_000);
+    return () => clearInterval(h);
+  }, [p.save.state, p.save.savedAt]);
+  const saveNote = saveLine(p.save, nowMs);
   const pageUrl = publicPageUrl(BRAND.joinOrigin, p.publicHandle);
   const draftProblem = handleProblem(normaliseHandle(pageHandle));
 
@@ -196,7 +224,7 @@ export default function CoachProfile() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header. No hero — a profile has no single live number ───────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
@@ -285,6 +313,21 @@ export default function CoachProfile() {
           </Section>
         ) : (
         <>
+
+        {/* ── did that save? ─────────────────────────────────────────────────
+            Above the fields, not under them. This screen commits on change with
+            no Save button, so the one thing a coach cannot otherwise find out is
+            whether what they just typed reached the server — and they look for
+            that where they are typing.
+
+            Nothing is drawn before the first edit: a permanent "Saved" badge
+            over an untouched screen is exactly the reassurance people stop
+            reading, which is the failure this is fixing. */}
+        {saveNote ? (
+          <Section>
+            <Flag tone={p.save.state === 'failed' ? t.crit : p.save.state === 'pending' ? t.ink3 : t.good}>{saveNote}</Flag>
+          </Section>
+        ) : null}
 
         {/* ── photo ──────────────────────────────────────────────────────── */}
         <Section>

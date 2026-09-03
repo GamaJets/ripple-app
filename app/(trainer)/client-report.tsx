@@ -51,7 +51,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { isQueryableId } from '../../src/lib/clientDrift';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { isoToday } from '../../src/lib/dayPlan';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
@@ -62,6 +62,7 @@ import { areaLabel, type Injury } from '../../src/lib/injuries';
 import { shareDoc, pdfExportAvailable } from '../../src/lib/exportShare';
 import { fetchInvoiceIssuer } from '../../src/ui/coachInvoices';
 import { useMyCoachLogo } from '../../src/ui/coachLogo';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   coachClientReportDoc, coachReportShareBlurb, sessionTally,
   type CoachSessionRow, type ReportScan, type ReportMeasureEntry, type ReportInjury,
@@ -131,19 +132,27 @@ export default function ClientReport() {
   // sent. Same guard as client-body.tsx and client-training.tsx.
   const wanted = useRef<string | null>(null);
 
-  useEffect(() => { void (async () => { setIssuer(await fetchInvoiceIssuer()); })(); }, []);
+  const loadIssuer = useCallback(async () => { setIssuer(await fetchInvoiceIssuer()); }, []);
+  useEffect(() => { void loadIssuer(); }, [loadIssuer]);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, askable: boolean) => {
     wanted.current = id;
     setReads(EMPTY);
     setToday(isoToday(new Date()));
 
     // A client the coach typed in by hand has a `coach_clients` row and no user
-    // account, so their id is not a uuid and Postgres refuses the whole
-    // statement rather than skipping the value. Nothing is asked for them, and
-    // every section is 'error' — which the document prints as "not read", not
-    // as "nothing on record".
-    if (!isQueryableId(id)) {
+    // account, so nothing server-backed is asked for them.
+    //
+    // This was `isQueryableId(id)` alone, on the belief that such a client
+    // carries an id the phone invented and Postgres would refuse. It does not:
+    // `coach_clients.id` is uuid DEFAULT gen_random_uuid(), so from the first
+    // round trip onward the guard passed, every read ran, each came back with
+    // zero rows and NO error, and this screen rendered that as a fact about the
+    // person. The roster is the only thing that knows which table the row came
+    // from — see src/lib/clientRecord.ts.
+    // Every section is 'error' here, which the document prints as "not read"
+    // rather than as "nothing on record".
+    if (!askable) {
       setReads({
         sessions: { rows: null, status: 'error' },
         training: { log: null, status: 'error' },
@@ -270,10 +279,19 @@ export default function ClientReport() {
     setReads(next);
   }, []);
 
+  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  /** Whether the server may be asked about this person at all. Computed at
+   *  render rather than inside `load`, so a roster that arrives AFTER the read
+   *  and says this row was typed in by hand re-runs the effect and withdraws
+   *  the answer, instead of leaving an empty screen standing as a fact about
+   *  them. `handAdded` undefined is "the roster has not said", which goes on
+   *  asking — only an explicit true withholds. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
   useFocusEffect(useCallback(() => {
     if (!USE_SUPABASE || !picked) return;
-    void load(picked);
-  }, [picked, load]));
+    void load(picked, askable);
+  }, [picked, askable, load]));
 
   useEffect(() => {
     if (!USE_SUPABASE || picked) return;
@@ -281,7 +299,18 @@ export default function ClientReport() {
     setReads(EMPTY);
   }, [picked]);
 
-  const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * This screen composes a document that gets SENT, so every figure on it is
+   * one somebody outside the app will hold the coach to. Four reads sit behind
+   * it: the client's own history, the issuer name on the letterhead, the logo
+   * beside it and the roster the name comes from — and the document is one
+   * artefact, so a refresh that moved the body figures and left the issuer
+   * would produce a page assembled out of two different moments. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(), loadIssuer(), Promise.resolve(logo.reload()),
+    ...(picked ? [load(picked, askable)] : []),
+  ]), [r, loadIssuer, logo, picked, askable, load]));
   const fullName = client?.name || (typeof name === 'string' ? name : '') || '';
   const who = (fullName || 'They').split(' ')[0];
 
@@ -381,7 +410,7 @@ export default function ClientReport() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
@@ -496,7 +525,7 @@ function Row({ t, label, value }: { t: ReturnType<typeof useTheme>; label: strin
       <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>{label}</Text>
       {/* "not read" says it in words; crit goes in the dot beside it. crit as
           label text is 3.03–4.05:1 on every one of the ten palettes. */}
-      {value === 'not read' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit, marginRight: 6 }} /> : null}
+      {value === 'not read' ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit, marginEnd: 6 }} /> : null}
       <Text style={{ ...ty.label, color: value === 'not read' ? t.ink2 : t.ink }}>{value}</Text>
     </View>
   );

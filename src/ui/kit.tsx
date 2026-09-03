@@ -20,6 +20,7 @@ import {
   axisLabel, pointLabel, tickIndices, maxTicksForWidth,
   segments, readablePoints, hasInteriorGap, nearestPoint,
 } from '../lib/chartAxis';
+import { FORWARD_CHAR, FORWARD_ICON } from './direction';
 
 /* ── how this kit talks ───────────────────────────────────────────────────
  *
@@ -69,7 +70,7 @@ export function Rule({ inset = 0 }: { inset?: number }) {
   return (
     <View
       accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-      style={{ height: hairline, backgroundColor: t.ring, marginLeft: inset }}
+      style={{ height: hairline, backgroundColor: t.ring, marginStart: inset }}
     />
   );
 }
@@ -80,8 +81,13 @@ export function Section({ children, style }: { children: ReactNode; style?: Styl
 }
 
 /**
- * A section's header: a quiet uppercase title on the left, and an optional
- * tappable trailing note (a summary figure, "All activity ›") on the right.
+ * A section's header: a quiet uppercase title at the leading edge, and an
+ * optional tappable trailing note (a summary figure, "All activity ›").
+ *
+ * "Leading" and "trailing" rather than left and right because the row is a
+ * plain `flexDirection: 'row'` and Yoga swaps the two ends in a right-to-left
+ * locale on its own. The chevron does not swap on its own, which is what
+ * FORWARD_CHAR below is for.
  */
 export function SectionHead({ title, note, onPress }: { title: string; note?: string; onPress?: () => void }) {
   const t = useTheme();
@@ -93,13 +99,20 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
         // "All activity right-pointing angle quotation mark". The label says the
         // words and the role says it is a button, which is what the glyph was
         // there to convey. 12pt of caption plus this slop reaches 44pt.
+        //
+        // The hitSlop stays on physical left/right, here and everywhere else
+        // in the app: React Native's Insets type is {top,left,bottom,right},
+        // there is no start/end spelling of it, and RN does not mirror one. So
+        // there is nothing to convert TO — which is why scripts/check-rtl.mjs
+        // exempts the whole property by name rather than asking for a marker on
+        // each of the twenty-odd call sites.
         <Pressable
           onPress={onPress} disabled={!onPress}
           accessibilityRole={onPress ? 'button' : undefined}
           accessibilityLabel={onPress ? note : undefined}
           hitSlop={{ top: 14, bottom: 14, left: 12, right: 12 }}
         >
-          <Text style={{ ...ty.caption, color: t.ink3 }}>{note}{onPress ? ' ›' : ''}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>{note}{onPress ? ' ' + FORWARD_CHAR : ''}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -177,7 +190,7 @@ export function Hero({
           {/* The unit is two or three characters and is what the figure MEANS,
               so it does not shrink and does not get pushed off — the figure
               yields first. */}
-          {unit ? <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginLeft: 6, letterSpacing: 0, flexShrink: 0 }}>{unit}</Text> : null}
+          {unit ? <Text numberOfLines={1} style={{ ...ty.head, color: t.ink3, marginStart: 6, letterSpacing: 0, flexShrink: 0 }}>{unit}</Text> : null}
         </View>
         {note ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.sm }}>
@@ -307,15 +320,15 @@ export function KpiRow({ items, onPress }: { items: KpiItem[]; onPress?: (i: Kpi
           accessible accessibilityLabel={spoken} accessibilityRole={live ? 'button' : undefined}
           style={{
             flex: 1,
-            paddingRight: sp.md,
-            paddingLeft: i === 0 ? 0 : sp.lg,
-            borderLeftWidth: i === 0 ? 0 : hairline,
-            borderLeftColor: t.ring,
+            paddingEnd: sp.md,
+            paddingStart: i === 0 ? 0 : sp.lg,
+            borderStartWidth: i === 0 ? 0 : hairline,
+            borderStartColor: t.ring,
           }}>
           <Text style={{ ...ty.caption, color: t.ink3 }}>{k.label}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 5 }}>
             <Text style={{ ...value(22), color: t.ink }}>{k.value}</Text>
-            {k.unit ? <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 2 }}>{k.unit}</Text> : null}
+            {k.unit ? <Text style={{ ...ty.caption, color: t.ink3, marginStart: 2 }}>{k.unit}</Text> : null}
           </View>
           {k.delta ? (
             // Two lines, and the mark aligned to the first of them. Three
@@ -442,7 +455,7 @@ export function ListRow({ icon, title, note, onPress, tone }: {
         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{title}</Text>
         {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{note}</Text> : null}
       </View>
-      <Icon name="chevron" size={16} color={t.ink3} />
+      <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
     </Pressable>
   );
 }
@@ -825,12 +838,27 @@ export function Spark({ data, h = 74, w = 320, labels, unit = '' }: {
       </View>
       {/* The axis. Each label is placed at its own point's x fraction, so it
           sits under the thing it names; the two ends are pulled flush to the
-          edges, where a centred box would be clipped by the container. */}
+          edges, where a centred box would be clipped by the container.
+
+          rtl-ok: this strip is pinned LTR and stays on physical left/right.
+          The line above it is an <Svg> in user-space coordinates and
+          react-native-svg mirrors nothing, so the polyline runs oldest-on-the-
+          left in every locale. Mirror the labels and every date sits under the
+          wrong point — a chart that renders perfectly and is false, which is
+          worse than one that leans the wrong way. `direction: 'ltr'` is what
+          holds it: without it `alignItems: 'flex-start'` would flip on its own,
+          because flex-start is a LOGICAL edge in Yoga even when left is not.
+          See src/lib/direction.ts for the rule and what else it covers. */}
       {ticks.length ? (
-        <View style={{ height: grown(14), marginTop: 3 }}>
+        <View style={{ height: grown(14), marginTop: 3, direction: 'ltr' }}>
           {ticks.map((i) => {
             const end = i === 0 ? 'first' : i === n - 1 ? 'last' : null;
             const frac = (6 + (i / (n - 1)) * (w - 12)) / w;
+            // rtl-ok: physical sides, under the `direction: 'ltr'` pin above.
+            // These three placements are the x coordinates of the polyline
+            // restated in layout terms, and the polyline is SVG user-space:
+            // mirror one without the other and every label names a different
+            // point than the one it sits under.
             const place: StyleProp<ViewStyle> = end === 'first' ? { left: 0, alignItems: 'flex-start' }
               : end === 'last' ? { right: 0, alignItems: 'flex-end' }
                 : { left: `${frac * 100}%`, marginLeft: -grown(54) / 2, width: grown(54), alignItems: 'center' };

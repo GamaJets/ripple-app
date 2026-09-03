@@ -51,7 +51,7 @@ export function SessionHrSheet({ visible, onClose, title, startISO, durationMin,
       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={onClose} accessibilityLabel="Close heart-rate detail" />
       <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: sp.lg, paddingBottom: 34, ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
-          <View style={{ flex: 1, paddingRight: sp.sm }}>
+          <View style={{ flex: 1, paddingEnd: sp.sm }}>
             <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{title}</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>{when}</Text>
           </View>

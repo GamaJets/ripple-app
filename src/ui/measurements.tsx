@@ -7,7 +7,7 @@
 // showed its "log your first measurement" empty state to a client with months of
 // history — inviting them to start again from nothing and lose the trend the
 // screen exists to show. `status` separates the two.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
@@ -119,6 +119,20 @@ interface MeasureValue {
    *  means the history could not be read, not that there is none. */
   status: LoadStatus;
   /**
+   * Read again from the server.
+   *
+   * A real re-read, not a state reset: it bumps the key the load effect below
+   * is keyed on, so the same query runs and `status` goes back through
+   * 'loading' to whatever the server answers this time. Nothing local is
+   * cleared and nothing pending is dropped, so a refused re-read leaves what is
+   * on screen exactly where it was with the status saying it is not confirmed.
+   *
+   * Added for the pull-to-refresh gesture on the screens this provider feeds:
+   * without it those screens could show a failed read for the whole session
+   * with no way to ask again.
+   */
+  reload: () => void;
+  /**
    * Record a measurement.
    *
    * Three answers, not two. Before the outbox there were two states — on the
@@ -135,6 +149,9 @@ const Ctx = createContext<MeasureValue | null>(null);
 
 export function MeasurementsProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
+  /** Bumped by `reload`. A counter, so two pulls are two reads. */
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
   const [entries, setEntries] = useState<MeasureEntry[]>([]);
   const [uid, setUid] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
@@ -207,7 +224,7 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readTick]);
 
   const addEntry = async (vals: Partial<Omit<MeasureEntry, 'id' | 'at'>>): Promise<MeasureOutcome> => {
     const clean: Partial<MeasureEntry> = {};
@@ -242,7 +259,7 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
     } catch { return keep(); }
   };
 
-  return <Ctx.Provider value={{ entries, status, addEntry }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ entries, status, addEntry, reload }}>{children}</Ctx.Provider>;
 }
 
 export function useMeasurements(): MeasureValue {

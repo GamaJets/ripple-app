@@ -68,6 +68,7 @@ import {
   selectionFromParams, COMPARE_DISCLAIMER,
 } from '../../src/lib/photoCompare';
 import { shareText } from '../../src/lib/exportShare';
+import { END_ALIGN } from '../../src/ui/direction';
 
 /** Expo Router hands a repeated query param back as an array and a single one
  *  as a string. Neither shape is special-cased at the two call sites. */
@@ -107,7 +108,11 @@ export default function Compare() {
   // A failed read used to strand this screen for the whole session — the only
   // way to ask again was to leave and come back. Pull to refresh is the gesture
   // people already try; see src/ui/pullToRefresh.tsx.
-  const pull = usePullToRefresh(useCallback(() => { void loadPhotos(); }, [loadPhotos]));
+  // The photos were the only half being asked for. The rows between them —
+  // weight, body fat and muscle at each date — come from `cd.scans`, which has
+  // its own status and its own three sentences on this screen, and none of them
+  // had a way back.
+  const pull = usePullToRefresh(useCallback(() => { void loadPhotos(); cd.reload(); }, [loadPhotos, cd.reload]));
 
   useEffect(() => {
     let cancelled = false;
@@ -274,13 +279,26 @@ export default function Compare() {
                     </Flag>
                   ) : cd.scansStatus === 'loading' ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Reading the scans from those days…</Text>
+                  ) : cd.scansStatus === 'partial' ? (
+                    // The fourth status, which this branch chain did not have.
+                    // `rows` is built only under 'ready' (see the note on it),
+                    // so under 'partial' every arm above was false, `rows` was
+                    // null and the whole figures panel rendered as nothing at
+                    // all — silently, under two photographs, to exactly the
+                    // member this screen is for: the one with a long enough
+                    // scan history to have passed the row cap. A sentence,
+                    // like the other three, and for the same reason: an absence
+                    // with no explanation beside it reads as a broken app.
+                    <Flag tone={t.warn} style={{ marginTop: sp.lg }}>
+                      You have more scans than we can read in one go, so the readings from these two days are not shown beside them. A blank column here would say you were not measured on a day you may well have been. The photos and their dates above are unaffected.
+                    </Flag>
                   ) : rows ? (
                     <View style={{ marginTop: sp.lg }}>
                       <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingBottom: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                         <Text style={{ ...ty.micro, color: t.ink3, flex: 1.3 }}>Reading</Text>
-                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>Before</Text>
-                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>After</Text>
-                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'right' }}>Change</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>Before</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>After</Text>
+                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: END_ALIGN }}>Change</Text>
                       </View>
                       {rows.map((r) => (
                         <View key={r.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
@@ -288,9 +306,9 @@ export default function Compare() {
                           {/* An unmeasured cell is t.ink3 as well as an
                               em-dash: it must not sit in the same weight as a
                               figure somebody actually recorded. */}
-                          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.before === null ? t.ink3 : t.ink, flex: 1, textAlign: 'right' }}>{readingText(r.before, r.unit)}</Text>
-                          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.after === null ? t.ink3 : t.ink, flex: 1, textAlign: 'right' }}>{readingText(r.after, r.unit)}</Text>
-                          <Text style={{ ...ty.label, ...numeric, color: r.delta === null ? t.ink3 : t.ink2, flex: 1, textAlign: 'right' }}>{deltaText(r.delta, r.unit)}</Text>
+                          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.before === null ? t.ink3 : t.ink, flex: 1, textAlign: END_ALIGN }}>{readingText(r.before, r.unit)}</Text>
+                          <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: r.after === null ? t.ink3 : t.ink, flex: 1, textAlign: END_ALIGN }}>{readingText(r.after, r.unit)}</Text>
+                          <Text style={{ ...ty.label, ...numeric, color: r.delta === null ? t.ink3 : t.ink2, flex: 1, textAlign: END_ALIGN }}>{deltaText(r.delta, r.unit)}</Text>
                         </View>
                       ))}
                       {/* Which days were scanned, named. A blank column with no
@@ -343,7 +361,7 @@ export default function Compare() {
                           </View>
                         )}
                         {selIdx >= 0 ? (
-                          <View style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
+                          <View style={{ position: 'absolute', top: 6, end: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
                             <Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text>
                           </View>
                         ) : null}

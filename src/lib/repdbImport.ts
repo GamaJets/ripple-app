@@ -261,3 +261,165 @@ export function overlap(
   }
   return { matched, added };
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Translations
+ *
+ * The Standard bundle ships `exercises.de.json` and `exercises.es.json`
+ * alongside `exercises.json` — 601 records each, with a translated name, a
+ * translated description, instructions and tips. They are keyed by RepDB's OWN
+ * id, which is the whole reason this section exists rather than being three
+ * lines in the script.
+ *
+ * ── The third key, and it is the first one again ──────────────────────────
+ *
+ * The header of this file is about two keys that are not the same key. A
+ * translation set introduces the same trap a third time and in its most
+ * expensive form:
+ *
+ *   `exercises.de.json` has an entry for `barbell-row`. The catalogue row for
+ *   that movement is `bent-over-barbell-row`, because the id is the slug of the
+ *   DISPLAYED NAME. Writing the translation under the vendor id produces a row
+ *   in `exercise_translations` pointing at an exercise that does not exist.
+ *
+ * That happens for the same 80 of 601 records the catalogue import already had
+ * to rekey. It is not silent this time — `exercise_translations.exercise_id` is
+ * a foreign key, so the insert is rejected — but it is rejected HALF WAY
+ * THROUGH, taking the rest of the language with it and leaving a catalogue
+ * partly translated with nothing recording which part.
+ *
+ * So the join below is: read the localised file by VENDOR id, find the English
+ * record with that vendor id, and emit catalogueId() of the English record.
+ * scripts/check-translations.mjs makes the same check against the seed parts.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * The catalogue languages, duplicated from TRANSLATION_LOCALES in
+ * src/lib/catalogueLocale.ts for the same reason `slug` above is duplicated
+ * from exerciseId.ts: scripts/import-repdb.mjs loads this module through Node's
+ * type stripping, which resolves only what it is given an explicit path to.
+ *
+ * Duplication that drifts silently is worse than no duplication, so
+ * scripts/check-translations.mjs compares all three places this set is written
+ * down — here, the TypeScript module the app reads, and the check constraint in
+ * supabase/parts/790 — and fails the build when they disagree.
+ *
+ * English is deliberately absent. It is not a translation of the catalogue, it
+ * is `exercises.name`, and `exercises.id` is the slug of it.
+ */
+export const IMPORT_TRANSLATION_LOCALES = ['de', 'es'] as const;
+
+export type ImportLocale = (typeof IMPORT_TRANSLATION_LOCALES)[number];
+
+/** One entry of `exercises.<locale>.json`, narrowed to what is written. */
+export type LocalisedRecord = {
+  /** RepDB's own id — NOT the catalogue id. See above. */
+  id?: string | null;
+  name?: string | null;
+  description?: string | null;
+};
+
+/** One row of `public.exercise_translations`, as the importer would write it. */
+export type PlannedTranslation = {
+  exerciseId: string;
+  locale: ImportLocale;
+  name: string | null;
+  description: string | null;
+};
+
+/** Why a localised record produced no row. Counted rather than swallowed: a
+ *  language that silently loses 80 rows still reports success. */
+export type TranslationSkip = {
+  vendorId: string;
+  reason: 'no-english-record' | 'no-usable-id' | 'nothing-to-translate' | 'duplicate';
+};
+
+const text = (v: unknown): string | null => {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t === '' ? null : t;
+};
+
+/**
+ * The translation rows for one language, and everything that did not become
+ * one.
+ *
+ * Idempotent by construction: the output is keyed (exerciseId, locale), which
+ * is the primary key of the table, so the caller's upsert re-running or being
+ * re-run with corrections leaves exactly one row per movement per language.
+ * Loading German twice does not produce a second exercise, a second name, or a
+ * second anything — that is the property the whole table shape was chosen for,
+ * and it is asserted in src/lib/repdbImport.test.ts.
+ *
+ * `records` is the ENGLISH set — it is what carries `name_en`, and therefore
+ * the only thing that knows what the catalogue id is. A localised record with
+ * no English counterpart is skipped rather than guessed at: it would be a
+ * foreign key violation, and inventing a catalogue id from a German name would
+ * mint a row nothing in the app can ever resolve.
+ *
+ * A record with neither a name nor a description in this language produces NO
+ * ROW, rather than an empty one. Part 790 refuses to store one anyway, and the
+ * reason is on screen: absence of a row shows English and says it is English,
+ * where a row with a blank name shows nothing at all.
+ */
+export function planTranslations(
+  records: readonly RepdbRecord[],
+  localised: readonly LocalisedRecord[],
+  locale: ImportLocale,
+): { rows: PlannedTranslation[]; skipped: TranslationSkip[] } {
+  const rows: PlannedTranslation[] = [];
+  const skipped: TranslationSkip[] = [];
+  if (!(IMPORT_TRANSLATION_LOCALES as readonly string[]).includes(locale)) return { rows, skipped };
+
+  // By VENDOR id. That is what the localised files are keyed by, and joining on
+  // anything else is the fault this whole section exists to prevent.
+  const english = new Map<string, RepdbRecord>();
+  for (const rec of records) {
+    const vendorId = slug(rec.id);
+    if (vendorId) english.set(vendorId, rec);
+  }
+
+  const taken = new Set<string>();
+  for (const loc of localised) {
+    const vendorId = slug(loc?.id);
+    if (!vendorId) { skipped.push({ vendorId: String(loc?.id ?? ''), reason: 'no-usable-id' }); continue; }
+    const rec = english.get(vendorId);
+    if (!rec) { skipped.push({ vendorId, reason: 'no-english-record' }); continue; }
+    const exerciseId = catalogueId(rec);
+    if (!exerciseId) { skipped.push({ vendorId, reason: 'no-usable-id' }); continue; }
+    const name = text(loc.name);
+    const description = text(loc.description);
+    if (name == null && description == null) { skipped.push({ vendorId, reason: 'nothing-to-translate' }); continue; }
+    // Two vendor records whose English names slug to the same catalogue id
+    // would both write the same row, and the second would silently overwrite
+    // the first. Counted, so the report says a language is 600 rows and not
+    // 601 rather than quietly being one short.
+    if (taken.has(exerciseId)) { skipped.push({ vendorId, reason: 'duplicate' }); continue; }
+    taken.add(exerciseId);
+    rows.push({ exerciseId, locale, name, description });
+  }
+  return { rows, skipped };
+}
+
+/**
+ * How many of the catalogue rows this language actually covers, and which are
+ * left in English.
+ *
+ * The number a translation run should be judged on. "601 rows written" says
+ * nothing about the catalogue: it could be 601 rows onto 619 movements with 18
+ * left English, or 601 rows onto movements that no longer exist. This answers
+ * the question the reader has — how much of what I can see is in my language —
+ * and the untranslated list is what somebody works through next.
+ */
+export function translationCoverage(
+  rows: readonly PlannedTranslation[],
+  catalogueIds: ReadonlySet<string>,
+): { translated: string[]; untranslated: string[] } {
+  const named = new Set(rows.filter((r) => !!text(r.name)).map((r) => r.exerciseId));
+  const translated: string[] = [];
+  const untranslated: string[] = [];
+  for (const id of catalogueIds) (named.has(id) ? translated : untranslated).push(id);
+  translated.sort();
+  untranslated.sort();
+  return { translated, untranslated };
+}

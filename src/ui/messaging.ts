@@ -451,8 +451,12 @@ export function useThread(clientId: string | null, role: ChatRole) {
    *  re-renders nothing and the queued bubbles would not appear until something
    *  else happened to cause a render. */
   const [threadId, setThreadId] = useState<string | null>(clientId);
-  /** Bumped to re-read the thread. See the effect below: the only thing that
-   *  bumps it is a queued message of ours having gone. */
+  /** Bumped to re-read the thread. Two things bump it: a queued message of
+   *  ours having gone (see the effect below), and `reload` — the screen asking
+   *  for the conversation again, which is what a pull-to-refresh on a chat is.
+   *  There is no realtime subscription on this thread, so until now the only
+   *  way a coach saw a reply that arrived while they were looking at it was to
+   *  send something themselves or leave and come back. */
   const [reloadTick, setReloadTick] = useState(0);
   /**
    * Whether there is more thread ABOVE what is on screen.
@@ -963,6 +967,13 @@ export function useThread(clientId: string | null, role: ChatRole) {
     olderError,
     /** One page further back. Safe to call when there is nothing to fetch. */
     loadOlder,
+    /** Read the thread again from the top.
+     *
+     *  Goes through `reloadTick` rather than calling the read directly, so the
+     *  merge rules and the `seen` bookkeeping in that effect are not duplicated
+     *  — and so pages already stepped back to with `loadOlder` are handled the
+     *  same way they are on any other re-read. */
+    reload: () => setReloadTick((n) => n + 1),
   };
 }
 

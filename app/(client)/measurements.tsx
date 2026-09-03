@@ -23,13 +23,14 @@
 // a client logged was captioned the day before it happened for anybody west of
 // Greenwich — the exact bug src/lib/localDate.ts exists for. Every date here
 // now goes through it, and every figure says how long ago it was taken.
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useToast } from '../../src/ui/toast';
 import { useMeasurements, METRICS, type MeasureEntry } from '../../src/ui/measurements';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
@@ -37,6 +38,7 @@ import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote 
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
 import { useClientData } from '../../src/ui/clientData';
 import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
+import { END_ALIGN } from '../../src/ui/direction';
 
 // Which tape sites a goal has an opinion about. A waist and a hip measurement
 // follow the fat, so Fat Loss and Tone want them down; a chest, an arm and a
@@ -52,10 +54,12 @@ export default function Measurements() {
  const t = useTheme();
  const toast = useToast();
  const router = useRouter();
- const { entries, status, addEntry } = useMeasurements();
+ const { entries, status, addEntry, reload } = useMeasurements();
  // The member's own goal, purely so the mark beside a fall can stop claiming to
  // be good news for everybody. Nothing else on this screen reads it.
  const cd = useClientData();
+ // The tape measurements, and the scan history charted beside them.
+ const pull = usePullToRefresh(useCallback(() => { reload(); cd.reload(); }, [reload, cd.reload]));
  // True only where this member's goal actually wants this site smaller.
  // `undefined` — no goal set, a goal with no opinion on girth, or a change that
  // rounds to nothing — paints the neutral mark.
@@ -138,7 +142,7 @@ export default function Measurements() {
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
@@ -209,7 +213,7 @@ export default function Measurements() {
           <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{deltaLabel(d, { since: null, unit: lu, noChange: 'Unchanged' })}</Text>
          </View>
         ) : (
-         <Text style={{ ...ty.caption, color: t.ink3, minWidth: 78, textAlign: 'right' }}>{prev ? 'Not measured' : '—'}</Text>
+         <Text style={{ ...ty.caption, color: t.ink3, minWidth: 78, textAlign: END_ALIGN }}>{prev ? 'Not measured' : '—'}</Text>
         )}
        </View>
       </View>

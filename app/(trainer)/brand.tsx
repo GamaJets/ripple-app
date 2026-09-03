@@ -75,11 +75,12 @@ import { useAuth } from '../../src/ui/auth';
 import { clearMyLogo, pickLogo, uploadMyLogo, useMyCoachLogo } from '../../src/ui/coachLogo';
 import { LOGO_SCOPE_NOTE, LOGO_UNREADABLE_NOTE } from '../../src/lib/coachLogo';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 export default function CoachBrand() {
   const t = useTheme();
   const { palettes } = useThemeControls();
-  const { name: coachName } = useMyTrainerProfile();
+  const { name: coachName, reload: reloadProfile } = useMyTrainerProfile();
   const { user: authUser } = useAuth();
   const coachId = authUser?.id ?? null;
   const logo = useMyCoachLogo();
@@ -148,6 +149,14 @@ export default function CoachBrand() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  // Three reads sit behind this screen: the brand row, the logo, and the coach's
+  // own name that the preview falls back to. A failed brand read shows "could
+  // not be read" with no way back except leaving the screen.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([load(), Promise.resolve(logo.reload()), reloadProfile()]),
+    [load, logo, reloadProfile],
+  ));
+
   const nameField = nameDraft ?? savedName ?? '';
   const colorField = colorDraft ?? savedColor ?? '';
   // What the app would actually apply, which is not always what is stored.
@@ -192,7 +201,7 @@ export default function CoachBrand() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ paddingTop: sp.md }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Coach</Text>
@@ -310,7 +319,7 @@ export default function CoachBrand() {
                     accessibilityRole="button" accessibilityLabel={p.name}
                     style={{ width: 52, height: 52, borderRadius: radius.md, backgroundColor: p.theme.bg, borderWidth: on ? 2 : hairline, borderColor: on ? t.brand : t.ring, alignItems: 'center', justifyContent: 'center' }}>
                     <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: p.theme.brand }} />
-                    {on ? <View style={{ position: 'absolute', bottom: 3, right: 3 }}><Icon name="check" size={13} color={t.brand} /></View> : null}
+                    {on ? <View style={{ position: 'absolute', bottom: 3, end: 3 }}><Icon name="check" size={13} color={t.brand} /></View> : null}
                   </Pressable>
                 );
               })}

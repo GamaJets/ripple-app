@@ -12,7 +12,8 @@
 //     counted as "waiting to send" for the life of the install.
 import {
   actLine, dropSent, enqueueAct, floorPendingNote, floorQueueKey, flushResultLine,
-  keptOfflineLine, readFloorQueue, refusedLine, supersedeKey, type FloorAct, type QueuedAct,
+  keptOfflineLine, readFloorQueue, refusedLine, registerVisibilityLine, supersedeKey,
+  type FloorAct, type QueuedAct,
 } from './floorQueue';
 
 const errors: string[] = [];
@@ -23,8 +24,8 @@ const q = (id: string, act: FloorAct, at = '2026-09-01T10:00:00.000Z'): QueuedAc
 
 const TICK = (userId: string, present: boolean): FloorAct =>
   ({ kind: 'class-attendance', classId: 'c1', userId, memberName: 'Sam', present });
-const LOG = (clientId: string, n: number): FloorAct =>
-  ({ kind: 'session-log', clientId, clientName: 'Sam', entries: Array.from({ length: n }, (_, i) => ({ i })) });
+const LOG = (clientId: string, n: number, stamp = '2026-09-01T18:00:00.000Z'): FloorAct =>
+  ({ kind: 'session-log', clientId, clientName: 'Sam', entries: Array.from({ length: n }, (_, i) => ({ i, t: stamp })) });
 const OUTCOME = (sessionId: string, outcome: string): FloorAct =>
   ({ kind: 'session-outcome', sessionId, clientName: 'Sam', outcome });
 
@@ -39,9 +40,28 @@ ok(floorQueueKey('a') !== floorQueueKey('b'), 'two accounts do not share a queue
 
 eq(supersedeKey(TICK('u1', true)), 'class:c1:u1', 'a tick is a state, keyed on the member in the class');
 eq(supersedeKey(OUTCOME('s1', 'completed')), 'session:s1', 'an outcome is a state, keyed on the session');
+
+/* ── and the log, which is keyed on its contents ────────────────────────── */
+
 // THE one that must not collapse. Two logged sessions for one client are two
-// hours of somebody's training, and merging them deletes one.
-eq(supersedeKey(LOG('u1', 3)), null, 'a logged session is an event and is never superseded');
+// hours of somebody's training, and merging them deletes one. They cannot
+// agree on this key: `logStamp` in src/lib/sessionWhen.ts carries the second
+// and millisecond of saving into every entry, so two sessions typed on the same
+// evening differ even when the exercises and the sets are identical.
+ok(supersedeKey(LOG('u1', 3, '2026-09-01T18:00:00.100Z'))
+  !== supersedeKey(LOG('u1', 3, '2026-09-01T18:00:00.200Z')),
+  'two sessions a moment apart are two sessions');
+ok(supersedeKey(LOG('u1', 3)) !== supersedeKey(LOG('u1', 4)),
+  'and so are two with different work in them');
+ok(supersedeKey(LOG('u1', 3)) !== supersedeKey(LOG('u2', 3)),
+  'the same hour against two clients is two writes');
+
+// And the one that MUST collapse, which is why the key exists at all: the same
+// entries offered a second time because the first offer was never answered. A
+// lost acknowledgement used to put the same hour in a client's history twice,
+// and neither the client nor the coach can tell which of the two to delete.
+eq(supersedeKey(LOG('u1', 3)), supersedeKey(LOG('u1', 3)),
+  'the same session offered twice is one session');
 
 let queue: QueuedAct[] = [];
 queue = enqueueAct(queue, q('1', TICK('u1', true)));
@@ -59,6 +79,9 @@ let logs: QueuedAct[] = [];
 logs = enqueueAct(logs, q('1', LOG('u1', 3)));
 logs = enqueueAct(logs, q('2', LOG('u1', 4)));
 eq(logs.length, 2, 'two sessions for one client stay two sessions');
+logs = enqueueAct(logs, q('3', LOG('u1', 3)));
+eq(logs.length, 2, 'and the same session offered again does not become a third');
+eq(logs[0].id, '3', 'the re-offer takes the place of the one it repeats');
 
 /* ── a sent act leaves by its id ────────────────────────────────────────── */
 
@@ -185,6 +208,27 @@ const mixedFlush = flushResultLine({ sent: 1, refused: 1, kept: 1 }) ?? '';
 ok(/went up/.test(mixedFlush) && /declined/.test(mixedFlush) && /nobody answered/.test(mixedFlush),
   'a mixed flush reports every arm rather than the most recent one');
 ok(!/undefined|NaN/.test(mixedFlush), 'and never renders a count as a word');
+
+/* ── who can see a register that is still on the phone ──────────────────── */
+
+// Rule 1 of this module, on the screen it was written for. The footnote under
+// the class register said "Your gym owner sees attendance per class for
+// payroll" unconditionally — including while this queue held every tick — and
+// a trainer who believes the gym has the attendance does not check it.
+const clear = registerVisibilityLine(0, true);
+ok(/Your gym owner sees attendance/.test(clear), 'an empty queue may say the gym has it');
+
+const waiting = registerVisibilityLine(3, true);
+ok(/still on this phone/.test(waiting), 'a queue with ticks in it says where they are');
+ok(/cannot see/.test(waiting), 'and that the gym cannot see them');
+ok(/3/.test(waiting), 'and how many');
+eq(/1 check-in is/.test(registerVisibilityLine(1, true)), true, 'counted in the singular');
+
+// A queue that could not be READ is not an empty queue, so neither answer may
+// be given.
+const unknown = registerVisibilityLine(0, false);
+ok(!/Your gym owner sees attendance/.test(unknown), 'an unread queue never claims the gym has it');
+ok(/not known/.test(unknown), 'it says the answer is unknown');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('floorQueue: ok');

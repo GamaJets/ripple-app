@@ -31,7 +31,7 @@
 // from a stored counter, which cannot lose a write under concurrency the way
 // `set redeemed = redeemed + 1` can. The count below is that, and a dash where
 // the count itself could not be read.
-import { useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -43,11 +43,24 @@ import { usePromos } from '../../src/ui/promos';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
+import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 export default function Promotions() {
   const t = useTheme();
   const router = useRouter();
-  const { promos, status, addPromo, toggleActive, removePromo } = usePromos();
+  const { promos, status, addPromo, toggleActive, removePromo, refresh } = usePromos();
+  /* ── When the codes were last read ───────────────────────────────────
+     The provider carries no stamp, so the screen keeps one: the moment
+     `status` last settled on a read that came back. 'error' does NOT move it —
+     the codes on screen are still the earlier read's. */
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (status === 'ready' || status === 'partial') setFetchedAt(Date.now());
+  }, [status]);
+  // The codes are the whole of this screen's server state — the hero counts
+  // them and the list below is them.
+  const pull = usePullToRefresh(useCallback(() => { void refresh(); }, [refresh]));
   const [title, setTitle] = useState('');
   const [code, setCode] = useState('');
   const [disc, setDisc] = useState(20);
@@ -117,7 +130,7 @@ export default function Promotions() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
           <View style={{ flex: 1 }}>
@@ -126,6 +139,10 @@ export default function Promotions() {
           </View>
           <Ghost icon="back" onPress={() => router.back()} />
         </View>
+
+        {/* When the codes were read, whether this phone is reaching us, and a
+            way to ask again. The hero below is a count over them. */}
+        <Fetched at={fetchedAt} onRefresh={() => { void refresh(); }} busy={status === 'loading'} />
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
         {/* `promos.length` was every code the gym had ever made, under the word

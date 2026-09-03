@@ -89,6 +89,7 @@ import {
   type CopyTarget, type CopyLine,
 } from '../../src/lib/checklistCopy';
 import { bulkReport, selectAllOffer, type WriteOutcome } from '../../src/lib/bulkActions';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 interface Item {
   id: string; label: string; icon: string; active: boolean; sort: number;
@@ -235,6 +236,27 @@ export default function CoachChecklists() {
 
   const shown = useMemo(() => (items ? [...items].sort((a, b) => a.sort - b.sort) : null), [items]);
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+
+  /* ── pull to refresh ─────────────────────────────────────────────────────
+   *
+   * The ticks are written by the CLIENT, on the client's phone, and this screen
+   * is where a coach finds out whether the fortnight happened. Nothing here
+   * moves on its own, so a coach who opened this at breakfast is looking at
+   * breakfast for as long as the screen stays up.
+   *
+   * Both reads together, never one. The summary below divides ticks by items
+   * over one window, and a refresh that moved the ticks and left the items
+   * would produce a percentage whose numerator and denominator came from
+   * different reads — a plausible number rather than a visible gap. The roster
+   * goes with them because the picker and the header name come off it.
+   *
+   * With no client picked there is nothing client-shaped to re-read, so this is
+   * the roster alone — which is exactly what the picker in front of the coach
+   * at that moment is made of. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(),
+    ...(uid && picked ? [load(uid, picked), loadTicks(picked)] : []),
+  ]), [r, uid, picked, load, loadTicks]));
 
   // Both reads have to be whole before a single figure is drawn. A truncated or
   // failed list of items means unknown denominators; a truncated or failed read
@@ -482,7 +504,7 @@ export default function CoachChecklists() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

@@ -26,7 +26,7 @@
 //
 // And the closing action. A client with no demonstration is told to ask their
 // coach; the coach is the person who can fix it, so they are sent to Videos.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -46,6 +46,8 @@ import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/ui/auth';
 import { RepdbInlineCredit } from '../../src/ui/Attribution';
+import { BACK_ICON } from '../../src/ui/direction';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 
 export default function TrainerExercise() {
@@ -54,8 +56,8 @@ export default function TrainerExercise() {
   const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
-  const { detail, status, signedOut } = useExerciseDetail(name);
-  const { videos } = useExerciseVideos();
+  const { detail, status, signedOut, reload: reloadDetail } = useExerciseDetail(name);
+  const { videos, reload: reloadVideos } = useExerciseVideos();
   const { user } = useAuth();
 
   // `trainers.id` references `profiles.id`, so on the coach app the signed-in
@@ -77,16 +79,26 @@ export default function TrainerExercise() {
   const { frames, animUrl, animCacheKey } = useExerciseMedia(detail);
   const caption = demoCaption(detail?.source, frames.length);
 
+  // Two reads: the catalogue row this movement is drawn from, and the clips
+  // the coach or their gym has attached to it. Both together, because this
+  // screen is a preview of what the client sees and the clip is chosen
+  // against the movement — refreshing one alone could show a coach a clip
+  // matched to the row they had before.
+  const pull = usePullToRefresh(useCallback(
+    () => Promise.all([reloadDetail(), reloadVideos()]),
+    [reloadDetail, reloadVideos],
+  ));
+
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]
     .filter((x): x is string => !!x)
     .map(cap);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, marginBottom: sp.lg }}>
           <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={10}>
-            <Icon name="back" size={20} color={t.ink} />
+            <Icon name={BACK_ICON} size={20} color={t.ink} />
           </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What your client sees</Text>

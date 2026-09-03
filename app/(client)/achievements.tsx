@@ -8,7 +8,7 @@
 // became one hero figure and a hairline-separated list. The badges' `icon` field
 // held an empty string for every badge (its emoji had been stripped), so each
 // tile rendered a blank 28px circle; that dead field is gone.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -17,6 +17,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
@@ -28,8 +29,13 @@ import { Confetti } from '../../src/ui/Confetti';
 export default function Achievements() {
   const t = useTheme();
   const router = useRouter();
-  const { log, status: logStatus } = useWorkoutLog();
+  const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   const cd = useClientData();
+  // Every badge here is scored off the training log and the profile's weight
+  // history. A failed read of either scores the member at nothing and says so
+  // in the same type used when it is true, and until now there was no gesture
+  // that would ask again.
+  const pull = usePullToRefresh(useCallback(() => { reloadLog(); cd.reload(); }, [reloadLog, cd.reload]));
   const wu = useSettings().weightUnit;
   const watch = useBadgeWatch();
   // Under 'error' the log is empty because it could not be read, so every
@@ -117,7 +123,7 @@ export default function Achievements() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>

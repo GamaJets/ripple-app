@@ -38,13 +38,24 @@
 // One table is deliberately NOT converted; see the note above the
 // metric-by-metric section further down.
 import { useState, useEffect, useCallback } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import * as ImageManipulator from 'expo-image-manipulator';
+// The queue a scan typed with no signal now goes into, and the sentence for a
+// device that could not even keep it. See src/lib/outbox.ts for which writes
+// are allowed to wait and why this one is.
+import { useOutbox } from '../../src/ui/outbox';
+import { notKeptNote } from '../../src/lib/recordQueue';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
+// Reading an InBody printout, INCLUDING which unit it was printed in. See the
+// note above `ocrInBody` for the assumption this replaces.
+import {
+  parseInBodySheet, sheetMassKg, ASSUMED_METRIC_NOTE, CONVERTED_FROM_LB_NOTE, type SheetRead,
+} from '../../src/lib/inbodySheet';
 import { useTheme } from '../../src/ui/components';
 import { useToast } from '../../src/ui/toast';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -101,6 +112,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { sessionsOf, trainingBoard } from '../../src/lib/clientTraining';
 import { areaLabel } from '../../src/lib/injuries';
 import { yearsAround } from '../../src/lib/scanYears';
+import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ITEM_H = 42, VISIBLE = 5;
@@ -115,33 +127,65 @@ const daysIn = (m: number, y: number) => new Date(y, m + 1, 0).getDate();
 // limited to a handful of requests. That is why scanning failed at random.
 //
 // The read now goes through the `ocr-scan` edge function, which holds the key as
-// a Supabase secret. Parsing stays here, where the InBody-specific rules live.
-function parseInBody(text: string): { weight?: string; bf?: string; muscle?: string; ok: boolean } {
-  const lines = text.split(/\r?\n/);
-  const numsIn = (str: string) => (str.match(/\d{1,3}(?:\.\d)?/g) || []).map(Number);
-  let weight: string | undefined, bf: string | undefined, muscle: string | undefined;
-  for (const ln of lines) {
-    const low = ln.toLowerCase();
-    if (bf === undefined && (low.includes('pbf') || low.includes('percent body fat'))) { const n = numsIn(ln).find((x) => x >= 3 && x <= 70); if (n !== undefined) bf = String(n); }
-    if (muscle === undefined && (low.includes('smm') || low.includes('skeletal muscle'))) { const n = numsIn(ln).find((x) => x >= 10 && x <= 80); if (n !== undefined) muscle = String(n); }
-    if (weight === undefined && low.includes('weight') && !low.includes('target') && !low.includes('control') && !low.includes('ideal') && !low.includes('over') && !low.includes('under')) { const cand = numsIn(ln).filter((x) => x >= 35 && x <= 250); if (cand.length) weight = String(cand[cand.length - 1]); }
+// a Supabase secret.
+//
+// The PARSING used to live here too, under a comment claiming that "an InBody
+// sheet is printed in kilograms — so what it hands back is metric no matter
+// what the boxes it is filling are labelled". The second half followed from the
+// first and the first is not true: a machine configured for a US site prints
+// Weight and SMM in pounds and says so on the sheet. It has moved to
+// src/lib/inbodySheet.ts, which reads the unit off the printout, and where
+// there is a test that a 180 lb sheet stops becoming 397.
+/**
+ * The id the scan's row will carry, minted here on the device.
+ *
+ * `scans.id` is a uuid primary key, and choosing it on this side is what makes
+ * a queued scan safe to replay: a row the server already holds comes back
+ * 23505 instead of being filed as a second weigh-in on the same day. See
+ * src/lib/recordQueue.ts · ScanIntent.
+ *
+ * ── Why not expo-crypto ──────────────────────────────────────────────────
+ *
+ * `expo-crypto` calls `requireNativeModule` at module scope, so importing it
+ * throws while this file is LOADING on any install made before that dependency
+ * landed — the whole Progress screen, not the one feature, and no `if` inside a
+ * component runs early enough to help. That is what scripts/check-native.mjs
+ * refuses, and it is right to: an over-the-air update carries the JavaScript
+ * and never the native half.
+ *
+ * So: the platform's own `crypto.randomUUID` where the runtime has one, and
+ * otherwise a v4 built from `Math.random`. `Math.random` is not a source of
+ * secrets and this is not a secret — it is a primary key for a row about the
+ * member's own body, and which rows they may write is decided by RLS and not by
+ * anybody's ability to guess an id. What the id has to be is UNIQUE, and 122
+ * random bits is unique enough that the app will never see two.
+ */
+function newScanId(): string {
+  const c = (globalThis as any).crypto;
+  if (typeof c?.randomUUID === 'function') {
+    try {
+      const id = c.randomUUID();
+      if (typeof id === 'string' && id) return id;
+    } catch { /* no usable platform uuid; the shape below is built by hand */ }
   }
-  if (bf === undefined) { const m = text.match(/PBF[^0-9]{0,12}(\d{1,2}(?:\.\d)?)/i); if (m) bf = m[1]; }
-  if (muscle === undefined) { const m = text.match(/SMM[^0-9]{0,12}(\d{1,2}(?:\.\d)?)/i); if (m) muscle = m[1]; }
-  return { weight, bf, muscle, ok: !!(weight || bf || muscle) };
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
 }
 
 /** Send the image to the edge function and parse whatever text comes back. */
-async function ocrInBody(b64?: string): Promise<{ weight?: string; bf?: string; muscle?: string; ok: boolean; error?: string }> {
-  if (!b64) return { ok: false, error: 'No image to read.' };
+async function ocrInBody(b64?: string): Promise<SheetRead & { error?: string }> {
+  const nothing: SheetRead = { weight: null, bodyFatPct: null, muscle: null, unit: null, ok: false };
+  if (!b64) return { ...nothing, error: 'No image to read.' };
   try {
     const { data, error } = await supabase.functions.invoke('ocr-scan', { body: { imageBase64: b64 } });
-    if (error) { reportError('scans.ocr', error); return { ok: false, error: 'Could not reach the scanning service.' }; }
-    if (!data?.ok) return { ok: false, error: typeof data?.error === 'string' ? data.error : undefined };
-    return parseInBody(String(data.text || ''));
+    if (error) { reportError('scans.ocr', error); return { ...nothing, error: 'Could not reach the scanning service.' }; }
+    if (!data?.ok) return { ...nothing, error: typeof data?.error === 'string' ? data.error : undefined };
+    return parseInBodySheet(String(data.text || ''));
   } catch (e) {
     reportError('scans.ocr', e);
-    return { ok: false, error: 'Could not reach the scanning service.' };
+    return { ...nothing, error: 'Could not reach the scanning service.' };
   }
 }
 
@@ -187,6 +231,10 @@ export default function Scans() {
   // to the metric default and is the only place that decision is made, so
   // nothing here second-guesses it.
   const { weightUnit: wu, lengthUnit: lu } = useSettings();
+  // Null when there is no outbox above this screen — signed out, or a build
+  // with no backend. `enqueue` is then simply not offered and the refusal below
+  // says nothing was kept, which is true.
+  const outbox = useOutbox();
   const { appName } = useBrand();
   // ── sharing and exporting this record ──────────────────────────────────
   //
@@ -468,7 +516,13 @@ export default function Scans() {
   const [showAdd, setShowAdd] = useState(false);
   // The targets the member set on the Goals screen. Read here so the screen
   // called Progress can say what progress is toward.
-  const { goals, status: goalStatus } = useGoalTracker();
+  const { goals, status: goalStatus, reload: reloadGoals } = useGoalTracker();
+  // Four reads sit on this screen: the scan history itself, the tape
+  // measurements charted with it, the training log the progress notes are
+  // written against, and the targets the whole thing is measured toward.
+  const pull = usePullToRefresh(useCallback(() => {
+    cd.reload(); measures.reload(); wlog.reload(); reloadGoals();
+  }, [cd.reload, measures.reload, wlog.reload, reloadGoals]));
   // ── Correcting a scan ──────────────────────────────────────────────────
   //
   // The scan that is highest-dated decides `weightKg`, `bodyFatPct` and
@@ -530,14 +584,24 @@ export default function Scans() {
       }
       const r = await ocrInBody(b64);
       setReading(false);
-      // The text reader scrapes an InBody sheet, and an InBody sheet is printed
-      // in kilograms — so what it hands back is metric no matter what the boxes
-      // it is filling are labelled.
+      // The masses come off the sheet in the sheet's OWN unit, and it is read
+      // off the printout rather than assumed. A US-configured InBody prints
+      // pounds — 180.4 where a metric one prints 81.8 — and both figures sit
+      // inside the band the weight matcher accepts, so nothing rejected it and
+      // `fieldFromKg(180)` filled the box with 397 lb. See src/lib/inbodySheet.
       if (r.ok) {
-        const rw = r.weight ? fieldFromKg(parseFloat(r.weight)) : '';
-        const rm = r.muscle ? fieldFromKg(parseFloat(r.muscle)) : '';
-        if (rw) setWt(rw); if (r.bf) setBf(r.bf); if (rm) setSm(rm);
-        setOcrMsg('Read from your scan: ' + [rw ? 'weight ' + rw + ' ' + wu : '', r.bf ? 'body fat ' + r.bf + '%' : '', rm ? 'muscle ' + rm + ' ' + wu : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.');
+        const wkg = sheetMassKg(r.weight, r.unit);
+        const mkg = sheetMassKg(r.muscle, r.unit);
+        const rw = wkg != null ? fieldFromKg(wkg) : '';
+        const rm = mkg != null ? fieldFromKg(mkg) : '';
+        const rbf = r.bodyFatPct != null ? String(r.bodyFatPct) : '';
+        if (rw) setWt(rw); if (rbf) setBf(rbf); if (rm) setSm(rm);
+        // The unit the sheet was in is part of what was read, and the member is
+        // the only one who can settle an ambiguous one — they are standing in
+        // front of the printout. Silence would leave a converted figure looking
+        // like a misread and an assumed one looking like a certainty.
+        const unitNote = r.unit === 'lb' ? ' ' + CONVERTED_FROM_LB_NOTE : r.unit == null ? ' ' + ASSUMED_METRIC_NOTE : '';
+        setOcrMsg('Read from your scan: ' + [rw ? 'weight ' + rw + ' ' + wu : '', rbf ? 'body fat ' + rbf + '%' : '', rm ? 'muscle ' + rm + ' ' + wu : ''].filter(Boolean).join(' · ') + '. Tap a field to correct.' + unitNote);
       } else { setOcrMsg((r.error || 'Could not read automatically' + (lastVisionError ? ' — ' + lastVisionError : '')) + ' Please type the numbers in.'); }
     }
   };
@@ -577,12 +641,53 @@ export default function Scans() {
     // would find out weeks later when the graph had a hole in it.
     //
     // Nothing is cleared and no verdict is given until the row exists.
-    const saved = await cd.addScan({ id: 's' + Date.now(), takenAt: newISO, weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source: scanMx ? 'InBody (OCR)' : 'InBody (manual)', image: img || undefined, metrics: scanMx ?? undefined });
+    // The row's id is minted here, as a real uuid, and it is the id the LOCAL
+    // entry carries as well as the one the queue would write. `scans.id` is a
+    // uuid primary key, so choosing it on the device is what makes a queued
+    // replay idempotent: a scan the server already holds comes back 23505
+    // rather than being filed twice. See src/lib/recordQueue.ts · ScanIntent.
+    const scanId = newScanId();
+    const source = scanMx ? 'InBody (OCR)' : 'InBody (manual)';
+    const saved = await cd.addScan({ id: scanId, takenAt: newISO, weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source, image: img || undefined, metrics: scanMx ?? undefined });
     if (!saved) {
-      // The sheet stays open with the numbers still in it: the person typed
-      // them off a printout they may no longer be holding, and clearing the
-      // form on a failure would make them find it again.
-      Alert.alert('Not saved', 'That scan could not be saved, so it is not on your record and your targets are unchanged. Your numbers are still here — try again in a moment.');
+      // Not lost, and no longer typed again.
+      //
+      // This branch used to be the whole answer: "try again in a moment", over
+      // four figures somebody had just copied off an InBody printout, in the
+      // corner of a gym where there is no signal — while measurements, glucose,
+      // check-ins and the workout log all had a queue behind them. The member's
+      // choices were to stand somewhere else holding a sheet of paper, or to
+      // find that sheet again later.
+      //
+      // A scan qualifies for the queue on every clause src/lib/outbox.ts sets:
+      // nothing is scarce, no money moves, it carries no file (the photograph
+      // of the printout never leaves the phone — `scans.image_path` is not
+      // written by this app), and a scan dated by `takenAt` says the same thing
+      // whenever it lands.
+      const q = outbox ? await outbox.enqueue('scan', {
+        id: scanId, takenAt: newISO, weightKg: w, bodyFatPct: f,
+        skeletalMuscleKg: m, source, metrics: scanMx ?? null,
+      }) : { result: 'unavailable' as const, id: null };
+      if (q.result !== 'queued') {
+        // Nothing was kept. The sheet stays open with the numbers still in it:
+        // the person typed them off a printout they may no longer be holding,
+        // and clearing the form here would make them find it again.
+        Alert.alert('Not saved', notKeptNote('scan', q.result === 'full' ? 'full' : 'unavailable'));
+        return;
+      }
+      // Kept. The form clears, because there is nothing left to retype.
+      //
+      // Deliberately NOT `keptOnPhoneNote`, whose promise ends "it won't show
+      // up here until it has" — true of a goal or a planned day, false of this
+      // one. `addScan` has already put the scan in the list and the figures
+      // behind the meal plan have moved with it, on this phone. Saying the
+      // shared sentence would leave a member looking at a scan the app had just
+      // told them was not there.
+      setImg(null); setWt(''); setBf(''); setSm(''); setScanMx(null); setShowAdd(false);
+      Alert.alert(
+        'Saved on this phone',
+        'Your scan is saved on this phone and has not reached your record yet — it goes up on its own next time you have signal. It is in your list and your targets here have moved with it in the meantime, and nobody else can see it until it sends.',
+      );
       return;
     }
     setImg(null); setWt(''); setBf(''); setSm(''); setScanMx(null); setShowAdd(false);
@@ -601,6 +706,11 @@ export default function Scans() {
       // Both weights are read out in the client's unit — each is a reading in
       // its own right, so each converts as a value rather than the pair being
       // treated as one span.
+      //
+      // rtl-ok: the two arrows are "was, then became" — time, not layout — and
+      // this is an English sentence assembled in code. When the catalogue is
+      // translated the whole sentence moves with it and the separator becomes
+      // the translator's, which is the right owner for it.
       ? 'Your stats updated (weight ' + weightIn(pw, wu) + '→' + weightIn(w, wu) + wu + ', body fat ' + pf + '%→' + f + '%), so your daily targets adjusted: ' + sign(dK) + ' kcal (now ' + after.kcal + '), protein ' + sign(dP) + 'g (now ' + after.protein + 'g). Your meal plan regenerated to match.'
       : 'Added to your history and charts. Targets are essentially unchanged (' + after.kcal + ' kcal / ' + after.protein + 'g protein).');
   };
@@ -1145,7 +1255,7 @@ export default function Scans() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: sp.md }}>
@@ -1447,6 +1557,8 @@ export default function Scans() {
               No photos yet — add one from your camera or library. They are saved privately to your account,
               so they are here on any device you sign in to. Your coach cannot see any of them: the only way
               they ever see one is if you send that one photo, and you can take it back afterwards.
+              {/* rtl-ok: "before → after" is time inside an English sentence.
+                  See the note on the Alert above. */}
               Tap two to compare before → after; press and hold one for the options.
             </Text>
           ) : (
@@ -1466,12 +1578,16 @@ export default function Scans() {
               {(() => {
                 const sel = comparePair(photos, cmp);
                 if (!sel) return (
+                  // rtl-ok: time inside an English sentence, as above.
                   <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
                     Tap two photos to compare before → after. Press and hold one to send it to your coach, or delete it.
                   </Text>
                 );
                 return (
                   <View style={{ marginBottom: sp.lg }}>
+                    {/* rtl-ok: the earlier date, then the later one. Mirroring
+                        this would say the comparison runs the other way, which
+                        is the one thing the line exists to state. */}
                     <Text style={{ ...ty.label, color: t.ink2 }}>
                       {new Date(sel.before.takenAt).toLocaleDateString()} → {new Date(sel.after.takenAt).toLocaleDateString()} · {spanLabel(sel.days)}
                     </Text>
@@ -1511,7 +1627,7 @@ export default function Scans() {
                             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center' }}>Picture{'\n'}unavailable</Text>
                           </View>
                         )}
-                        {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text></View> : null}
+                        {selIdx >= 0 ? <View style={{ position: 'absolute', top: 6, end: 6, width: 20, height: 20, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}><Text style={{ ...ty.caption, fontWeight: '600', color: t.brandInk }}>{selIdx + 1}</Text></View> : null}
                         {/* Every photo carries its own answer to "can my coach
                             see this?" — including the honest non-answer. The
                             badge is on the picture, not in a list somewhere
@@ -1591,7 +1707,7 @@ export default function Scans() {
                             </Text>
                           </View>
                         ) : (
-                          <Text style={{ ...ty.caption, color: t.ink3, minWidth: 52, textAlign: 'right' }}>—</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, minWidth: 52, textAlign: END_ALIGN }}>—</Text>
                         )}
                       </View>
                     </Pressable>
@@ -1763,7 +1879,7 @@ export default function Scans() {
                   <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fig(weightLabel(s.weightKg, wu))} · {s.bodyFatPct}% BF</Text>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{fmt(s.takenAt)} · {s.source}</Text>
                 </View>
-                <Icon name="chevron" size={14} color={t.ink3} />
+                <Icon name={FORWARD_ICON} size={14} color={t.ink3} />
               </Pressable>
             ))}
           </ScrollView>

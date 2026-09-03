@@ -13,7 +13,7 @@
 // alerting "Barcode Scanned". No barcode was ever read and no product was ever
 // looked up: every scan produced the same invented protein bar. The button now
 // says nothing was logged and points at the real Open Food Facts lookup.
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Alert, Modal, Image, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -34,7 +34,7 @@ import { useGoalTracker } from '../../src/ui/goalTracker';
 import { useClientData } from '../../src/ui/clientData';
 import { Icon } from '../../src/ui/Icon';
 import { analyzeMeal, visionAvailable } from '../../src/lib/vision';
-import { parseFoodText, foodAIAvailable } from '../../src/lib/foodAI';
+import { parseFoodText, foodAIAvailable, type ParsedFood } from '../../src/lib/foodAI';
 import { searchProducts, type OffProduct } from '../../src/lib/openfoodfacts';
 import { searchCommonFoods } from '../../src/lib/foods';
 import { searchDishes } from '../../src/lib/restaurant';
@@ -65,6 +65,7 @@ import { todayKey } from '../../src/lib/offlineQueue';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useWearables } from '../../src/ui/wearables';
 import { Rule, Section, SectionHead, Hero, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
@@ -88,21 +89,36 @@ export default function FoodLog() {
  const t = useTheme();
  const router = useRouter();
  const cd = useClientData();
- const _adj = useCoachNutrition().get(cd.id);
+ const coachNutrition = useCoachNutrition();
+ const _adj = coachNutrition.get(cd.id);
+ const soloEater = cd.coachingMode === 'solo';
+ // A null adjustment under 'error' means UNKNOWN, which is the distinction
+ // src/ui/coachNutrition.tsx exists to make and the one this screen was not
+ // making: `get()` returns null identically for "your coach has not adjusted
+ // you" and "we could not find out whether they have". The second one, fed to
+ // `dayTarget`, produces the uncorrected generic figure — and this is the
+ // screen a member eats against all day, meal by meal, so a coach's 400 kcal
+ // cut goes missing without a word. src/ui/habits.tsx has guarded this with
+ // `adjustUnknown` since the checklist was written.
+ //
+ // Only for a coached member. Nobody adjusts a solo member's macros, so the
+ // read failing tells us nothing we needed.
+ const adjustUnknown = !soloEater && coachNutrition.status === 'error' && _adj == null;
  // null until there is a body to scale to — the 70 kg / 20% placeholder that
  // used to stand in produced a target belonging to nobody.
- const goals = useGoalTracker().goals;
+ const goalTracker = useGoalTracker();
+ const goals = goalTracker.goals;
  // The day type is not offered here. Zero is the Off day the Meals tab's picker
  // starts on, so the two screens agree for every member who has not moved it —
  // and a member who has is reading a what-if on the tab that offers it.
- const target = dayTarget({
+ const target = adjustUnknown ? null : (dayTarget({
   weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity,
   goal: cd.goal, diet: cd.diet,
-  coachAdjust: cd.coachingMode === 'solo' ? null : (_adj ?? null),
+  coachAdjust: soloEater ? null : (_adj ?? null),
   weightGoal: goals.find((g) => g.kind === 'weight' && !g.achievedAtISO) ?? null,
   weightSeries: cd.weightSeries,
   nowMs: Date.now(),
- })?.macros ?? null;
+ })?.macros ?? null);
 
  const fl = useFoodLog();
  const toast = useToast();
@@ -242,10 +258,20 @@ export default function FoodLog() {
    // wrote it, so a described meal the model only knew the calories of counted
    // as a zero-protein meal against the day's remaining macros. Those go to the
    // sheet instead, one at a time, where a person fills the gap in.
-   const items = parsed ? parsed.filter((it) => it.protein != null && it.carbs != null && it.fat != null) : null;
+   // Calories are on the same footing as the macros now. `parseFoodText` used
+   // to coerce an absent calorie figure to 0 and then FILTER THE FOOD OUT for
+   // being zero — so a described item the model could not price simply never
+   // appeared, and a member who typed three things and got two back was never
+   // told the third had been read at all. It goes to the sheet with the others,
+   // where the calories box seeds empty and refuses to log until somebody types
+   // one. `NaN` is what a FoodFacts carries for a calorie figure nobody has
+   // supplied yet; the sheet has always read it that way (LogFoodSheet.tsx).
+   const whole = (it: ParsedFood): it is ParsedFood & { kcal: number; protein: number; carbs: number; fat: number } =>
+     it.kcal != null && it.protein != null && it.carbs != null && it.fat != null;
+   const items = parsed ? parsed.filter(whole) : null;
    const gaps: FoodFacts[] = parsed
-     ? parsed.filter((it) => it.protein == null || it.carbs == null || it.fat == null)
-       .map((it) => ({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, basis: null }))
+     ? parsed.filter((it) => !whole(it))
+       .map((it) => ({ name: it.name, kcal: it.kcal ?? NaN, protein: it.protein, carbs: it.carbs, fat: it.fat, basis: null }))
      : [];
    if (parsed && parsed.length) {
     // Awaited in sequence and counted, rather than fired off in a forEach: a
@@ -261,7 +287,7 @@ export default function FoodLog() {
     let queued = 0;
     let refused = 0;
     for (const it of items ?? []) {
-     const out = await fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein ?? 0, carbs: it.carbs ?? 0, fat: it.fat ?? 0, via: 'manual' });
+     const out = await fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' });
      if (out === 'unsent') queued++;
      else if (out === 'refused') refused++;
     }
@@ -273,7 +299,7 @@ export default function FoodLog() {
     if (gaps.length) {
      setPendingTitle('Check This One');
      setPendingVia('manual');
-     setPendingNote(`Read from what you typed. Some of the macros did not come back, so they are blank rather than nought — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
+     setPendingNote(`Read from what you typed. Some of the figures did not come back, so they are blank rather than nought — fill them in and this can be logged.${gaps.length > 1 ? ` ${gaps.length - 1} more to check after it.` : ''}`);
      setPendingPhoto(null);
      setPending(gaps[0]);
      setQueue(gaps.slice(1));
@@ -389,6 +415,13 @@ export default function FoodLog() {
  // see the note above `useFoodHistory`. Before this the app had no yesterday
  // at all: the food log was a thing you could write into and never read.
  const hist = useFoodHistory(14);
+ // Five reads make this screen: today's entries, the fourteen days behind it,
+ // the profile the target is scaled to, the coach's adjustment to that target,
+ // and the goals it is weighted by. `adjustUnknown` above withholds the whole
+ // target when the coach's half failed — this is the way back from that.
+ const pull = usePullToRefresh(useCallback(() => {
+   fl.reload(); hist.reload(); cd.reload(); void coachNutrition.reload(); goalTracker.reload();
+ }, [fl.reload, hist.reload, cd.reload, coachNutrition, goalTracker.reload]));
  const [openDay, setOpenDay] = useState<string | null>(null);
  const histWhole = isWhole(hist.status);
  // Today is drawn by everything above and does not need a row of its own down
@@ -548,7 +581,7 @@ export default function FoodLog() {
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
  <Ghost icon="back" onPress={() => router.back()} />
@@ -569,7 +602,13 @@ export default function FoodLog() {
    : fl.status === 'partial'
    ? 'You have logged more today than this screen can read in one go, so what is left in the day cannot be worked out from it. What is listed below is real.'
    : "We couldn't read all of today's log, so anything already eaten may be missing from this. What is listed below is real; the number left in the day is not something we can work out yet.")
-  : (target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}` : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`)}
+  : (target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}`
+   // Two reasons there is no target, and only one of them is the member's to
+   // fix. Sending somebody to add a weight they already have, because their
+   // coach's adjustment could not be read, is the app blaming them for its own
+   // failed request.
+   : adjustUnknown ? `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · we couldn’t read your coach’s adjustment, so there is no target to show`
+   : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`)}
  arc={dayWhole && target && target.kcal ? tot.k / target.kcal : undefined}
  arcLabel="of today's calories eaten"
  tone={dayWhole && remK != null && remK < 0 ? t.crit : undefined}
@@ -586,6 +625,14 @@ export default function FoodLog() {
  {target && dayWhole ? macroRow('Protein', tot.p, target.protein) : null}
  {target && dayWhole ? macroRow('Carbs', tot.c, target.carbs, true) : null}
  {target && dayWhole ? macroRow('Fat', tot.f, target.fat, true) : null}
+ {/* The other half of the same rule, for the other missing side of the sum.
+     A member whose coach's adjustment could not be read had three bars simply
+     not drawn, under a heading, with nothing said. */}
+ {!target && adjustUnknown ? (
+  <Text style={{ ...ty.label, color: t.ink3 }}>
+   We couldn’t read your coach’s adjustment to your macros, so these bars would be measuring you against the generic figures rather than your plan. They are left out rather than shown as yours.
+  </Text>
+ ) : null}
  {target && !dayWhole ? (
   <Text style={{ ...ty.label, color: t.ink3 }}>
    {dayReading

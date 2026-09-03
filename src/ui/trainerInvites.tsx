@@ -15,7 +15,7 @@
 //
 // Both list reads swallowed their query too, so "no pending invitations" and
 // "we could not check" were the same empty screen.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -48,6 +48,17 @@ interface TrainerInvitesValue {
   acceptTrainerInvite: (id: string) => Promise<boolean>;
   /** Resolves true when the decline was recorded. */
   declineTrainerInvite: (id: string) => Promise<boolean>;
+  /**
+   * Read both lists again.
+   *
+   * A real re-read: it bumps the key the one effect in this provider is keyed
+   * on, so the same query runs and `status` goes back through 'loading' to
+   * whatever the server says this time. Added because the owner's Trainers
+   * screen shows `sent` as its Pending Invites list and had no way to ask for
+   * it again — an invitation accepted in the other app stayed "Pending" here
+   * until the app was killed.
+   */
+  reload: () => void;
 }
 
 // The `SEQ` counter that minted `local-…` ids for optimistic invitations is
@@ -74,6 +85,8 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
   const [myName, setMyName] = useState<string | null>(null);
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [tick, setTick] = useState(0);
+  const reload = useCallback(() => setTick((n) => n + 1), []);
 
   const DISMISS_KEY = 'repple.trainerInvites.dismissed';
   const markDismissed = (id: string) => {
@@ -149,7 +162,7 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
       if (!cancelled) setStatus(failed ? 'error' : truncated ? 'partial' : 'ready');
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, tick]);
 
   // Nothing goes on the list until the server has it.
   //
@@ -225,7 +238,7 @@ export function TrainerInvitesProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ sent, received, status, sendTrainerInvite, revokeTrainerInvite, acceptTrainerInvite, declineTrainerInvite }}>
+    <Ctx.Provider value={{ sent, received, status, sendTrainerInvite, revokeTrainerInvite, acceptTrainerInvite, declineTrainerInvite, reload }}>
       {children}
     </Ctx.Provider>
   );

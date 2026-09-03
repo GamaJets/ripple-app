@@ -45,13 +45,16 @@
 // keeps the right to write one; they simply reach it from the directory
 // instead, where their former coach's profile still is.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { View, Text, ScrollView, Image, TextInput, Pressable, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, ListRow, Ghost, Cta, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+// 44pt, and the one place the number lives. See the rating row below.
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
@@ -174,7 +177,9 @@ export default function MyCoach() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+    // `tick` too, so one gesture brings back the coach's branding along with
+    // everything else. It was read once at mount and never again.
+  }, [tick]);
 
   // A separate effect from the profile above, and keyed on the coach's id: the
   // three reads below are about a coach we may not have yet, and folding them
@@ -198,6 +203,13 @@ export default function MyCoach() {
     })();
     return () => { cancelled = true; };
   }, [coachId, tick]);
+
+  // The four reads behind this screen: the coach's profile, their branding,
+  // their credentials, and this member's own review and whether they may leave
+  // one. `tick` runs the last three; `load` is the first.
+  const pull = usePullToRefresh(useCallback(() => {
+    void load(); setTick((n) => n + 1);
+  }, [load]));
 
   const openForm = () => {
     setRating(mine && !mine.withdrawnAt ? mine.rating : null);
@@ -298,7 +310,7 @@ export default function MyCoach() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
@@ -510,7 +522,7 @@ export default function MyCoach() {
                       <Text style={{ ...ty.body, color: t.ink2, marginTop: 6 }}>{live.body}</Text>
                     ) : null}
                     {live.coachReply ? (
-                      <View style={{ marginTop: sp.md, paddingLeft: sp.md, borderLeftWidth: 2, borderLeftColor: t.ring }}>
+                      <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
                         <Text style={{ ...ty.micro, color: t.ink3 }}>THEIR REPLY</Text>
                         <Text style={{ ...ty.body, color: t.ink2, marginTop: 3 }}>{live.coachReply}</Text>
                       </View>
@@ -535,17 +547,40 @@ export default function MyCoach() {
                   {open ? (
                     <View style={{ marginTop: sp.lg }}>
                       <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>YOUR RATING</Text>
-                      <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-                        {[MIN_RATING, 2, 3, 4, MAX_RATING].map((n) => (
-                          <Pressable key={n} onPress={() => setRating(n)} accessibilityRole="button"
-                            accessibilityLabel={`${n} out of ${MAX_RATING}`}
-                            style={{
-                              flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: radius.sm,
-                              backgroundColor: rating === n ? t.brand : t.surface2,
-                            }}>
-                            <Text style={{ ...ty.body, color: rating === n ? t.bg : t.ink2 }}>{n}</Text>
-                          </Pressable>
-                        ))}
+                      {/* ── Which number is chosen, said three ways ──────────
+                          It used to be said once, in colour: the selected box
+                          took `t.brand` and the other four took `t.surface2`,
+                          and that was the whole of it. A screen reader was told
+                          "3 out of 5, button" about every one of the five, with
+                          nothing anywhere saying which was picked — so somebody
+                          reviewing their coach by voice could not tell what
+                          they were about to send, and someone who cannot
+                          separate the brand hue from the surface could not
+                          either. The tone is `radio`, because that is what a
+                          row of five where exactly one may be chosen IS, and
+                          `selected` is what turns the colour into something a
+                          screen reader can read out. The ring and the weight
+                          are the non-colour cue on screen, per the rule
+                          src/lib/hr.ts states about the zone palette: colour
+                          confirms what is already said, it never says it
+                          alone. */}
+                      <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }} accessibilityRole="radiogroup">
+                        {[MIN_RATING, 2, 3, 4, MAX_RATING].map((n) => {
+                          const on = rating === n;
+                          return (
+                            <Pressable key={n} onPress={() => setRating(n)} accessibilityRole="radio"
+                              accessibilityState={{ selected: on, checked: on }}
+                              accessibilityLabel={`${n} out of ${MAX_RATING}`}
+                              style={{
+                                flex: 1, paddingVertical: 12, minHeight: MIN_TARGET, justifyContent: 'center',
+                                alignItems: 'center', borderRadius: radius.sm,
+                                borderWidth: on ? 2 : hairline, borderColor: on ? t.ink : t.ring,
+                                backgroundColor: on ? t.brand : t.surface2,
+                              }}>
+                              <Text style={{ ...ty.body, fontWeight: on ? '700' : '400', color: on ? t.bg : t.ink2 }}>{n}</Text>
+                            </Pressable>
+                          );
+                        })}
                       </View>
                       <TextInput
                         value={body}

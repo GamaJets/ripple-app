@@ -59,6 +59,11 @@ export function useTrainerGoals() {
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState<LoadStatus>('loading');
   const rev = useAuthRevision();
+  // Bumped by `reload`. The read below is the only place the account is read,
+  // so a pulled refresh has to come back through here rather than growing a
+  // second path — the `writable` guard above is set inside it, and a second
+  // path that forgot to set it would publish {0,0} over the coach's targets.
+  const [nonce, setNonce] = useState(0);
 
   // Whether this session may write to the account. False until a read has
   // landed; never set by a read that failed. See the header.
@@ -123,7 +128,12 @@ export function useTrainerGoals() {
       }
     })();
     return () => { cancelled = true; };
-  }, [rev]);
+  }, [rev, nonce]);
+
+  /** Ask the account again. A refused read left `status` at 'error' and the
+   *  targets unwritable for the whole session; this is the way back without
+   *  killing the app. */
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   /**
    * Set one or both targets.
@@ -153,7 +163,7 @@ export function useTrainerGoals() {
     });
   }, []);
 
-  return { goals, setGoals: save, loaded, status };
+  return { goals, setGoals: save, loaded, status, reload };
 }
 
 // Re-exported rather than moved out from under its callers: the clamp is pure

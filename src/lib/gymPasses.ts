@@ -14,6 +14,10 @@
 
 import { assertWhole, capLimit, readAll } from './rowCap';
 import { assertWrote } from './wroteRows';
+// "Today" as the local calendar day. One definition, shared with memberships,
+// because a pass and a membership that disagree about what day it is at the
+// same front desk is worse than either being wrong on its own.
+import { todayIso } from './memberRecord';
 
 type Queryable = { from: (table: string) => any };
 
@@ -108,12 +112,80 @@ export function isExpired(p: Pick<GymPass, 'expiresOn'>, today: string): boolean
   return p.expiresOn < today;
 }
 
-/** A pass can be taken at the desk when it has visits left and has not expired. */
+/**
+ * A pass has visits left and has not expired.
+ *
+ * COUNTING ONLY. It says nothing about what the pass is good FOR, which is the
+ * other half of the question and the half that costs money to get wrong — see
+ * `passBlocker` below, which is what the door and `redeemPass` actually ask.
+ */
 export function isRedeemable(
   p: Pick<GymPass, 'usesTotal' | 'usesSpent' | 'expiresOn'>,
   today: string,
 ): boolean {
   return remainingUses(p) > 0 && !isExpired(p, today);
+}
+
+/** The part of a pass a spending decision needs. */
+export type SpendablePass = Pick<
+  GymPass, 'covers' | 'usesTotal' | 'usesSpent' | 'expiresOn' | 'passTypeName'
+>;
+
+/**
+ * Why this pass cannot pay for this, or null when it can.
+ *
+ * ── The one this exists for ───────────────────────────────────────────────
+ *
+ * /door redeemed on `holderId === memberId && passStatus(p, today) === 'live'`
+ * and checked NOTHING ELSE, so a ten-session personal-training block was spent
+ * by its holder walking through the turnstile. `covers` has said which is which
+ * since supabase/parts/370 and the door never read it. The member's credit is
+ * gone, the coach's paid hour is gone with it, and both the member and the
+ * owner read the record afterwards as correct — nothing on any screen says a
+ * PT credit was burned on a floor visit. /members has rendered the "Good for"
+ * column all along: the record knew, and the screen spending it did not.
+ *
+ * ── Why coverage is tested before the count ───────────────────────────────
+ *
+ * Because it is true whatever the count says, and it is the sentence that
+ * changes what the desk does next. "No visits left" sends them to sell another
+ * pack of the wrong thing; "this is a personal-training pass" sends them to
+ * check the member in on their membership, which is what should have happened.
+ *
+ * A null `covers` is UNKNOWN and is refused. It means the pass type could not
+ * be read, not that this is an ordinary day pass — and a coverage nobody knows
+ * is the one case where guessing spends somebody's hour by accident.
+ *
+ * Pure, so the door can grey a button out before the round trip and a test can
+ * prove it without a database. The same null-means-go shape as `passTypeBlocker`
+ * above and `slotBlocker` in gymPtSchedule.ts.
+ */
+export function passBlocker(
+  p: SpendablePass,
+  opts: { spendOn: PassCovers; today: string },
+): string | null {
+  const named = p.passTypeName ? `“${p.passTypeName}”` : 'That pass';
+  if (p.covers === null) {
+    return `${named} could not be matched to a pass type, so nothing here knows whether it pays for coming in or for an hour with a coach. It is not taken — an unknown coverage is never spent. Reload; if the type was deleted, reissue the pass.`;
+  }
+  if (p.covers !== opts.spendOn) {
+    return opts.spendOn === 'visit'
+      ? `${named} is a personal-training pass. It pays for an hour with a coach, not for coming in — taking it here would spend an hour the member has paid for and the coach is still owed. Check them in on their membership, or sell them a day pass.`
+      : `${named} is good for the door and classes, not for personal training. A one-to-one has to draw on a PT pass or be settled directly.`;
+  }
+  if (remainingUses(p) === 0) {
+    return opts.spendOn === 'pt'
+      ? 'That pass has no sessions left on it.'
+      : 'That pass has no visits left on it.';
+  }
+  if (isExpired(p, opts.today)) return `That pass expired on ${p.expiresOn}.`;
+  return null;
+}
+
+/** True when this pass may be spent on this, today. The button's enabled state;
+ *  `passBlocker` is the sentence that goes with a no. */
+export function spendable(p: SpendablePass, spendOn: PassCovers, today: string): boolean {
+  return passBlocker(p, { spendOn, today }) === null;
 }
 
 /**
@@ -458,7 +530,7 @@ export interface IssuePass {
   /** A name written at the desk, for a walk-in with no account. */
   holderName?: string | null;
   hostMemberId?: string | null;
-  /** ISO date. Defaults to today in UTC. */
+  /** ISO date. Defaults to today AT THE GYM — see `issuePass`. */
   issuedOn?: string;
   /** What was actually taken. Defaults to the type's list price. */
   paidCents?: number | null;
@@ -469,12 +541,34 @@ export interface IssuePass {
  * Sell a pass. Uses and expiry are copied from the type at the moment of sale,
  * so later edits to the price book never silently rewrite passes already in
  * someone's hand.
+ *
+ * ── The day, and why it is the local one ──────────────────────────────────
+ *
+ * `issued_on` and `expires_on` are `date` columns and `validDays` is counted
+ * off the first to get the second, so the day this is sold ON decides the day
+ * it dies. It used to be `new Date().toISOString().slice(0, 10)`, which is the
+ * day in UTC — and app/(client)/bookings.tsx states the rule this breaks in as
+ * many words: "a pass expires on a date at the gym, not at an instant in UTC".
+ *
+ * What that cost, in the two directions it goes wrong:
+ *
+ *   · A gym in Dubai (UTC+4) selling a seven-day pass at 09:00 on the 8th.
+ *     UTC still says the 7th until 04:00, so the pass is dated the 7th and
+ *     expires on the 14th — a day early, taken off somebody who paid for
+ *     seven days, at the desk, with the receipt in their hand.
+ *   · A gym in Los Angeles (UTC−7) selling one at 18:00 on the 8th. UTC has
+ *     already turned over, so the pass is dated the 9th — it reads as not yet
+ *     issued to `passBlocker` for the rest of that evening, and the member is
+ *     turned away from the gym they have just bought a pass for.
+ *
+ * `todayIso` builds the day from the local getters, which is the day everybody
+ * standing in the building agrees it is.
  */
 export async function issuePass(sb: Queryable, tenantId: string, p: IssuePass): Promise<void> {
   if (!p.holderId && !(p.holderName ?? '').trim()) {
     throw new Error('A pass needs either a member or a name to be issued to.');
   }
-  const issuedOn = p.issuedOn ?? new Date().toISOString().slice(0, 10);
+  const issuedOn = p.issuedOn ?? todayIso(new Date());
   const { error } = await sb.from('gym_passes').insert({
     tenant_id: tenantId,
     pass_type_id: p.passType.id,
@@ -497,9 +591,15 @@ export async function issuePass(sb: Queryable, tenantId: string, p: IssuePass): 
  * Take a visit off a pass at the desk — and record the visit it paid for.
  *
  * `uses_spent` is not written here — the database trigger recounts it from the
- * redemption rows, so the counter cannot drift from the audit trail. The guard
- * below is a courtesy that gives a readable error; the table's own constraint
- * is what actually holds the line.
+ * redemption rows, so the counter cannot drift from the audit trail. On the
+ * COUNT and the expiry, `passBlocker` below is a courtesy that gives a readable
+ * error and the table's own constraint is what holds the line.
+ *
+ * On the COVERAGE it is the only line there is. Nothing in the database stops a
+ * redemption row against a personal-training pass — `gym_pass_redemptions`
+ * cannot see what the visit was for — so this check is load-bearing, and it is
+ * here rather than in the screen precisely because a guard the caller has to
+ * remember is a guard the next caller will not.
  *
  * ── Why this writes gym_visits too ────────────────────────────────────────
  *
@@ -532,14 +632,29 @@ export async function issuePass(sb: Queryable, tenantId: string, p: IssuePass): 
  * `pass_id` when it is not supplied, so a door terminal that does not know the
  * gym cannot supply the wrong one. Callers that do know it pass it, because a
  * stated value needs no trigger to be right.
+ *
+ * ── `spendOn` has no default, on purpose ──────────────────────────────────
+ *
+ * It is required, and the options object is no longer optional, so the type
+ * checker asks every caller what this credit is being spent on. A default of
+ * 'visit' would have been silent in exactly the direction that lost the money:
+ * the caller that forgets is the caller taking a personal-training credit at
+ * the turnstile. A guard the caller has to remember to ask for is a guard the
+ * next caller will not — the same argument `checkIn` makes about admission.
  */
 export async function redeemPass(
   sb: Queryable,
   pass: GymPass,
   opts: {
+    /** What this credit is being spent on. The pass's own `covers` has to
+     *  agree, or nothing is written. */
+    spendOn: PassCovers;
     classId?: string | null;
     redeemedBy?: string | null;
     today?: string;
+    /** Written onto the VISIT, not onto the redemption — the door's override
+     *  reason, when staff admitted somebody against the gym's own answer. */
+    visitNote?: string | null;
     /** The gym, when the caller knows it. Left out, the table's own trigger
      *  fills it in from the pass. */
     tenantId?: string | null;
@@ -548,11 +663,20 @@ export async function redeemPass(
      *  this product does that yet; the flag exists so that when something does,
      *  it has to say so rather than quietly stop writing the visit. */
     recordVisit?: boolean;
-  } = {},
+  },
 ): Promise<void> {
-  const today = opts.today ?? new Date().toISOString().slice(0, 10);
-  if (remainingUses(pass) === 0) throw new Error('That pass has no visits left on it.');
-  if (isExpired(pass, today)) throw new Error(`That pass expired on ${pass.expiresOn}.`);
+  // The day AT THE GYM, not the day in UTC. `passBlocker` compares this against
+  // `issued_on` and `expires_on`, so the UTC version expired a pass at 04:00 in
+  // Dubai and admitted one that had not been issued yet at 18:00 in Los
+  // Angeles — both at the desk, both to somebody standing there having paid.
+  // See `issuePass` above for the arithmetic, and the rule in
+  // app/(client)/bookings.tsx: a pass expires on a date at the gym.
+  const today = opts.today ?? todayIso(new Date());
+  // One guard rather than three, and it is the same sentence the screen showed
+  // before the click — including the coverage check, which is the only one of
+  // them that costs a member an hour they paid for.
+  const blocked = passBlocker(pass, { spendOn: opts.spendOn, today });
+  if (blocked) throw new Error(blocked);
 
   const { error } = await sb.from('gym_pass_redemptions').insert({
     pass_id: pass.id,
@@ -573,6 +697,7 @@ export async function redeemPass(
     class_id: opts.classId ?? null,
     entered_at: new Date().toISOString(),
     source: 'desk',
+    note: (opts.visitNote ?? '').trim() || null,
   });
   if (vErr) {
     throw new Error(

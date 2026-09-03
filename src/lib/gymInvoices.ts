@@ -35,6 +35,7 @@
 import { assertWhole, capLimit } from './rowCap';
 import { assertWrote } from './wroteRows';
 import type { InvoiceStatus } from './gymRecord';
+import { readMinorAmount } from './coachMoney';
 
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args: any) => any };
 
@@ -90,41 +91,47 @@ export interface GymInvoiceRow {
 /* ── what an owner typed ───────────────────────────────────────────────────── */
 
 export type AmountInput =
-  | { kind: 'amount'; cents: number }
+  | { kind: 'amount'; minorUnits: number }
   | { kind: 'bad'; reason: string };
 
 /**
- * An amount of money, as typed, in whole units → minor units.
+ * An amount of money, as typed, in whole units → minor units of THIS gym's
+ * currency.
  *
- * Written here rather than left to `parseFloat` at the call site because the
- * interesting cases are the ones a person types by accident and none of them is
- * visible in a JSX file: a currency symbol, a thousands comma, a third decimal
- * place, a lone minus. `parseFloat('1,250.00')` is 1 — not an error, not NaN,
- * ONE — and the invoice for 1,250 goes out for a penny.
+ * The currency is an argument and there is no default, because the number of
+ * minor units in a whole one is not two everywhere. This function used to end
+ * `Math.round(Number(bare) * 100)` regardless, which is right for a sterling
+ * gym, files a ¥5,000 Tokyo invoice as ¥500,000, and refuses a Kuwaiti gym's
+ * 82.500 outright before storing 82.50 as 8.250 KWD — wrong by a factor of ten
+ * in the direction the member does not notice.
  *
- * Three decimal places are refused rather than rounded. `amount_cents` is an
- * integer, so 10.005 has to become either 1000 or 1001 and neither is what the
- * person meant; being told costs a keystroke and guessing costs the invoice.
+ * `readMinorAmount` in coachMoney.ts is the one reader for this in the product:
+ * it takes the decimal places from the currency, refuses a thousands separator
+ * rather than guessing which side of the Channel the typist grew up on, and
+ * refuses a third decimal place rather than rounding it. Only the two refusals
+ * that are about an INVOICE rather than about an amount are written here.
  */
-export function parseAmount(input: string | null | undefined): AmountInput {
-  const raw = String(input ?? '').trim();
-  if (!raw) return { kind: 'bad', reason: 'An invoice needs an amount.' };
-  // The gym's currency is whatever `tenants.currency` says. A symbol typed in
-  // front of the digits is not a second opinion on that and is simply dropped —
-  // refusing it teaches nothing.
-  const bare = raw.replace(/[,\s]/g, '').replace(/^[^\d.-]+/, '');
-  if (/-/.test(raw)) {
+export function parseAmount(
+  input: string | null | undefined,
+  currency: string | null | undefined,
+): AmountInput {
+  // Read before the shape check, so "−60" is refused as a negative invoice
+  // rather than as an unreadable one. A minus is not a typo; it is somebody
+  // meaning to reverse a bill, and the answer names the way to do that.
+  if (/-/.test(String(input ?? ''))) {
     return { kind: 'bad', reason: 'An invoice cannot be for a negative amount. To take one back, void it or write it off.' };
   }
-  if (!/^\d+(\.\d{1,2})?$/.test(bare)) {
-    return { kind: 'bad', reason: 'Enter the amount as a number — 60, or 82.50. Two decimal places at most.' };
+  const read = readMinorAmount(input, currency);
+  if (!read.ok) return { kind: 'bad', reason: read.reason };
+  // `gym_invoices.amount_cents` is a plain integer column, so anything past
+  // 2^31−1 is rejected by the database with a 22003 after the form has closed.
+  // The ceiling is in MINOR units, which is what the column holds — a
+  // zero-decimal currency therefore gets a hundred times the headroom in whole
+  // units, which is the arithmetic those currencies are quoted in.
+  if (read.minorUnits > 2_147_483_647) {
+    return { kind: 'bad', reason: 'That is more than Repple will record on one invoice — check the zeros.' };
   }
-  const cents = Math.round(Number(bare) * 100);
-  if (!Number.isFinite(cents)) return { kind: 'bad', reason: 'That is not an amount.' };
-  // `amount_cents` is a plain integer column, so anything past 2^31-1 is
-  // rejected by the database with 22003 after the form has closed.
-  if (cents > 2_147_483_647) return { kind: 'bad', reason: 'That is more than Repple will record on one invoice — check the zeros.' };
-  return { kind: 'amount', cents };
+  return { kind: 'amount', minorUnits: read.minorUnits };
 }
 
 export interface InvoiceDraft {
@@ -150,7 +157,7 @@ export function invoiceBlocker(d: InvoiceDraft, currency: string | null): string
   if (!currency) {
     return 'This gym has not set its currency, so there is nothing to bill in. An invoice is what somebody is asked to pay, and no default here would be right for half the gyms running Repple.';
   }
-  const amt = parseAmount(d.amount);
+  const amt = parseAmount(d.amount, currency);
   if (amt.kind === 'bad') return amt.reason;
   if (!isoDay(d.issuedOn)) return 'The issue date has to be a real date — YYYY-MM-DD.';
   // A due date is optional and its absence is a decision: an invoice with no

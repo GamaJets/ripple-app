@@ -30,11 +30,13 @@ import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { isoDate } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   fetchEquipment, addEquipment, setStatus, recordService,
   summariseRegister, needsAttention, serviceState, nextServiceDue,
   type Equipment, type ServiceState,
 } from '../../src/lib/gymEquipment';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * Today, on the calendar the owner is standing in — not UTC's.
@@ -107,12 +109,21 @@ export default function OwnerEquipment() {
       // checking whether anything is due a service would have been shown a
       // clean board by a query that failed, and walked past a treadmill that
       // was overdue. Null keeps it "not known" and `failed` says which.
-      setItems(null);
+      //
+      // What it no longer does is throw away a register that HAD come back. The
+      // Try Again button, and now the pull, both run this loader, and a refusal
+      // on the second read says nothing about the first — the kit on screen is
+      // still what the last good read returned and the stamp above still says
+      // when. Only a first read that has never landed leaves this null.
       setFailed(true);
     }
   }, [tenant?.id]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // The register is the only server read on this screen — the summary, the
+  // attention queue and the list below are all derived from it.
+  const pull = usePullToRefresh(load);
 
   const today = todayIso();
   const loaded = items !== null;
@@ -238,10 +249,11 @@ export default function OwnerEquipment() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
+        refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name="chevron" size={20} color={t.ink3} />
+            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Equipment</Text>
         </View>
@@ -279,11 +291,12 @@ export default function OwnerEquipment() {
             // RefreshControl on it, and there was no retry anywhere else on the
             // screen either — so the only instruction offered to an owner whose
             // maintenance board had failed to load was a gesture that does
-            // nothing. The button under "All kit" below is the retry; this says
-            // so instead.
+            // nothing. The gesture is real now, and the button under "All kit"
+            // below runs the same read.
             <Flag tone={t.crit} style={{ marginTop: sp.md }}>
-              These are blank because the read failed, not because the register is empty. Read it
-              again from the button below before assuming nothing is due.
+              {loaded
+                ? 'The register could not be read again just now. These are from the last read that came back — the stamp at the top says when.'
+                : 'These are blank because the read failed, not because the register is empty. Pull down, or read it again from the button below, before assuming nothing is due.'}
             </Flag>
           ) : loaded && list.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
@@ -345,10 +358,11 @@ export default function OwnerEquipment() {
         <Section>
           <SectionHead title={loaded && list.length ? `All kit · ${list.length}` : 'All kit'} />
           {failed ? (
-            <View>
+            <View style={{ marginBottom: loaded && list.length ? sp.md : 0 }}>
               <Flag tone={t.crit}>
-                The register could not be read. This is not a list of your kit — it is nothing at
-                all. Check your connection and read it again.
+                {loaded
+                  ? 'The register could not be read again just now. The kit below is the last read that came back, not a fresh one.'
+                  : 'The register could not be read. This is not a list of your kit — it is nothing at all. Check your connection and read it again.'}
               </Flag>
               {/* The control the two failure messages point at. Without it both
                   of them told an owner to try again and gave them nothing to
@@ -357,13 +371,17 @@ export default function OwnerEquipment() {
                 <Ghost label="Try Again" onPress={() => { void load(); }} />
               </View>
             </View>
-          ) : !loaded ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
+          ) : null}
+          {!loaded ? (
+            failed ? null : <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
           ) : list.length === 0 ? (
+            // "Nothing recorded yet" is a claim about a read that succeeded.
+            failed ? null : (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nothing recorded yet. Add a treadmill, a rack, a set of bikes — anything you would
               notice missing.
             </Text>
+            )
           ) : list.map((e, i) => {
             const st = serviceState(e, today);
             const retired = e.status === 'retired';

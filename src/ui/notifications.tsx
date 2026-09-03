@@ -63,6 +63,9 @@ import {
   inboxControls, clearReadPrompt, deletedNote, clearedNote,
 } from '../lib/notifyInbox';
 import { writeFailure } from '../lib/wroteRows';
+// 44pt, and the arithmetic that gets a small control there. See
+// ROW_CONTROL_SIZE below.
+import { hitSlopFor } from '../lib/a11y';
 import type { AppVariant } from '../lib/variant';
 import { useTheme } from './components';
 import { Icon, type IconName } from './Icon';
@@ -95,6 +98,16 @@ export interface InboxItem {
  *  share a phone at the gym and must not see each other's inbox in the gap
  *  before the server answers. */
 const cacheKey = (uid: string) => `repple.notifications:${uid}`;
+
+/**
+ * How big the two icon buttons on a row actually are: a 16pt glyph inside 4pt
+ * of padding.
+ *
+ * Named rather than left as an 8 in a `hitSlop` prop, because the number that
+ * matters is not the slop — it is the drawn size, and the slop is derived from
+ * it by `hitSlopFor`. Change the icon or the padding and the target follows.
+ */
+const ROW_CONTROL_SIZE = 24;
 
 /**
  * Rows written by the `notify-message` edge function — every row in this table
@@ -526,7 +539,7 @@ export function NotificationBell({ group }: { group: AppVariant }) {
         pointerEvents="none"
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={{ position: 'absolute', top: badge.kind === 'count' ? -4 : 2, right: badge.kind === 'count' ? -4 : 2 }}
+        style={{ position: 'absolute', top: badge.kind === 'count' ? -4 : 2, end: badge.kind === 'count' ? -4 : 2 }}
       >
         {badge.kind === 'count' ? (
           <View style={{ minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: radius.pill, backgroundColor: t.brand, borderWidth: 2, borderColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
@@ -821,13 +834,24 @@ export function NotificationInbox(f: InboxFraming) {
 
             {/* Back to unread, on read rows only — on an unread row it is a
                 control that cannot do anything. `eye-off` because that is what
-                it means: not seen. */}
+                it means: not seen.
+
+                ── The slop, and why it is not 8 ──────────────────────────────
+                A 16pt icon in 4pt of padding is 24pt drawn. `hitSlop={8}` takes
+                that to 40 — four short of the 44 src/lib/a11y.ts requires, and
+                short in BOTH axes, on a row where the next control along is
+                this one's destructive neighbour eight points away. Two 40pt
+                targets side by side, tapped one-handed while walking out of a
+                gym, is how somebody deletes the message they meant to mark
+                unread. `hitSlopFor` computes the slop that brings a control of a
+                given size up to 44 — it is the same arithmetic every time and
+                this file is the last place it should be done by eye. */}
             {controls.markUnread && item.read ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Mark ${item.heading ?? 'this notification'} as unread`}
                 onPress={() => void onMarkUnread(item)}
-                hitSlop={8}
+                hitSlop={hitSlopFor(ROW_CONTROL_SIZE)}
                 style={{ padding: 4 }}
               >
                 <Icon name="eye-off" size={16} color={t.ink3} />
@@ -844,7 +868,7 @@ export function NotificationInbox(f: InboxFraming) {
                 accessibilityRole="button"
                 accessibilityLabel={`Delete ${item.heading ?? 'this notification'}`}
                 onPress={() => void onDelete(item)}
-                hitSlop={8}
+                hitSlop={hitSlopFor(ROW_CONTROL_SIZE)}
                 style={{ padding: 4 }}
               >
                 <Icon name="minus" size={16} color={t.crit} />

@@ -44,6 +44,7 @@ import { money } from '@lib/gymRecord';
 import { payPolicyOf, PAY_POLICY_LABEL, type PayPolicyCode } from '@lib/gymPolicy';
 import { isoDate } from '@lib/format';
 import { assertWhole, capLimit } from '@lib/rowCap';
+import { Banner } from '@/components/Banner';
 
 /** How many months back a coach can look. */
 const PERIODS = 12;
@@ -943,16 +944,6 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
       </div>
       {note ? <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 3 }}>{note}</div> : null}
     </div>
-  );
-}
-
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
   );
 }
 

@@ -29,6 +29,37 @@
 // must not be one: the tick belongs to the client, in `habit_logs`, under their
 // own policy. A coach marking their own client's habit complete would be a
 // second answer to a question only one person can answer.
+//
+// ── Every read here is paged, and none of them used to be ──────────────────
+//
+// All four reads below were bare `select()`s with no `.limit()` and no page
+// loop, so PostgREST answered each of them with at most a thousand rows and
+// said nothing about it. Each one truncates into a different wrong sentence,
+// and none of them looks broken:
+//
+//   · `clients` is what the picker is built from, so a coach past a thousand
+//     clients simply cannot select the ones off the end — they are not on the
+//     screen and there is nothing to say they are missing.
+//   · the `profiles` lookup was a bare `.in()` over those ids. Past a thousand
+//     it truncates to dashes, and long before that the query string 414s —
+//     src/lib/idLookup.ts is the write-up.
+//   · `coach_checklist_items` is one coach × one client and is small today,
+//     but it is the denominator of every adherence figure on this screen: an
+//     item that falls off the read is a line the coach set, still on the
+//     client's phone, that this screen does not know exists.
+//   · `habit_logs` is the worst of the four, and it is the one the roadmap
+//     named. It is the client's ticks, and a truncated tick list does not make
+//     a rate smaller — it makes it FALSE. Every day whose rows fell off the end
+//     reads as a day the client did nothing, on a screen a coach uses to judge
+//     whether somebody is engaging. The window bounds it, but a client ticking
+//     six habits a day over a 28-day window against a cap that is shared with
+//     nothing is a bound, not a guarantee.
+//
+// `readAll` and `readByIds` are the house answer (src/lib/rowCap.ts,
+// src/lib/idLookup.ts): both check `error` on every page and THROW on a
+// truncation, so a read that could not be finished arrives here as a failure —
+// which every one of these already renders honestly as null-not-empty — rather
+// than as a short set wearing the whole set's clothes.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
@@ -36,6 +67,8 @@ import {
   recentWindow, summariseAdherence, setItemLine, dayLabel,
   type DayWindow, type TickRow, type AdherenceSummary,
 } from '@lib/adherence';
+import { readAll } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
 
 /** One row of coach_checklist_items, as this screen holds it. */
 interface Item {
@@ -111,43 +144,76 @@ export default function CoachChecklists() {
   // The coach's book. Scoped in the query, not filtered after it lands.
   const loadClients = useCallback(async (coachId: string) => {
     setClientsErr(null);
-    const { data, error } = await supabase.from('clients').select('id').eq('trainer_id', coachId);
-    if (error) {
+    let ids: string[];
+    try {
+      // Ordered by the primary key, which `readAll` requires and which
+      // `clients.id` satisfies — it IS the primary key (parts/01-schema.sql:49)
+      // and so cannot tie. The book is what the picker is made of, so a cut
+      // here does not shorten a column; it removes people from the screen.
+      const rows = await readAll<{ id: string }>(
+        (from, to) => supabase.from('clients').select('id')
+          .eq('trainer_id', coachId)
+          .order('id', { ascending: true })
+          .range(from, to),
+        'your client records',
+      );
+      ids = rows.map((r) => r.id).filter(Boolean);
+    } catch (e) {
       // Null, not []. An empty list here reads as "you have no clients", which
       // is a statement about this coach's book rather than about the read.
       setClients(null);
-      setClientsErr(error.message);
+      setClientsErr((e as { message?: string } | null)?.message ?? 'The read did not come back.');
       return;
     }
-    const ids = (data ?? []).map((r) => (r as { id: string }).id);
     if (!ids.length) { setClients([]); return; }
 
-    const { data: profs, error: pErr } = await supabase
-      .from('profiles').select('id, full_name').in('id', ids);
+    // Chunked and paged rather than one `.in()`: see the header. A failure is
+    // caught here and NOT allowed to blank the book — the ids came back, the
+    // people are real, and only their names are unknown.
+    let nameBy = new Map<string, string>();
+    let named = true;
+    try {
+      const profs = await readByIds<{ id: string; full_name: string | null }>(
+        ids,
+        (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+          .in('id', chunk).order('id', { ascending: true }).range(from, to),
+        'your clients’ names',
+      );
+      nameBy = new Map(profs.map((r) => [r.id, (r.full_name ?? '').trim()]));
+    } catch {
+      named = false;
+    }
     // A name that cannot be read is a dash, never a substitute. The client is
     // still on the book and still needs a checklist.
-    setNamesKnown(!pErr);
-    const nameBy = new Map(
-      (profs ?? []).map((p) => {
-        const r = p as { id: string; full_name: string | null };
-        return [r.id, (r.full_name ?? '').trim()];
-      }),
-    );
+    setNamesKnown(named);
     setClients(ids.map((id) => ({ id, name: nameBy.get(id) || null })));
   }, []);
 
   const loadItems = useCallback(async (coachId: string, clientId: string) => {
     setItemsErr(null);
     setWriteErr(null);
-    const { data, error } = await supabase
-      .from('coach_checklist_items')
-      .select(COLS)
-      .eq('coach_id', coachId)
-      .eq('client_id', clientId)
-      .order('sort', { ascending: true })
-      .order('created_at', { ascending: true });
-    if (error) { setItems(null); setItemsErr(error.message); return; }
-    setItems((data ?? []) as unknown as Item[]);
+    try {
+      // The display order is kept and `id` is appended to make it TOTAL:
+      // `sort` is a coach-set integer that ties freely — two lines added in the
+      // same second share a `sort` and a `created_at` — and a tied order across
+      // separate paged requests drops rows silently.
+      const rows = await readAll<Item>(
+        (from, to) => supabase
+          .from('coach_checklist_items')
+          .select(COLS)
+          .eq('coach_id', coachId)
+          .eq('client_id', clientId)
+          .order('sort', { ascending: true })
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, to),
+        'this client’s checklist',
+      );
+      setItems(rows);
+    } catch (e) {
+      setItems(null);
+      setItemsErr((e as { message?: string } | null)?.message ?? 'The read did not come back.');
+    }
   }, []);
 
   /**
@@ -161,21 +227,30 @@ export default function CoachChecklists() {
   const loadTicks = useCallback(async (clientId: string) => {
     setTicksErr(null);
     const w = recentWindow();
-    const { data, error } = await supabase
-      .from('habit_logs')
-      .select('habit, done_on')
-      .eq('user_id', clientId)
-      .gte('done_on', w.start)
-      .lte('done_on', w.end)
-      .order('done_on', { ascending: false });
-    if (error) {
+    try {
+      // Ordered by the primary key, not by `done_on`. `done_on` is a DATE, so
+      // every tick a client made on the same day ties — which is most of them —
+      // and `summariseAdherence` reads the rows into sets and sorts what it
+      // needs, so nothing downstream wanted the descending order this used to
+      // ask for.
+      const rows = await readAll<TickRow>(
+        (from, to) => supabase
+          .from('habit_logs')
+          .select('habit, done_on')
+          .eq('user_id', clientId)
+          .gte('done_on', w.start)
+          .lte('done_on', w.end)
+          .order('id', { ascending: true })
+          .range(from, to),
+        'this client’s ticks',
+      );
+      setTicks({ window: w, rows });
+    } catch (e) {
       // Null, never []. An empty tick list reads as "they did none of it",
       // which is the single most damaging thing this screen could say wrongly.
       setTicks(null);
-      setTicksErr(error.message);
-      return;
+      setTicksErr((e as { message?: string } | null)?.message ?? 'The read did not come back.');
     }
-    setTicks({ window: w, rows: (data ?? []) as unknown as TickRow[] });
   }, []);
 
   useEffect(() => { if (me?.id) void loadClients(me.id); }, [me?.id, loadClients]);

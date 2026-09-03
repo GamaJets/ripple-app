@@ -29,7 +29,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightDeltaIn, kgToLb, type WeightUnit } from '../../src/lib/units';
 import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaLabel';
-import { shortDayLabel } from '../../src/lib/bodyFigures';
+import { shortDayLabel, todayISO } from '../../src/lib/bodyFigures';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 // Which week of the block today belongs to. See src/lib/clientBlock.ts.
@@ -58,6 +58,7 @@ import {
   showBody, showFuel, showWeek,
   checklist, checklistDone, checklistLeft, nextTodo, showChecklist,
 } from '../../src/lib/firstRun';
+import { FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
 // The month and weekday names used to be two hardcoded English arrays here,
 // rendered as `{DAYS[d.getDay()]} {d.getDate()} {MONTHS[d.getMonth()]}` on the
@@ -75,24 +76,40 @@ export default function Home() {
   const router = useRouter();
   const c = useClientData();
   const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
-  const { getProgram, status: programStatus } = useAssignedPrograms();
+  const assigned = useAssignedPrograms();
+  const { getProgram, status: programStatus } = assigned;
   const coachProgram = getProgram(c.id);
   // Under 'error' an empty log means the history could not be read, not that
   // there is none — so the streak, the week's session count and the PR count
   // below are unknowns rather than zeroes. This is the first screen of the app,
   // and "0 of 4 this week" over a broken streak is the first thing a client who
   // trained four times would read about their own week.
-  const logKnown = logStatus !== 'error';
-  const nutriAdjust = useCoachNutrition().get(c.id);
-  const coachNotes = useCoachFeedback().getFeedback(c.id);
+  //
+  // The gate was `!== 'error'`, which admits both of the other two answers that
+  // are not a whole log. 'loading' printed the whole week — a streak, a session
+  // count, a tonnage and a PR count — on the first frame, before the read came
+  // back at all. And 'partial' is not an edge case here: src/ui/workoutLog.tsx
+  // notes that four sessions a week at twenty sets apiece passes PostgREST's
+  // thousand-row cap inside three months, so for a committed member 'partial'
+  // is the ORDINARY state, and every figure below was a total computed from the
+  // most recent thousand rows and presented as their whole history.
+  //
+  // `isWhole` is the gate src/ui/loadStatus.ts asks for and the one
+  // app/(client)/membership.tsx already applies to this same log. The two
+  // notices below say which of the three it is.
+  const logKnown = isWhole(logStatus);
+  const coachNutrition = useCoachNutrition();
+  const nutriAdjust = coachNutrition.get(c.id);
+  const coachFeedback = useCoachFeedback();
+  const coachNotes = coachFeedback.getFeedback(c.id);
   // Two slots, not one. `latest` is the newest notice from this client's COACH
   // and `latestGym` the newest from their GYM: they are different authors
   // addressing different groups, and the block below that says "From Your
   // Coach" may only ever show the first. Both are the newest of their kind —
   // the rest live in app/(client)/notices.tsx, which is what stops a notice
   // being readable for one day and then nowhere.
-  const { latest: ann, latestGym: gymAnn } = useAnnouncements();
-  const { water, waterGoal, addWater, removeWater } = useHabits();
+  const { latest: ann, latestGym: gymAnn, reload: reloadAnnouncements } = useAnnouncements();
+  const { water, waterGoal, addWater, removeWater, reload: reloadHabits } = useHabits();
   // Readiness, its inputs and its caveats, from the one shared derivation.
   //
   // This screen used to assemble it here out of five providers, and so did
@@ -140,15 +157,6 @@ export default function Home() {
     received: myInvites, status: invitesStatus, reload: reloadInvites,
     acceptInvite: acceptCoachInvite, declineInvite: declineCoachInvite,
   } = useInvites();
-  // The home screen tells a member whose invitation check failed to "pull down
-  // to try again", and until now the ScrollView had no RefreshControl at all —
-  // so the gesture did nothing, and the only remedy that worked was killing the
-  // app. The three server reads this screen renders and reports on are the
-  // three it asks for again.
-  const pull = usePullToRefresh(useCallback(() => {
-    reloadInvites(); reloadLog(); void refreshSessions();
-  }, [reloadInvites, reloadLog, refreshSessions]));
-
   // ── the three sentences about being offline that nothing rendered ───────
   //
   // `offlineBanner` and `lapsedNote` were both written, both tested and both
@@ -179,6 +187,28 @@ export default function Home() {
   // a live WHOOP token exactly that, for exactly this reason.
   const wearableKnown = Object.keys(wearables.states).length > 0;
   const wearableConnected = Object.values(wearables.states).some((v) => v === 'connected');
+
+  // The home screen tells a member whose invitation check failed to "pull down
+  // to try again", and before this the ScrollView had no RefreshControl at all
+  // — the gesture did nothing and the only remedy was killing the app.
+  //
+  // It then asked for three reads: the invitations, the training log and the
+  // booked sessions. This screen draws on ten. Weight and body fat come from
+  // the profile, the plan from the assignment, the calorie target from the
+  // coach's adjustment, the notes from the coach's feedback, the notice from
+  // announcements, the water count from habits, the fuel row from the food log
+  // and the watch panel from the wearables — and none of those moved when
+  // somebody pulled. A home screen that refreshes a third of itself under one
+  // gesture is worse than one that refreshes nothing, because the parts that
+  // did not move now look confirmed.
+  const pull = usePullToRefresh(useCallback(() => {
+    reloadInvites(); reloadLog(); void refreshSessions();
+    c.reload(); assigned.reload(); void coachNutrition.reload(); coachFeedback.reload();
+    reloadAnnouncements(); reloadHabits(); foodLog.reload(); void wearables.syncAll();
+  }, [
+    reloadInvites, reloadLog, refreshSessions, c.reload, assigned,
+    coachNutrition, coachFeedback, reloadAnnouncements, reloadHabits, foodLog.reload, wearables,
+  ]));
 
   const solo = c.coachingMode === 'solo';
   // Whether to offer a way to FIND a coach. Deliberately not `solo`: that is
@@ -309,8 +339,22 @@ export default function Home() {
   // Real logged intake (shared with the Meals tab + Food Log); reflects what was actually eaten today.
   const consumed = { kcal: foodToday.kcal, p: foodToday.protein, cbs: foodToday.carbs, f: foodToday.fat };
   const burn = macros ? dayBurn(macros, wToday) : null;
-  const _todayKey = new Date().toISOString().slice(0, 10);
-  const trainedToday = log.some((e) => (e.t || '').slice(0, 10) === _todayKey);
+  // Both sides of this comparison are the LOCAL day, and they used to be the
+  // UTC one on both sides — `new Date().toISOString().slice(0, 10)` against a
+  // slice of the entry's own ISO string. That is not a harmless pair of
+  // matching mistakes: for a member in Auckland every session logged after 1pm
+  // carries tomorrow's UTC date, so "Ready to Train" stayed on the card all
+  // afternoon for somebody who had already trained, and then at midnight UTC —
+  // lunchtime there — the whole day's training stopped counting as today's.
+  // `todayISO` is the local calendar day and says in its own header that a
+  // string slice is not it.
+  const _todayKey = todayISO();
+  const trainedToday = log.some((e) => {
+    const d = new Date(e.t || '');
+    // An unparseable stamp is not evidence of a session today. It is dropped
+    // rather than formatted, which would compare 'NaN-NaN-NaN' against a date.
+    return Number.isNaN(d.getTime()) ? false : todayISO(d) === _todayKey;
+  });
   // The third copy of this sum, and it had both of the faults the other two
   // were fixed for: it ADDED the day's burn to a target that already assumed
   // movement, and clamped at zero so Home could never say a client was over.
@@ -441,7 +485,7 @@ export default function Home() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Personalise your plan</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>One minute — tailors your workouts and meals to you.</Text>
                 </View>
-                <Icon name="chevron" size={16} color={t.ink3} />
+                <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
               </View>
             </Card>
           ) : null}
@@ -549,9 +593,18 @@ export default function Home() {
           <Notice tone={t.warn} kicker="Today" title="We couldn’t check for a coach plan"
             note={`Today's focus below comes from ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it.`} />
         ) : null}
-        {!logKnown ? (
+        {logStatus === 'error' ? (
           <Notice tone={t.warn} kicker="Today" title="We couldn’t read your training log"
             note="Your streak and this week's sessions are shown as dashes because we can't see them — not because they're zero. Nothing has been lost." />
+        ) : logStatus === 'partial' ? (
+          // A separate sentence, because it is a separate situation and the
+          // reader's question is different: nothing failed, there is simply
+          // more history than one read returns, and a streak or a total taken
+          // over the part that came back would be wrong by however much did
+          // not. Only the FIGURES are withheld — everything on this screen
+          // driven by the sessions themselves is unaffected.
+          <Notice tone={t.warn} kicker="Today" title="You have more training logged than we can read at once"
+            note="Your streak, this week's sessions, your tonnage and your PRs are shown as dashes because they would be counted over part of your history rather than all of it. Nothing is missing from your log." />
         ) : null}
 
         {/* ── the one card: today's action ────────────────────────────────── */}
@@ -658,13 +711,13 @@ export default function Home() {
                     print — not "of null glasses", and not a fallback eight —
                     so the count stands on its own and the line below offers
                     the screen that sets one. */}
-                <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 3 }}>
+                <Text style={{ ...ty.caption, color: t.ink3, marginStart: 3 }}>
                   {waterGoal != null ? `of ${waterGoal} glasses` : water === 1 ? 'glass today' : 'glasses today'}
                 </Text>
               </View>
               {waterGoal == null ? (
                 <Pressable onPress={() => router.push('/(client)/habits')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Set a daily water goal">
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>Set a daily goal ›</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>Set a daily goal {FORWARD_CHAR}</Text>
                 </Pressable>
               ) : null}
             </View>

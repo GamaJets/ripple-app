@@ -1054,6 +1054,10 @@ export interface MyCancellationPolicy {
   setApplies: (v: boolean) => void;
   setNoticeHours: (v: number) => void;
   setFee: (v: number | null) => void;
+  /** Read the `trainers` columns and the gym's currency again. Under 'error'
+   *  the policy on screen is the empty default and NOT the coach's own, so a
+   *  screen stating a fee needs a way to ask a second time. */
+  reload: () => void;
 }
 
 export function useMyCancellationPolicy(): MyCancellationPolicy {
@@ -1066,6 +1070,10 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
   // Nothing is written back before the server copy has been read for this uid,
   // or the empty defaults above would clobber a policy the coach already has.
   const [synced, setSynced] = useState(false);
+  // Bumped by `reload`. `synced` is cleared with it, which is what keeps the
+  // debounced write below from firing the empty defaults at the server while
+  // the re-read is in flight — the same guard the first read already relies on.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     // Not issued at all off the coach app. These are the SIGNED-IN user's own
@@ -1100,6 +1108,12 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
+  }, [nonce]);
+
+  const reloadPolicy = useCallback(() => {
+    setSynced(false);
+    setStatus(USE_SUPABASE && VARIANT === 'trainer' ? 'loading' : 'ready');
+    setNonce((n) => n + 1);
   }, []);
 
   // The database refuses `applies` without an amount, so the same rule is stated
@@ -1124,7 +1138,7 @@ export function useMyCancellationPolicy(): MyCancellationPolicy {
     return () => clearTimeout(timer);
   }, [applies, noticeHours, fee, uid, synced, blocker]);
 
-  return { applies, noticeHours, fee, currency, status, blocker, setApplies, setNoticeHours, setFee };
+  return { applies, noticeHours, fee, currency, status, blocker, setApplies, setNoticeHours, setFee, reload: reloadPolicy };
 }
 
 /* ── The waitlist, from the client's side ──────────────────────────────────

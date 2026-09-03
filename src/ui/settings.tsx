@@ -284,12 +284,19 @@ async function tokenRowsPresent(tokens: string[]): Promise<boolean | null> {
  * is nothing to delete, and that is success without a delete being issued at
  * all — the case assertWrote would have wrongly called a failure.
  *
+ * Exported for ONE other caller: src/ui/signOutState.ts, which runs it while
+ * the session is still alive so that ending a session also ends this handset's
+ * registration. It is not exported for general use and there is no second copy
+ * of this logic anywhere — the two attempts, the identity check and the verify
+ * are the parts that are easy to get wrong, and a sign-out is the moment they
+ * matter most.
+ *
  * Resolves TRUE only when nothing in `push_tokens` can reach this handset any
  * more. A failed delete and a failed verify both resolve FALSE: "we could not
  * check" is not "it is gone", and this is the switch where the difference is
  * the member getting a notification they turned off.
  */
-async function revokePushToken(cancelled: () => boolean): Promise<boolean> {
+export async function revokePushToken(cancelled: () => boolean): Promise<boolean> {
   const tokens = await handsetPushTokens();
   // This handset has never registered and the OS will not name a token for it,
   // so there is no row that could be ours. Nothing to delete is not a failure.

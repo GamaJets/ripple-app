@@ -109,8 +109,12 @@ export default function StandingAppointments() {
   // materialiser respects, so the sessions do not quietly re-book themselves.
   const { pauses, status: pauseStatus, reload: reloadPauses } = useSeriesPauses();
   const [pauseFor, setPauseFor] = useState<RecurringSeries | null>(null);
-  const pull = usePullToRefresh(useCallback(() => { void reloadSeries(); refreshSessions(); void reloadPauses(); }, [reloadSeries, refreshSessions, reloadPauses]));
-  const { policy: cancelPolicy, status: policyStatus } = useCancellationPolicy();
+  // The fourth read on this screen. Every cancellation offered here is priced
+  // against this policy and every sentence about a fee comes out of it, and it
+  // was outside the gesture — so a gym that changed its notice period was still
+  // being quoted the old one however often the member pulled.
+  const { policy: cancelPolicy, status: policyStatus, reload: reloadPolicy } = useCancellationPolicy();
+  const pull = usePullToRefresh(useCallback(() => { void reloadSeries(); void refreshSessions(); void reloadPauses(); reloadPolicy(); }, [reloadSeries, refreshSessions, reloadPauses, reloadPolicy]));
   const cd = useClientData();
 
   // TF-32: the coach's name comes from the thread peer, never from

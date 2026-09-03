@@ -36,6 +36,7 @@ import {
 import { playlistLine, playlistSavedLine } from '../../src/lib/spotifyPlayback';
 import { reportError } from '../../src/lib/reportError';
 import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 
@@ -115,14 +116,24 @@ export default function Music() {
    finally { setMineBusy(false); }
  }, []);
 
- useEffect(() => { (async () => {
+ // The connection itself is a read, and so is the account's playlist list
+ // behind it. Split out of the effect so the gesture and the mount run the
+ // same thing rather than two versions of it.
+ const readSpotify = useCallback(async () => {
    const st = await spotifyStatus();
    if (!st.connected) return;
    setConn((p) => ({ ...p, spotify: true }));
    setSpotifyName(st.name);
    setNeedsReconnect(st.needsReconnect);
-   if (!st.needsReconnect) loadMine();
- })(); }, [loadMine]);
+   if (!st.needsReconnect) await loadMine();
+ }, [loadMine]);
+
+ useEffect(() => { void readSpotify(); }, [readSpotify]);
+
+ // A token that expired, or a playlist saved on the desktop app: both show up
+ // only on a re-read, and the screen's own "Could not read your playlists"
+ // had nothing to press.
+ const pull = usePullToRefresh(readSpotify);
 
  const toggleService = async (id: Service) => {
    // Only Spotify is offered now, so this is the whole of the list. Kept as a
@@ -244,7 +255,7 @@ export default function Music() {
 
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
- <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+ <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
  <Ghost icon="back" onPress={() => router.back()} />

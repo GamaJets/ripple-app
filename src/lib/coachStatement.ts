@@ -44,7 +44,7 @@
 //
 // ── What the statement claims ──────────────────────────────────────────────
 //
-// Seven sections, each with its period named and its source named:
+// Ten sections, each with its period named and its source named:
 //
 //   sessions delivered      counted, never priced — see `SESSIONS_NOT_MONEY`
 //   packs and memberships   what Stripe told this app it charged
@@ -53,6 +53,18 @@
 //   invoices issued         the coach's own documents, their own claim
 //   late-cancellation fees  recorded here, charged by nobody here
 //   payouts that arrived    what Stripe says reached the bank, never netted
+//   money given back        refunds on a sale or a renewal, never netted
+//   chargebacks raised      what a card issuer took back, never netted
+//   costs recorded here     what the coach says went out (part 450)
+//
+// The last three are the ones this document did not have, and their absence was
+// not a gap so much as a slant: every figure on it was money IN. A coach who
+// refunded four sales, lost a chargeback and paid a year of gym rent handed
+// their accountant a statement showing the sales at full value and no penny of
+// any of it, and this app held rows for all three. Nothing is SUBTRACTED by
+// adding them — see `REFUNDS_ARE_NOT_NETTED`, `DISPUTES_ARE_NOT_NETTED` and
+// `COSTS_ARE_NEVER_NETTED`, which are three statements of one rule — but both
+// sides are now on the page for the person whose job is the difference.
 //
 // ── What it refuses to claim ───────────────────────────────────────────────
 //
@@ -91,7 +103,12 @@ import type { LoadStatus } from '../ui/loadStatus';
 // currency it was not told, and it knows which currencies have no minor unit,
 // so ¥50,000 does not print as ¥500. A statement is the last place that may
 // hold a second opinion about how much money something is.
-import { minorMoney, wholeMoney, sumTaken, combineTaken, ZERO_DECIMAL, type Taken, type TakenRow } from './coachMoney';
+// `currencyDecimals` rather than `ZERO_DECIMAL` — the plain-digit writers below
+// need the WHOLE answer to how many places a currency has, not half of it, and
+// half of it is what put a Kuwaiti coach's sales into an accountant's
+// spreadsheet at ten times their value. There is one place in this app that
+// knows the three families and it is coachMoney.ts.
+import { minorMoney, wholeMoney, sumTaken, combineTaken, currencyDecimals, type Taken, type TakenRow } from './coachMoney';
 // The same five replacements the invoice uses, rather than a fifth private
 // copy. Every value on this page that a person typed goes through it.
 import { escapeHtml } from './coachInvoice';
@@ -100,6 +117,11 @@ import { escapeHtml } from './coachInvoice';
 // second thing to get wrong, and getting it wrong puts money that has not
 // arrived into a figure an accountant reconciles a bank statement against.
 import { payoutState } from './coachPayouts';
+// The three sentences the costs screen already says, imported rather than
+// restated. A cost means the same thing on a document as it does on the screen
+// it was typed into, and a second copy of "nothing here is netted" is the copy
+// that gets softened on one surface and left alone on the other.
+import { COST_IS_YOUR_WORD, COSTS_ARE_NEVER_NETTED, COSTS_ARE_NOT_TAX_ADVICE } from './coachCosts';
 
 /* ── the period ───────────────────────────────────────────────────────────── */
 
@@ -375,17 +397,44 @@ export interface PeriodSplit<T> {
    * is exactly the quiet subtraction this codebase keeps banning.
    */
   undated: number;
+  /**
+   * Rows this app could date perfectly well and could not PLACE, because the
+   * period itself would not read.
+   *
+   * ── The hole this closes ──────────────────────────────────────────────────
+   *
+   * `range` is nullable and the loop below used to be `if (range && …)`, so a
+   * null range put every dated row nowhere: not in `inside`, and not in
+   * `undated` either, because their dates were fine. A caller then read
+   * `inside.length` as a count and printed "0 sales" — under a 'ready' status,
+   * on a document handed to an accountant, over a full year of a coach's
+   * takings. It is the confident zero over a failed read that this whole file
+   * is written against, arriving through the period rather than through a read.
+   *
+   * Counted separately from `undated` because they are different sentences.
+   * `undated` is a fact about the ROWS — this app cannot say when they
+   * happened. This is a fact about the PERIOD — the rows are fine and the two
+   * dates this app was asked to compare them against are not, so no row is
+   * inside or outside anything and NO figure may be stated at all. See
+   * `PERIOD_UNREADABLE` and what `coachStatement` does with it.
+   */
+  noPeriod: number;
 }
 
 export function splitByPeriod<T>(rows: readonly T[], at: (row: T) => string | null | undefined, range: PeriodRange | null): PeriodSplit<T> {
   const inside: T[] = [];
   let undated = 0;
+  let noPeriod = 0;
   for (const r of rows) {
     const t = Date.parse(String(at(r) ?? ''));
     if (!Number.isFinite(t)) { undated += 1; continue; }
-    if (range && t >= range.fromMs && t < range.toMs) inside.push(r);
+    // A row with a date, and no period to compare it against. It is not undated
+    // and it is not outside the period; there is no period. Counted, so that
+    // nothing can vanish between the two.
+    if (!range) { noPeriod += 1; continue; }
+    if (t >= range.fromMs && t < range.toMs) inside.push(r);
   }
-  return { inside, undated };
+  return { inside, undated, noPeriod };
 }
 
 /**
@@ -401,19 +450,28 @@ export function splitByPeriod<T>(rows: readonly T[], at: (row: T) => string | nu
  * ISO dates sort lexicographically, so the comparison is the string one and no
  * Date is constructed at all. A value that is not a bare date is undated: it is
  * in no period rather than swept into this one.
+ *
+ * The period's own two ends are tested ONCE, before the loop, and a period that
+ * does not read counts every dated row under `noPeriod` rather than dropping
+ * it — the same hole `splitByPeriod` had, and for the same reason it mattered:
+ * the ends were tested inside the `if`, so an unreadable period silently
+ * emptied a section that then printed a count of nought.
  */
 export function splitByDay<T>(rows: readonly T[], on: (row: T) => string | null | undefined, p: StatementPeriod): PeriodSplit<T> {
   const inside: T[] = [];
   let undated = 0;
+  let noPeriod = 0;
   const from = String(p.from ?? '');
   const to = String(p.to ?? '');
   const readable = /^\d{4}-\d{2}-\d{2}$/;
+  const havePeriod = readable.test(from) && readable.test(to) && from <= to;
   for (const r of rows) {
     const d = String(on(r) ?? '').slice(0, 10);
     if (!readable.test(d)) { undated += 1; continue; }
-    if (readable.test(from) && readable.test(to) && d >= from && d <= to) inside.push(r);
+    if (!havePeriod) { noPeriod += 1; continue; }
+    if (d >= from && d <= to) inside.push(r);
   }
-  return { inside, undated };
+  return { inside, undated, noPeriod };
 }
 
 /* ── amounts as plain digits, for a spreadsheet ───────────────────────────── */
@@ -431,17 +489,35 @@ export function splitByDay<T>(rows: readonly T[], on: (row: T) => string | null 
  * writing "500.00" into an accountant's spreadsheet understates a coach's
  * takings by a factor of a hundred in sixteen currencies.
  *
+ * ── And it went the other way in five ─────────────────────────────────────
+ *
+ * The branch above was the ONLY branch: `ZERO_DECIMAL` or a hundred. A Kuwaiti
+ * dinar has a thousand fils in it, so KWD 12.340 is stored as 12340 minor units
+ * and this function wrote "123.40" into an accountant's spreadsheet — ten times
+ * the sale, in the file the paragraph above exists to stop being wrong. The
+ * readable document beside it was right the whole time, because `minorMoney`
+ * goes through `currencyDecimals`, so the two artefacts a coach hands over
+ * together disagreed by a factor of ten and neither said which was which.
+ *
+ * `currencyDecimals` is now the one answer to how many places this money has —
+ * the same function `minorMoney`, `majorFromMinor` and `readMinorAmount` use.
+ * There is one place in this app that decides that question and it is not this
+ * one; a second copy of the list is the copy that drifts, which is exactly what
+ * this was.
+ *
  * Null — not "0.00" — when either half is missing, so the CSV cell is empty and
  * nobody reads a hole as a sale for nothing.
  */
 export function minorToPlain(minorUnits: number | null | undefined, currency: string | null | undefined): string | null {
   if (minorUnits == null || !Number.isFinite(minorUnits) || !Number.isInteger(minorUnits)) return null;
-  const cur = (currency || '').trim().toLowerCase();
-  if (!cur) return null;
-  if (ZERO_DECIMAL.has(cur)) return String(minorUnits);
+  const dp = currencyDecimals(currency);
+  if (dp == null) return null;
+  if (dp === 0) return String(minorUnits);
   const neg = minorUnits < 0;
-  const digits = String(Math.abs(minorUnits)).padStart(3, '0');
-  return (neg ? '-' : '') + digits.slice(0, -2) + '.' + digits.slice(-2);
+  // Padded to dp + 1 so a figure smaller than one whole unit keeps its leading
+  // nought — 5 fils is "0.005", never ".005", which a spreadsheet reads as text.
+  const digits = String(Math.abs(minorUnits)).padStart(dp + 1, '0');
+  return (neg ? '-' : '') + digits.slice(0, -dp) + '.' + digits.slice(-dp);
 }
 
 /**
@@ -452,12 +528,16 @@ export function minorToPlain(minorUnits: number | null | undefined, currency: st
  * units. Mixing the two is a hundred-fold error in a money column, so the two
  * conversions are separate functions with separate names and the sections that
  * use them are never added together.
+ *
+ * Through `currencyDecimals` for the same reason `minorToPlain` is: a fee
+ * recorded in dinars has three places, and `toFixed(2)` rounds the third one
+ * away — a fils off every fee, silently, in the file an accountant adds up.
  */
 export function majorToPlain(amount: number | null | undefined, currency: string | null | undefined): string | null {
   if (amount == null || !Number.isFinite(amount)) return null;
-  const cur = (currency || '').trim().toLowerCase();
-  if (!cur) return null;
-  return ZERO_DECIMAL.has(cur) ? String(Math.round(amount)) : amount.toFixed(2);
+  const dp = currencyDecimals(currency);
+  if (dp == null) return null;
+  return dp === 0 ? String(Math.round(amount)) : amount.toFixed(dp);
 }
 
 /* ── what the caller hands over ───────────────────────────────────────────── */
@@ -481,6 +561,83 @@ export interface StatementInvoice {
   kind: string;
   issuedOn: string;
   voidedAt: string | null;
+}
+
+/**
+ * One sale or renewal that had money given back on it.
+ *
+ * ── Why the statement had none of these, and what that cost ───────────────
+ *
+ * Every section above this one is money IN. A coach who refunded four sales in
+ * a quarter handed their accountant a document listing all four at their full
+ * value, with nothing anywhere on it saying the money had gone back — and the
+ * one figure this statement is most likely to be copied from is the sales
+ * total. The data has been in this database since part 192 and reached this
+ * document nowhere.
+ *
+ * `refundedCents` is a RUNNING TOTAL across every refund on that charge, which
+ * is what both columns hold: a sale refunded twice is ONE row here carrying the
+ * sum, dated on the last of them. That is Stripe's shape rather than a choice
+ * made here, and `REFUNDS_ARE_A_RUNNING_TOTAL` says so on the page — a reader
+ * who counts these as individual refund events will count too few.
+ */
+export interface StatementRefund {
+  /** Minor units, the running total given back on this charge. */
+  refundedCents: number | null;
+  currency: string | null;
+  /** When the LAST refund on this charge was made, as an instant. */
+  refundedAt: string;
+  /** Which of the two money tables it came off, so the reader can find it. */
+  on: 'sale' | 'renewal';
+}
+
+/**
+ * One chargeback raised against the coach's charges (part 611).
+ *
+ * Counted on `openedAt`, the day the card issuer raised it, because that is the
+ * day the money left — `DISPUTE_MONEY_IS_ALREADY_GONE` in src/lib/disputes.ts
+ * is the rule and it is not softened here. A dispute that is later WON does not
+ * become a sale that was never disputed: the money left and came back, both are
+ * facts, and this section states the raising rather than netting the outcome.
+ *
+ * `status` is STRIPE'S OWN WORD, verbatim. Nothing here reads it as a
+ * conclusion, and nothing here subtracts a disputed amount from anything.
+ */
+export interface StatementDispute {
+  amountCents: number | null;
+  currency: string | null;
+  /** Stripe's own status word, uncoerced. */
+  status: string;
+  /** Stripe's own reason word, or null where it gave none. */
+  reason: string | null;
+  /** When it was raised, as an instant. */
+  openedAt: string;
+  /** When it was resolved either way, or null while it is open. */
+  closedAt: string | null;
+}
+
+/**
+ * One cost the coach recorded themselves (part 450).
+ *
+ * The outgoing half of the same book the receipts section is the incoming half
+ * of, and it is on this document for the reason coachCosts.ts gives: a
+ * statement of a self-employed person's year with every penny in and no penny
+ * out is one-sided by construction, handed to somebody whose whole job is the
+ * difference.
+ *
+ * NOTHING IS SUBTRACTED. `COSTS_ARE_NEVER_NETTED` is a standing rule of this
+ * product and this section is the single biggest temptation to break it. The
+ * amounts here are gross, in whatever currency each was paid in, and they are
+ * not taken off any figure above.
+ */
+export interface StatementCost {
+  description: string;
+  /** The coach's own category word. Never read as anything about tax. */
+  category: string;
+  amountCents: number | null;
+  currency: string | null;
+  /** `YYYY-MM-DD`, the day the coach says the money went out. */
+  paidOn: string;
 }
 
 /** One late-cancellation fee recorded against a client. MAJOR units. */
@@ -567,6 +724,24 @@ export interface StatementInput {
    * supports. A missing argument is a compile error instead.
    */
   payoutsPaid: Read<StatementPayout>;
+  /**
+   * Money given back on a sale or a renewal (part 192, part 610).
+   *
+   * Required rather than optional, for the reason `receipts` and `payoutsPaid`
+   * are. An optional field defaulting to an empty 'ready' read would print "you
+   * gave nothing back in this period" on a statement built by a caller that
+   * simply forgot to pass it, beside a sales total that is short by exactly
+   * that amount and looks whole. A missing argument is a compile error instead.
+   */
+  refunds: Read<StatementRefund>;
+  /** Chargebacks raised against the coach's charges (part 611). Required for
+   *  the same reason: an unstated chargeback is a sale on this document at its
+   *  full value that the coach no longer has the money for. */
+  disputes: Read<StatementDispute>;
+  /** What the coach recorded going out (part 450). Required for the same
+   *  reason, and one more: this is the half an accountant asks for first, and a
+   *  confident "no costs recorded" is a sentence about somebody's return. */
+  costs: Read<StatementCost>;
   /** When it was built, ISO. Printed, because a statement of a period is only
    *  ever "as this app held it at" a moment. */
   generatedAt: string;
@@ -645,6 +820,25 @@ export const PAYOUTS_ONLY_ARRIVED =
 export const STATEMENT_STRIPE_IS_THE_RECORD =
   'Where Stripe took the payment, Stripe’s own record is the artefact. The amounts here are what this app was told at the time; they have never been reconciled against Stripe, against a bank, or against each other. What Stripe charged in fees, what the platform took, and whether the money has reached your bank are not recorded in this app at all.';
 
+/**
+ * That the two dates at the top of this document did not read, so NOTHING on it
+ * is a figure.
+ *
+ * The other half of `splitByPeriod`'s `noPeriod`. Every period this screen
+ * offers is built by `fiscalYear`, `fiscalQuarter` or `customRange` and all
+ * three produce real days — but a period restored from storage, or handed in by
+ * a caller written later, can be two strings that are not dates, and until now
+ * that produced a complete-looking document reading "0 sales, 0 renewals, 0
+ * invoices" under a 'ready' status, with every read having succeeded.
+ *
+ * A confident nought over an unreadable period is the same artefact as a
+ * confident nought over a failed read, and it is worse in one way: there is no
+ * failed read anywhere to raise a caveat, so the document says every part of it
+ * was read in full, which is true and completely misleading.
+ */
+export const PERIOD_UNREADABLE =
+  'The two dates this statement covers could not be read as days, so nothing on it has been placed inside or outside a period and NO figure is stated anywhere on it. Every read behind it may have succeeded — that is not the problem. Pick the period again and take the statement afresh; do not treat any nought on this one as a nought in your record.';
+
 /** That the period was the coach's choice and not this app's. */
 export const PERIOD_IS_YOURS =
   'The period above is a calendar period you chose. This app does not know which period your accountant or your authority works to and has not assumed one.';
@@ -665,6 +859,45 @@ export const SESSIONS_NOT_MONEY =
 /** Why invoices are listed apart and never added to the sales. */
 export const INVOICES_NOT_ADDED =
   'These are documents you issued. They may describe the same money as the sales above — an invoice you wrote for a pack Stripe had already taken — so they are listed separately and are deliberately not added to anything else on this statement.';
+
+/**
+ * That a refund is listed and never subtracted.
+ *
+ * The same rule `PAYOUTS_ARE_NOT_NETTED` states for a payout, and it has to be
+ * said louder here, because a refund LOOKS like it belongs in a subtraction in
+ * a way a payout does not. It still may not be done by this app: the sales
+ * figure above is gross, Stripe's processing fee on the original charge is not
+ * in this database at all and is usually not returned, and a refund made in one
+ * period against a sale made in another belongs to neither on its own. The
+ * accountant does the netting, from both figures, knowing which period each is
+ * about. What this app owes them is both figures.
+ */
+export const REFUNDS_ARE_NOT_NETTED =
+  'These are amounts given back. They are NOT subtracted from the sales above and no net figure appears anywhere on this statement: a refund made in this period may be against a sale made in another, the sales figures are gross of everything Stripe and this platform took, and what Stripe charged to process the original payment is usually not returned. Both figures are here so your accountant can do that arithmetic knowing which period each belongs to.';
+
+/**
+ * That one row here is every refund on one charge, added up.
+ *
+ * `refunded_cents` is a running total, so a sale refunded in three instalments
+ * is one line carrying the sum and dated on the last of them. A reader counting
+ * lines as refund events counts too few, and a reader looking for the first
+ * instalment's date will not find it here — Stripe's dashboard has both.
+ */
+export const REFUNDS_ARE_A_RUNNING_TOTAL =
+  'Each line here is the whole of what has been given back on one charge, not one refund. A sale refunded twice appears once, for the total, on the day of the later one. Stripe’s own dashboard is where the individual refunds and their dates are.';
+
+/**
+ * That a chargeback is counted when it was RAISED, and never netted.
+ *
+ * The money leaves on the day the issuer raises it, whatever happens
+ * afterwards — that is `DISPUTE_MONEY_IS_ALREADY_GONE` in src/lib/disputes.ts,
+ * and this section holds the same line. A dispute the coach later wins is money
+ * that left and came back; both are facts and neither is quietly cancelled out
+ * here, because the two can fall in different periods and the accountant is the
+ * one who knows which return each belongs on.
+ */
+export const DISPUTES_ARE_NOT_NETTED =
+  'A chargeback takes the money back out of your balance on the day it is raised, before anybody decides who is right. These are counted on that day, whatever was decided later, and they are NOT subtracted from the sales above. Where you won one, the money came back on a different day and Stripe’s record is where that is. Nothing here is a judgement about any of them.';
 
 /** Why late-cancellation fees are their own section. */
 export const LATE_FEES_NOT_TAKINGS =
@@ -742,7 +975,13 @@ export function sumCharges(rows: readonly StatementCharge[]): ChargeTotals {
 
 /* ── the sections ─────────────────────────────────────────────────────────── */
 
-export type SectionKey = 'sessions' | 'packs' | 'subscriptions' | 'receipts' | 'invoices' | 'lateCancellations' | 'payoutsPaid';
+export type SectionKey =
+  | 'sessions' | 'packs' | 'subscriptions' | 'receipts' | 'invoices' | 'lateCancellations' | 'payoutsPaid'
+  // The three that money goes OUT through, added after the seven above rather
+  // than interleaved with them, so the document reads money in, money to the
+  // bank, then money back out — and so a section key already written into
+  // somebody's saved CSV still means what it meant.
+  | 'refunds' | 'disputes' | 'costs';
 
 /** One line of money, ready to print. */
 export interface MoneyLine { label: string; amount: string }
@@ -833,9 +1072,29 @@ export interface Statement {
   complete: boolean;
 }
 
+/**
+ * Whether the period itself reads, which decides whether any figure may be
+ * stated at all.
+ *
+ * Both halves are asked, because they can fail apart: `periodRange` builds the
+ * half-open instant range the timestamped sections split on, and the bare
+ * `from`/`to` days are what the date-only sections (invoices, payouts) compare
+ * against. A period that satisfies one and not the other would give a document
+ * with figures in half its sections and silent noughts in the rest.
+ */
+export function periodReads(p: StatementPeriod): boolean {
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const from = String(p?.from ?? '');
+  const to = String(p?.to ?? '');
+  return day.test(from) && day.test(to) && from <= to && periodRange(p) != null;
+}
+
 /** Every part that could not be read, named. */
 export function statementCaveats(input: StatementInput): string[] {
   const out: string[] = [];
+  // First, and on its own, because it is not a failed read and it costs every
+  // figure on the document rather than one section's.
+  if (!periodReads(input.period)) out.push(`The period: ${PERIOD_UNREADABLE}`);
   const say = (status: LoadStatus, what: string, cost: string) => {
     if (status === 'ready') return;
     const how = status === 'partial'
@@ -855,6 +1114,9 @@ export function statementCaveats(input: StatementInput): string[] {
   say(input.invoices.status, 'Invoices issued', 'the documents you issued');
   say(input.lateCancellations.status, 'Late-cancellation fees', 'the fees recorded against your clients');
   say(input.payoutsPaid.status, 'Payouts that reached your bank', 'what Stripe paid out to you');
+  say(input.refunds.status, 'Money you gave back', 'what you refunded, leaving the sales above looking whole');
+  say(input.disputes.status, 'Chargebacks raised against you', 'money taken back out of your balance by a card issuer');
+  say(input.costs.status, 'Costs you recorded yourself', 'the money you have written down as going out');
   if (input.payouts.status !== 'ready') {
     out.push('Your payout account: its state could not be read, so this statement says nothing about whether you are set up to be paid.');
   }
@@ -900,6 +1162,16 @@ export function payoutFacts(k: PayoutKnowledge): { title: string; lines: string[
 
 export function coachStatement(input: StatementInput): Statement {
   const range = periodRange(input.period);
+  // Whether the two dates at the top of the document mean anything. Null range
+  // and unreadable days are the same failure arriving through two doors, and
+  // `periodReads` asks both — see `PERIOD_UNREADABLE` for what it costs.
+  //
+  // Every `…Ready` boolean below is ANDed with this, so nothing that states a
+  // number is built at all where the period does not read. It is not enough to
+  // blank the counts afterwards: the notes carry figures too — "Marked
+  // completed: 0. No-show: 0." off an `inside` that is empty because no row
+  // could be placed is the same confident nought wearing a sentence.
+  const readable = periodReads(input.period);
 
   /* ── sessions: counted, never priced ───────────────────────────────────── */
   const sess = splitByPeriod(input.sessions.rows, (r) => r.startsAt, range);
@@ -908,7 +1180,7 @@ export function coachStatement(input: StatementInput): Statement {
   const lateCancelled = sess.inside.filter((s) => s.outcome === 'late_cancelled').length;
   const cancelled = sess.inside.filter((s) => s.outcome === 'cancelled').length;
   const unmarked = sess.inside.filter((s) => !s.outcome).length;
-  const sessionsReady = input.sessions.status === 'ready';
+  const sessionsReady = input.sessions.status === 'ready' && readable;
   const sessionNotes: string[] = [SESSIONS_NOT_MONEY];
   if (sessionsReady) {
     sessionNotes.push(`Marked completed: ${delivered}. No-show: ${noShow}. Late-cancelled: ${lateCancelled}. Cancelled: ${cancelled}.`);
@@ -935,7 +1207,7 @@ export function coachStatement(input: StatementInput): Statement {
   /* ── packs and memberships ─────────────────────────────────────────────── */
   const packSplit = splitByPeriod(input.packs.rows, (r) => r.created_at, range);
   const packTaken = sumTaken(packSplit.inside);
-  const packsReady = input.packs.status === 'ready';
+  const packsReady = input.packs.status === 'ready' && readable;
   const packNotes = packsReady ? takenNotes(packTaken, 'sale') : [];
   if (packsReady && packSplit.undated > 0) {
     packNotes.push(`${packSplit.undated} sale${packSplit.undated === 1 ? '' : 's'} could not be dated and ${packSplit.undated === 1 ? 'is' : 'are'} in no period at all.`);
@@ -955,7 +1227,7 @@ export function coachStatement(input: StatementInput): Statement {
   /* ── subscription renewals ─────────────────────────────────────────────── */
   const subSplit = splitByPeriod(input.subscriptions.rows, (r) => r.created_at, range);
   const subTaken = sumTaken(subSplit.inside);
-  const subsReady = input.subscriptions.status === 'ready';
+  const subsReady = input.subscriptions.status === 'ready' && readable;
   const subNotes = subsReady ? takenNotes(subTaken, 'renewal') : [];
   if (subsReady && subSplit.undated > 0) {
     subNotes.push(`${subSplit.undated} renewal${subSplit.undated === 1 ? '' : 's'} could not be dated and ${subSplit.undated === 1 ? 'is' : 'are'} in no period at all.`);
@@ -983,7 +1255,7 @@ export function coachStatement(input: StatementInput): Statement {
   // against, and the accountant is the person who needs to know which is which.
   const recSplit = splitByPeriod(input.receipts.rows, (r) => r.created_at, range);
   const recTaken = sumTaken(recSplit.inside);
-  const recReady = input.receipts.status === 'ready';
+  const recReady = input.receipts.status === 'ready' && readable;
   const recNotes = [RECEIPTS_ARE_YOUR_WORD];
   if (recReady) {
     for (const n of takenNotes(recTaken, 'payment')) recNotes.push(n);
@@ -1012,7 +1284,7 @@ export function coachStatement(input: StatementInput): Statement {
   const live = invSplit.inside.filter((i) => !i.voidedAt);
   const received = live.filter((i) => i.kind === 'received').length;
   const invTaken = sumTaken(live.map((i): TakenRow => ({ amount_cents: i.amountCents, currency: i.currency, created_at: i.issuedOn })));
-  const invReady = input.invoices.status === 'ready';
+  const invReady = input.invoices.status === 'ready' && readable;
   const invNotes = [INVOICES_NOT_ADDED];
   if (invReady) {
     invNotes.push(`${received} of ${live.length} state the money was received; the rest state it was being requested. Both are your own word and neither has been checked against a bank or a card processor.`);
@@ -1039,7 +1311,7 @@ export function coachStatement(input: StatementInput): Statement {
   /* ── late-cancellation fees ────────────────────────────────────────────── */
   const feeSplit = splitByPeriod(input.lateCancellations.rows, (r) => r.createdAt, range);
   const fees = sumCharges(feeSplit.inside);
-  const feesReady = input.lateCancellations.status === 'ready';
+  const feesReady = input.lateCancellations.status === 'ready' && readable;
   const feeNotes = [LATE_FEES_NOT_TAKINGS, LATE_FEES_ONLY_CURRENT_CLIENTS];
   if (feesReady) {
     if (fees.pots.length > 1) feeNotes.push('These are separate amounts of money in different currencies and are deliberately not added together.');
@@ -1088,7 +1360,7 @@ export function coachStatement(input: StatementInput): Statement {
     currency: p.currency,
     created_at: p.arrivalOn ?? '',
   })));
-  const payReady = input.payoutsPaid.status === 'ready';
+  const payReady = input.payoutsPaid.status === 'ready' && readable;
   const payNotes = [PAYOUTS_ARE_NOT_NETTED, PAYOUTS_ONLY_ARRIVED];
   if (payReady) {
     for (const n of takenNotes(payTaken, 'payout')) payNotes.push(n);
@@ -1116,12 +1388,133 @@ export function coachStatement(input: StatementInput): Statement {
     notes: payNotes,
   };
 
+  /* ── money given back ──────────────────────────────────────────────────── */
+  //
+  // Dated on `refunded_at`, the day the money went back, and NOT on the day of
+  // the sale it came off. A refund in April against a January sale belongs in
+  // April's statement and in nobody's January — which is also the reason
+  // nothing here is subtracted from anything: the two figures are about two
+  // different periods as often as not.
+  const refundSplit = splitByPeriod(input.refunds.rows, (r) => r.refundedAt, range);
+  const refTaken = sumTaken(refundSplit.inside.map((r): TakenRow => ({
+    amount_cents: r.refundedCents,
+    currency: r.currency,
+    created_at: r.refundedAt,
+  })));
+  const refReady = input.refunds.status === 'ready' && readable;
+  const refNotes = [REFUNDS_ARE_NOT_NETTED, REFUNDS_ARE_A_RUNNING_TOTAL];
+  if (refReady) {
+    const onSales = refundSplit.inside.filter((r) => r.on === 'sale').length;
+    const onRenewals = refundSplit.inside.length - onSales;
+    refNotes.push(`${onSales} of these came off a pack or membership sale and ${onRenewals} off a subscription renewal.`);
+    for (const n of takenNotes(refTaken, 'refund')) refNotes.push(n);
+    if (refundSplit.undated > 0) {
+      refNotes.push(`${refundSplit.undated} refund${refundSplit.undated === 1 ? '' : 's'} could not be dated and ${refundSplit.undated === 1 ? 'is' : 'are'} in no period at all, including this one.`);
+    }
+  }
+  const refundsSection: StatementSection = {
+    key: 'refunds',
+    title: 'Money You Gave Back',
+    source: 'Written onto the sale by Stripe — through a refund made in this app, and through one you made in your own Stripe dashboard. Stripe’s own record is the authority.',
+    status: input.refunds.status,
+    count: refReady ? refundSplit.inside.length : null,
+    countLabel: refundSplit.inside.length === 1 ? 'charge refunded' : 'charges refunded',
+    lines: refReady
+      ? refTaken.pots.map((p) => ({
+        label: `${p.count} ${p.count === 1 ? 'charge' : 'charges'} in ${p.currency}`,
+        amount: minorMoney(p.minorUnits, p.currency) ?? '—',
+      }))
+      : [],
+    withheld: withheldReason(input.refunds.status, 'refunds'),
+    notes: refNotes,
+  };
+
+  /* ── chargebacks ───────────────────────────────────────────────────────── */
+  //
+  // Counted on the day the issuer RAISED it, which is the day the money left.
+  // A dispute won later is money that left and came back, on two different
+  // days; both are facts and neither is netted here.
+  const dispSplit = splitByPeriod(input.disputes.rows, (d) => d.openedAt, range);
+  const dispTaken = sumTaken(dispSplit.inside.map((d): TakenRow => ({
+    amount_cents: d.amountCents,
+    currency: d.currency,
+    created_at: d.openedAt,
+  })));
+  const dispReady = input.disputes.status === 'ready' && readable;
+  const dispNotes = [DISPUTES_ARE_NOT_NETTED];
+  if (dispReady) {
+    const open = dispSplit.inside.filter((d) => !d.closedAt).length;
+    if (open > 0) {
+      dispNotes.push(`${open} of these ${open === 1 ? 'is' : 'are'} still open, so ${open === 1 ? 'it has' : 'they have'} no outcome yet. Nothing here says who will win ${open === 1 ? 'it' : 'them'}.`);
+    }
+    for (const n of takenNotes(dispTaken, 'chargeback')) dispNotes.push(n);
+    if (dispSplit.undated > 0) {
+      dispNotes.push(`${dispSplit.undated} chargeback${dispSplit.undated === 1 ? '' : 's'} could not be dated and ${dispSplit.undated === 1 ? 'is' : 'are'} in no period at all, including this one.`);
+    }
+  }
+  const disputesSection: StatementSection = {
+    key: 'disputes',
+    title: 'Chargebacks Raised Against You',
+    source: 'Mirrored from Stripe as each one was raised. The status word on each is Stripe’s own; your Stripe dashboard is where the evidence and the outcome live.',
+    status: input.disputes.status,
+    count: dispReady ? dispSplit.inside.length : null,
+    countLabel: dispSplit.inside.length === 1 ? 'chargeback' : 'chargebacks',
+    lines: dispReady
+      ? dispTaken.pots.map((p) => ({
+        label: `${p.count} ${p.count === 1 ? 'chargeback' : 'chargebacks'} in ${p.currency}`,
+        amount: minorMoney(p.minorUnits, p.currency) ?? '—',
+      }))
+      : [],
+    withheld: withheldReason(input.disputes.status, 'chargebacks'),
+    notes: dispNotes,
+  };
+
+  /* ── what the coach recorded going out ─────────────────────────────────── */
+  //
+  // By DAY, not by instant: `coach_costs.paid_on` is a Postgres `date` and
+  // means a calendar day, the same as `issued_on` and `arrival_on` above. Rent
+  // was paid on a day, in the place the coach was standing.
+  //
+  // NOTHING IS SUBTRACTED. This section and the sales sections are the two
+  // halves somebody will be tempted to difference, and `COSTS_ARE_NEVER_NETTED`
+  // gives the four independent reasons that number would be wrong.
+  const costSplit = splitByDay(input.costs.rows, (c) => c.paidOn, input.period);
+  const costTaken = sumTaken(costSplit.inside.map((c): TakenRow => ({
+    amount_cents: c.amountCents,
+    currency: c.currency,
+    created_at: c.paidOn,
+  })));
+  const costReady = input.costs.status === 'ready' && readable;
+  const costNotes = [COST_IS_YOUR_WORD, COSTS_ARE_NEVER_NETTED, COSTS_ARE_NOT_TAX_ADVICE];
+  if (costReady) {
+    for (const n of takenNotes(costTaken, 'cost')) costNotes.push(n);
+    if (costSplit.undated > 0) {
+      costNotes.push(`${costSplit.undated} cost${costSplit.undated === 1 ? '' : 's'} could not be dated and ${costSplit.undated === 1 ? 'is' : 'are'} in no period at all, including this one.`);
+    }
+  }
+  const costsSection: StatementSection = {
+    key: 'costs',
+    title: 'Costs You Recorded Yourself',
+    source: 'Written down by you, in this app, for money you say went out. Nothing behind them has been checked against a bank, a card or a supplier.',
+    status: input.costs.status,
+    count: costReady ? costSplit.inside.length : null,
+    countLabel: costSplit.inside.length === 1 ? 'cost' : 'costs',
+    lines: costReady
+      ? costTaken.pots.map((p) => ({
+        label: `${p.count} ${p.count === 1 ? 'cost' : 'costs'} in ${p.currency}`,
+        amount: minorMoney(p.minorUnits, p.currency) ?? '—',
+      }))
+      : [],
+    withheld: withheldReason(input.costs.status, 'costs'),
+    notes: costNotes,
+  };
+
   /* ── the one combination this statement makes ──────────────────────────── */
   //
   // Only when BOTH halves came back whole. A sum over a page of a longer list
   // is not a smaller total, it is a wrong one — and this is the figure a coach
   // is most likely to copy straight into something else.
-  const bothWhole = packsReady && subsReady;
+  const bothWhole = packsReady && subsReady && readable;
   const combined = bothWhole ? combineTaken(packTaken, subTaken) : null;
   const salesTotal = combined
     ? {
@@ -1134,9 +1527,40 @@ export function coachStatement(input: StatementInput): Statement {
     : null;
   const salesWithheld = bothWhole
     ? null
-    : 'No combined figure is stated, because one of the two reads behind it did not come back whole. Adding a complete half to an incomplete one produces a number that is wrong rather than small.';
+    : readable
+      ? 'No combined figure is stated, because one of the two reads behind it did not come back whole. Adding a complete half to an incomplete one produces a number that is wrong rather than small.'
+      : PERIOD_UNREADABLE;
 
   const caveats = statementCaveats(input);
+
+  /* ── an unreadable period costs every figure, in one place ─────────────── */
+  //
+  // Each section above was built as though the split it was handed meant
+  // something. Where the period does not read, no split does: `noPeriod` is
+  // where all the dated rows went, `inside` is empty, and a count off an empty
+  // `inside` is a nought about nothing. So the withholding is applied HERE, to
+  // every section at once, rather than as a seventh copy of the same branch in
+  // each of them — a per-section branch is how six of them get it right and the
+  // seventh prints a nought.
+  //
+  // The read status is left exactly as it was. The reads DID succeed and saying
+  // otherwise would send a coach to fix a query that is fine; what is withheld
+  // is the figure, and `PERIOD_UNREADABLE` says which of the two went wrong.
+  const sections = readable
+    ? [sessionsSection, packsSection, subsSection, receiptsSection, invoicesSection, feesSection, payoutsSection, refundsSection, disputesSection, costsSection]
+    : [sessionsSection, packsSection, subsSection, receiptsSection, invoicesSection, feesSection, payoutsSection, refundsSection, disputesSection, costsSection]
+      .map((s): StatementSection => ({
+        ...s,
+        // `count` and `lines` are already empty here, because every `…Ready`
+        // boolean above is ANDed with `readable` — as are the notes, which is
+        // the half a post-hoc blanking would have missed. What this map adds is
+        // the one thing those booleans cannot: the REASON. `withheldReason`
+        // answers null under a 'ready' read, and the read was ready; it is the
+        // period that was not, and the section has to say which.
+        count: null,
+        lines: [],
+        withheld: PERIOD_UNREADABLE,
+      }));
 
   return {
     period: input.period,
@@ -1144,7 +1568,7 @@ export function coachStatement(input: StatementInput): Statement {
     issuerStatus: input.issuer.status,
     brand: (input.issuer.brand || '').trim() || null,
     generatedAt: input.generatedAt,
-    sections: [sessionsSection, packsSection, subsSection, receiptsSection, invoicesSection, feesSection, payoutsSection],
+    sections,
     salesTotal,
     salesWithheld,
     payouts: payoutFacts(input.payouts),
@@ -1375,7 +1799,7 @@ export function statementCsv(s: Statement): string {
 }
 
 /**
- * The line items themselves, one row per invoice and per fee.
+ * Everything this app holds a ROW for, one line each.
  *
  * Kept apart from `statementCsv` because the two answer different questions and
  * a caller may want only one. Sales and renewals are NOT itemised here: they are
@@ -1383,21 +1807,68 @@ export function statementCsv(s: Statement): string {
  * spreadsheet under this app's name would invite somebody to reconcile against
  * a copy rather than against the original.
  *
+ * ── The three it used to leave out ────────────────────────────────────────
+ *
+ * It carried invoices and fees and nothing else, so the file an accountant
+ * actually works line by line held every document the coach had issued and no
+ * refund, no chargeback and no cost. The summary beside it named the same
+ * figures. A refund and a chargeback are Stripe's rows in one sense — but
+ * unlike a sale they are the rows that make a sale on this document untrue, and
+ * a line-item file that lists the charge and not the reversal is worse than one
+ * that lists neither. The costs are the coach's own rows and exist nowhere else
+ * at all.
+ *
+ * NOTHING IS NETTED HERE EITHER. There is no signed amount and no minus sign:
+ * every figure in the `amount` column is the size of what moved, and the `part`
+ * column says which way. A spreadsheet that summed the column blind would be
+ * doing the arithmetic this whole file refuses, so it is made to require a
+ * decision rather than made easy.
+ *
  * The rows are filtered to the period HERE, by the same two functions the
  * summary uses, rather than trusting the caller to hand over a set that already
  * matches. A caller that filtered slightly differently — or not at all — would
  * produce a file whose lines do not add up to the totals printed beside them,
  * and the person holding both would have no way to tell which one was wrong.
  */
-export function statementItemsCsv(s: Statement, invoices: readonly StatementInvoice[], fees: readonly StatementCharge[]): string {
+export interface StatementItems {
+  invoices: readonly StatementInvoice[];
+  fees: readonly StatementCharge[];
+  refunds: readonly StatementRefund[];
+  disputes: readonly StatementDispute[];
+  costs: readonly StatementCost[];
+}
+
+/** The one sentence written beside every empty amount cell in this file. A
+ *  hole and a nought are different facts and the hole has to say so where it
+ *  is, because a cell is read on its own line and not with the covering note. */
+const NO_CURRENCY_CELL =
+  'No currency is recorded on this one, so no amount is written. Do not read the empty cell as nothing charged.';
+
+export function statementItemsCsv(s: Statement, items: StatementItems): string {
   const rows: (string | number | null)[][] = [];
   rows.push(['about', '', '', 'What this is NOT', '', '', '', STATEMENT_NOT]);
   rows.push(['about', '', '', 'The period', '', '', '', periodSentence(s.period)]);
+  rows.push(['about', '', '', 'Nothing is netted', '', '', '', 'Every amount below is the size of what moved and the first column says which way. Money in and money back out are on the same lines and are deliberately not signed, so no column here adds up to anything on its own.']);
   rows.push(['about', '', '', 'Late-cancellation fees', '', '', '', LATE_FEES_ONLY_CURRENT_CLIENTS]);
+  rows.push(['about', '', '', 'Refunds', '', '', '', REFUNDS_ARE_A_RUNNING_TOTAL]);
   for (const c of s.caveats) rows.push(['not read', '', '', 'A part of this record is missing from this file', '', '', '', c]);
 
-  const inPeriodInvoices = splitByDay(invoices, (i) => i.issuedOn, s.period).inside;
-  const inPeriodFees = splitByPeriod(fees, (f) => f.createdAt, periodRange(s.period)).inside;
+  // The period, once, for every split below. Where it does not read, no row can
+  // be placed in it — every split comes back empty — and a file of about-rows
+  // with no items under it would look like a quiet period rather than an
+  // unreadable one. `statementCaveats` has already put PERIOD_UNREADABLE in the
+  // caveats above; this is the row that stands where the items would have been.
+  if (!periodReads(s.period)) {
+    rows.push(['not read', '', '', 'No items are listed in this file', '', '', 'no period', PERIOD_UNREADABLE]);
+    return '﻿' + [CSV_HEADER, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+  }
+  const range = periodRange(s.period);
+
+  const inPeriodInvoices = splitByDay(items.invoices, (i) => i.issuedOn, s.period).inside;
+  const inPeriodFees = splitByPeriod(items.fees, (f) => f.createdAt, range).inside;
+  const inPeriodRefunds = splitByPeriod(items.refunds, (r) => r.refundedAt, range).inside;
+  const inPeriodDisputes = splitByPeriod(items.disputes, (d) => d.openedAt, range).inside;
+  const inPeriodCosts = splitByDay(items.costs, (c) => c.paidOn, s.period).inside;
 
   for (const i of inPeriodInvoices) {
     rows.push([
@@ -1408,7 +1879,7 @@ export function statementItemsCsv(s: Statement, invoices: readonly StatementInvo
       i.currency ?? '',
       minorToPlain(i.amountCents, i.currency) ?? '',
       i.voidedAt ? 'voided' : (i.kind === 'received' ? 'stated received' : 'stated requested'),
-      i.currency ? '' : 'No currency is recorded on this one, so no amount is written. Do not read the empty cell as nothing charged.',
+      i.currency ? '' : NO_CURRENCY_CELL,
     ]);
   }
   for (const f of inPeriodFees) {
@@ -1420,7 +1891,50 @@ export function statementItemsCsv(s: Statement, invoices: readonly StatementInvo
       f.currency ?? '',
       majorToPlain(f.amount, f.currency) ?? '',
       f.waivedAt ? 'waived' : 'recorded',
-      f.currency ? '' : 'No currency is recorded on this one, so no amount is written. Do not read the empty cell as nothing charged.',
+      f.currency ? '' : NO_CURRENCY_CELL,
+    ]);
+  }
+  // Money OUT. Unsigned, like everything else here — see the note row above.
+  // `who` is left empty rather than filled from the sale: the refund columns
+  // carry no name and joining one on would put a person against an amount on
+  // the strength of a lookup this file did not make.
+  for (const r of inPeriodRefunds) {
+    rows.push([
+      'refund',
+      String(r.refundedAt ?? '').slice(0, 10),
+      '',
+      r.on === 'renewal' ? 'Refunded on a subscription renewal' : 'Refunded on a pack or membership sale',
+      r.currency ?? '',
+      minorToPlain(r.refundedCents, r.currency) ?? '',
+      'given back',
+      r.currency ? '' : NO_CURRENCY_CELL,
+    ]);
+  }
+  for (const d of inPeriodDisputes) {
+    rows.push([
+      'chargeback',
+      String(d.openedAt ?? '').slice(0, 10),
+      '',
+      d.reason ? `Chargeback — reason given: ${d.reason}` : 'Chargeback — no reason was given',
+      d.currency ?? '',
+      minorToPlain(d.amountCents, d.currency) ?? '',
+      // Stripe's own status word, verbatim. Nothing here rewrites it into an
+      // outcome, and an open one says it is open rather than reading as nothing.
+      String(d.status || '').trim() || 'status not stated',
+      d.currency ? '' : NO_CURRENCY_CELL,
+    ]);
+  }
+  for (const c of inPeriodCosts) {
+    rows.push([
+      'cost',
+      c.paidOn,
+      '',
+      c.description,
+      c.currency ?? '',
+      minorToPlain(c.amountCents, c.currency) ?? '',
+      // The coach's own category word, and never read as a claim about tax.
+      String(c.category || '').trim() || 'uncategorised',
+      c.currency ? '' : NO_CURRENCY_CELL,
     ]);
   }
   return '﻿' + [CSV_HEADER, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';

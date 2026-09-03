@@ -60,19 +60,58 @@
 //
 // Pure. The reads and writes are in src/ui/coachNotify.ts.
 import type { LoadStatus } from '../ui/loadStatus';
+import { BACKLOG_FLOOR, backlogBody } from './coachReminders';
+
+/**
+ * What muting the money channel costs, shown under that switch alone.
+ *
+ * Specific rather than reassuring, in the same way `WITHHELD_NOTE` is: the
+ * consequence that matters is a client who has silently stopped paying, and a
+ * coach needs that in front of them before they choose.
+ */
+export const CHANNEL_QUIET_COST_MONEY =
+  'A failed subscription payment is a client who has quietly stopped paying you. With this off you find out when you next open Payments, which for most coaches is the end of the month.';
+
+/**
+ * What muting the coach's own book costs.
+ *
+ * The unmarked queue is the sharp end of it. Until a session carries an
+ * outcome it is counted as neither delivered nor missed, `settlementBlocker` in
+ * src/lib/gymSessions.ts refuses to settle a period containing one, and the
+ * statement, the payroll figure and the revenue line are all short by exactly
+ * those sessions — so this is not a reminder about tidiness, it is the only
+ * thing that tells a coach their own money is sitting still.
+ */
+export const CHANNEL_QUIET_COST_BOOK =
+  'The sessions waiting on an outcome are counted as neither delivered nor missed, so your statement and your revenue figure stay short until you mark them — and nothing else in the app will tell you. With this off you find out when you next open Mark What Happened.';
 
 /**
  * The channels a coach can mute independently.
  *
- * Five, and the grouping is by WHAT THE COACH WOULD DO ABOUT IT rather than by
- * which table the row came from. A coach silencing chat is silencing a
- * conversation; a coach silencing money is deciding they will look at Payments
- * themselves. Grouping by source would have put "a subscription payment failed"
- * next to "a package was bought" for no reason a coach cares about, and split
- * the two booking notifications across two switches because one is sent by a
- * handset and the other by a trigger.
+ * The grouping is by WHAT THE COACH WOULD DO ABOUT IT rather than by which
+ * table the row came from. A coach silencing chat is silencing a conversation;
+ * a coach silencing money is deciding they will look at Payments themselves.
+ * Grouping by source would have put "a subscription payment failed" next to "a
+ * package was bought" for no reason a coach cares about, and split the two
+ * booking notifications across two switches because one is sent by a handset
+ * and the other by a trigger.
+ *
+ * ── The sixth, and why there were five ────────────────────────────────────
+ *
+ * Every one of the first five is somebody ELSE doing something: a client
+ * messages, books, cancels, pays, asks, signs, leaves. That is not an accident
+ * of the list — it is the whole of what this app could notify a coach about,
+ * because every one of those has another person's action behind it and
+ * therefore a trigger or a handset to send it.
+ *
+ * So a coach was told about everything their clients did and nothing about
+ * their own book going wrong. A session whose outcome nobody recorded, a pack
+ * about to run out from under somebody, an invoice ageing past its due date, a
+ * client who has stopped training — the app computes all four already, on
+ * screens the coach has to open to see. `book` is that channel, and
+ * `bookAlert` below is the rule that decides when it has something to say.
  */
-export type CoachChannel = 'chat' | 'bookings' | 'money' | 'clients' | 'admin';
+export type CoachChannel = 'chat' | 'bookings' | 'money' | 'clients' | 'admin' | 'book';
 
 export interface CoachChannelDef {
   key: CoachChannel;
@@ -81,37 +120,76 @@ export interface CoachChannelDef {
   /** Sentence case prose under it, naming what actually stops. */
   note: string;
   /**
-   * Whether muting this is a decision the coach may come to regret quietly.
+   * Whether the notification is scheduled by THIS handset rather than sent to
+   * it.
    *
-   * True for `money`, and it is the only one. A missed chat message is visible
-   * the next time they open the app; a failed subscription payment is a client
-   * who has silently stopped paying, and the coach finds out at the end of the
-   * month. `CHANNEL_QUIET_COST` is the sentence and it is shown under this
-   * switch and no other, so it means something when it appears.
+   * The same field, meaning the same thing, as `CategoryDef.local` in
+   * src/lib/notifyPrefs.ts, and it is here for the same reason: the two kinds
+   * are gated in different places and a switch that claimed to govern the wrong
+   * one would read "off" while the banner kept arriving.
+   *
+   * False for the first five — they are remote without exception, sent by
+   * another person's handset or written server-side, and the preference is
+   * applied in supabase/functions/send-push and notify-message where the
+   * recipients are resolved.
+   *
+   * True for `book`, and that is not an inconsistency. Nothing about the coach's
+   * own book has another person's action behind it to hang a trigger on: the
+   * unmarked queue, the ageing invoice and the drifting client are all computed
+   * on the coach's own device out of reads it already makes. The preference
+   * still lives in the same server table, so it follows the coach between
+   * phones like the other five — only the place it is APPLIED differs.
    */
-  quietCost: boolean;
+  local: boolean;
+  /**
+   * Whether muting this is a decision the coach may come to regret quietly, and
+   * what it would cost them.
+   *
+   * A SENTENCE rather than a flag, and it became one when a second channel
+   * earned it. A missed chat message is visible the next time the coach opens
+   * the app; a failed subscription payment is a client who has silently stopped
+   * paying, and an unmarked session is somebody's pay held up — two different
+   * costs, and a shared warning would have said the wrong one under one of
+   * them. Null for the channels where muting costs nothing you would not
+   * notice, so the flag still means something when it appears.
+   *
+   * Specific rather than reassuring, the same way `WITHHELD_NOTE` in
+   * src/lib/coachShare.ts is: the consequence goes in front of the coach before
+   * they choose.
+   */
+  quietCost: string | null;
 }
 
 export const COACH_CHANNELS: readonly CoachChannelDef[] = [
   {
-    key: 'chat', title: 'Client Messages', quietCost: false,
+    key: 'chat', title: 'Client Messages', quietCost: null, local: false,
     note: 'A message from a client. This is the one that arrives at 11pm.',
   },
   {
-    key: 'bookings', title: 'Bookings And Cancellations', quietCost: false,
+    key: 'bookings', title: 'Bookings And Cancellations', quietCost: null, local: false,
     note: 'A client booking a session, cancelling one, or a slot re-opening.',
   },
   {
-    key: 'money', title: 'Money', quietCost: true,
+    key: 'money', title: 'Money', quietCost: CHANNEL_QUIET_COST_MONEY, local: false,
     note: 'A package bought, a subscription starting or ending, and a subscription payment failing.',
   },
   {
-    key: 'clients', title: 'Joining And Leaving', quietCost: false,
+    key: 'clients', title: 'Joining And Leaving', quietCost: null, local: false,
     note: 'Somebody asking to be coached by you, and somebody ending their coaching.',
   },
   {
-    key: 'admin', title: 'Paperwork', quietCost: false,
+    key: 'admin', title: 'Paperwork', quietCost: null, local: false,
     note: 'An intake coming back, a document accepted, a release signed, and a review left.',
+  },
+  {
+    // The second channel to carry a quiet cost, and the reason `quietCost`
+    // became a sentence rather than a flag. An unmarked session is a statement,
+    // a payroll figure and a revenue line all short by exactly that session,
+    // and `settlementBlocker` refuses to settle a period containing one — so
+    // muting this is muting the only thing that tells a coach their own money
+    // is being held up.
+    key: 'book', title: 'Your Own Book', quietCost: CHANNEL_QUIET_COST_BOOK, local: true,
+    note: 'A session waiting on an outcome, an invoice past its due date, and a client who has stopped training.',
   },
 ];
 
@@ -224,14 +302,166 @@ export const CHANNEL_STILL_RECORDED =
   'Muting a category stops your phone buzzing about it. Every one of them is still written into your notifications list, so nothing is lost — you find out when you open the app rather than as it happens.';
 
 /**
- * The cost of muting money, shown under that switch alone.
+ * The money channel's cost, kept under its old name.
  *
- * Specific rather than reassuring, in the same way `WITHHELD_NOTE` is: the
- * consequence that matters is a client who has silently stopped paying, and a
- * coach needs that in front of them before they choose.
+ * It was the only one, so the screen imported one constant and printed it under
+ * whichever switch carried the flag. A second channel earned a quiet cost of
+ * its own and the sentence moved onto the channel — `CoachChannelDef.quietCost`
+ * — because one shared warning under two switches would have said the wrong
+ * thing under one of them. This stays so the assertions about the WORDING keep
+ * naming what they are about.
  */
-export const CHANNEL_QUIET_COST =
-  'A failed subscription payment is a client who has quietly stopped paying you. With this off you find out when you next open Payments, which for most coaches is the end of the month.';
+export const CHANNEL_QUIET_COST = CHANNEL_QUIET_COST_MONEY;
+
+/**
+ * What is different about a LOCAL channel, shown under the switches that are
+ * one.
+ *
+ * Said out loud because the difference is discoverable only by accident and it
+ * matters twice. It arrives without a network, so a coach on a plane still gets
+ * it. And it is the coach's own phone doing the arithmetic, so it can only be
+ * as current as the last time they opened the app — which is exactly the sort
+ * of promise this codebase refuses to leave implied.
+ */
+export const CHANNEL_LOCAL_NOTE =
+  'This one is worked out by this phone rather than sent to it, so it arrives with no signal and it is only ever as up to date as the last time you opened the app. Your answer is still saved on your account, so it follows you to a new phone.';
+
+/* ── what the coach's own book has to say ─────────────────────────────────── */
+
+/**
+ * The four figures the `book` channel is built from.
+ *
+ * Every one is `number | null` and the null is load-bearing: it means the read
+ * did not establish the figure, NOT that the figure is nought. A banner about a
+ * coach's own business composed out of a failed query is how somebody learns to
+ * ignore the next one, and the next one is the one that matters — so a null
+ * never prompts and never contributes to a count.
+ *
+ * They are passed in rather than read here because this module is pure and
+ * because no single screen holds all four. A caller supplies what it actually
+ * read and passes null for the rest, which is exactly what the null is for.
+ */
+export interface BookState {
+  /** Sessions that happened with no outcome recorded — `SessionMonth.unmarked`
+   *  in src/lib/coachRevenue.ts. */
+  unmarkedSessions: number | null;
+  /** Live invoices past their due date — `ageingBook(...).overdue.length`. */
+  invoicesOverdue: number | null;
+  /** Clients whose own record says they have stopped — the 'drifting' band of
+   *  `summariseDrift`. Only ever passed from a read that could actually support
+   *  a verdict: src/lib/clientDrift.ts is explicit that a truncated read cannot,
+   *  and "where have you been" to somebody who trained yesterday is the exact
+   *  harm this channel would otherwise cause. */
+  clientsDrifting: number | null;
+  /** Session packs about to run out from under somebody. Null from every caller
+   *  today — no coach-wide screen reads pack balances yet — and declared rather
+   *  than omitted so the day one does, the rule already knows what to do with
+   *  it and nobody has to reopen this decision. */
+  packsRunningOut: number | null;
+}
+
+/**
+ * How few of something is not worth a banner.
+ *
+ * One overdue invoice out of forty is a Tuesday; one is also exactly the case a
+ * coach with three clients wants to hear about. So the floor is ONE and there
+ * is no threshold — the problem with this channel was never that it said too
+ * much, it was that it did not exist.
+ *
+ * Unmarked sessions are the exception and they keep the bar they were already
+ * given: `BACKLOG_FLOOR` in src/lib/coachReminders.ts, imported rather than
+ * restated, because "below this the queue is a normal week's work" is one
+ * decision and two copies of it would drift. A coach told about two unmarked
+ * sessions every Monday stops reading the message that will one day say forty.
+ */
+export const BOOK_FLOOR = 1;
+
+/** How this channel's banner reads. Title and body kept apart because the
+ *  platform draws them differently and a body that repeats its title is the
+ *  notification people swipe away without reading. */
+export interface BookAlert { title: string; body: string }
+
+const n = (x: number) => (x === 1 ? '' : 's');
+
+/**
+ * The one thing worth telling a coach about their own book, or null.
+ *
+ * ONE banner and not four, and the order is the argument. A phone that fires
+ * four notifications in a row about the same business on the same morning is a
+ * phone whose notifications get turned off, and turning them off is what took
+ * the money channel down with the chat channel in the first place. So the
+ * highest-cost item speaks and the rest are counted after it.
+ *
+ * The order is by what it costs to leave alone:
+ *
+ *   1. unmarked sessions — somebody's pay is held up. `settlementBlocker` in
+ *      src/lib/gymSessions.ts refuses to settle a period containing one, and
+ *      the statement, the payroll figure and the revenue line are all short by
+ *      exactly those sessions until the coach clears them.
+ *   2. overdue invoices — money already earned and not collected, ageing.
+ *   3. packs running out — a client about to arrive with nothing left to draw
+ *      on, which is a conversation to have BEFORE they turn up.
+ *   4. drifting clients — the slowest of the four, and the one the Quiet
+ *      Clients screen already exists for.
+ *
+ * Null when every figure is nought or unknown. Never a cheerful all-clear: an
+ * empty book is not news, and a notification saying nothing is wrong is
+ * indistinguishable from one composed out of four failed reads.
+ */
+export function bookAlert(s: BookState): BookAlert | null {
+  const at = (v: number | null, floor = BOOK_FLOOR): number =>
+    (v != null && Number.isFinite(v) && v >= floor ? Math.floor(v) : 0);
+  const unmarked = at(s.unmarkedSessions, BACKLOG_FLOOR);
+  const overdue = at(s.invoicesOverdue);
+  const packs = at(s.packsRunningOut);
+  const drifting = at(s.clientsDrifting);
+
+  /** The others, as a trailing clause, or ''. Counted rather than listed: the
+   *  banner has one line and the screen behind it has the detail. */
+  const rest = (parts: string[]): string =>
+    parts.length ? ` Also waiting: ${parts.join(', ')}.` : '';
+
+  if (unmarked) {
+    return {
+      title: `${unmarked} session${n(unmarked)} waiting on an outcome`,
+      // `backlogBody` and not a sentence written here. That wording — the
+      // CONSEQUENCE rather than the chore, "counted nowhere until you mark
+      // them" — is already argued at length in src/lib/coachReminders.ts and
+      // was the whole of this channel before it had a name. Two wordings for
+      // one fact is how the banner and the screen come to disagree.
+      body: backlogBody(unmarked)
+        + rest([
+          overdue ? `${overdue} overdue invoice${n(overdue)}` : '',
+          packs ? `${packs} pack${n(packs)} running out` : '',
+          drifting ? `${drifting} client${n(drifting)} gone quiet` : '',
+        ].filter(Boolean)),
+    };
+  }
+  if (overdue) {
+    return {
+      title: `${overdue} invoice${n(overdue)} past ${overdue === 1 ? 'its' : 'their'} due date`,
+      body: 'Money you have already earned and not been paid.'
+        + rest([
+          packs ? `${packs} pack${n(packs)} running out` : '',
+          drifting ? `${drifting} client${n(drifting)} gone quiet` : '',
+        ].filter(Boolean)),
+    };
+  }
+  if (packs) {
+    return {
+      title: `${packs} pack${n(packs)} about to run out`,
+      body: `Worth a word before ${packs === 1 ? 'they turn' : 'anybody turns'} up with nothing left to draw on.`
+        + rest([drifting ? `${drifting} client${n(drifting)} gone quiet` : ''].filter(Boolean)),
+    };
+  }
+  if (drifting) {
+    return {
+      title: `${drifting} client${n(drifting)} ${drifting === 1 ? 'has' : 'have'} gone quiet`,
+      body: 'Nothing on their record for a while. Quiet Clients has who, and a draft you send yourself.',
+    };
+  }
+  return null;
+}
 
 /** Applies to every device on the account, and says so — the master switch is
  *  per handset and this is not, which is exactly the sort of difference that

@@ -24,8 +24,11 @@ import {
   STATEMENT_NOT, STATEMENT_IS, STATEMENT_NOT_THE_WHOLE_BOOK, STATEMENT_STRIPE_IS_THE_RECORD,
   PERIOD_IS_YOURS, SESSIONS_NOT_MONEY, INVOICES_NOT_ADDED, LATE_FEES_NOT_TAKINGS, LATE_FEES_ONLY_CURRENT_CLIENTS,
   PAYOUTS_ARE_NOT_NETTED, PAYOUTS_ONLY_ARRIVED,
+  REFUNDS_ARE_NOT_NETTED, REFUNDS_ARE_A_RUNNING_TOTAL, DISPUTES_ARE_NOT_NETTED, PERIOD_UNREADABLE, periodReads,
   type StatementInput, type StatementInvoice, type StatementCharge, type StatementPayout,
+  type StatementRefund, type StatementDispute, type StatementCost, type StatementPeriod,
 } from './coachStatement';
+import { COSTS_ARE_NEVER_NETTED, COSTS_ARE_NOT_TAX_ADVICE } from './coachCosts';
 import { escapeHtml } from './coachInvoice';
 import type { TakenRow } from './coachMoney';
 
@@ -64,6 +67,22 @@ const fee = (o: Partial<StatementCharge> = {}): StatementCharge =>
 const payout = (o: Partial<StatementPayout> = {}): StatementPayout =>
   ({ amountCents: 42810, currency: 'GBP', status: 'paid', arrivalOn: '2026-07-09', ...o });
 
+/** Money given back on one charge. `refundedCents` is a running total across
+ *  every refund on it, dated on the last of them — Stripe's shape, not a
+ *  choice made here, and the reason the section says so on its face. */
+const refund = (o: Partial<StatementRefund> = {}): StatementRefund =>
+  ({ refundedCents: 12000, currency: 'GBP', refundedAt: at(2026, 8, 3), on: 'sale', ...o });
+
+/** One chargeback, counted on the day the issuer raised it — the day the money
+ *  left, whatever was decided afterwards. */
+const dispute = (o: Partial<StatementDispute> = {}): StatementDispute =>
+  ({ amountCents: 9000, currency: 'GBP', status: 'needs_response', reason: 'fraudulent', openedAt: at(2026, 9, 14), closedAt: null, ...o });
+
+/** One cost the coach wrote down. `paidOn` is a calendar day, so it is a bare
+ *  `YYYY-MM-DD` — rent was paid on a day, where the coach was standing. */
+const cost = (o: Partial<StatementCost> = {}): StatementCost =>
+  ({ description: 'Gym floor rent, October', category: 'rent', amountCents: 40000, currency: 'GBP', paidOn: '2026-10-01', ...o });
+
 function input(over: Partial<StatementInput> = {}): StatementInput {
   return {
     period: Y26,
@@ -86,12 +105,26 @@ function input(over: Partial<StatementInput> = {}): StatementInput {
     // reached your bank in this period" on a document handed to an accountant,
     // built by a caller that simply forgot to pass it.
     payoutsPaid: { status: 'ready', rows: [payout()] },
+    // The three that money goes OUT through. Required for exactly the reason
+    // the two above are: an optional default would print "you gave nothing
+    // back, nothing was charged back to you and you recorded no costs" on a
+    // document built by a caller that forgot to pass them — three sentences
+    // about somebody's return, from an argument nobody wrote.
+    refunds: { status: 'ready', rows: [refund()] },
+    disputes: { status: 'ready', rows: [dispute()] },
+    costs: { status: 'ready', rows: [cost()] },
     generatedAt: '2027-01-04T09:00:00.000Z',
     ...over,
   };
 }
 
 const sec = (s: ReturnType<typeof coachStatement>, key: string) => s.sections.find((x) => x.key === key)!;
+
+/** The five row-bearing parts the line-item file carries. Empty by default so
+ *  an assertion about one of them says which one it is about, rather than
+ *  passing on a row some other fixture happened to leave in. */
+const items = (o: Partial<Parameters<typeof statementItemsCsv>[1]> = {}): Parameters<typeof statementItemsCsv>[1] =>
+  ({ invoices: [], fees: [], refunds: [], disputes: [], costs: [], ...o });
 
 /* ── 1. the periods this app is willing to name ───────────────────────────
    A calendar period, or one the COACH names. This app still does not know
@@ -313,6 +346,15 @@ const STATED = [
   STATEMENT_NOT, STATEMENT_IS, STATEMENT_NOT_THE_WHOLE_BOOK,
   STATEMENT_STRIPE_IS_THE_RECORD, PERIOD_IS_YOURS,
   SESSIONS_NOT_MONEY, INVOICES_NOT_ADDED, LATE_FEES_NOT_TAKINGS,
+  // The three sections money goes OUT through carry the same shape of denial
+  // and are cut for the same reason: `COSTS_ARE_NOT_TAX_ADVICE` says no cost is
+  // marked allowable and none has been treated as a deduction, which is the
+  // sentence this rule exists to require rather than one it should forbid, and
+  // `COSTS_ARE_NEVER_NETTED` says outright that there is no profit figure
+  // anywhere in this app. Cutting them keeps the rule looking for an invented
+  // figure rather than for the words that refuse to invent one.
+  REFUNDS_ARE_NOT_NETTED, REFUNDS_ARE_A_RUNNING_TOTAL, DISPUTES_ARE_NOT_NETTED,
+  COSTS_ARE_NEVER_NETTED, COSTS_ARE_NOT_TAX_ADVICE,
 ];
 
 /** The document with its own disclaimers cut out, so the rule does not fail on
@@ -345,7 +387,7 @@ for (const shape of [
 ]) {
   const s = coachStatement(shape);
   const d = statementDoc(s);
-  const prose = scannable(d.html + '\n' + d.text + '\n' + statementCsv(s) + '\n' + statementItemsCsv(s, shape.invoices.rows, shape.lateCancellations.rows));
+  const prose = scannable(d.html + '\n' + d.text + '\n' + statementCsv(s) + '\n' + statementItemsCsv(s, { invoices: shape.invoices.rows, fees: shape.lateCancellations.rows, refunds: shape.refunds.rows, disputes: shape.disputes.rows, costs: shape.costs.rows }));
   for (const f of FORBIDDEN) {
     ok(!forbiddenRe(f).test(prose), `the statement calculates and names no tax of any kind — found "${f}"`);
   }
@@ -362,7 +404,7 @@ for (const shape of [
   ok(d.text.includes(STATEMENT_STRIPE_IS_THE_RECORD), 'and that Stripe holds the record of what moved');
   ok(d.text.includes(PERIOD_IS_YOURS), 'and that the period was the coach’s own choice');
   ok(statementCsv(s).includes(STATEMENT_NOT), 'the CSV carries the same sentence on its own face');
-  ok(statementItemsCsv(s, [invoice()], [fee()]).includes(STATEMENT_NOT), 'and so does the line-item file');
+  ok(statementItemsCsv(s, items({ invoices: [invoice()], fees: [fee()] })).includes(STATEMENT_NOT), 'and so does the line-item file');
   ok(d.text.includes(periodSentence(Y26)), 'and the exact period is on it, both ends');
   ok(statementCsv(s).includes(periodSentence(Y26)), 'and on the CSV too');
 }
@@ -475,7 +517,7 @@ ok(!(withheldReason('error', 'sales') ?? '').includes('had not finished loading'
 
 {
   // The empty-cell rule in the file an accountant opens.
-  const csv = statementItemsCsv(coachStatement(input()), [invoice({ currency: null, amountCents: 48000 })], []);
+  const csv = statementItemsCsv(coachStatement(input()), items({ invoices: [invoice({ currency: null, amountCents: 48000 })] }));
   ok(csv.includes('Do not read the empty cell as nothing charged'), 'an undenominated invoice explains its empty amount cell');
   ok(!/,0\.00,/.test(csv), 'and it is never written as zero');
 }
@@ -667,7 +709,7 @@ ok(!(withheldReason('error', 'sales') ?? '').includes('had not finished loading'
 {
   // A comma or a semicolon in a name shifts every column after it, silently and
   // forever, and the amount lands under the wrong heading.
-  const csv = statementItemsCsv(coachStatement(input()), [invoice({ billTo: 'Smith, Jr.', description: 'paid cash; owes 20' })], []);
+  const csv = statementItemsCsv(coachStatement(input()), items({ invoices: [invoice({ billTo: 'Smith, Jr.', description: 'paid cash; owes 20' })] }));
   ok(csv.includes('"Smith, Jr."'), 'a comma in a name is quoted');
   ok(csv.includes('"paid cash; owes 20"'), 'and so is a semicolon in a description');
   ok(csv.startsWith('﻿'), 'the file opens with a BOM so Excel reads it as UTF-8');
@@ -721,7 +763,7 @@ ok(!(withheldReason('error', 'sales') ?? '').includes('had not finished loading'
   ok(sec(s, 'lateCancellations').notes.some((n) => n === LATE_FEES_ONLY_CURRENT_CLIENTS),
     'the fees section says which fees it cannot see');
   ok(statementDoc(s).text.includes(LATE_FEES_ONLY_CURRENT_CLIENTS), 'and the document carries it');
-  ok(statementItemsCsv(s, [], []).includes(LATE_FEES_ONLY_CURRENT_CLIENTS), 'and so does the line-item file');
+  ok(statementItemsCsv(s, items()).includes(LATE_FEES_ONLY_CURRENT_CLIENTS), 'and so does the line-item file');
 }
 
 /* ── 16c. the line items are filtered here, not by whoever calls it ───────
@@ -731,11 +773,10 @@ ok(!(withheldReason('error', 'sales') ?? '').includes('had not finished loading'
 
 {
   const s = coachStatement(input());
-  const csv = statementItemsCsv(
-    s,
-    [invoice({ seq: 1, issuedOn: '2026-05-02' }), invoice({ seq: 2, issuedOn: '2024-05-02', description: 'out of period' })],
-    [fee(), fee({ createdAt: at(2024, 6, 11), amount: 999 })],
-  );
+  const csv = statementItemsCsv(s, items({
+    invoices: [invoice({ seq: 1, issuedOn: '2026-05-02' }), invoice({ seq: 2, issuedOn: '2024-05-02', description: 'out of period' })],
+    fees: [fee(), fee({ createdAt: at(2024, 6, 11), amount: 999 })],
+  }));
   ok(!csv.includes('out of period'), 'an invoice outside the period never reaches the file');
   ok(!csv.includes('999.00'), 'nor does a fee outside it');
   ok(csv.includes('2026-05-02'), 'and the ones inside it do');
@@ -759,6 +800,175 @@ ok(!(withheldReason('error', 'sales') ?? '').includes('had not finished loading'
   eq(statementFileStem(s), 'statement-of-record-ironhaus-strength-2026-01-01-to-2026-12-31',
     'the filename carries the brand and both ends of the period');
   ok(!statementFileStem(s).includes('INCOMPLETE'), 'and says nothing about incompleteness when there is none');
+}
+
+/* ── 18. THE THOUSANDTH ───────────────────────────────────────────────────
+   `minorToPlain`'s own doc comment says it is currency-aware and exists so a
+   yen is not divided by a hundred. It branched on ZERO_DECIMAL and on nothing
+   else, so it was right for the yen and a hundred times wrong for a dinar: KWD
+   12.340 is 12340 fils, and the accountant's spreadsheet said 123.40.
+
+   The readable document beside it was right the whole time — `minorMoney` goes
+   through `currencyDecimals` — so the two artefacts a coach hands over together
+   disagreed by a factor of ten and neither said which was which. */
+
+{
+  eq(minorToPlain(12340, 'KWD'), '12.340', 'a Kuwaiti dinar has three decimal places, not two');
+  eq(minorToPlain(12340, 'kwd'), '12.340', 'and the code is read case-insensitively, as everywhere else');
+  eq(minorToPlain(5, 'BHD'), '0.005', 'five fils keeps its leading nought rather than starting with a point');
+  eq(minorToPlain(-12340, 'JOD'), '-12.340', 'and a negative one keeps its sign in front of the whole figure');
+  eq(minorToPlain(50000, 'JPY'), '50000', 'a yen still has none, which is what this function already got right');
+  eq(minorToPlain(48000, 'GBP'), '480.00', 'and two places is still the answer for most of the world');
+  eq(minorToPlain(4800, null), null, 'no currency is still no figure, never a bare number');
+  // The whole-unit sibling had the same hole pointed the other way: `toFixed(2)`
+  // on a dinar rounds the third place away, a fils off every fee in the file.
+  eq(majorToPlain(12.345, 'KWD'), '12.345', 'a whole-unit dinar keeps all three of its places');
+  eq(majorToPlain(25, 'GBP'), '25.00', 'and a pound still gets two');
+  eq(majorToPlain(50000, 'JPY'), '50000', 'and a yen still gets none');
+
+  // And the file itself carries the right digits, which is the thing that
+  // actually reaches an accountant.
+  const kw = coachStatement(input({ period: Y26 }));
+  const csv = statementItemsCsv(kw, items({ invoices: [invoice({ amountCents: 12340, currency: 'KWD' })] }));
+  ok(csv.includes('12.340'), 'the line-item file writes a dinar at its own scale');
+  ok(!csv.includes('123.40'), 'and never at a hundredth of it');
+}
+
+/* ── 19. A PERIOD THAT DOES NOT READ IS NOT A QUIET YEAR ──────────────────
+   `splitByPeriod` was `if (range && …)`, so a null range put every dated row
+   nowhere: not inside, and not undated either, because the dates were fine.
+   Sections then counted an empty `inside` and printed "0 sales" — under a
+   'ready' status, with every read having succeeded, so `complete` was true and
+   the document said every part of it had been read in full.
+
+   That is the confident nought over a failed read, arriving through the period
+   instead of through a read, and it is worse in one way: there is no failed
+   read anywhere to raise a caveat. */
+
+{
+  const broken: StatementPeriod = { from: 'the first', to: 'the last', label: 'nonsense' };
+  eq(periodReads(broken), false, 'a period whose ends are not days does not read');
+  eq(periodReads(Y26), true, 'and a real one does');
+  eq(periodReads({ from: '2026-12-31', to: '2026-01-01', label: 'backwards' }), false,
+    'nor does one that closes before it opens');
+
+  // Nothing vanishes between the two counts.
+  const split = splitByPeriod([{ at: at(2026, 3, 4) }, { at: 'not a date' }], (r) => r.at, null);
+  eq(split.inside.length, 0, 'with no range nothing is placed inside the period');
+  eq(split.undated, 1, 'the row with no readable date is undated, as it always was');
+  eq(split.noPeriod, 1, 'and the row with a perfectly good date is counted rather than dropped');
+
+  const day = splitByDay([{ on: '2026-05-02' }], (r) => r.on, broken);
+  eq(day.inside.length, 0, 'the date-only split places nothing against an unreadable period');
+  eq(day.noPeriod, 1, 'and counts what it could not place');
+
+  const s = coachStatement(input({ period: broken }));
+  ok(!s.complete, 'a statement over an unreadable period is not complete');
+  ok(s.caveats.some((c) => c.includes(PERIOD_UNREADABLE)), 'and names the period as the thing that failed');
+  for (const key of ['sessions', 'packs', 'subscriptions', 'receipts', 'invoices', 'lateCancellations', 'payoutsPaid', 'refunds', 'disputes', 'costs']) {
+    eq(sec(s, key).count, null, `no count is stated for ${key} over a period that does not read`);
+    eq(sec(s, key).lines.length, 0, `and no figure for ${key} either`);
+    eq(sec(s, key).withheld, PERIOD_UNREADABLE, `and ${key} says which of the two went wrong`);
+    // The read itself succeeded and the section still says so. Reporting it as
+    // a failed read would send a coach to fix a query that is fine.
+    eq(sec(s, key).status, 'ready', `the read behind ${key} is still reported as whole, because it was`);
+  }
+  eq(s.salesTotal, null, 'and the one combined figure is withheld too');
+  const doc = statementDoc(s);
+  ok(doc.text.includes(PERIOD_UNREADABLE), 'the document carries the reason where it cannot be scrolled past');
+  ok(!doc.text.includes('0 sales'), 'and states no nought anywhere');
+  // The notes carry figures too, and blanking the counts alone would leave
+  // "Marked completed: 0. No-show: 0." on the page — the same confident nought
+  // wearing a sentence, over an `inside` that is empty because no row could be
+  // placed rather than because nothing happened.
+  ok(!doc.text.includes('Marked completed: 0'), 'nor a nought inside a note');
+  ok(!/\b0 of 0\b/.test(doc.text), 'nor a count of invoices that could not be placed');
+  const csv = statementItemsCsv(s, items({ invoices: [invoice()], costs: [cost()] }));
+  ok(csv.includes(PERIOD_UNREADABLE), 'the line-item file says why it lists nothing');
+  ok(!csv.includes('Dana Okafor'), 'rather than listing rows it could not place');
+}
+
+/* ── 20. THE THREE SECTIONS MONEY GOES OUT THROUGH ────────────────────────
+   Every figure on this document was money IN. A coach who refunded four sales,
+   lost a chargeback and paid a year of gym rent handed their accountant a
+   statement showing the sales at full value and no penny of any of it — and
+   this app held rows for all three.
+
+   Adding them subtracts NOTHING. That is the load-bearing part: the three
+   standing statements are three phrasings of one rule, and the assertions below
+   are as much about the absence of a net figure as about the presence of the
+   sections. */
+
+{
+  const s = coachStatement(input());
+  eq(sec(s, 'refunds').count, 1, 'a refund inside the period is counted');
+  eq(sec(s, 'refunds').lines[0]?.amount, 'GBP 120.00', 'and stated in the currency it went back in');
+  ok(sec(s, 'refunds').notes.includes(REFUNDS_ARE_NOT_NETTED), 'and says it is not subtracted from the sales');
+  ok(sec(s, 'refunds').notes.includes(REFUNDS_ARE_A_RUNNING_TOTAL), 'and that one line is every refund on one charge');
+
+  eq(sec(s, 'disputes').count, 1, 'a chargeback raised inside the period is counted');
+  ok(sec(s, 'disputes').notes.includes(DISPUTES_ARE_NOT_NETTED), 'and says it is not subtracted either');
+  ok(sec(s, 'disputes').notes.some((n) => n.includes('still open')), 'and that an open one has no outcome yet');
+
+  eq(sec(s, 'costs').count, 1, 'a cost the coach recorded is counted');
+  ok(sec(s, 'costs').notes.includes(COSTS_ARE_NEVER_NETTED), 'and carries the standing rule from the costs screen itself');
+
+  // The sales figure is untouched by any of them. This is the assertion that
+  // would fail the moment somebody "finished" this document with a net line.
+  const packs = sec(s, 'packs');
+  eq(packs.lines[0]?.amount, 'GBP 480.00', 'the sales figure is the gross it always was');
+  eq(s.salesTotal?.lines[0]?.amount, 'GBP 1,080.00', 'and the one combined figure ignores every refund and cost');
+
+  // A period each of them falls outside of.
+  const out = coachStatement(input({
+    refunds: { status: 'ready', rows: [refund({ refundedAt: at(2024, 8, 3) })] },
+    disputes: { status: 'ready', rows: [dispute({ openedAt: at(2024, 9, 14) })] },
+    costs: { status: 'ready', rows: [cost({ paidOn: '2024-10-01' })] },
+  }));
+  eq(sec(out, 'refunds').count, 0, 'a refund from another year is in this period for nothing');
+  eq(sec(out, 'disputes').count, 0, 'nor is a chargeback from one');
+  eq(sec(out, 'costs').count, 0, 'nor a cost');
+
+  // And a failed read is never a nought, which is the rule for all ten.
+  for (const key of ['refunds', 'disputes', 'costs'] as const) {
+    const bad = coachStatement(input({ [key]: { status: 'error', rows: [] } } as Partial<StatementInput>));
+    eq(sec(bad, key).count, null, `a failed ${key} read states no count`);
+    ok(!!sec(bad, key).withheld, `and says why`);
+    ok(!bad.complete, `and the whole statement admits it`);
+  }
+
+  // Two currencies of refunds are two amounts of money and never one.
+  const two = coachStatement(input({
+    refunds: { status: 'ready', rows: [refund(), refund({ currency: 'AED', refundedCents: 30000 })] },
+  }));
+  eq(sec(two, 'refunds').lines.length, 2, 'two currencies of refunds make two lines');
+  ok(sec(two, 'refunds').notes.some((n) => n.includes('deliberately not added together')),
+    'and carry the warning that they are not added');
+}
+
+/* ── 21. the line-item file carries every part that has rows ──────────────
+   It carried invoices and fees and nothing else, so the file an accountant
+   works line by line held every document the coach had issued and no refund, no
+   chargeback and no cost. Unlike a sale, those three are the rows that make a
+   sale on the same document untrue. */
+
+{
+  const s = coachStatement(input());
+  const csv = statementItemsCsv(s, items({
+    invoices: [invoice()], fees: [fee()], refunds: [refund()], disputes: [dispute()], costs: [cost()],
+  }));
+  ok(csv.includes('invoice,'), 'invoices are in the file');
+  ok(csv.includes('late cancellation,'), 'and fees');
+  ok(csv.includes('refund,'), 'and refunds');
+  ok(csv.includes('chargeback,'), 'and chargebacks');
+  ok(csv.includes('cost,'), 'and costs');
+  ok(csv.includes('120.00'), 'a refund carries its amount at its own scale');
+  ok(csv.includes('Gym floor rent, October'.replace(',', ',')) || csv.includes('"Gym floor rent, October"'),
+    'a description with a comma in it is quoted rather than becoming two columns');
+  ok(csv.includes('Nothing is netted'), 'and the file says on its own face that no column adds up');
+  // No signed amounts anywhere: money in and money out sit on the same lines
+  // and the first column is what says which way.
+  ok(!/,-\d/.test(csv), 'no amount in the file is written as a negative');
 }
 
 declare const process: { exit(code: number): void };

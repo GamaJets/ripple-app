@@ -180,10 +180,19 @@ export function passLiveOn(expiresOn: string | null, onISODate: string): boolean
  * The gym passes that can pay for a one-to-one, in the order part 370 spends
  * them: soonest to expire first, then oldest.
  *
- * The ordering is the opposite of the coach-pack rule and the difference is not
- * an inconsistency — a coach pack cannot expire and a pass can, so spending the
- * one about to be lost is the only order that does not throw a member's money
- * away.
+ * The ordering is the opposite of the coach-pack rule — that one is oldest
+ * first, matching the `order by created_at asc` in `redeem_pack_session` — and
+ * the difference is not an inconsistency: a pass has always had a window, so
+ * spending the one about to be lost is the only order that does not throw a
+ * member's money away.
+ *
+ * That contrast used to be stated as "a coach pack cannot expire", which part
+ * 612 made false: a coach pack can carry an `expires_on` too. What is still
+ * true is the ordering, and it is still right, because the database spends
+ * coach packs oldest-first whatever this list says and a picker that disagreed
+ * with the draw would name a pack the credit did not come off.
+ * `coachPackLines` now carries each pack's own date so a screen can SAY what is
+ * about to be lost even where it cannot change what is spent first.
  */
 export function gymPtLines(
   passes: readonly {
@@ -225,20 +234,52 @@ export function gymPtLines(
   return out;
 }
 
-/** Coach packs as entitlement lines. Takes `PackLine`s from packDraw.ts rather
- *  than re-deriving a balance this module has no business computing twice. */
+/**
+ * Coach packs as entitlement lines. Takes `PackLine`s from packDraw.ts rather
+ * than re-deriving a balance this module has no business computing twice.
+ *
+ * ── `expiresOn` was a literal null, and part 612 made that false ──────────
+ *
+ * The comment on `gymPtLines` above says "a coach pack cannot expire and a pass
+ * can", and that was true when it was written. Part 612 put a real
+ * `expires_on` on a coach pack, `PackLine` has carried it since, and this
+ * function threw it away on every line — so a coach pack with three weeks left
+ * on it was handed to the picker as a pass that never runs out, sorted BEHIND
+ * every dated gym pass, and offered with nothing anywhere saying it was about
+ * to be lost. The one order that does not throw a client's money away is
+ * soonest-to-expire first, and this fed it a null for every coach pack.
+ *
+ * A pack whose window has ALREADY closed is not an entitlement at all and is
+ * dropped here rather than offered with a date in the past: nothing in the
+ * database will let it be drawn — `run_pack_expiry()` has reduced its
+ * `sessions_total` — so putting it in a picker is offering somebody something
+ * that cannot be spent. `packBalance` counts what is left on those under
+ * `onClosedPacks`, which is where that conversation belongs.
+ */
 export function coachPackLines(
-  lines: readonly { id: string; label: string; left: number; sessions_total: number }[] | null | undefined,
+  lines: readonly {
+    id: string; label: string; left: number; sessions_total: number;
+    /** Optional so every existing construction of this shape keeps compiling.
+     *  Absent and null mean the same thing: a pack with no window, which is
+     *  every pack sold before part 612. */
+    expiresOn?: string | null;
+    expired?: boolean;
+  }[] | null | undefined,
 ): Entitlement[] | null {
   if (lines == null) return null;
-  return lines.map((l) => ({
-    id: l.id,
-    kind: 'coach_pack' as const,
-    label: l.label,
-    left: Math.max(0, l.left),
-    sessions_total: l.sessions_total,
-    expiresOn: null,
-  }));
+  return lines
+    .filter((l) => !l.expired)
+    .map((l) => ({
+      id: l.id,
+      kind: 'coach_pack' as const,
+      label: l.label,
+      left: Math.max(0, l.left),
+      sessions_total: l.sessions_total,
+      // The pack's own last day, straight off the line. Null is still the
+      // answer for a pack with no window, and it still sorts last — but it is
+      // now the absence of a window rather than the absence of a field.
+      expiresOn: l.expiresOn ?? null,
+    }));
 }
 
 /* ── the ledger ────────────────────────────────────────────────────────────── */

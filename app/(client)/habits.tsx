@@ -19,7 +19,7 @@
 //     of you. Under `status === 'error'` that is exactly the lie the provider's
 //     header is about, so the empty state and the notice below say which of the
 //     two it is before the client draws a conclusion about their own day.
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,6 +28,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, Flag, Notice, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useHabits } from '../../src/ui/habits';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { donePercent } from '../../src/lib/checklist';
 import { useClientData } from '../../src/ui/clientData';
@@ -65,6 +66,9 @@ export default function Habits() {
   // read behind it is whole, and withheld otherwise.
   const doneKnown = isWhole(h.status);
   const c = useClientData();
+  // The ticks and the water count come from the habits provider; the targets
+  // they are measured against are on the profile. Both are server reads.
+  const pull = usePullToRefresh(useCallback(() => { h.reload(); c.reload(); }, [h.reload, c.reload]));
   // The three targets below live on `clients` and are read once, with no local
   // copy under USE_SUPABASE. A null one therefore has two meanings — "you have
   // not set this" and "the row that holds it could not be read" — and this
@@ -79,7 +83,7 @@ export default function Habits() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
@@ -274,7 +278,17 @@ export default function Habits() {
               style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
             </Field>
             <Cta label="Save" onPress={() => {
-              const n = Math.round(parseFloat(stepDraft));
+              // `readNumber`, not `parseFloat` — the same reader the sleep box
+              // twelve lines below uses, and for the same reason. This is a
+              // whole-number field on a number pad, so the comma is rarer here
+              // than there, but "rarer" is not a rule: an 8,000 pasted or typed
+              // with a group separator is `parseFloat`'s 8, which is a step goal
+              // a member passes walking to the kitchen and then reads as met
+              // every day for ever. One reader for every typed figure in this
+              // app is what src/lib/units.ts asks for and what
+              // `check:decimals` was written alongside.
+              const typed = readNumber(stepDraft);
+              const n = typed == null ? NaN : Math.round(typed);
               if (!Number.isFinite(n) || n < STEP_MIN || n > STEP_MAX) {
                 Alert.alert('Check that number', `A step goal needs to be between ${STEP_MIN} and ${STEP_MAX}.`);
                 return;
@@ -332,7 +346,11 @@ export default function Habits() {
               style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
             </Field>
             <Cta label="Save" onPress={() => {
-              const n = Math.round(parseFloat(waterDraft));
+              // As above: one reader for every typed figure. A glass count is a
+              // small number and a comma in it is unlikely — and the box next
+              // to it, which is neither, is the one this file already fixed.
+              const typed = readNumber(waterDraft);
+              const n = typed == null ? NaN : Math.round(typed);
               if (!Number.isFinite(n) || n < WATER_MIN || n > WATER_MAX) {
                 Alert.alert('Check that number', `A water goal needs to be between ${WATER_MIN} and ${WATER_MAX} glasses. If you meant millilitres, use glasses here — a glass is about 250 ml.`);
                 return;

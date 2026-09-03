@@ -165,13 +165,25 @@ export interface MyInjuryAcks {
   status: LoadStatus;
   read: CoachRead | null;
   choices: ProgrammeChoice[];
+  /**
+   * Ask both reads again.
+   *
+   * A real re-read of `injury_acknowledgements` and
+   * `program_injury_acknowledgements`, not a state reset: the status goes back
+   * through whatever the server says this time. Whether a coach has read a
+   * disclosure is the sort of fact a client refreshes a screen to find out, and
+   * until this there was no way to ask twice.
+   */
+  reload: () => void;
 }
 
 export function useMyInjuryAcks(): MyInjuryAcks {
-  const [state, setState] = useState<MyInjuryAcks>({
+  const [state, setState] = useState<Omit<MyInjuryAcks, 'reload'>>({
     status: USE_SUPABASE ? 'loading' : 'ready', read: null, choices: [],
   });
   const authRev = useAuthRevision();
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
 
   useEffect(() => {
     if (!USE_SUPABASE) return;
@@ -239,7 +251,7 @@ export function useMyInjuryAcks(): MyInjuryAcks {
       }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readTick]);
 
-  return state;
+  return { ...state, reload };
 }

@@ -61,7 +61,16 @@ export function useAvailability() {
   const authRev = useAuthRevision();
   const [slots, setSlots] = useState<AvailSlot[]>([]);
   const [uid, setUid] = useState<string | null>(null);
+  // How many server rows carry no timezone, or null when the read did not
+  // come back whole. Null is never folded into zero — see the header of
+  // src/lib/slotGeneration.ts for why an unchecked week is not a clear one.
+  const [zoneless, setZoneless] = useState<number | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Bumped by `reload`. The read below latches 'error' on three separate paths
+  // and the effect used to run only on an auth change, so a coach whose weekly
+  // grid was refused kept the cached copy on screen — marked unchecked, with no
+  // way to check it again short of restarting the app.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,7 +112,7 @@ export function useAvailability() {
         // no future writer is obliged to preserve, and the cost of the limit is
         // nothing. `capped()` below is what makes it a claim rather than a hope.
         const { data: rows, error } = await supabase.from('trainer_availability')
-          .select('id, dow, hour, minute, dur').eq('trainer_id', u)
+          .select('id, dow, hour, minute, dur, tz').eq('trainer_id', u)
           .order('dow', { ascending: true }).order('hour', { ascending: true }).order('minute', { ascending: true })
           .limit(capLimit());
         if (cancelled) return;
@@ -118,6 +127,9 @@ export function useAvailability() {
           // meant — coerced rather than left undefined, because undefined
           // reaches `String(m).padStart` and renders ":NaN".
           const server: AvailSlot[] = page.rows.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur }));
+          // Counted off the rows themselves rather than asked for separately,
+          // so the count and the grid can never disagree about the same week.
+          setZoneless(page.rows.filter((r: any) => r.tz == null).length);
           setSlots(server.sort(byTime));
           // Deliberately not cached when short. This copy is what the coach
           // sees offline, and writing a truncated grid over the good one would
@@ -139,8 +151,8 @@ export function useAvailability() {
           // slot they had closed kept re-appearing, and the sessions generated
           // from it were real.
           const { data: up, error: upErr } = await supabase.from('trainer_availability')
-            .insert(local.map((sl) => ({ trainer_id: u, dow: sl.dow, hour: sl.hour, minute: Number(sl.minute) || 0, dur: sl.dur })))
-            .select('id, dow, hour, minute, dur');
+            .insert(local.map((sl) => ({ trainer_id: u, dow: sl.dow, hour: sl.hour, minute: Number(sl.minute) || 0, dur: sl.dur, tz: deviceZone() })))
+            .select('id, dow, hour, minute, dur, tz');
           if (cancelled) return;
           if (upErr || !up) { setStatus('error'); return; }
           const synced: AvailSlot[] = up.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur })).sort(byTime);
@@ -154,7 +166,12 @@ export function useAvailability() {
       } catch { if (!cancelled) setStatus('error'); /* offline: local copy stands, and now says so */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, nonce]);
+
+  /** Ask the server for this coach's week again. Goes back through the effect
+   *  above rather than repeating its rules — the local-push-up branch and the
+   *  truncation handling are not worth having two copies of. */
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   const persist = (next: AvailSlot[]) => {
     const sorted = [...next].sort(byTime);
@@ -218,7 +235,39 @@ export function useAvailability() {
     } catch { return false; }
   };
 
-  return { slots, status, addSlot, removeSlot };
+  /**
+   * Records this handset's zone against the coach's OWN rows that have none.
+   *
+   * Scoped to `trainer_id = uid` and to `tz is null` in the statement itself
+   * rather than by passing a list of ids: a row that gained a zone between the
+   * read and this write — from part 731's trigger, or from the coach's other
+   * phone — must not have it overwritten by a device that happens to be
+   * somewhere else today. The filter is the guarantee; the count is only what
+   * is reported afterwards.
+   *
+   * Returns how many rows actually came back changed, never how many were
+   * asked for. `assertWrote`'s argument throughout this repo: a write that
+   * reports what it intended is a write that cannot report a refusal.
+   */
+  const setZoneOnUnzoned = async (): Promise<number> => {
+    const zone = deviceZone();
+    if (!USE_SUPABASE || !uid || !zone) return 0;
+    try {
+      const { data, error } = await supabase.from('trainer_availability')
+        .update({ tz: zone })
+        .eq('trainer_id', uid)
+        .is('tz', null)
+        .select('id');
+      if (error || !data) return 0;
+      // Re-read rather than assumed: the local count is now stale by exactly
+      // the number of rows that landed, and guessing it would be the same
+      // mistake the write above refuses to make.
+      setZoneless((n) => (n == null ? null : Math.max(0, n - data.length)));
+      return data.length;
+    } catch { return 0; }
+  };
+
+  return { slots, status, addSlot, removeSlot, zoneless, deviceZone: deviceZone(), setZoneOnUnzoned, reload };
 }
 
 /** Concrete dates for a weekly slot over the next `weeks` weeks (from today).

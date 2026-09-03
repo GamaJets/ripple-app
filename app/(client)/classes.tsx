@@ -6,7 +6,7 @@
 // hairline-separated sections instead of a stack of bordered cards, and a
 // coloured dot beside ink text where "Class full" used to be status-coloured
 // type. The schedule itself is the gym's own — nothing is scheduled here.
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -15,6 +15,7 @@ import { classFillState } from '../../src/lib/gymSchedule';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useReachability } from '../../src/ui/reachability';
 import { retryLine } from '../../src/lib/reachability';
 import { useSettings } from '../../src/ui/settings';
@@ -34,7 +35,10 @@ const dayLabel = (iso: string) => fmtRelativeDay(iso);
 export default function Classes() {
   const t = useTheme();
   const router = useRouter();
-  const { classes, myStatus, status: classStatus, book, cancel, countsKnown, cachedNote } = useClasses();
+  const { classes, myStatus, status: classStatus, book, cancel, countsKnown, cachedNote, refresh } = useClasses();
+  // The timetable and this member's place in it come from one provider read, so
+  // one call brings back both the classes and whether they are booked on them.
+  const pull = usePullToRefresh(useCallback(() => { void refresh(); }, [refresh]));
   // Whether this phone can reach us at all. It decides which second half every
   // failure sentence on this screen gets.
   const reach = useReachability();
@@ -142,7 +146,7 @@ export default function Classes() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>

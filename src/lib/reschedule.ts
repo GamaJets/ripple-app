@@ -120,8 +120,14 @@ export function rescheduleRefusalLine(r: RescheduleReport, at: string | null): s
   switch (r.reason) {
     case 'inside_notice': {
       const hours = r.noticeHours ?? 24;
+      // `unstatedCurrency` is appended for the same reason it is appended to
+      // the other two priced sentences in this file and to `cancelWarningLine`
+      // in booking.ts: "A slot may print the figure alone; a sentence may not."
+      // This one was the sentence that did — a member of a gym with no currency
+      // set read "would cost 25" immediately before deciding whether to cancel
+      // and rebook, and priced it in whatever money they happen to think in.
       const cost = r.fee != null && r.fee > 0
-        ? ` Cancelling it now would cost ${feeAmountLine(r.fee, r.currency)}.`
+        ? ` Cancelling it now would cost ${feeAmountLine(r.fee, r.currency)}.${unstatedCurrency(r.currency)}`
         : '';
       return `Your coach asks for ${hours} ${hours === 1 ? 'hour' : 'hours'} of notice, and this session is inside that, so it cannot be moved free of charge. `
         + `${still} To change it now, cancel it and book another time.${cost}`;

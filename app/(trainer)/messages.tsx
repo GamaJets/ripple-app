@@ -44,8 +44,24 @@
 // and the one that matters is 'error': a coach told they have no messages, when
 // the read was refused, does not go looking — and the client who wrote that
 // morning is waiting on a reply.
-import { useCallback, useState } from 'react';
-import { View, Text, ScrollView, Pressable, Image, ActivityIndicator } from 'react-native';
+// ── Finding one of them, and finding the ones waiting on you ───────────────
+//
+// This screen listed `conversations` newest-first under one head reading "Most
+// recent first" and offered nothing else: no query field, no unread filter, no
+// archive. The header above says it exists because "a coach with twenty clients
+// had no way to see who had written to them" — and at forty, recency-only
+// ordering recreates precisely that, on the queue that predicts churn better
+// than anything else in the product. The roster next door already draws
+// "3 unread" on its rows, so the app computed the answer and would not let the
+// coach filter to it.
+//
+// Both controls are in src/lib/threadFilter.ts, which is also where the one
+// thing that is hard about the unread chip lives: `unread` is nullable, and a
+// filter that dropped the rows whose count did not come back would hide exactly
+// the client who might be waiting, behind a shorter list that looks complete.
+import { useCallback, useMemo, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { View, Text, ScrollView, Pressable, Image, ActivityIndicator, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -58,6 +74,12 @@ import { peerHeading } from '../../src/lib/threadPeer';
 import {
   threadPreview, threadWhen, threadsEmptyNote, unreadBadgeLabel, type CoachThread,
 } from '../../src/lib/coachThreads';
+import {
+  NO_THREAD_FILTER, filterThreads, knownUnread, threadFilterActive, threadFilterLine,
+  unknownUnread, unreadChipLabel, withheldNames, type ThreadFilter,
+} from '../../src/lib/threadFilter';
+import { hitSlopFor } from '../../src/lib/a11y';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * One row: a face, a name, the last thing said and when, and whether anything
@@ -135,7 +157,7 @@ function ThreadRow({ t, now, onPress }: { t: CoachThread; now: number; onPress: 
           </Text>
         ) : null}
       </View>
-      <Icon name="chevron" size={16} color={th.ink3} />
+      <Icon name={FORWARD_ICON} size={16} color={th.ink3} />
     </Pressable>
   );
 }
@@ -145,12 +167,18 @@ export default function Messages() {
   const router = useRouter();
   const { conversations, unstarted, status, roster, refresh } = useCoachThreads();
   const [showAll, setShowAll] = useState(false);
+  const [filter, setFilter] = useState<ThreadFilter>(NO_THREAD_FILTER);
+  const narrowed = threadFilterActive(filter);
 
   // Opening a thread is what marks it read (`mark_thread_read`, called by
   // useThread), and the coach comes straight back here. Without this the badge
   // they just cleared is still on the row and the screen is asserting something
   // the server stopped agreeing with a second ago.
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+  // The same read focus runs. Threads are written by the OTHER side — a
+  // client replying is the only thing that changes this list — so a coach
+  // sitting on this screen waiting for an answer had no way to ask for it.
+  const pull = usePullToRefresh(useCallback(() => { refresh(); }, [refresh]));
 
   // One clock for the whole render, so two rows a millisecond apart cannot
   // disagree about what "now" is.
@@ -166,14 +194,60 @@ export default function Messages() {
       ? { pathname: '/(trainer)/chat', params: { clientId: c.clientId, name: c.name } }
       : { pathname: '/(trainer)/chat', params: { clientId: c.clientId } });
   };
-  const emptyNote = conversations.length === 0 ? threadsEmptyNote(status, roster) : null;
+  /**
+   * What is drawn, and what the chip is drawn FROM.
+   *
+   * The chip's own count comes from the whole list rather than from the
+   * filtered one, so pressing it does not change the number on it. And it is
+   * withheld entirely while any count is unknown — see `unreadChipLabel`.
+   */
+  const shown = useMemo(() => filterThreads(conversations, filter), [conversations, filter]);
+  const unreadKnown = useMemo(() => knownUnread(conversations), [conversations]);
+  const unreadUnknown = useMemo(() => unknownUnread(conversations), [conversations]);
+  /**
+   * People the coach has never written to are matched on their NAME and are not
+   * offered under the unread chip at all — an unstarted thread has no messages
+   * in it, so it can hold nothing unopened, and listing one there would be a
+   * row that answers the filter it is under by accident.
+   */
+  const shownUnstarted = useMemo(
+    () => (filter.mode === 'unread' ? [] : filterThreads(unstarted, { mode: 'all', query: filter.query })),
+    [unstarted, filter],
+  );
+  /**
+   * What the narrowing did, in one sentence, or null.
+   *
+   * `searched` is the number of threads the filter actually ran over — what
+   * LOADED, which under 'partial' is not the coach's book. `withheld` is the
+   * rows a name query could never have matched because the name did not come
+   * back; without it they are simply absent, which reads as "not on your book".
+   */
+  // The pool the filter actually ran over. Under the unread chip that is the
+  // conversations alone, because clients who have never written are not
+  // candidates for it — so counting their withheld names here would tell the
+  // coach rows were skipped that were never in the running.
+  const pool = filter.mode === 'unread' ? conversations : [...conversations, ...unstarted];
+  const filterLine = threadFilterLine({
+    status, filter,
+    matched: shown.length + shownUnstarted.length,
+    searched: pool.length,
+    unknown: unknownUnread(shown),
+    withheld: withheldNames(pool),
+  });
+  /**
+   * "Nobody has written to you" is a claim about the coach's book and must
+   * never be printed over a list somebody has narrowed. Under an active filter
+   * the empty list is `filterLine`'s to explain, and it is careful about which
+   * statuses may state an absence at all.
+   */
+  const emptyNote = conversations.length === 0 && !narrowed ? threadsEmptyNote(status, roster) : null;
   const G = layout.gutter;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
         <Pressable onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Go back" hitSlop={8}>
-          <Icon name="back" size={20} color={t.ink2} />
+          <Icon name={BACK_ICON} size={20} color={t.ink2} />
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your clients</Text>
@@ -182,7 +256,7 @@ export default function Messages() {
       </View>
       <Rule />
 
-      <ScrollView contentContainerStyle={{ paddingBottom: sp.xxl }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: sp.xxl }} refreshControl={pull}>
         {status === 'loading' ? (
           <View style={{ paddingTop: sp.xxl, alignItems: 'center' }}>
             <ActivityIndicator size="small" color={t.ink3} />
@@ -213,10 +287,80 @@ export default function Messages() {
           </View>
         ) : null}
 
-        {conversations.length ? (
+        {/* ── narrowing ─────────────────────────────────────────────────────
+            Offered whenever there is a list to narrow, including under a failed
+            read — a coach who typed a name and got nothing is owed the sentence
+            saying nothing was searched, and hiding the field would leave them
+            with no way to ask the question at all.
+
+            The chip is drawn from the WHOLE list, so pressing it never changes
+            the number written on it. */}
+        {status !== 'loading' ? (
+          <View style={{ paddingHorizontal: G, paddingTop: sp.lg }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
+              <Icon name="search" size={16} color={t.ink3} />
+              <TextInput
+                value={filter.query}
+                onChangeText={(q) => setFilter((f) => ({ ...f, query: q }))}
+                placeholder="Find a client by name" placeholderTextColor={t.ink3}
+                autoCapitalize="none" autoCorrect={false}
+                accessibilityLabel="Find a client by name"
+                style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }}
+              />
+              {filter.query ? (
+                <Pressable onPress={() => setFilter((f) => ({ ...f, query: '' }))} hitSlop={hitSlopFor(24)}
+                  accessibilityRole="button" accessibilityLabel="Clear the name search">
+                  <Text style={{ ...ty.head, color: t.ink3 }}>×</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
+              {/* One chip, not a segmented control: "All" is the absence of a
+                  filter and does not need a control of its own — pressing this
+                  a second time is what turns it off, and the label says which
+                  state it is in through `accessibilityState`. */}
+              <Pressable
+                onPress={() => setFilter((f) => ({ ...f, mode: f.mode === 'unread' ? 'all' : 'unread' }))}
+                accessibilityRole="button"
+                accessibilityState={{ selected: filter.mode === 'unread' }}
+                accessibilityLabel={unreadUnknown > 0
+                  ? 'Show only clients with an unopened message. Some unread counts could not be read, so the number is not shown.'
+                  : unreadKnown > 0
+                    ? `Show only clients with an unopened message. ${unreadKnown} of them.`
+                    : 'Show only clients with an unopened message'}
+                hitSlop={hitSlopFor(32)}
+                style={{
+                  paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill,
+                  backgroundColor: filter.mode === 'unread' ? t.brand : t.surface2,
+                  borderWidth: filter.mode === 'unread' ? 0 : hairline, borderColor: t.ring,
+                }}>
+                <Text style={{ ...ty.micro, fontWeight: '600', color: filter.mode === 'unread' ? t.brandInk : t.ink2 }}>
+                  {unreadChipLabel(unreadKnown, unreadUnknown > 0)}
+                </Text>
+              </Pressable>
+              {narrowed ? (
+                <Ghost label="Clear" onPress={() => setFilter(NO_THREAD_FILTER)}
+                  a11yLabel="Clear the filter and show every conversation" />
+              ) : null}
+            </View>
+            {/* What was actually narrowed, and over what. This is the only
+                thing on the screen allowed to state an absence, and only under
+                a whole read — see src/lib/threadFilter.ts. */}
+            {filterLine ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{filterLine}</Text>
+            ) : null}
+          </View>
+        ) : null}
+
+        {shown.length ? (
           <Section>
-            <SectionHead title="Conversations" note="Most recent first" />
-            {conversations.map((c, i) => (
+            <SectionHead
+              title="Conversations"
+              note={narrowed
+                ? `${shown.length} of ${conversations.length}`
+                : 'Most recent first'}
+            />
+            {shown.map((c, i) => (
               <View key={c.clientId}>
                 {i > 0 ? <Rule inset={56} /> : null}
                 <ThreadRow t={c} now={now} onPress={() => open(c)} />
@@ -240,18 +384,22 @@ export default function Messages() {
             Expanded by default when there are no conversations at all: the whole
             content of the screen at that point is "pick somebody", and making
             them tap twice for it would be a hub with one row in it. */}
-        {unstarted.length ? (
+        {shownUnstarted.length ? (
           <>
             <Rule />
             <Section>
               <SectionHead
                 title="Message Someone Else"
-                note={unstarted.length === 1
+                note={shownUnstarted.length === 1
                   ? 'One client you have not written to yet'
-                  : `${unstarted.length} clients you have not written to yet`}
+                  : `${shownUnstarted.length} clients you have not written to yet`}
               />
-              {showAll || conversations.length === 0 ? (
-                unstarted.map((c, i) => (
+              {/* A coach who has typed a name is looking for that person, so the
+                  matches are drawn rather than hidden behind the button — the
+                  button exists to keep eighteen quiet clients out of a list of
+                  two conversations, and a search result is neither. */}
+              {showAll || shown.length === 0 || !!filter.query.trim() ? (
+                shownUnstarted.map((c, i) => (
                   <View key={c.clientId}>
                     {i > 0 ? <Rule inset={56} /> : null}
                     <ThreadRow t={c} now={now} onPress={() => open(c)} />

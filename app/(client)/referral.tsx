@@ -35,6 +35,7 @@
 // A signup is also not a conversion, and the screen is explicit about which one
 // it counts: a friend has converted when they log their first workout.
 import { useCallback, useEffect, useState } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Share, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -82,6 +83,10 @@ export default function Referral() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // The code, the list of people who used it and the two counts over them all
+  // come from `load`, so one call brings the whole screen back.
+  const pull = usePullToRefresh(load);
 
   // The message and the bare link, both from src/lib/referralLink.ts so that
   // the thing shared, the thing copied and the thing a friend's app opens are
@@ -140,7 +145,7 @@ export default function Referral() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

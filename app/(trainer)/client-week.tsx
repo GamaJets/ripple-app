@@ -59,6 +59,10 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { fetchClientPlannedDays } from '../../src/lib/plannedDays';
 import { scheduledFocus } from '../../src/lib/checklist';
+import { programWeeks, weekCount, weekLabel } from '../../src/lib/programBlock';
+import { blockPosition } from '../../src/lib/programStart';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { clientWeek } from '../../src/lib/clientBlock';
 import { isoToday, DAY_TYPE_LABEL, type PlannedDay, type PlannedDayType } from '../../src/lib/dayPlan';
 import {
   coachWeek, planWindow, dayHeading, whenLabel, coachPlanLine, coachConflictLine,
@@ -133,6 +137,15 @@ export default function ClientWeek() {
     void load(picked);
   }, [picked, load]);
 
+  // Three reads: the client's planned days, the roster the picker and the
+  // header come off, and the programme assignments — which decide which week
+  // of a block is on screen, so a refresh that moved the days and left the
+  // assignment would lay this week's plan out against last week's block.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(), Promise.resolve(ap.reload()),
+    ...(picked ? [load(picked)] : []),
+  ]), [r, ap, picked, load]));
+
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
   const who = client?.name.split(' ')[0] ?? 'They';
 
@@ -143,9 +156,38 @@ export default function ClientWeek() {
   // nothing". So a null programme feeds `undefined` into planConflict, which
   // claims no conflict on an unknown, and the caveat below says so in words.
   const programme = picked ? ap.getProgram(picked) : null;
+  /**
+   * The week of the block this client's own phone is showing them.
+   *
+   * This screen compared the days they had marked against `programme.days` —
+   * week one, by construction (see `ProgramWeek` in src/lib/programs.ts) —
+   * whichever week the client was actually standing in. On a twelve-week block
+   * that made every conflict after week one a comparison against a session
+   * nobody was doing: a rest day marked in week six read as clashing with week
+   * one's Monday, and week six's Monday went unmentioned.
+   *
+   * Read through `clientWeek`, which is the same function the client's Train
+   * tab and app/(trainer)/client-training.tsx read, rather than worked out
+   * again here. Two implementations of "which week" is how a coach ends up
+   * comparing a record against a week their client was never shown, which is
+   * what src/lib/clientBlock.ts exists to prevent.
+   *
+   * `isoToday` reads the COACH's device — the header of this file argues that
+   * boundary at length, and a start date is a bare date counted in the reader's
+   * own days.
+   */
+  const startsOn = picked ? (ap.startsOn[picked] ?? null) : null;
+  const shownWeek = useMemo(() => {
+    if (!programme) return null;
+    const weeks = programWeeks(programme);
+    if (!weeks.length) return null;
+    const pos = blockPosition(startsOn, todayISO, weekCount(programme));
+    const w = clientWeek(pos, weeks.length);
+    return { days: (weeks[w.index] ?? weeks[0]).days, at: w, label: weekLabel(weeks[w.index] ?? weeks[0], w.index + 1) };
+  }, [programme, startsOn, todayISO]);
   const focusOn = useCallback<ScheduledFocus>(
-    (weekday) => (programme ? scheduledFocus(programme.days, weekday) : undefined),
-    [programme],
+    (weekday) => (shownWeek ? scheduledFocus(shownWeek.days, weekday) : undefined),
+    [shownWeek],
   );
 
   const board = useMemo(
@@ -203,7 +245,7 @@ export default function ClientWeek() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -349,6 +391,23 @@ export default function ClientWeek() {
                 {/* Three things the lists above cannot say for themselves. */}
                 {caveat && board.state !== 'unreadable' ? (
                   <Section><Flag tone={t.ink3}>{caveat}</Flag></Section>
+                ) : null}
+                {/* Which week of the block the clashes were counted against.
+                    Only on a block, and only because a conflict reported
+                    against a week the client is not doing is worse than no
+                    conflict at all — it sends the coach to change a session
+                    nobody has. Null on a one-week programme, where a week
+                    number would be counting something that does not exist. */}
+                {shownWeek && shownWeek.at.count > 1 && board.state !== 'unreadable' ? (
+                  <Section>
+                    <Flag tone={t.ink3}>
+                      Compared against {shownWeek.label.toLowerCase()}, which is the week {who} is on —
+                      week {shownWeek.at.index + 1} of {shownWeek.at.count}
+                      {shownWeek.at.reason === 'no-date' ? ', because no start date is set on this block' : ''}
+                      {shownWeek.at.reason === 'unreadable' ? ', because the start date stored on this block cannot be read' : ''}
+                      {shownWeek.at.reason === 'ended' ? ', which is where their plan stays until you write the next block' : ''}.
+                    </Flag>
+                  </Section>
                 ) : null}
                 {status === 'partial' ? (
                   <Section>

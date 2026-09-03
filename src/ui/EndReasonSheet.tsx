@@ -142,7 +142,7 @@ export function EndReasonSheet({
                       {labels[r]}
                     </Text>
                   </View>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2, marginLeft: 16 }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2, marginStart: 16 }}>
                     {notes[r]}
                   </Text>
                 </Pressable>

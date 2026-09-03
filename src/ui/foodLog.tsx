@@ -42,7 +42,7 @@
 //    every launch forever and shown to the client as "1 waiting to send" for
 //    the life of the install, so a refusal is dropped and said out loud, and
 //    only an unanswered write is kept. `classifyWrite` is that distinction.
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -68,6 +68,20 @@ interface FoodLogValue {
    *  is a floor, not a total — there may be entries we could not read, so
    *  "remaining" is an overestimate and must not be presented as a target. */
   status: LoadStatus;
+  /**
+   * Read again from the server.
+   *
+   * A real re-read, not a state reset: it bumps the key the load effect below
+   * is keyed on, so the same query runs and `status` goes back through
+   * 'loading' to whatever the server answers this time. Nothing local is
+   * cleared and nothing pending is dropped, so a refused re-read leaves what is
+   * on screen exactly where it was with the status saying it is not confirmed.
+   *
+   * Added for the pull-to-refresh gesture on the screens this provider feeds:
+   * without it those screens could show a failed read for the whole session
+   * with no way to ask again.
+   */
+  reload: () => void;
   /**
    * Resolves true only once the entry is on the server.
    *
@@ -138,6 +152,9 @@ const Ctx = createContext<FoodLogValue | null>(null);
 
 export function FoodLogProvider({ children }: { children: ReactNode }) {
   const authRev = useAuthRevision();
+  /** Bumped by `reload`. A counter, so two pulls are two reads. */
+  const [readTick, setReadTick] = useState(0);
+  const reload = useCallback(() => setReadTick((n) => n + 1), []);
   // Empty. This held a 130 kcal Greek yogurt marked "via search" that counted
   // into the day's macro rings on every launch. The Supabase hydration below
   // only cleared it on the happy path — signed out, offline, or on any query
@@ -307,7 +324,7 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
       } catch { if (!cancelled) setStatus('error'); /* offline: the cached day stands, and now says so */ }
     })();
     return () => { cancelled = true; };
-  }, [authRev]);
+  }, [authRev, readTick]);
 
   /**
    * Send everything this device is holding that the server has never heard of.
@@ -420,7 +437,7 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
     [entries, owedCount],
   );
 
-  return <Ctx.Provider value={{ entries, consumed, status, addFood, logFood, removeFood, updateFood, unsent }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ entries, consumed, status, addFood, logFood, removeFood, updateFood, unsent, reload }}>{children}</Ctx.Provider>;
 }
 
 export function useFoodLog(): FoodLogValue {

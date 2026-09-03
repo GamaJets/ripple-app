@@ -27,9 +27,11 @@
 // the top of the README. src/lib/gymExport.ts does that part; this file's only
 // job is to be honest about what it managed to read.
 //
-// The eleven files leave as ONE zip, written by lib/zip.ts — no dependency, the
-// 1989 format is a page of DataViews. See the comment on `downloadAll` for why
-// eleven separate downloads was not a bundle.
+// The files leave as ONE zip, written by lib/zip.ts — no dependency, the 1989
+// format is a page of DataViews. See the comment on `downloadAll` for why a
+// download per part was not a bundle. (There were eleven when that comment was
+// written and there are `EXPORT_PARTS.length` now; the count is deliberately
+// not repeated in prose, because it has been wrong here twice.)
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
@@ -46,6 +48,7 @@ import { readAll } from '@lib/rowCap';
 import { sliceLoading, sliceReady, sliceFailed } from '@lib/memberView';
 import { fetchMemberRecords } from '@lib/gymMembers';
 import { attributionOf } from '@lib/gymSigning';
+import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 import {
   windowFromDays, windowBlocker, describeWindow, isBounded, presetDays,
   PRESET_IDS, PRESET_LABEL, type PresetId, type ExportWindow,
@@ -59,6 +62,8 @@ import {
   type ExportInvoice, type ExportSettlement, type ExportEquipment, type ExportShift,
   type ExportIntervention, type ExportPromo, type ExportEvent, type ExportPurchase,
   type ExportMemberRecord, type ExportAgreement, type ExportSignature, type ExportDocument,
+  type ExportOrder, type ExportClose, type ExportAdjustment, type ExportEquipmentLog,
+  type ExportReconcileMark,
 } from '@lib/gymExport';
 
 /**
@@ -112,6 +117,11 @@ const PENDING: Reads = {
   agreements: sliceLoading(),
   signatures: sliceLoading(),
   documents: sliceLoading(),
+  orders: sliceLoading(),
+  closes: sliceLoading(),
+  adjustments: sliceLoading(),
+  equipmentLog: sliceLoading(),
+  reconciles: sliceLoading(),
 };
 
 const EMPTY: Reads = {
@@ -137,6 +147,11 @@ const EMPTY: Reads = {
   agreements: sliceReady([]),
   signatures: sliceReady([]),
   documents: sliceReady([]),
+  orders: sliceReady([]),
+  closes: sliceReady([]),
+  adjustments: sliceReady([]),
+  equipmentLog: sliceReady([]),
+  reconciles: sliceReady([]),
 };
 
 export default function ExportPage() {
@@ -182,6 +197,7 @@ export default function ExportPage() {
       sessions, passTypes, passes, visits, invites,
       invoices, settlements, equipment, shifts, interventions, promos, events, purchases,
       memberRecords, agreements, signatures, documents,
+      orders, closes, adjustments, equipmentLog, reconciles,
     ] = await Promise.all([
       slice(() => fetchPlans(supabase, tenantId)),
       slice(() => fetchMemberships(supabase, tenantId)),
@@ -213,12 +229,24 @@ export default function ExportPage() {
       slice(() => readAgreements(tenantId)),
       slice(() => readSignatures(tenantId)),
       slice(() => readDocuments(tenantId)),
+      // The order book, the closed months, the payroll adjustments, the
+      // accident book and the reconciliation marks. Five more reads and five
+      // more sets of three states, for the reason all the others have one: an
+      // empty online-orders.csv beside a refused query would tell a gym that
+      // takes card money on its own Stripe account that it has never sold
+      // anything online, and that is the file it would hand an accountant.
+      slice(() => readOrders(tenantId)),
+      slice(() => readCloses(tenantId)),
+      slice(() => readAdjustments(tenantId)),
+      slice(() => readEquipmentLog(tenantId)),
+      slice(() => readReconciles(tenantId)),
     ]);
 
     setReads({
       plans, memberships, payments, classes, attendance, sessions, passTypes, passes, visits, invites,
       invoices, settlements, equipment, shifts, interventions, promos, events, purchases,
       memberRecords, agreements, signatures, documents,
+      orders, closes, adjustments, equipmentLog, reconciles,
     });
     setReadAt(new Date().toISOString());
   }, []);
@@ -304,9 +332,12 @@ export default function ExportPage() {
         The whole operating record as CSV in one zip, in the shapes another
         system can read: the price book, members and the gym’s own file on each of
         them, memberships, payments, invoices, the timetable, class attendance,
-        one-to-ones, passes, the door log, invites, payroll settlements, the
-        equipment register, the rota, member contact, promo codes, the activity log,
-        PT packs, and the paperwork — every version of what people are asked to sign,
+        one-to-ones, passes, the door log, invites, payroll settlements and the
+        adjustments behind them, the equipment register and its maintenance and
+        accident book, the rota, member contact, promo codes, the activity log,
+        PT packs, what members bought online with the Stripe reference each one
+        reconciles to, the months that were signed off, the reconciliation marks,
+        and the paperwork — every version of what people are asked to sign,
         every signature with who actually gave it, and the index of the filing
         cabinet. It is the gym’s record, and leaving with it has to be possible.
         A period can be set below; one member’s own file can be taken from the
@@ -1104,6 +1135,184 @@ async function readPurchases(tenantId: string): Promise<ExportPurchase[]> {
   }));
 }
 
+/* ── the five the round after the paperwork left behind ────────────────────── */
+
+/**
+ * The order book — card money the gym took online.
+ *
+ * `fetchGymOrders` in src/lib/gymOrders.ts is the console's own reader and it
+ * is NOT reused here, deliberately: it selects the columns /orders draws and
+ * leaves out the three Stripe references, which are the only join between this
+ * bundle and the gym's own payouts. An export that dropped them would produce a
+ * list of amounts an owner cannot reconcile against anything.
+ *
+ * `gym_orders_owner_r` has existed since supabase/parts/281; nothing here needs
+ * a policy change.
+ */
+async function readOrders(tenantId: string): Promise<ExportOrder[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_orders')
+      .select('id, member_id, kind, intent, status, amount_cents, currency, plan_id, pass_type_id, '
+        + 'term_starts_on, term_ends_on, uses_total, expires_on, membership_id, pass_id, '
+        + 'stripe_account_id, stripe_session_id, stripe_payment_intent, failure_note, created_at, paid_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's online orders",
+  );
+  if (!rows.length) return [];
+  const names = await namesFor(rows.map((r) => r.member_id));
+  return rows.map((r) => ({
+    id: r.id,
+    memberId: r.member_id ?? null,
+    memberName: r.member_id ? names.get(r.member_id) ?? null : null,
+    kind: r.kind ?? null, intent: r.intent ?? null, status: r.status ?? null,
+    // Checked rather than coerced: `amount_cents` is not null in the schema, so
+    // a non-number here means the read did not answer and must export blank.
+    amountCents: Number.isFinite(r.amount_cents) ? Number(r.amount_cents) : null,
+    currency: r.currency ?? null,
+    planId: r.plan_id ?? null, passTypeId: r.pass_type_id ?? null,
+    termStartsOn: r.term_starts_on ?? null, termEndsOn: r.term_ends_on ?? null,
+    usesTotal: Number.isFinite(r.uses_total) ? Number(r.uses_total) : null,
+    expiresOn: r.expires_on ?? null,
+    membershipId: r.membership_id ?? null, passId: r.pass_id ?? null,
+    stripeAccountId: r.stripe_account_id ?? null,
+    stripeSessionId: r.stripe_session_id ?? null,
+    stripePaymentIntent: r.stripe_payment_intent ?? null,
+    failureNote: r.failure_note ?? null,
+    createdAt: r.created_at ?? null,
+    paidAt: r.paid_at ?? null,
+  }));
+}
+
+/** Every month somebody signed off, reopenings included. */
+async function readCloses(tenantId: string): Promise<ExportClose[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_month_closes')
+      .select('id, month_key, closed_at, closed_by, note, taken_cents, invoiced_cents, outstanding_cents, '
+        + 'payroll_cents, currency, unmarked_sessions, blockers_at_close, reopened_at, reopened_by, reopen_reason')
+      .eq('tenant_id', tenantId)
+      .order('month_key', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "the months this gym has closed",
+  );
+  if (!rows.length) return [];
+  const names = await namesFor(rows.flatMap((r) => [r.closed_by, r.reopened_by]));
+  const cents = (v: unknown): number | null => (Number.isFinite(v) ? Number(v) : null);
+  return rows.map((r) => ({
+    id: r.id,
+    monthKey: r.month_key,
+    closedAt: r.closed_at ?? null,
+    closedById: r.closed_by ?? null,
+    closedByName: r.closed_by ? names.get(r.closed_by) ?? null : null,
+    takenCents: cents(r.taken_cents),
+    invoicedCents: cents(r.invoiced_cents),
+    outstandingCents: cents(r.outstanding_cents),
+    payrollCents: cents(r.payroll_cents),
+    currency: r.currency ?? null,
+    unmarkedSessions: cents(r.unmarked_sessions),
+    blockersAtClose: r.blockers_at_close ?? null,
+    note: r.note ?? null,
+    reopenedAt: r.reopened_at ?? null,
+    reopenedById: r.reopened_by ?? null,
+    reopenedByName: r.reopened_by ? names.get(r.reopened_by) ?? null : null,
+    reopenReason: r.reopen_reason ?? null,
+  }));
+}
+
+/** The lines that made a settlement the figure it was. */
+async function readAdjustments(tenantId: string): Promise<ExportAdjustment[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('payroll_adjustments')
+      .select('id, trainer_id, kind, amount_cents, currency, note, applies_on, settlement_id, created_at, created_by')
+      .eq('tenant_id', tenantId)
+      .order('applies_on', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's payroll adjustments",
+  );
+  if (!rows.length) return [];
+  const names = await namesFor(rows.flatMap((r) => [r.trainer_id, r.created_by]));
+  return rows.map((r) => ({
+    id: r.id,
+    trainerId: r.trainer_id ?? null,
+    trainerName: r.trainer_id ? names.get(r.trainer_id) ?? null : null,
+    kind: r.kind ?? null,
+    amountCents: Number.isFinite(r.amount_cents) ? Number(r.amount_cents) : null,
+    currency: r.currency ?? null,
+    note: r.note ?? null,
+    appliesOn: r.applies_on ?? null,
+    settlementId: r.settlement_id ?? null,
+    createdAt: r.created_at ?? null,
+    createdById: r.created_by ?? null,
+    createdByName: r.created_by ? names.get(r.created_by) ?? null : null,
+  }));
+}
+
+/** The maintenance history and the accident book. */
+async function readEquipmentLog(tenantId: string): Promise<ExportEquipmentLog[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_equipment_log')
+      .select('id, equipment_id, equipment_label, kind, happened_on, performed_by, findings, cost_cents, '
+        + 'currency, document_id, reported_to, recorded_by, created_at')
+      .eq('tenant_id', tenantId)
+      .order('happened_on', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's maintenance and accident book",
+  );
+  if (!rows.length) return [];
+  const names = await namesFor(rows.map((r) => r.recorded_by));
+  return rows.map((r) => ({
+    id: r.id,
+    equipmentId: r.equipment_id ?? null,
+    equipmentLabel: r.equipment_label ?? null,
+    kind: r.kind ?? null,
+    happenedOn: r.happened_on ?? null,
+    performedBy: r.performed_by ?? null,
+    findings: r.findings ?? null,
+    costCents: Number.isFinite(r.cost_cents) ? Number(r.cost_cents) : null,
+    currency: r.currency ?? null,
+    documentId: r.document_id ?? null,
+    reportedTo: r.reported_to ?? null,
+    recordedById: r.recorded_by ?? null,
+    recordedByName: r.recorded_by ? names.get(r.recorded_by) ?? null : null,
+    createdAt: r.created_at ?? null,
+  }));
+}
+
+/** Which lines somebody accepted as explained, and which they flagged. */
+async function readReconciles(tenantId: string): Promise<ExportReconcileMark[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_reconcile_marks')
+      .select('id, subject_kind, subject_id, state, note, marked_by, marked_at')
+      .eq('tenant_id', tenantId)
+      .order('marked_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's reconciliation marks",
+  );
+  if (!rows.length) return [];
+  const names = await namesFor(rows.map((r) => r.marked_by));
+  return rows.map((r) => ({
+    id: r.id,
+    subjectKind: r.subject_kind ?? null,
+    subjectId: r.subject_id ?? null,
+    state: r.state ?? null,
+    note: r.note ?? null,
+    markedById: r.marked_by ?? null,
+    markedByName: r.marked_by ? names.get(r.marked_by) ?? null : null,
+    markedAt: r.marked_at ?? null,
+  }));
+}
+
 /* ── the paperwork, and the member's own file ──────────────────────────────── */
 
 /**
@@ -1369,14 +1578,15 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
   );
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13, lineHeight: 1.6,
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page carried a byte-for-byte copy of it that rendered into a plain <div>,
+// so every sentence it printed — including the ones saying a write was
+// REFUSED and nothing was saved — was silent to a screen reader. The shared
+// component carries role="alert"/"status" and aria-live.
+// The wrapper stays only for this page's looser line height, which is passed
+// through the shared component's `style` rather than duplicating it.
+function Banner({ children, tone }: { children: React.ReactNode; tone?: BannerTone }) {
+  return <SharedBanner tone={tone} style={{ lineHeight: 1.6 }}>{children}</SharedBanner>;
 }
 
 function capitalise(s: string): string {

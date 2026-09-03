@@ -35,6 +35,7 @@
 // builder stays empty, says why, and the Assign control is held. See
 // src/lib/overwriteGuard.ts.
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -59,6 +60,7 @@ import { useSettings } from '../../src/ui/settings';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
+import { matchesSearch, fallbackTag } from '../../src/lib/catalogueLocale';
 import { ensureCatalogueRow } from '../../src/ui/customExercise';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { buildProgram, type Program, type ProgramDay } from '../../src/lib/programs';
@@ -86,11 +88,11 @@ import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { areaLabel, injuryFlag, type Injury } from '../../src/lib/injuries';
 import { goalToEnum, goalsDisagree } from '../../src/lib/rosterMerge';
-import { CHECKS, NOT_CHECKED, checksLine, reviewProgram, type Finding } from '../../src/lib/programReview';
+import { CHECKS, NOT_CHECKED, checksLine, coverageLine, reviewProgram, type Finding } from '../../src/lib/programReview';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { dayLabel } from '../../src/lib/adherence';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { isQueryableId } from '../../src/lib/clientDrift';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -104,6 +106,7 @@ import { seedDecision, stillListed, pruneSelection, assignCtaLabel } from '../..
 import { foldsAfterRemoval, foldsForNewProgramme } from '../../src/lib/foldedDays';
 import { notifySuccess } from '../../src/ui/haptics';
 import { WEEK_DAYS } from '../../src/lib/weekStart';
+import { FORWARD_ICON } from '../../src/ui/direction';
 
 /** The week, in the order src/lib/weekStart.ts draws one. This is the order a
  *  new day is offered in and the order Cycle Day walks, so the builder and the
@@ -306,8 +309,8 @@ export default function Builder() {
   // one BY NAME. "8 of 12 saved" tells a coach something is wrong and nothing
   // about which four or what to do — see src/lib/bulkActions.ts, which is where
   // that arithmetic already lives and is not re-implemented here.
-  const { getProgram, assignProgramTo, clearProgram, clearProgramFrom, status: programStatus } = useAssignedPrograms();
-  const { templates, saveTemplateTo, removeTemplateFrom, isStarter, status: tplStatus } = useProgramTemplates();
+  const { getProgram, assignProgramTo, clearProgram, clearProgramFrom, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
+  const { templates, saveTemplateTo, removeTemplateFrom, isStarter, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
   const router = useRouter();
 
   const params = useLocalSearchParams();
@@ -480,6 +483,10 @@ export default function Builder() {
   }, [rosterStatus, rosterIds, clientId]);
 
   const client = roster.find((c) => c.id === clientId);
+  /** Whether the server may be asked about this person at all. `handAdded`
+   *  undefined is "the roster has not said yet", which goes on asking; only an
+   *  explicit true withholds. See src/lib/clientRecord.ts. */
+  const clientAskable = clientIsQueryable(clientId, client?.handAdded);
   // Only a whole read of `assigned_programs` can tell us this. Under any other
   // status a null from getProgram means "we did not find out", so saying "on
   // their auto-generated program" — and offering a Revert for a programme we
@@ -559,11 +566,17 @@ export default function Builder() {
   useEffect(() => {
     wantedLog.current = clientId ?? null;
     if (!clientId || !USE_SUPABASE) { setReviewLog(null); setReviewLogStatus('ready'); return; }
-    // A client the coach typed in by hand has no user account, so their id is
-    // not a uuid and Postgres refuses the whole statement rather than skipping
-    // the value. There is nothing to read and nothing failed: the check stands
+    // A client the coach typed in by hand has a `coach_clients` row and no user
+    // account. There is nothing to read and nothing failed: the check stands
     // down rather than reporting a client who never trains.
-    if (!isQueryableId(clientId)) { setReviewLog(null); setReviewLogStatus('ready'); return; }
+    //
+    // This was `isQueryableId(clientId)`, which stopped separating the two the
+    // moment `coach_clients.id` turned out to be uuid DEFAULT
+    // gen_random_uuid(): the guard passed, the read ran, it came back empty
+    // with no error, and the volume check compared a whole block against a
+    // training history that had never been asked for. The roster is what knows
+    // which table the row came from — src/lib/clientRecord.ts.
+    if (!clientAskable) { setReviewLog(null); setReviewLogStatus('ready'); return; }
     let live = true;
     setReviewLog(null); setReviewLogStatus('loading');
     void (async () => {
@@ -590,7 +603,7 @@ export default function Builder() {
       setReviewLogStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [clientId]);
+  }, [clientId, clientAskable]);
   // ── This builder edits ONE person's copy ─────────────────────────────────
   //
   // A programme sent to a group is a fan-out: each member gets their own
@@ -605,6 +618,29 @@ export default function Builder() {
   // read that did not land — so the line is simply absent rather than wrong.
   const clientGroups = useProgramGroups();
   const inGroups = clientId && clientGroups.status === 'ready' ? clientGroups.groupsForClient(clientId) : [];
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * Seven reads sit behind this screen and the builder crosses them on every
+   * decision it makes: the book, what each client is already assigned (the
+   * overwrite confirmation is counted off that), the template library, the
+   * coach's saved movement names, the movement catalogue, the group
+   * membership line, and the injury acknowledgements the primary button is
+   * gated on.
+   *
+   * The injury read is the reason this gesture belongs here at all. The
+   * button says "Injuries Could Not Be Read" and refuses — correctly — and
+   * until now the only way to make it ask again was to leave the screen,
+   * which takes the half-built programme with it.
+   *
+   * NOTHING here touches the draft. Every one of these is a read; the week
+   * the coach has laid out is untouched, which is the only reason a refresh
+   * gesture is safe on a screen that is mostly an editor. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    refreshRoster(), Promise.resolve(reloadPrograms()), Promise.resolve(reloadTemplates()),
+    Promise.resolve(coachEx.reload()), cat.reload(),
+    Promise.resolve(clientGroups.refresh()), acks.refresh(),
+  ]), [refreshRoster, reloadPrograms, reloadTemplates, coachEx, cat, clientGroups, acks]));
 
   /**
    * ── The retry the injury gate never had ───────────────────────────────────
@@ -1064,7 +1100,25 @@ export default function Builder() {
     setFoldedDays((p) => foldsAfterRemoval(p, di));
   };
 
+  /** Exercises in the WEEK ON SCREEN. Used only where the sentence is about
+   *  that week — the Training Days heading, and nothing else. */
   const totalExercises = days.reduce((a, d) => a + d.exercises.length, 0);
+  /**
+   * Exercises in the WHOLE BLOCK, which is what every gate is about.
+   *
+   * `totalExercises` was doing both jobs, and on a block it was the wrong
+   * number for the second: a coach on a deload week five with an empty screen
+   * was told to add an exercise and had Assign taken away over six weeks of
+   * finished programming. What leaves this screen is `composeProgram()`, which
+   * is every week, so what decides whether there is anything to send has to be
+   * every week too.
+   */
+  const blockExercises = blockWeeks.reduce(
+    (a, w) => a + w.days.reduce((b, d) => b + d.exercises.length, 0), 0);
+  /** Days across the block that actually carry work — for the template sheet,
+   *  which saves the block and not the week in front of the coach. */
+  const blockDays = blockWeeks.reduce(
+    (a, w) => a + w.days.filter((d) => d.exercises.length).length, 0);
   /* ── who this is going to ───────────────────────────────────────────────── */
 
   const pickedIds = Object.keys(picked).filter((k) => picked[k]);
@@ -1113,28 +1167,46 @@ export default function Builder() {
   // the coach just made with their own thumb, and there is no read of it that
   // could have come back short. The roster it was ticked FROM carries its own
   // banner above.
-  const plan = planFanOut('ready', programStatus, pickedIds.map(asMember), totalExercises > 0, fanOutSubject(pickedIds.length));
+  const plan = planFanOut('ready', programStatus, pickedIds.map(asMember), blockExercises > 0, fanOutSubject(pickedIds.length));
   // What the sweeping gesture is allowed to claim, given how the roster read
   // went — "Select All" over a roster that came back at its row limit ticks a
   // thousand people and calls it everybody. See src/lib/bulkActions.ts.
   const selAll = selectAllOffer(rosterStatus, roster.length);
 
-  /** Every movement in this programme that loads something a RECIPIENT has
-   *  disclosed, grouped by who. The old version asked this about the subject
-   *  only, so a programme fanned out to four people was checked against one of
-   *  them. */
+  /**
+   * Every movement in this programme that loads something a RECIPIENT has
+   * disclosed, grouped by who.
+   *
+   * Two things it used to miss, both of them the same mistake — asking about
+   * less than what is actually being sent. It asked about the SUBJECT only, so
+   * a programme fanned out to four people was checked against one of them. And
+   * it read `days`, the week on screen, so a squat written into week four for a
+   * client with a disclosed knee was assigned with no warning and no
+   * acknowledgement recorded — which is the entire point of
+   * src/lib/injuryGate.ts. `assign` sends `composeProgram()`, every week of it,
+   * so this walks every week of it.
+   *
+   * `week` is the 1-based position, or null on a one-week programme, where a
+   * week number would be a count of something that does not exist. It is in the
+   * acknowledgement record as well as in the confirmation, because "you were
+   * told about the back squat" is a weaker record than "you were told about the
+   * back squat in week four".
+   */
   const injuryLoads = pickedIds.map((id) => {
     const inj = injuriesOf(id);
-    const movements = days.flatMap((d) => d.exercises)
+    const multi = blockWeeks.length > 1;
+    const movements = blockWeeks.flatMap((w, wi) => w.days.flatMap((d) => d.exercises
       .map((e) => {
         const f = injuryFlag(e.name, e.group || '', inj);
-        return f ? { exercise: e.name, area: f.injury.area, severity: f.injury.severity } : null;
-      })
-      .filter(Boolean) as { exercise: string; area: string; severity: string }[];
+        return f
+          ? { exercise: e.name, area: f.injury.area, severity: f.injury.severity, week: multi ? wi + 1 : null }
+          : null;
+      })))
+      .filter(Boolean) as { exercise: string; area: string; severity: string; week: number | null }[];
     return { clientId: id, name: roster.find((r) => r.id === id)?.name.split(' ')[0] ?? 'This client', movements };
   }).filter((x) => x.movements.length);
 
-  const canAssign = pickedIds.length > 0 && totalExercises > 0 && plan.allowed;
+  const canAssign = pickedIds.length > 0 && blockExercises > 0 && plan.allowed;
   /** The ticked clients who are actually ON something to be taken off.
    *
    *  Only off a whole read: under any other status a null from `getProgram`
@@ -1170,7 +1242,11 @@ export default function Builder() {
   // is a coach assigning one lift and their client being shown another.
   const ownSlugs = useMemo(() => new Set(ownList.map((x) => exerciseSlug(x.name))), [ownList]);
   const catShownList = cat.rows.filter(
-    (e) => !ownSlugs.has(e.id) && (pickTerm === '' || e.name.toLowerCase().includes(pickTerm)),
+    // Searched on BOTH names. Most German-speaking coaches learned these
+    // movements in English and type "bench"; their German-speaking clients
+    // read "Bankdrücken". Matching only one of the two hides half the
+    // catalogue from whoever is holding the phone.
+    (e) => !ownSlugs.has(e.id) && matchesSearch(pickTerm, e.name, e.display),
   );
 
   // A picture for every movement on this screen: the ones already in the days
@@ -1329,6 +1405,10 @@ export default function Builder() {
     [blockWeeks, title, note, clientId, clientInjuries, disclosureStatus, reviewLog, reviewLogStatus, autoGoal],
   );
 
+  /** What the checks covered, on a block. Null on a one-week programme, where
+   *  a coverage sentence would be furniture. */
+  const coverage = coverageLine(review.counted);
+
   /**
    * The figures behind a volume finding, in the coach's own unit.
    *
@@ -1366,7 +1446,7 @@ export default function Builder() {
   // was said for every cause alike — including the one the coach can act on,
   // which was the app not yet knowing who they were signed in as.
   const doSaveTemplate = async () => {
-    if (totalExercises === 0) { Alert.alert('Nothing to save', 'Add at least one exercise first.'); return; }
+    if (blockExercises === 0) { Alert.alert('Nothing to save', 'Add at least one exercise first.'); return; }
     const nm = tplName.trim() || title.trim() || 'Untitled template';
     const saved = await saveTemplateTo(nm, composeProgram());
     setSaveOpen(false); setTplName('');
@@ -1396,7 +1476,7 @@ export default function Builder() {
    */
   const recordInjuryChoice = async (
     forClient: string,
-    movements: { exercise: string; area: string; severity: string }[],
+    movements: { exercise: string; area: string; severity: string; week: number | null }[],
   ): Promise<boolean> => {
     if (!movements.length) return true;
     try {
@@ -1481,7 +1561,10 @@ export default function Builder() {
     const sending = injuryLoads.filter((x) => plan.send.includes(x.clientId));
     if (sending.length) {
       const lines = sending.flatMap((x) =>
-        x.movements.slice(0, 4).map((m) => `· ${x.name} — ${m.exercise}, ${areaLabel(m.area).toLowerCase()}, ${m.severity}`),
+        // The week is named where there is one. On a twelve-week block the same
+        // movement can appear in every week, and four identical lines tell a
+        // coach nothing about which week to go and change.
+        x.movements.slice(0, 4).map((m) => `· ${x.name} — ${m.exercise}${m.week ? ` in week ${m.week}` : ''}, ${areaLabel(m.area).toLowerCase()}, ${m.severity}`),
       );
       const shown = lines.slice(0, 8);
       const more = sending.reduce((a, x) => a + x.movements.length, 0) - shown.length;
@@ -1661,7 +1744,7 @@ export default function Builder() {
           the drag both claim the same vertical movement, and the list scrolls
           under the finger while the row tries to follow it — which reads as
           the drag being broken rather than as two gestures competing. */}
-      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView scrollEnabled={!dragging} contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
@@ -1708,7 +1791,7 @@ export default function Builder() {
           ) : roster.length === 0 && rosterStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : roster.length === 0 ? null : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingRight: sp.lg }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: sp.lg }}>
               {roster.map((c) => {
                 const on = c.id === clientId;
                 return (
@@ -2080,7 +2163,7 @@ export default function Builder() {
                   paddingTop: sp.md,
                   borderTopWidth: joinedAbove ? 0 : hairline,
                   borderTopColor: t.ring,
-                  ...(gb ? { borderLeftWidth: 2, borderLeftColor: t.brand, paddingLeft: sp.md, marginLeft: -sp.md } : null),
+                  ...(gb ? { borderStartWidth: 2, borderStartColor: t.brand, paddingStart: sp.md, marginStart: -sp.md } : null),
                   ...(isDragging ? {
                     // Lifted: it must read as picked up, or a coach cannot tell
                     // a drag from a list that has started scrolling.
@@ -2171,7 +2254,7 @@ export default function Builder() {
                         onResponderTerminate={endDrag}
                         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                         style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                                 marginRight: 6, backgroundColor: isDragging ? t.brand : t.surface2,
+                                 marginEnd: 6, backgroundColor: isDragging ? t.brand : t.surface2,
                                  borderWidth: hairline, borderColor: t.ring }}>
                         <Text style={{ ...ty.label, color: isDragging ? t.brandInk : t.ink3, lineHeight: 18 }}>≡</Text>
                       </View>
@@ -2208,14 +2291,14 @@ export default function Builder() {
                       <Pressable onPress={() => moveExercise(di, e.key, 1)} accessibilityRole="button"
                         accessibilityLabel={`Move ${e.name} later in ${d.day}`} hitSlop={6}
                         style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                                 marginLeft: 6, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
+                                 marginStart: 6, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
                         <Text style={{ ...ty.label, color: t.ink2 }}>▼</Text>
                       </Pressable>
                     ) : null}
                     <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button"
                       accessibilityLabel={`Remove ${e.name} from ${d.day}`} hitSlop={6}
                       style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-                               marginLeft: sp.lg, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.crit }}>
+                               marginStart: sp.lg, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.crit }}>
                       {/* The critical tone is the BORDER, not the glyph. As ink
                           it measures 3.03–4.05:1 across the ten palettes, under
                           the 4.5:1 text needs, and check:contrast is right to
@@ -2336,7 +2419,7 @@ export default function Builder() {
                       style={{ width: 30, height: 30, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="plus" size={14} color={t.ink2} />
                     </Pressable>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>Reps</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: sp.sm }}>Reps</Text>
                     <TextInput value={e.reps} onChangeText={(v) => patchEx(di, e.key, { reps: v })} placeholder="8-10" placeholderTextColor={t.ink3}
                       style={[inp, { width: 74, paddingVertical: 7, paddingHorizontal: 10 }]} />
                   </View>
@@ -2490,7 +2573,7 @@ export default function Builder() {
                       keyboardType="decimal-pad" placeholder="8.5" placeholderTextColor={t.ink3}
                       accessibilityLabel={`Prescribed effort for ${e.name}, on the RPE scale`}
                       style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>% of 1RM</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: sp.sm }}>% of 1RM</Text>
                     <TextInput
                       value={pctDraft[e.key] ?? (e.pct1rm == null ? '' : String(e.pct1rm))}
                       onChangeText={(v) => {
@@ -2503,7 +2586,7 @@ export default function Builder() {
                       keyboardType="number-pad" placeholder="75" placeholderTextColor={t.ink3}
                       accessibilityLabel={`Prescribed share of a one-rep max for ${e.name}, as a whole percentage`}
                       style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: sp.sm }}>Tempo</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: sp.sm }}>Tempo</Text>
                     <TextInput
                       value={tempoDraft[e.key] ?? (e.tempo ?? '')}
                       onChangeText={(v) => {
@@ -2623,7 +2706,7 @@ export default function Builder() {
                                    minHeight: MIN_TARGET, paddingHorizontal: sp.lg, paddingVertical: sp.sm,
                                    borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
                           <Text style={{ ...ty.body, color: t.ink }}>{m.label}</Text>
-                          <Icon name="chevron" size={16} color={t.ink3} />
+                          <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                         </Pressable>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
                           {m.blurb} {otherMethodsHint(e.method)}
@@ -2671,12 +2754,17 @@ export default function Builder() {
             they disagree with. */}
         <Section>
           <SectionHead title="Programme Checks"
-            note={totalExercises && review.findings.length ? `${num(review.findings.length)} to read` : undefined} />
-          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{checksLine()}</Text>
+            note={blockExercises && review.findings.length ? `${num(review.findings.length)} to read` : undefined} />
+          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: coverage ? sp.xs : sp.lg }}>{checksLine()}</Text>
+          {/* Only on a block, and only because the sentence above used to be
+              true of week one and read as true of twelve. */}
+          {coverage ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>{coverage}</Text>
+          ) : null}
 
-          {totalExercises === 0 ? (
+          {blockExercises === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              Nothing to check yet. The checks read the training days above as you write them.
+              Nothing to check yet. The checks read the training days above — every week of them — as you write them.
             </Text>
           ) : (
             <>
@@ -2690,7 +2778,7 @@ export default function Builder() {
                 <View key={`${f.id}-${i}`} style={{ marginBottom: sp.md }}>
                   <Flag tone={f.id === 'injury' ? t.crit : t.warn}>{f.detail}</Flag>
                   {figures ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginLeft: 14, marginTop: 3 }}>{figures}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginStart: 14, marginTop: 3 }}>{figures}</Text>
                   ) : null}
                 </View>
                 );
@@ -2944,13 +3032,13 @@ export default function Builder() {
             <Cta wide label={assignCtaLabel({
               busy: assignBusy,
               picked: pickedIds.length,
-              exercises: totalExercises,
+              exercises: blockExercises,
               planLabel: plan.label,
               soleName: pickedIds.length === 1 ? (roster.find((r) => r.id === pickedIds[0])?.name ?? null) : null,
             })} onPress={assign} />
           </View>
 
-          {totalExercises === 0 ? (
+          {blockExercises === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
               Add at least one exercise to assign this program.
             </Text>
@@ -3069,8 +3157,8 @@ export default function Builder() {
                 </Pressable>
                 <Pressable onPress={() => previewExercise(x.name)} hitSlop={8}
                   accessibilityRole="button" accessibilityLabel={`What ${x.name} is`}
-                  style={{ paddingLeft: sp.md, paddingVertical: sp.md }}>
-                  <Icon name="chevron" size={15} color={t.ink3} />
+                  style={{ paddingStart: sp.md, paddingVertical: sp.md }}>
+                  <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
                 </Pressable>
               </View>
             ))}
@@ -3123,11 +3211,18 @@ export default function Builder() {
                       borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
                     }}>
                       <Pressable
+                        // `e.name` and NOT the translated name, deliberately. A
+                        // programme stores an exercise name and every screen
+                        // resolves it through exerciseSlug(); writing
+                        // "Kniebeuge" in here would put a movement into a
+                        // client's week that resolves to nothing — no
+                        // illustration, no history, "not in our catalogue" on
+                        // tap. The identity is English; only the label moves.
                         onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, e.name, e.group || ''); setPickerDay(null); } }}
-                        accessibilityRole="button" accessibilityLabel={`Add ${e.name}`}
+                        accessibilityRole="button" accessibilityLabel={`Add ${e.display.text}`}
                         style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                         <View style={{ flex: 1 }}>
-                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
+                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.display.text}</Text>
                           {/* Only what the row actually carries. A movement with
                               no muscle group shows no muscle group — never
                               "Uncategorised", which is a label we invented, and
@@ -3136,17 +3231,22 @@ export default function Builder() {
                               genuinely non-empty, because a coach who taps
                               expecting a picture and gets a sentence stops
                               trusting the marker on every other row. */}
-                          {e.group || e.hasDemo ? (
+                          {/* fallbackTag joins the same line: a coach picking a
+                              movement for a German-speaking client can see at a
+                              glance which names that client will read in
+                              English. It is null, and so absent, for a coach
+                              whose own device is in English. */}
+                          {e.group || e.hasDemo || fallbackTag(e.display) ? (
                             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                              {[e.group, e.hasDemo ? 'Illustrated' : null].filter(Boolean).join(' · ')}
+                              {[e.group, e.hasDemo ? 'Illustrated' : null, fallbackTag(e.display)].filter(Boolean).join(' · ')}
                             </Text>
                           ) : null}
                         </View>
                       </Pressable>
                       <Pressable onPress={() => previewExercise(e.name)} hitSlop={8}
-                        accessibilityRole="button" accessibilityLabel={`What ${e.name} is`}
-                        style={{ paddingLeft: sp.md, paddingVertical: sp.md }}>
-                        <Icon name="chevron" size={15} color={t.ink3} />
+                        accessibilityRole="button" accessibilityLabel={`What ${e.display.text} is`}
+                        style={{ paddingStart: sp.md, paddingVertical: sp.md }}>
+                        <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
                       </Pressable>
                     </View>
                   ))}
@@ -3225,7 +3325,7 @@ export default function Builder() {
                   {isStarter(tpl.id) ? null : (
                     <Pressable onPress={() => deleteTemplate(tpl.id, tpl.name)} hitSlop={8}
                       accessibilityRole="button" accessibilityLabel={`Delete ${tpl.name}`}
-                      style={{ paddingLeft: sp.md, paddingVertical: sp.md }}>
+                      style={{ paddingStart: sp.md, paddingVertical: sp.md }}>
                       <Icon name="minus" size={17} color={t.ink3} />
                     </Pressable>
                   )}
@@ -3318,7 +3418,7 @@ export default function Builder() {
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Save as Template</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>
-            Reuse this program with other clients — {num(totalExercises)} exercise{s(totalExercises)} across {num(days.filter((d) => d.exercises.length).length)} day{s(days.filter((d) => d.exercises.length).length)}.
+            Reuse this program with other clients — {num(blockExercises)} exercise{s(blockExercises)} across {num(blockDays)} day{s(blockDays)}{blockWeeks.length > 1 ? ` in ${num(blockWeeks.length)} weeks` : ''}.
           </Text>
           <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Template name</Text>
           <TextInput value={tplName} onChangeText={setTplName} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}

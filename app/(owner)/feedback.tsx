@@ -12,8 +12,8 @@
 // one hero figure, each feedback card became a hairline-separated row, and the
 // category no longer tints the *text* — a coloured dot sits beside ink-coloured
 // text instead, so Bug/Confusing stay readable at any contrast.
-import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, RefreshControl } from 'react-native';
+import { useEffect, useState, useCallback } from 'react';
+import { View, Text, Pressable, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -24,6 +24,7 @@ import { fetchAllFeedbackPage, fetchAppErrors, type FeedbackRow, type AppErrorRo
 import { SkeletonList } from '../../src/ui/Skeleton';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const CAT_COLOR = (t: any, c: string | null) => c === 'Bug' ? t.crit : c === 'Praise' ? t.brand : c === 'Confusing' ? t.warn : t.ink3;
 
@@ -80,7 +81,13 @@ export default function OwnerFeedback() {
     }
   };
   useEffect(() => { let cancelled = false; (async () => { if (!cancelled) await load(); })(); return () => { cancelled = true; }; }, []);
-  const onRefresh = async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } };
+  const onRefresh = useCallback(async () => { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }, []);
+  // Was four hand-written lines of RefreshControl with its own spinner colour —
+  // the duplication src/ui/pullToRefresh.tsx exists to end. The hook also
+  // brings the thing the hand-rolled version lacked: a second pull arriving
+  // while the first read is still in flight is ignored rather than firing the
+  // read again, which is exactly when somebody pulls twice.
+  const pull = usePullToRefresh(onRefresh);
 
   const fmt = (iso: string) => { try { return new Date(iso).toLocaleDateString(); } catch { return ''; } };
   // Null, not 0, and null under truncation too. An average over the newest
@@ -93,7 +100,7 @@ export default function OwnerFeedback() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.brand} />}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

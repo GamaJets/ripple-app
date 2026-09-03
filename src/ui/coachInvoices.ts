@@ -8,14 +8,23 @@
 // DELETE, and no policy for any of them. The number has to be allocated under
 // a lock to stay gapless per coach, and an issued document cannot be edited
 // once somebody is holding a copy of it — neither of which a client-side write
-// could promise. So every write in this file is an `rpc` — issue, void, and
-// since part 168 the chase — and the read below is the only place the table is
-// touched directly. The chase moves two columns that are NOT on the document
-// (when the coach last chased, and how many times), and it still goes through a
-// function rather than an UPDATE grant: a grant on this table is a grant on the
-// row, RLS narrows a grant rather than creating one, and the immutable trigger
-// would then be the only thing between an issued amount and anybody who wanted
-// to edit it.
+// could promise. So every write in this file is an `rpc` — issue, void, the
+// chase since part 188, and since part 660 the settlement and the chase date —
+// and the read below is the only place the table is touched directly.
+//
+// Each of those moves columns that are NOT on the issued document: when the
+// coach last chased and how many times, whether they say it was paid and when,
+// and their own note of the day to start chasing from. Every one still goes
+// through a function rather than an UPDATE grant, because a grant on this table
+// is a grant on the ROW: RLS narrows a grant rather than creating one, and the
+// immutable trigger would then be the only thing between an issued amount and
+// anybody who wanted to edit it.
+//
+// The line none of them crosses is the same line. Nothing about a document
+// already issued is rewritten: a settlement is a NEW FACT recorded beside
+// `kind` rather than an edit of it, and `chase_from` appears on no artefact
+// anybody else ever sees. `due_on`, `kind` and `amount_cents` are exactly as
+// immutable as they were.
 //
 // ── supabase-js RESOLVES ON AN ERROR ───────────────────────────────────────
 //
@@ -42,7 +51,7 @@ import { recordInbox } from './pushNotifications';
 
 /** Every column the document needs and nothing else. */
 const INVOICE_COLS =
-  'id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, reminded_at, reminder_count, note, tax_rate_pct, tax_registration, voided_at, void_reason, created_at';
+  'id, seq, client_id, bill_to, description, amount_cents, currency, kind, issued_on, due_on, settled_on, settled_at, settle_note, chase_from, reminded_at, reminder_count, note, tax_rate_pct, tax_registration, voided_at, void_reason, created_at';
 
 interface InvoiceRow {
   id: string;
@@ -55,6 +64,10 @@ interface InvoiceRow {
   kind: string;
   issued_on: string;
   due_on: string | null;
+  settled_on: string | null;
+  settled_at: string | null;
+  settle_note: string | null;
+  chase_from: string | null;
   reminded_at: string | null;
   reminder_count: number | string | null;
   note: string | null;
@@ -96,6 +109,14 @@ function toInvoice(r: InvoiceRow): CoachInvoice {
     // due date of the 1st on the 31st for every coach west of Greenwich — the
     // same trap `splitByDay` in coachStatement.ts exists to document.
     dueOn: (r.due_on || '').slice(0, 10) || null,
+    // Both `date` columns, and both kept as bare `YYYY-MM-DD` for the reason
+    // `due_on` is: they mean a DAY. `settled_at` is a real instant — when the
+    // coach wrote it down, as opposed to the day they say the money arrived —
+    // and is the one of the three that is left alone.
+    settledOn: (r.settled_on || '').slice(0, 10) || null,
+    settledAt: r.settled_at ?? null,
+    settleNote: (r.settle_note || '').trim() || null,
+    chaseFrom: (r.chase_from || '').slice(0, 10) || null,
     remindedAt: r.reminded_at ?? null,
     // `integer` arrives as a number, but the same PostgREST bigint-as-string
     // rule that bit `amount_cents` is one migration away from applying here.
@@ -468,6 +489,92 @@ async function tellTheClientAgain(invoice: CoachInvoice): Promise<boolean | null
   } catch (e) {
     reportError('coachInvoices.remind.notify', e);
     return false;
+  }
+}
+
+/**
+ * Record that one was paid, on a day the coach names (part 660).
+ *
+ * ── The write that had nowhere to go ──────────────────────────────────────
+ *
+ * This file's header says every write here is an `rpc` because "an issued
+ * document cannot be edited once somebody is holding a copy of it". That is
+ * right, and it is why a settlement is not an edit: `settle_coach_invoice`
+ * writes three columns that did not exist on the document when it was issued
+ * and leaves `kind` exactly as it was. The immutable guard still refuses to
+ * move `kind`, `amount_cents`, `due_on` or anything else on the page.
+ *
+ * ── The client is not told ────────────────────────────────────────────────
+ *
+ * Deliberately no notification, and it is the opposite decision from `issue`.
+ * An issue notification exists because the coach has made a claim ABOUT the
+ * client — most sharply a 'received' one, which records that this person has
+ * paid — in the client's absence. A settlement is the coach agreeing with
+ * something the client already knows they did: they paid it. A push saying "your
+ * coach noticed you paid" is a notification about nothing, and where the money
+ * did NOT arrive the client hearing that it did is far worse than silence.
+ *
+ * Raises rather than updating nothing on the server, so "that is not yours",
+ * "it is already settled" and "it is voided" arrive here as messages rather
+ * than as a silent success over zero rows.
+ */
+export async function settleInvoice(id: string, settledOn: string, note?: string | null): Promise<IssueResult> {
+  if (!USE_SUPABASE) return { ok: false, error: 'This build is not connected to a server.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(settledOn ?? '').trim())) {
+    return { ok: false, error: 'Say which day the money arrived.' };
+  }
+  try {
+    const { data, error } = await supabase.rpc('settle_coach_invoice', {
+      p_id: id,
+      p_settled_on: settledOn.trim(),
+      p_note: (note || '').trim() || null,
+    });
+    if (error) {
+      reportError('coachInvoices.settle', error);
+      return { ok: false, error: error.message || 'That settlement was not recorded.' };
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
+    // Nothing back means nothing was written, whatever the absence of an error
+    // suggests — and an invoice the coach believes came off their chase list
+    // and did not is one part 613's nightly pass keeps telling them about.
+    if (!row?.id) return { ok: false, error: 'That settlement was not recorded — nothing came back from the server.' };
+    return { ok: true, invoice: toInvoice(row) };
+  } catch (e) {
+    reportError('coachInvoices.settle', e);
+    return { ok: false, error: 'That settlement was not recorded.' };
+  }
+}
+
+/**
+ * Set, move, or clear the day the coach means to start chasing one (part 660).
+ *
+ * `from` null CLEARS it, and that is a real request rather than a no-op: it
+ * puts the invoice back on the undated list, which is where it was before
+ * anybody made a plan for it.
+ *
+ * This does not write `due_on` and cannot — that column is on the document and
+ * on the immutable list, and part 660's function refuses this call outright on
+ * an invoice that carries one, so no invoice ever has two answers to when it is
+ * late.
+ */
+export async function setInvoiceChaseFrom(id: string, from: string | null): Promise<IssueResult> {
+  if (!USE_SUPABASE) return { ok: false, error: 'This build is not connected to a server.' };
+  const day = (from || '').trim();
+  if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return { ok: false, error: 'Write the day to start chasing from as a date.' };
+  }
+  try {
+    const { data, error } = await supabase.rpc('set_coach_invoice_chase_from', { p_id: id, p_from: day || null });
+    if (error) {
+      reportError('coachInvoices.chaseFrom', error);
+      return { ok: false, error: error.message || 'That was not changed.' };
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as InvoiceRow | null;
+    if (!row?.id) return { ok: false, error: 'That was not changed — nothing came back from the server.' };
+    return { ok: true, invoice: toInvoice(row) };
+  } catch (e) {
+    reportError('coachInvoices.chaseFrom', e);
+    return { ok: false, error: 'That was not changed.' };
   }
 }
 

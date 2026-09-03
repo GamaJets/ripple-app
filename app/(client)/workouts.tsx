@@ -6,6 +6,7 @@
 // only on the live metric and the primary action.
 // Guided session runner, cardio logging & month calendar preserved.
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
@@ -110,7 +111,11 @@ import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
 import { startGate } from '../../src/lib/startGate';
-import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
+import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, hrScaleNote, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
+// 44pt is the minimum tap target — the number and the reasoning live in one
+// place, and the controls added here take it from there rather than from a
+// literal that can drift.
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { ZoneNow, ZoneBoard } from '../../src/ui/ZoneBoard';
 import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
@@ -125,7 +130,11 @@ import { dayKeyOf, instantForDay, readWorkoutEdit, type WorkoutDraftSet } from '
 import { useSettings } from '../../src/ui/settings';
 import { WeightUnitToggle } from '../../src/ui/WeightUnitToggle';
 import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, readNumber, type WeightUnit } from '../../src/lib/units';
+// The distance unit a cardio log opens on. Derived from the member's length
+// unit rather than defaulted to km — see src/lib/distance.ts.
+import { distanceUnitFor, distanceUnitName, type DistanceUnit } from '../../src/lib/distance';
 import { WEEK_DAYS, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
+import { BACK_ICON, FORWARD_ARROW, FORWARD_ICON, turn } from '../../src/ui/direction';
 
 /** The day strip and the month sheet's column heads, in the order
  *  src/lib/weekStart.ts draws a week. Both are on this screen, and before this
@@ -249,7 +258,7 @@ function MetricCols({ t, items }: { t: Theme; items: { label: string; value: str
   return (
     <View style={{ flexDirection: 'row' }}>
       {items.map((k, i) => (
-        <View key={k.label} style={{ flex: 1, paddingRight: sp.md, paddingLeft: i === 0 ? 0 : sp.lg, borderLeftWidth: i === 0 ? 0 : hairline, borderLeftColor: t.ring }}>
+        <View key={k.label} style={{ flex: 1, paddingEnd: sp.md, paddingStart: i === 0 ? 0 : sp.lg, borderStartWidth: i === 0 ? 0 : hairline, borderStartColor: t.ring }}>
           <Text style={{ ...ty.caption, color: t.ink3 }} numberOfLines={1}>{k.label}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 }}>
             {k.dot ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: k.dot }} /> : null}
@@ -267,11 +276,12 @@ export default function Train() {
   const pageScroll = useRef<ScrollView>(null);
   const router = useRouter();
   const cd = useClientData();
-  const { getProgram, status: programStatus } = useAssignedPrograms();
+  const assigned = useAssignedPrograms();
+  const { getProgram, status: programStatus } = assigned;
   const _cp = getProgram(cd.id);
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
-  const { log: loggedWorkouts, status: workoutLogStatus, unsent: unsentWorkouts, logWorkouts, flushWorkouts, updateWorkout, removeWorkout } = useWorkoutLog();
+  const { log: loggedWorkouts, status: workoutLogStatus, unsent: unsentWorkouts, logWorkouts, flushWorkouts, updateWorkout, removeWorkout, reload: reloadLog } = useWorkoutLog();
   const toast = useToast();
   // An entry whose delete is staged: off this screen and out of every figure
   // computed from the log, and not yet written. `id` is absent until the row
@@ -300,8 +310,15 @@ export default function Train() {
   // or pounds". Nothing below is stored in it. Every load reaching the log is
   // kilograms; this converts at the two edges, what is printed and what is
   // typed, through src/lib/units.ts.
-  const wu = useSettings().weightUnit;
+  const { weightUnit: wu, lengthUnit: lu } = useSettings();
   const loadNote = convertedNote(wu);
+  // What a cardio log OPENS on. It opened on kilometres for everybody, and the
+  // toggle beside the box was the whole of the answer — so a member in Dallas
+  // switched it on every single entry, and one who did not notice it filed
+  // their five miles as five kilometres. The unit travels into the log with the
+  // number (`WorkoutEntry.cardio.unit`), so that entry then says 5 km for ever.
+  // The toggle stays: this changes which way round it starts.
+  const defaultDistUnit = distanceUnitFor(lu);
   // A null from `getProgram` only means "your coach has not assigned you one"
   // once the read has finished and succeeded. Under 'loading' we have not
   // finished asking, under 'error' we asked and could not find out, and under
@@ -421,7 +438,16 @@ export default function Train() {
   const [swapFor, setSwapFor] = useState<ProgramExercise | null>(null);
   const [injRevealed, setInjRevealed] = useState<string[]>([]);
   const [deloadDismiss, setDeloadDismiss] = useState(false);
-  const { videos: exVideos, status: exVideoStatus } = useExerciseVideos();
+  const { videos: exVideos, status: exVideoStatus, reload: reloadVideos } = useExerciseVideos();
+  // The notice at the top of this screen ends "open this screen again when you
+  // have signal" — the plan below it is the automatic programme wearing the
+  // coach's layout whenever the assignment read failed, and until now leaving
+  // and returning really was the only way to try again. Four reads: the
+  // assigned plan, the training log the day strip is ticked from, the coach's
+  // clips, and the profile the fallback programme is built from.
+  const pull = usePullToRefresh(useCallback(() => {
+    assigned.reload(); reloadLog(); void reloadVideos(); cd.reload();
+  }, [assigned, reloadLog, reloadVideos, cd.reload]));
   // Resting burn per minute, for correcting a whole-day energy counter down to
   // just the session. Null without a weight and body fat — there is no resting
   // rate to compute, and a guessed one would be subtracted from a real figure.
@@ -515,7 +541,14 @@ export default function Train() {
     if (isSessionKind(m)) setCtype(SESSION_TYPES[m][0]);
     router.setParams({ mode: undefined });
   }, [modeParam]);
- const [dist, setDist] = useState(''); const [unit, setUnit] = useState<'km' | 'mi'>('km');
+ const [dist, setDist] = useState(''); const [unit, setUnit] = useState<DistanceUnit>(defaultDistUnit);
+ // The member's unit can settle AFTER this screen mounts — `useSettings` reads
+ // the account's preference asynchronously and `unitsLoaded` is what says so —
+ // and a box that opened on the device's guess must move to their real answer
+ // when it lands. Only while the box is untouched: once somebody has switched
+ // it for this entry, their choice is the one that counts.
+ const touchedUnit = useRef(false);
+ useEffect(() => { if (!touchedUnit.current) setUnit(defaultDistUnit); }, [defaultDistUnit]);
   const [watts, setWatts] = useState(''); const [kcalIn, setKcalIn] = useState('');
   const [hrEntry, setHrEntry] = useState<WorkoutEntry | null>(null);
   const [showCal, setShowCal] = useState(false);
@@ -1245,7 +1278,7 @@ export default function Train() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView ref={pageScroll} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <ScrollView ref={pageScroll} refreshControl={pull} contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
@@ -1295,7 +1328,7 @@ export default function Train() {
           <Pressable accessibilityRole="button" accessibilityLabel="Previous week"
             onPress={() => { setWeekOffset((w) => w - 1); tapLight(); }}
             style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
-            <Icon name="back" size={15} color={t.ink2} />
+            <Icon name={BACK_ICON} size={15} color={t.ink2} />
           </Pressable>
           <Text style={{ ...ty.micro, color: t.ink3, flex: 1, textAlign: 'center' }}>{weekLabel}</Text>
           {/* Absent rather than disabled on the current week. A greyed arrow is
@@ -1305,7 +1338,7 @@ export default function Train() {
             <Pressable accessibilityRole="button" accessibilityLabel="Next week"
               onPress={() => { setWeekOffset((w) => Math.min(0, w + 1)); tapLight(); }}
               style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
-              <Icon name="chevron" size={15} color={t.ink2} />
+              <Icon name={FORWARD_ICON} size={15} color={t.ink2} />
             </Pressable>
           ) : <View style={{ width: 34 }} />}
         </View>
@@ -1347,7 +1380,7 @@ export default function Train() {
           <View style={{ marginTop: sp.lg }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your block</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.sm, paddingRight: sp.md }}>
+              contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.sm, paddingEnd: sp.md }}>
               {blk.weeks.map((w, i) => {
                 const on = i === viewWeek;
                 const mine = i === blk.week.index;
@@ -1570,7 +1603,7 @@ export default function Train() {
                         in half the one thing their badges are saying. */}
                     {ei > 0 && !sameRunAbove ? <Rule /> : null}
                     <View style={grp
-                      ? { paddingVertical: sp.lg, borderLeftWidth: 2, borderLeftColor: t.brand, paddingLeft: sp.md, marginLeft: 1 }
+                      ? { paddingVertical: sp.lg, borderStartWidth: 2, borderStartColor: t.brand, paddingStart: sp.md, marginStart: 1 }
                       : { paddingVertical: sp.lg }}>
                       {/* The badge, above the movement it labels and only on a
                           row that is really in a run. The words are DERIVED from
@@ -1627,7 +1660,7 @@ export default function Train() {
                           ) : null}
                         </View>
                         <Pressable accessibilityRole="button" accessibilityLabel={'Remove ' + nameOf(e)} onPress={() => removeExercise(e)} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
-                        <View style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}><Icon name="chevron" size={16} color={t.ink3} /></View>
+                        <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}><Icon name={FORWARD_ICON} size={16} color={t.ink3} /></View>
                       </Pressable>
                       {sets.length > 0 ? (
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: sp.md, alignItems: 'center' }}>
@@ -1978,8 +2011,9 @@ export default function Train() {
                   <Field label="Distance" hint={unit}>
                     <View style={{ flexDirection: 'row', gap: sp.sm }}>
                       <TextInput value={dist} onChangeText={setDist} keyboardType="decimal-pad" style={inp} />
-                      <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${unit === 'km' ? 'kilometres' : 'miles'}. Switch to ${unit === 'km' ? 'miles' : 'kilometres'}`}
-                        onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
+                      <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${distanceUnitName(unit)}. Switch to ${distanceUnitName(unit === 'km' ? 'mi' : 'km')}`}
+                        onPress={() => { touchedUnit.current = true; setUnit(unit === 'km' ? 'mi' : 'km'); }}
+                        style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
                         <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
                       </Pressable>
                     </View>
@@ -2207,7 +2241,7 @@ export default function Train() {
               <Pressable accessibilityRole="button" accessibilityLabel="Previous month"
                 onPress={() => { setCalShift((m) => m - 1); tapLight(); }}
                 style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
-                <Icon name="back" size={15} color={t.ink2} />
+                <Icon name={BACK_ICON} size={15} color={t.ink2} />
               </Pressable>
               <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>{monthLabel}</Text>
               {/* Nothing forward of the month we are in, for the reason at
@@ -2217,7 +2251,7 @@ export default function Train() {
                 <Pressable accessibilityRole="button" accessibilityLabel="Next month"
                   onPress={() => { setCalShift((m) => m + 1); tapLight(); }}
                   style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
-                  <Icon name="chevron" size={15} color={t.ink2} />
+                  <Icon name={FORWARD_ICON} size={15} color={t.ink2} />
                 </Pressable>
               ) : null}
             </View>
@@ -2295,14 +2329,14 @@ export default function Train() {
                           <View style={{ paddingVertical: sp.md }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                               <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize', flex: 1 }}>{l.exercise}</Text>
-                              <Pressable accessibilityLabel={'Edit ' + l.exercise} onPress={() => setEditEntry(l)} hitSlop={8} style={{ padding: 4, marginRight: sp.sm }}><Icon name="pencil" size={16} color={t.ink3} /></Pressable>
+                              <Pressable accessibilityLabel={'Edit ' + l.exercise} onPress={() => setEditEntry(l)} hitSlop={8} style={{ padding: 4, marginEnd: sp.sm }}><Icon name="pencil" size={16} color={t.ink3} /></Pressable>
                               {/* Confirmed, then verified. The confirm was already
                                   here; what was missing is that the row left the
                                   screen whether or not the server had removed it,
                                   so a refused delete looked done and the session
                                   was back — with its volume and calories — at the
                                   next launch. */}
-                              <Pressable accessibilityLabel={'Delete ' + l.exercise} onPress={() => deleteEntry(l)} hitSlop={8} style={{ padding: 4, marginRight: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
+                              <Pressable accessibilityLabel={'Delete ' + l.exercise} onPress={() => deleteEntry(l)} hitSlop={8} style={{ padding: 4, marginEnd: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
                             </View>
                             {l.sets ? (
                               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
@@ -2362,7 +2396,7 @@ export default function Train() {
             a shared handset can belong to whoever used it last, and a coach
             congratulating the wrong person by name is worse than one told "a
             client". */}
-        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -2564,14 +2598,32 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
  * Deliberately not a link to the settings: leaving mid-session to go and pair a
  * device would abandon the workout being logged.
  */
-function ZonePanel({ t, liveZone, liveSample, zoneSecs }: {
+function ZonePanel({ t, liveZone, liveSample, zoneSecs, age }: {
   t: Theme; liveZone: ZoneNo | null; liveSample: number | null; zoneSecs: ZoneSeconds;
+  /** The member's age, or null when the app has no date of birth for them —
+   *  which is the case this panel now has to say something about. */
+  age: number | null;
 }) {
   const hasZones = zoneSecondsTotal(zoneSecs) > 0;
+  // Whose scale this is. Every band on this panel is a percentage of 220 − age,
+  // and with no date of birth on the profile that age is thirty — so a member
+  // of fifty-five was being shown a zone 5 that starts 23 bpm above the top of
+  // their actual range, on the one screen in this app that asks somebody to
+  // push harder. The guess is kept (see ASSUMED_AGE in src/lib/hr.ts: zones
+  // with no colour on them are a worse product than approximate ones) and it is
+  // no longer silent. Null for a member whose age we have, so nobody is
+  // apologised to about a scale that is theirs.
+  const scaleNote = hrScaleNote(age);
   if (!liveZone && !hasZones) {
     return (
       <View style={{ marginTop: sp.xl, paddingVertical: sp.md, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
         <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>Heart-rate Zones</Text>
+        {/* rtl-ok: a navigation PATH inside an English sentence — "the screen
+            called X, and inside it the thing called Y". The separator belongs to
+            the sentence, not to the layout: dropping FORWARD_CHAR into it would
+            put a mirrored chevron in the middle of an unmirrored English clause,
+            which is worse than leaving it. When the catalogue is translated the
+            whole sentence moves and the separator goes with it. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
           Connect a watch under Train → Watch &amp; Devices and your zones appear here live while you train.
         </Text>
@@ -2585,6 +2637,9 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs }: {
         <View style={{ marginTop: sp.lg }}>
           <ZoneBoard seconds={zoneSecs} current={liveZone} />
         </View>
+      ) : null}
+      {scaleNote ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{scaleNote}</Text>
       ) : null}
     </View>
   );
@@ -2605,7 +2660,10 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs }: {
  * shared and the rest is not.
  */
 function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, defaultUnit, onSave, onClose }: {
-  t: Theme; kind: SessionKind; activity: string; age: number | null; restingKcalPerMin: number | null; defaultUnit: string;
+  // `DistanceUnit`, not `string`. The toggle inside this runner reads the unit
+  // back out in words for a screen reader, and a bare string would let a caller
+  // seed it with anything and have the sentence say "miles" about it.
+  t: Theme; kind: SessionKind; activity: string; age: number | null; restingKcalPerMin: number | null; defaultUnit: DistanceUnit;
   /** Resolves whether the server took it. It used to return void and the
    *  caller closed the modal on the tap, so a refused write shut the one
    *  screen holding the session's heart-rate zones — the single thing in
@@ -2691,7 +2749,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
               <Field label="Distance" hint={unit}>
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
                   <TextInput value={dist} onChangeText={setDist} keyboardType="decimal-pad" style={inp} />
-                  <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${unit === 'km' ? 'kilometres' : 'miles'}. Switch to ${unit === 'km' ? 'miles' : 'kilometres'}`}
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Distance unit: ${distanceUnitName(unit)}. Switch to ${distanceUnitName(unit === 'km' ? 'mi' : 'km')}`}
                     onPress={() => setUnit(unit === 'km' ? 'mi' : 'km')} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
                     <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{unit}</Text>
                   </Pressable>
@@ -2787,7 +2845,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           </Text>
         ) : null}
 
-        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} />
+        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} age={age} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account
@@ -2842,7 +2900,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   t: Theme; name: string; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null;
 }) {
   const { detail, status, signedOut } = useExerciseDetail(name);
-  const { frames, animUrl, equipmentUrl } = useExerciseMedia(detail);
+  const { frames, animUrl, animCacheKey, equipmentUrl } = useExerciseMedia(detail);
   const clip = useMemo(() => videoForExercise(name, videos, preferTrainerId), [name, videos, preferTrainerId]);
   const caption = demoCaption(detail?.source, frames.length);
 
@@ -2859,7 +2917,24 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   if (animUrl) {
     return (
       <View style={{ paddingVertical: sp.sm }}>
-        <DemoAnimation uri={animUrl} label={name} />
+        {/* `stillUrls` and `cacheKey`, both of which this call site left off
+            and every other call site passes.
+
+            The stills are the catalogue frames, already fetched, and they hold
+            the box while the 1.6 MB clip arrives — without them the
+            demonstration a member opened mid-session is an empty grey rectangle
+            for the second or two that takes on gym wifi, which reads as broken
+            rather than as loading.
+
+            The cacheKey is the storage path, and it is the difference between
+            the clip being downloaded once and being downloaded every hour.
+            src/ui/signedMedia.ts re-signs each URL after 55 minutes because the
+            bucket is private; expo-image keys its disk cache by URL, so every
+            fresh signature is a file it has never seen. `cachePolicy="disk"` is
+            asked for in ExerciseDemo and was doing nothing here. In a basement
+            gym with no signal the re-signing fails outright and the member gets
+            a blank box for a clip that is sitting on their phone. */}
+        <DemoAnimation uri={animUrl} label={name} stillUrls={frames} cacheKey={animCacheKey ?? undefined} />
         {detail?.demoLicence !== 'commercial' ? (
           <View style={{ marginTop: sp.sm }}>
             <Flag tone={t.warn}>Evaluation asset — licensed for review only, never for release.</Flag>
@@ -2920,7 +2995,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   );
 }
 
-function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
+function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; /** Replace one movement for the rest of the plan, through the same `swaps` map the plan screen writes. Optional so a caller with no plan to write to still gets a runner. */ onSwap?: (e: ProgramExercise, alt: string) => void; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   // A session can be put down and picked up.
@@ -3228,6 +3303,35 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
 
   const ex = exercises[idx];
   const done = results[idx] || [];
+  /**
+   * Swapping the movement WITHOUT leaving the session.
+   *
+   * The plan screen has had a Swap arrow on every row since it was written, and
+   * the runner had nothing. So a member who started a session and walked to a
+   * squat rack somebody else was using had exactly one route: End the session —
+   * the button that offers to throw the logged sets away — go back to the plan,
+   * swap there, and start again. In a gym. Mid-warm-up.
+   *
+   * It goes through the same `swaps` map the plan screen writes, passed in as
+   * `onSwap`, so the swap is the same swap: it persists (src/lib/planEdits.ts),
+   * it survives closing the app, and the plan behind this session shows the
+   * movement the member actually did rather than the one that was written.
+   *
+   * ── Why it stops once a set is logged ────────────────────────────────────
+   *
+   * `results` is indexed by position, and the entries written at the finish
+   * take their name from `nameOf(exercises[i])` at THAT moment. So swapping
+   * after logging would relabel sets that have already been done: three sets of
+   * back squat would be filed as three sets of leg press, at the back squat's
+   * loads, into the member's permanent record — and the PR check and next
+   * session's suggestion would both read them as leg press. A member who has
+   * started the movement has not been beaten to the rack; they are on it.
+   */
+  const [swapOpen, setSwapOpen] = useState(false);
+  const canSwap = !!onSwap && !!ex && done.length === 0 && (ex.alternatives?.length ?? 0) > 0;
+  // Closed whenever the movement changes, so a sheet left open on exercise two
+  // cannot be tapped into a swap of exercise three.
+  useEffect(() => { setSwapOpen(false); }, [idx]);
   /**
    * The sets of this movement, one by one — the coach's table where there is
    * one, and `sets` copies of the single spec where there is not, which is
@@ -3831,7 +3935,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
 
         {/* Live effort, and the same empty state as a timed session when there
             is no watch feeding it — see ZonePanel. */}
-        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} />
+        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} age={age} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account
@@ -4010,7 +4114,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         >
           <Icon name="video" size={14} color={t.ink3} />
           <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{demoOpen ? 'Hide the demo' : 'See how this is done'}</Text>
-          <View style={{ transform: [{ rotate: demoOpen ? '90deg' : '0deg' }] }}><Icon name="chevron" size={14} color={t.ink3} /></View>
+          <View style={{ transform: [{ rotate: turn(demoOpen ? 90 : 0) }] }}><Icon name={FORWARD_ICON} size={14} color={t.ink3} /></View>
         </Pressable>
         {/* No onSearch here, unlike the plan screen. A live session's sets live
             in this component's state and nowhere else, so sending the client to
@@ -4020,6 +4124,70 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
         {demoOpen ? (
           <SessionDemo t={t} name={nameOf(ex)} videos={videos} videoStatus={videoStatus} preferTrainerId={preferTrainerId} />
         ) : null}
+
+        {/* Swap this movement, from inside the session. See `canSwap` above for
+            why it goes away the moment a set is logged, and why that is not a
+            limitation to work around. */}
+        {canSwap ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Swap ${nameOf(ex)} for another movement`}
+            accessibilityHint="The rack may be taken. Your session and everything you have logged stay as they are."
+            onPress={() => { setSwapOpen(true); tapLight(); }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.lg, minHeight: MIN_TARGET }}
+          >
+            <Icon name="swap" size={14} color={t.ink3} />
+            <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Rack taken? Swap this movement</Text>
+            <View style={{ transform: [{ rotate: '0deg' }] }}><Icon name={FORWARD_ICON} size={14} color={t.ink3} /></View>
+          </Pressable>
+        ) : null}
+        {/* Said once a set is in, rather than the control simply vanishing. A
+            member who used it on exercise one and cannot find it on exercise
+            two is owed the reason. */}
+        {onSwap && ex && done.length > 0 && (ex.alternatives?.length ?? 0) > 0 ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+            You have logged a set of this, so it can no longer be swapped — the sets would end up filed under the movement you swapped to.
+          </Text>
+        ) : null}
+
+        <Modal visible={swapOpen} transparent animationType="slide" onRequestClose={() => setSwapOpen(false)}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSwapOpen(false)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 32 }}>
+            {ex ? (
+              <View>
+                <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>Swap {nameOf(ex)}</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
+                  Your sets, your clock and your time in each zone all stay where they are. Your plan keeps the swap, so it is the movement you did that goes into your record.
+                </Text>
+                <View style={{ marginTop: sp.lg }}>
+                  {[ex.name, ...(ex.alternatives ?? [])].map((alt) => {
+                    const on = nameOf(ex) === alt;
+                    return (
+                      <Pressable
+                        key={alt}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={on ? `${alt}, the movement you are on` : `Swap to ${alt}`}
+                        onPress={() => { if (!on) onSwap?.(ex, alt); setSwapOpen(false); }}
+                        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md, minHeight: MIN_TARGET }}
+                      >
+                        <Text style={{ ...ty.body, color: on ? t.ink : t.ink2, fontWeight: on ? '600' : '400', textTransform: 'capitalize', flex: 1 }}>{alt}</Text>
+                        {/* A tick, not a colour. The selected row is the one the
+                            member is standing at, and a brand-tinted row says
+                            nothing to a screen reader or to anybody who cannot
+                            separate the two hues. */}
+                        {on ? <Icon name="check" size={16} color={t.brand} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+                  <Ghost label="Keep This One" onPress={() => setSwapOpen(false)} />
+                </View>
+              </View>
+            ) : null}
+          </View>
+        </Modal>
 
         {/* What a pause actually does, said where the clock is. Somebody comes
             back to this screen ten minutes later and has to be able to tell a
@@ -4108,8 +4276,8 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, age, restingKcalPerM
           {paused
             ? <Cta label="Resume Session" wide onPress={resume} />
             : done.length >= plan.length
-            ? <Cta label={idx < exercises.length - 1 ? 'Next Exercise →' : 'Finish Session'} wide onPress={next} />
-            : <Ghost label={idx < exercises.length - 1 ? 'Next Exercise →' : 'Finish Session'} onPress={next} />}
+            ? <Cta label={idx < exercises.length - 1 ? `Next Exercise ${FORWARD_ARROW}` : 'Finish Session'} wide onPress={next} />
+            : <Ghost label={idx < exercises.length - 1 ? `Next Exercise ${FORWARD_ARROW}` : 'Finish Session'} onPress={next} />}
         </View>
 
         {/* The same row src/ui/StretchRunner.tsx has carried since it was
@@ -4419,7 +4587,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
                       can be a hold and its next three ordinary. Both flags are
                       the ones the runner writes, so a set edited here reads back
                       to every board exactly as a set logged live does. */}
-                  <View style={{ flexDirection: 'row', gap: sp.lg, paddingLeft: 22 + sp.sm }}>
+                  <View style={{ flexDirection: 'row', gap: sp.lg, paddingStart: 22 + sp.sm }}>
                     <SetKindChip t={t} on={r.bw} onToggle={() => { flagAt(i, 'bw'); tapLight(); }}
                       label={`Set ${i + 1} bodyweight`} onLabel={`Set ${i + 1} bodyweight`}
                       a11yHint={r.bw

@@ -84,9 +84,10 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
-import { isQueryableId } from '../../src/lib/clientDrift';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { fetchSharedInbox, SHARED_URL_TTL_S } from '../../src/lib/photoShare';
 import {
   liveUrl, linkState, refreshEveryMs, inboxStale, unusableCount, stillShared,
@@ -139,17 +140,26 @@ export default function ClientPhotos() {
 
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
   const firstName = client ? client.name.split(' ')[0] : 'They';
+  /** Whether the server may be asked about this person at all. `handAdded`
+   *  undefined is "the roster has not said yet", which goes on asking; only an
+   *  explicit true withholds. See src/lib/clientRecord.ts. */
+  const askable = clientIsQueryable(picked, client?.handAdded);
 
-  const load = useCallback(async (clientId: string) => {
+  const load = useCallback(async (clientId: string, canAsk: boolean) => {
     if (!USE_SUPABASE) {
       setInbox(null);
       setErr('This build is not talking to a server, so there is nothing to read.');
       return;
     }
     // A client the coach added by hand has no account, so no photo of theirs
-    // exists to be sent. Asking anyway means a uuid parse error on the server
-    // and a coach reading a database message.
-    if (!isQueryableId(clientId)) {
+    // exists to be sent.
+    //
+    // This was `isQueryableId(clientId)`, which stopped telling the two apart
+    // the moment `coach_clients.id` turned out to be uuid DEFAULT
+    // gen_random_uuid(): the guard passed, the read ran, it came back empty
+    // with no error, and the screen said they had sent nothing. The roster is
+    // what knows which table the row came from — src/lib/clientRecord.ts.
+    if (!canAsk) {
       setInbox(null);
       setErr(null);
       return;
@@ -196,16 +206,32 @@ export default function ClientPhotos() {
     setErr(null);
     setOpen(null);
     setWithdrawn(null);
-    if (picked) void load(picked);
-  }, [picked, load]);
+    if (picked) void load(picked, askable);
+  }, [picked, askable, load]);
 
   // Coming back to the screen is the moment a coach is most likely to act on
   // what it says, so anything that has been sitting is re-read rather than
   // trusted from before. A list read seconds ago is left alone: the point is
   // freshness, not traffic.
   useFocusEffect(useCallback(() => {
-    if (picked && inboxStale(inboxRef.current, Date.now(), SHARED_URL_TTL_S)) void load(picked);
-  }, [picked, load]));
+    if (picked && inboxStale(inboxRef.current, Date.now(), SHARED_URL_TTL_S)) void load(picked, askable);
+  }, [picked, askable, load]));
+
+  /* ── pull to refresh ───────────────────────────────────────────────────
+   *
+   * UNCONDITIONAL, unlike the focus effect above. That one skips a list read
+   * seconds ago on purpose — it fires on every return to the screen and the
+   * point there is freshness rather than traffic. This one is a person
+   * deliberately asking, and "I already looked recently" is not an answer to
+   * somebody who pulled the screen down: the whole gesture is somebody saying
+   * the screen is not what they expect.
+   *
+   * A client shares a photo from their own phone, so nothing on this inbox
+   * moves because of anything the coach did. */
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(),
+    ...(picked ? [load(picked, askable)] : []),
+  ]), [r, picked, askable, load]));
 
   useEffect(() => {
     if (!picked) return;
@@ -217,11 +243,11 @@ export default function ClientPhotos() {
       setNow(at);
       if (inboxStale(inboxRef.current, at, SHARED_URL_TTL_S)
           && at - lastTryRef.current >= refreshEveryMs(SHARED_URL_TTL_S)) {
-        void load(picked);
+        void load(picked, askable);
       }
     }, TICK_MS);
     return () => clearInterval(id);
-  }, [picked, load]);
+  }, [picked, askable, load]);
 
   const opened = useMemo(
     () => (open && inbox ? inbox.photos.find((p) => p.id === open) ?? null : null),
@@ -270,7 +296,7 @@ export default function ClientPhotos() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
@@ -324,7 +350,7 @@ export default function ClientPhotos() {
               {err ? (
                 <Notice tone={t.warn} kicker="Not loaded" title="Their photos could not be read"
                   note={`${err} That is not the same as ${firstName} having sent none — nothing came back, so this screen cannot say either way.`} />
-              ) : !isQueryableId(picked) ? (
+              ) : !askable ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
                   You added {firstName} to your book yourself, so they have no Repple account and no
                   photos to send from one.
@@ -382,7 +408,7 @@ export default function ClientPhotos() {
                   ) : null}
 
                   <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-                    <Ghost label={loading ? 'Checking…' : 'Check Again Now'} onPress={() => { if (picked) void load(picked); }} />
+                    <Ghost label={loading ? 'Checking…' : 'Check Again Now'} onPress={() => { if (picked) void load(picked, askable); }} />
                   </View>
                 </View>
               ) : null}
