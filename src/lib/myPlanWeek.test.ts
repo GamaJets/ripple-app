@@ -84,6 +84,9 @@ const note = (r: ReturnType<typeof myPlanWeek>) => r.note;
     movements: [mv('Back Squat', 'logged'), mv('Bench Press', 'not-logged'), mv('Chin-up', 'unknown')],
   }), 28);
   if (r.kind !== 'ready') { errors.push('a mixed read still compares'); } else {
+    eq(r.logged, 1, 'only the movements the read confirmed are counted as logged');
+    ok(/1 of the 3 movements/.test(r.note),
+      'a movement nobody can answer for is never quietly counted as done');
     eq(r.missing.names.join(), 'Bench Press', 'the ones that did not appear are stated');
     eq(r.unanswered.names.join(), 'Chin-up', 'and the ones nobody can answer for are kept apart');
     ok(/cannot be answered for/.test(r.unansweredNote ?? ''), 'with their own sentence');

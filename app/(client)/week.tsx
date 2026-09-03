@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useNow } from '../../src/ui/today';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useCallback } from 'react';
@@ -30,6 +30,16 @@ import { clientWeekLine } from '../../src/lib/clientBlock';
 import { weekLabel } from '../../src/lib/programBlock';
 import { WEEK_DAYS, jsDayForIndex, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 import { FORWARD_ICON } from '../../src/ui/direction';
+// Which of the movements the plan names have actually appeared in the log.
+// `planVsActual` has done this arithmetic since it was written and its only
+// reader was the coach's client-training screen; `myPlanWeek` is the member's
+// side of the same sentence. See src/lib/myPlanWeek.ts.
+import { planVsActual } from '../../src/lib/planVsActual';
+import { myPlanWeek, allLoggedNote } from '../../src/lib/myPlanWeek';
+// How far back the log read actually reached, which is what makes "not logged"
+// an honest claim under a truncated read rather than a guess.
+import { readBoundary } from '../../src/lib/sessionHistory';
+import { dayKeyOf } from '../../src/lib/entryEdit';
 
 /** The seven rows, in the order src/lib/weekStart.ts draws a week. `WEEK[i]`
  *  and `jsDayForIndex(i)` are the label and the weekday of the same row, which
@@ -116,6 +126,46 @@ export default function ThisWeek() {
   // not place (a coach program whose day fell outside Mon–Sun would be counted
   // and never drawn).
   const trainingDays = rows.filter((r) => r.day).length;
+
+  /* ── what the plan names, against what the log holds ────────────────────
+   *
+   * The seven rows above mark a day "Logged" when ANYTHING was logged on it,
+   * which is a different claim from the one a member actually wants: whether
+   * the movements their coach wrote are the movements they have been doing. A
+   * member can be marked Logged on all three training days for a month and not
+   * have touched a prescribed leg movement, and nothing on this screen would
+   * have said so.
+   *
+   * Seven days, rolling. A rolling week always contains one of every weekday,
+   * so the comparison is as fair on a Tuesday as on a Sunday — which a
+   * Sunday-to-today window would not be, and a member two days into their week
+   * reading "1 of 6" would be reading a number about the calendar rather than
+   * about themselves.
+   *
+   * `days` is null while the coach programme is unknown. The plan drawn above
+   * is then the generated one and may be about to be replaced, so comparing
+   * against it would measure somebody's week against a programme they may not
+   * be on — `programUnknown` is the flag the banner at the top already uses for
+   * exactly that doubt.
+   */
+  const PLAN_WINDOW_DAYS = 7;
+  const pva = planVsActual({
+    days: programUnknown ? null : blk.days,
+    programStatus,
+    // Null under 'error', which the module requires: an empty array must never
+    // be able to arrive there meaning both "nothing logged" and "not read".
+    log: logStatus === 'error' ? null : log,
+    logStatus,
+    todayISO: dstr(now),
+    // Only consulted under a truncated read — a whole one covers the window by
+    // definition. `readBoundary` is the existing reader for "how far back does
+    // this screen honestly see", and it is given `truncated` rather than a
+    // guess so a member under the row cap has no boundary claimed about them.
+    oldestDay: dayKeyOf(readBoundary(log.map((l) => ({ startsAt: l.t })), logStatus === 'partial').oldestISO),
+    windowDays: PLAN_WINDOW_DAYS,
+  });
+  const planCheck = myPlanWeek(pva, PLAN_WINDOW_DAYS);
+  const allLogged = allLoggedNote(planCheck, PLAN_WINDOW_DAYS);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -221,6 +271,49 @@ export default function ThisWeek() {
               </View>
             );
           })}
+        </Section>
+
+        <Rule />
+
+        {/* ── the plan, against the record ────────────────────────────────
+            The rows above answer "did I train"; this answers "did I train
+            THIS". Every figure comes out of `planVsActual`, so the member's
+            screen and their coach's cannot come to disagree about the same
+            week — and every refusal that module makes is kept: movements
+            rather than sessions, no percentage, and "we could not tell" never
+            wearing the face of "you did not do it".
+
+            'no-programme' never fires from here, because the plan drawn above
+            is always a plan; the branch is kept in the module for a caller
+            that has none. */}
+        <Section>
+          <SectionHead title="Against the Plan" note={`Last ${PLAN_WINDOW_DAYS} days`} />
+          <Text style={{ ...ty.body, color: t.ink }}>{planCheck.note}</Text>
+          {allLogged ? (
+            <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{allLogged}</Text>
+          ) : null}
+          {planCheck.kind === 'ready' ? (
+            <>
+              {/* Marked, not coloured. The words carry it; the dot is the
+                  mark, because a status hue as text ink does not clear the
+                  contrast running prose needs. */}
+              {planCheck.missingNote ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Flag tone={t.warn}>{planCheck.missingNote}</Flag>
+                </View>
+              ) : null}
+              {/* Never folded into the line above it. "You have not done these"
+                  and "we could not tell" are two different things to be told,
+                  and the tri-state on `Coverage` exists so they stay two. */}
+              {planCheck.unansweredNote ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{planCheck.unansweredNote}</Text>
+              ) : null}
+              {planCheck.offPlanNote ? (
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{planCheck.offPlanNote}</Text>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{planCheck.caveat}</Text>
+            </>
+          ) : null}
         </Section>
 
         <Rule />

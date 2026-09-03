@@ -43,11 +43,41 @@ import { useFocusEffect } from 'expo-router';
 /**
  * Run `refresh` every time the screen is focused EXCEPT the first.
  *
- * `refresh` must be stable — wrap it in `useCallback` at the call site, exactly
- * as `useFocusEffect` itself requires. An unstable callback re-runs the effect
- * on every render, and on a screen whose refresh changes the state the callback
- * closes over that is an unbounded read loop; `app/(trainer)/client.tsx` has
- * the note about the nine-round-trip version of that bug.
+ * ── Why the callback's identity cannot be allowed to matter ────────────────
+ *
+ * This used to pass `refresh` straight into `useFocusEffect`'s dependency
+ * array, with a note telling the caller to keep it stable. That note was
+ * correct and it was not enough. A dependency array is a request; on 2026-09-04
+ * the coach app was found spinning continuously on a booted simulator —
+ * React's "Maximum update depth exceeded", every one and a half to three
+ * seconds, from launch — because it was not being honoured.
+ *
+ * The route it took is worth writing down, because no single file looked wrong:
+ *
+ *   · `app/(trainer)/dashboard.tsx` collects FOURTEEN provider reloads into one
+ *     `reloadEverything` and lists every one of them as a dependency. That is
+ *     the right thing for it to do; the screen genuinely refreshes fourteen
+ *     reads and must not close over a stale one.
+ *   · Several of those providers published their context value as an object
+ *     literal, so a new `reload` function on every render of the provider.
+ *   · At least one of those providers changed its own state on every reload —
+ *     `src/ui/invites.tsx` re-read a Set of handled ids and called its setter
+ *     with a fresh Set whether or not an id had changed.
+ *
+ * Put together: focus → reloadEverything → a provider re-renders → a new
+ * `reload` → a new `reloadEverything` → this effect re-runs → focus handler
+ * again. Fourteen dependencies is fourteen chances for one link in that chain,
+ * across four apps' worth of providers, on a screen nobody was editing.
+ *
+ * So the identity is no longer part of the contract. `refresh` is held in a ref
+ * and the callback handed to `useFocusEffect` never changes, which means this
+ * hook runs on FOCUS and on nothing else — which is the only thing its name
+ * ever promised. A caller may still memoise, and should for its own reasons;
+ * it can no longer cause an unbounded read loop by failing to.
+ *
+ * The ref is written on every render, so the run that happens on the next focus
+ * calls the LATEST `refresh` rather than the one from mount. That is the half
+ * the old dependency array was actually buying, and it is kept.
  *
  * Nothing is awaited and nothing is returned. A screen that needs to know
  * whether the re-read landed already has a `LoadStatus` for it, and this hook
@@ -57,10 +87,13 @@ export function useRefreshOnFocus(refresh: () => void): void {
   // A ref rather than state: this must not itself cause a render, and its value
   // is only ever read inside the effect.
   const seen = useRef(false);
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
   useFocusEffect(
+    // Empty dependencies, deliberately and permanently. See above.
     useCallback(() => {
       if (!seen.current) { seen.current = true; return; }
-      refresh();
-    }, [refresh]),
+      refreshRef.current();
+    }, []),
   );
 }

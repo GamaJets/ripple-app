@@ -71,25 +71,3 @@ export function worstStatus(...s: LoadStatus[]): LoadStatus {
   if (s.includes('partial')) return 'partial';
   return 'ready';
 }
-
-// TEMPORARY DIAGNOSTIC — remove before reporting. Captures the JS stack behind
-// the repeating "Maximum update depth exceeded" so the component can be named.
-if (!(globalThis as any).__loopProbe) {
-  (globalThis as any).__loopProbe = true;
-  const orig = console.error.bind(console);
-  let shots = 0;
-  console.error = (...a: any[]) => {
-    try {
-      const m = String(a[0] ?? '');
-      if (shots < 12 && m.indexOf('Maximum update depth') >= 0) {
-        shots += 1;
-        (Error as any).stackTraceLimit = 120;
-        const frames = String(new Error('probe').stack || '').split('\n');
-        for (let i = 5; i < frames.length && i < 14; i += 1) {
-          orig('LOOPPROBE#' + shots + '.' + i + ' ' + frames[i].replace(/http:\/\/127\.0\.0\.1:8081/, '').replace(/\/\/&platform[^)]*?:(\d+:\d+)/, ':$1').slice(0, 240));
-        }
-      }
-    } catch { /* ignore */ }
-    return orig(...a);
-  };
-}
