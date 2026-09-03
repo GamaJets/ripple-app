@@ -114,7 +114,14 @@
 
 /* ── reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+/* The palette below is dark-first with a light `prefers-color-scheme` block, but
+   nothing ever told the BROWSER that. Without this the form controls on
+   /signup, /forgot-password and /reset-password, the scrollbars, and the
+   spinners inside a date field are all drawn from the light system palette on
+   top of a near-black page — the one part of the site the stylesheet does not
+   paint. Declared as `dark light` because dark is what the page is when the
+   visitor has expressed no preference. */
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; color-scheme: dark light; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
@@ -137,6 +144,35 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 ::selection { background: var(--accent); color: var(--brand-ink); }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+/* ── the two accessibility primitives this site had neither of ──────────────
+   `.skip` is the first focusable thing in the body on every page. The sticky
+   header carries six links and a menu button before the content starts, so
+   without it a keyboard or switch user tabs all seven on every single page
+   before reaching a word of the page they asked for. It is off-screen until
+   focused rather than `display:none`, because a hidden element is not
+   focusable and would therefore not exist at all.
+
+   `.vh` is a heading present for the outline and not for the eye. Four pages
+   opened with an h1 and then dropped straight to h3 — a screen reader reading
+   the outline of /, /client, /trainer and /studio was told a level was missing
+   at the top of each. The fix is the heading the design already implies but
+   never wrote down, not a demotion of the h3s, because those h3s are the app
+   names and are correctly subordinate to it. */
+.skip {
+  position: absolute; left: 12px; top: -60px; z-index: 200;
+  padding: 12px 18px; border-radius: 10px;
+  background: var(--accent); color: var(--brand-ink);
+  font-weight: 600; font-size: 15px; text-decoration: none;
+  transition: top .12s ease;
+}
+.skip:focus { top: 12px; text-decoration: none; }
+
+.vh {
+  position: absolute !important; width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
 
 /* numbers never wobble */
 .mono, .num, table.data td, .stat-n { font-family: var(--mono); font-variant-numeric: tabular-nums; }

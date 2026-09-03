@@ -57,6 +57,7 @@ import { fmtClock, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import {
   cancelClass, cancelSeriesFrom, deleteClass, restoreClass, updateClass, updateSeriesFrom,
 } from '../../src/lib/gymSchedule';
+import { assertChanged } from '../../src/lib/changedRows';
 // ── Telling the room ──────────────────────────────────────────────────────
 //
 // supabase/parts/493 writes an inbox row to everybody booked or waitlisted the
@@ -299,6 +300,19 @@ export default function TrainerClasses() {
         setMBusy(true);
         try {
           const n = await updateSeriesFrom(supabase, c.seriesId as string, c.startsAt, seriesPatch);
+          // The count, not the absence of an error — the rule this sheet's own
+          // header states and the single-class path keeps through `assertWrote`
+          // inside `updateClass`. `updateSeriesFrom` hands back a row count and
+          // nothing tested it, so a coach who opened Manage on a colleague's
+          // class was shown a dialog TITLED "Series updated" reading "0 classes
+          // from this one onward were changed", and left believing the term had
+          // moved.
+          //
+          // Zero here can only be a refusal: the class the sheet was opened on
+          // is itself in the series and its own start is the lower bound, so
+          // `series_id = X and starts_at >= c.startsAt` matches at least that
+          // row for anybody permitted to change it.
+          assertChanged('That change to the series', n);
           setManage(null);
           refresh();
           Alert.alert('Series updated', `${n} ${n === 1 ? 'class' : 'classes'} from this one onward ${n === 1 ? 'was' : 'were'} changed. Classes that have already run are untouched, because they are the gym's record of what happened.`);
@@ -432,6 +446,19 @@ export default function TrainerClasses() {
         let ids: string[];
         if (series) {
           ids = await cancelSeriesFrom(supabase, c.seriesId as string, c.startsAt, why);
+          // Counted, for the reason the single-class arm below does not have to
+          // be: `cancelClass` throws unless the update matched, and
+          // `cancelSeriesFrom` returns a list nobody was checking. An empty one
+          // produced "Series called off — 0 classes were called off … there was
+          // nobody to tell", under that title, over a term that is still on and
+          // still bookable, and the coach walked away from it.
+          //
+          // Two innocent readings here rather than one, and the sentence
+          // carries both: the writer adds `.neq('status', 'cancelled')`, so a
+          // term already off matches nothing without anybody having been
+          // refused. Which of the two happened is not visible from here, and
+          // the coach's next act is the same either way.
+          assertChanged('That series', ids.length, 'those classes were already called off');
         } else {
           await cancelClass(supabase, c.id, why);
           ids = [c.id];

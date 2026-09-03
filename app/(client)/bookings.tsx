@@ -38,6 +38,7 @@ import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../.
 import { coachPackLines, gymPtLines, chooseRoute, creditsLeft, payingLines, ledgerStateOf,
   clientLedgerLine, bookingCreditNote, type CreditSession } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
+import { withDeadline } from '../../src/lib/readDeadline';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
 // One definition of "today, locally", shared with the membership screen and
 // with the pass code itself — see the note on `todayISO` below.
@@ -186,8 +187,26 @@ export default function Bookings() {
   useEffect(() => {
     let live = true;
     (async () => {
-      const [p, g, c] = await Promise.all([sessionPacks(), myPtPasses(), mySessionCredits()]);
+      // Under a ceiling. All three of these swallow their own failures and hand
+      // back null, so the only way they stay at `undefined` is a request that
+      // never SETTLES — and no request in this app carries a timeout
+      // (src/lib/readDeadline.ts). `undefined` is what silences `creditLineFor`
+      // entirely: a member on a captive-portal wifi was shown their bookings
+      // with no line under them at all, which reads as "nothing to pay",
+      // instead of the sentence this screen already has for a credit it could
+      // not read.
+      const got = await withDeadline(Promise.all([sessionPacks(), myPtPasses(), mySessionCredits()]));
       if (!live) return;
+      if (!got.answered) {
+        // Only where there was nothing to lose. A pull that stalls over
+        // balances already on screen must not blank them — src/lib/staleRead.ts
+        // makes that argument, and this is what pays for somebody's sessions.
+        setPacks((v) => (v === undefined ? null : v));
+        setPtPasses((v) => (v === undefined ? null : v));
+        setCredits((v) => (v === undefined ? null : v));
+        return;
+      }
+      const [p, g, c] = got.value;
       setPacks(p); setPtPasses(g); setCredits(c);
     })();
     return () => { live = false; };

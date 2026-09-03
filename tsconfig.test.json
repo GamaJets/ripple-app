@@ -28,6 +28,8 @@
     "rootDir": "src"
   },
   "files": [
+    "src/lib/requestTimeout.ts",
+    "src/lib/requestTimeout.test.ts",
     "src/lib/monthEnd.ts",
     "src/lib/staffView.ts",
     "src/lib/readDeadline.test.ts",
@@ -413,8 +415,8 @@
     "src/lib/coachMacros.test.ts",
     "src/lib/settlementStamp.test.ts",
     "src/lib/wholeUnits.test.ts",
-    "src/lib/deadline.ts",
-    "src/lib/deadline.test.ts",
+    "src/lib/payRunConfirm.ts",
+    "src/lib/payRunConfirm.test.ts",
     "src/lib/cappedByIds.ts",
     "src/lib/cappedByIds.test.ts",
     "src/lib/consoleClock.test.ts",

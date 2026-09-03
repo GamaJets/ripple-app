@@ -49,6 +49,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+import { useReadDeadline } from '../../src/ui/readDeadline';
 import { AGREEMENT_LABEL } from '../../src/lib/gymDocs';
 import {
   forMember, outstanding, agreementSummary, signingBlocker, signAsMember,
@@ -61,7 +62,14 @@ export default function ClientGymAgreementsScreen() {
   const router = useRouter();
 
   const [rows, setRows] = useState<MemberAgreement[]>([]);
-  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Under a ceiling. Every branch that leaves 'loading' is inside the try or
+  // the catch of one function, and a request that never SETTLES runs neither —
+  // no request in this app carries a timeout (src/lib/readDeadline.ts). A
+  // member on a gym's captive-portal wifi was left reading "Reading what your
+  // gym asks you to sign." for the life of the app, on the screen that tells
+  // them what they are required to sign before they may train.
+  const [readStatus, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const status = useReadDeadline(readStatus);
   const [tenantId, setTenantId] = useState<string | null>(null);
   /** Whether the read failed because nobody is signed in. A different sentence
    *  from a read that failed on the wire, and a different thing to do about it. */

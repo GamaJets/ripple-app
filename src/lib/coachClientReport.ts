@@ -78,7 +78,7 @@
 //
 // Pure, framework-free and asserted against under plain `node`.
 
-import type { LoadStatus } from '../ui/loadStatus';
+import { isWhole, type LoadStatus } from '../ui/loadStatus';
 import { weightIn, lengthIn, volumeIn, convertedNote, type WeightUnit, type LengthUnit } from './units';
 import { progressChangeLines, progressSpanLabel, figure, dayLabel } from './progressExport';
 // The coach's own mark, on the coach's own document. `logoImgHtml` returns the
@@ -151,6 +151,44 @@ export interface SessionTally {
 }
 
 const dayOf = (iso: string): string => String(iso ?? '').slice(0, 10);
+
+/**
+ * How many rows there are, or null because that is not a thing this read can
+ * say.
+ *
+ * ── Why a function for `rows.length` ──────────────────────────────────────
+ *
+ * Because `rows.length` is not the number of rows. It is the number of rows
+ * THAT CAME BACK, and under 'partial' those are different — src/lib/rowCap.ts
+ * exists for that difference and `sessionTally` below restates the rule two
+ * dozen lines down: "a truncated read may be LISTED and may not be COUNTED".
+ *
+ * The document already keeps that rule everywhere. The PREVIEW panel on
+ * app/(trainer)/client-report.tsx did not, in two of its six rows, and the two
+ * it missed are the two whose figure is not computed by a module that owns the
+ * rule — they read `.rows.length` straight off the state. So a client with a
+ * long measurement history was previewed as
+ *
+ *     Body-composition scans            1000
+ *     Days with tape measurements        417
+ *
+ * while the document those numbers describe printed neither total and said, on
+ * its own front page, that what it holds is not all of it. The coach reads the
+ * panel, not the front page: they are looking at "What will be on it" to decide
+ * whether to send it. `measurements` is one row per site per day, so a client
+ * measured across ten sites reaches the cap in about a hundred measuring days,
+ * which is two years of a fortnightly tape — an ordinary client, not a
+ * pathological one.
+ *
+ * Loading is null too, and the caller says '…' for it. This only answers the
+ * question "may this be counted"; which of the three silences to print is the
+ * screen's to choose, exactly as it already chooses between 'not read', '—' and
+ * 'more than could be read' for the rows that were right all along.
+ */
+export function countableRows(rows: readonly unknown[] | null | undefined, status: LoadStatus): number | null {
+  if (!isWhole(status) || rows == null) return null;
+  return rows.length;
+}
 
 /**
  * Tally the sessions, or refuse to.

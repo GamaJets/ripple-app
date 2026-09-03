@@ -49,6 +49,7 @@ import {
   summaryLine, invitesCutLine, type ReferralRow,
 } from '../../src/lib/referralCredit';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+import { useReadDeadline } from '../../src/ui/readDeadline';
 import { Rule, Section, SectionHead, Card, Cta, Ghost } from '../../src/ui/kit';
 import { sp, layout, hairline, radius, type as ty, numeric, value } from '../../src/theme/scale';
 
@@ -61,7 +62,12 @@ export default function Referral() {
   const [rows, setRows] = useState<ReferralRow[]>([]);
   const [joined, setJoined] = useState<number | null>(null);
   const [converted, setConverted] = useState<number | null>(null);
-  const [status, setStatus] = useState<LoadStatus>('loading');
+  // Under a ceiling — see src/lib/readDeadline.ts. `setStatus('error')` is
+  // reached only by a read that came BACK null; a socket that is accepted and
+  // then answers nothing settles neither way, and this screen's "Reading…"
+  // sentence had no end.
+  const [readStatus, setStatus] = useState<LoadStatus>('loading');
+  const status = useReadDeadline(readStatus);
   /**
    * Whether the LIST came back at the server's ceiling, held apart from
    * `status` on purpose.

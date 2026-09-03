@@ -12,11 +12,6 @@ import { createClient } from '@supabase/supabase-js';
 // scripts/check-currency.mjs is looking for and would otherwise have had to be
 // argued with.
 import type { WeightUnit } from '@lib/units';
-// A request that is never going to answer, given up on rather than waited for.
-// The rule, the two sentences and the timer live in one tested module because
-// the phone app has exactly the same hole and this is the half of the fix that
-// is not a browser type.
-import { changesThings, deadlineMsFor, withDeadline, type BodyKind } from '@lib/deadline';
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -30,79 +25,58 @@ if (!url || !key) {
   );
 }
 
-/**
- * What sort of body a request is carrying, in the three terms the deadline
- * rule is written in.
- *
- * A string is JSON — every write this console makes. A Blob, a File, a
- * FormData, a stream or a raw buffer is an upload, and `/compliance` sends a
- * gym document through this same client. Anything unrecognised is treated as
- * JSON rather than as an upload: erring the other way would hand a request
- * three minutes of silence at a front desk.
- */
-function bodyKind(body: BodyInit | null | undefined): BodyKind {
-  if (body == null) return 'none';
-  if (typeof body === 'string') return 'text';
-  if (typeof Blob !== 'undefined' && body instanceof Blob) return 'file';
-  if (typeof FormData !== 'undefined' && body instanceof FormData) return 'file';
-  if (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream) return 'file';
-  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return 'file';
-  return 'text';
-}
-
-/**
- * `fetch`, with a deadline on it.
- *
- * ── Why this is here and not at each call site ────────────────────────────
- *
- * Because the condition is not a property of any call site. A captive portal at
- * a front desk accepts the socket, completes the handshake and then answers
- * nothing, and every request made through this client behaves identically: the
- * promise never settles, in either direction. There are some three hundred
- * awaits across thirty-five routes and none of them is wrong; the fetch under
- * all of them is what has no deadline. See src/lib/deadline.ts for what each
- * screen does today when one of these hangs — the short version is that
- * `Fetched`'s "Read again" button disables itself permanently, because the
- * `finally` that clears its `running` flag never runs.
- *
- * ── What a caller sees ────────────────────────────────────────────────────
- *
- * A rejection, which is what every screen here is already built for: supabase-js
- * turns a fetch rejection into a thrown error on `.then`, and a thrown read is
- * `landed()`'s 'failed' arm, the banner, and the retry. Nothing downstream needs
- * to know this exists.
- *
- * ── The caller's own signal is kept ───────────────────────────────────────
- *
- * PostgREST's `.abortSignal()` passes one through `init`, and dropping it would
- * silently break every caller that cancels. Both signals abort the one request,
- * and the listener is removed on settle so a long-lived signal does not
- * accumulate one per query.
- */
-const timedFetch: typeof fetch = (input, init) => {
-  const method = init?.method
-    ?? (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET');
-  const wrote = changesThings(method);
-  const ms = deadlineMsFor(bodyKind(init?.body));
-
-  const ac = new AbortController();
-  const caller = init?.signal ?? null;
-  // Already cancelled before we started: pass it straight through rather than
-  // arming a timer for a request that is not going to be made.
-  if (caller?.aborted) return fetch(input, init);
-  const onCallerAbort = () => ac.abort(caller?.reason);
-  caller?.addEventListener('abort', onCallerAbort, { once: true });
-
-  const work = fetch(input, { ...init, signal: ac.signal });
-  return withDeadline(work, ms, wrote, () => ac.abort())
-    .finally(() => caller?.removeEventListener('abort', onCallerAbort));
-};
+// A ceiling on every request this console sends.
+//
+// `src/lib/requestTimeout.ts` is the product's one answer to a socket that is
+// accepted and then answers nothing, and its header carries the argument for
+// both numbers — thirty seconds for a call, two minutes for a transfer, the
+// second set by Supabase's own 150-second edge-function limit. It was written
+// for the phone. Nothing about it is a phone: the wrapper is structurally typed
+// over `fetch`, and the condition it closes is worse here than there.
+//
+// ── What a hung request does to THIS console ──────────────────────────────
+//
+// Not "shows an error late". The three-state discipline every screen here is
+// built on collapses to one state, permanently:
+//
+//   · `components/Gate.tsx` renders "Reading your account…" and stays. Its
+//     unreadable branch — the one with the Try Again button and the sentence
+//     saying this is not you being signed out — is reached only when `loadMe`
+//     REJECTS, and a hung fetch never rejects.
+//   · `components/Fetched.tsx` sets `running.current = true` before awaiting
+//     and clears it in a `finally` that never runs, so "Read again" disables
+//     itself for good. The one control on the page for getting out of this is
+//     the one the condition takes away.
+//   · every `Read<T>` sits at 'loading', which `Unresolved` draws as
+//     "Loading…" — the sentence this console's whole discipline exists to keep
+//     distinct from "empty" and from "refused".
+//
+// A front desk on gym wifi behind a captive portal gets that, with nothing to
+// press, and reloads the tab — which `Fetched`'s own header says nobody does
+// because it discards a half-typed form.
+//
+// ── Why the wrapper rather than a second one ──────────────────────────────
+//
+// Because two ceilings in one product is two numbers to disagree, which is the
+// case `scripts/check-sql-caps.mjs` argues at length about a different pair.
+// This console shares the database, the row-level policies and every figure
+// with the phone; it should not give up at a different moment.
+//
+// One thing it does NOT close, and it is worth writing down: a WRITE that timed
+// out may have committed and had only its reply lost. The screens here word a
+// thrown write as "was NOT closed", "Nothing was taken back", "the original
+// still stands in full" — which is true of a refusal and is a claim this
+// console cannot make about a request nobody answered. `retryOnTimeout` already
+// refuses to resend one for exactly that reason; the wording has not caught up.
+import { withRequestTimeout } from '@lib/requestTimeout';
 
 export const supabase = createClient(url, key, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
-  // Realtime is a WebSocket and is untouched by this; every read, every write
-  // and every storage upload this console makes goes through here.
-  global: { fetch: timedFetch },
+  // Realtime is a WebSocket and is untouched by this. Every read, every write
+  // and every storage upload this console makes goes through here. Wrapped in
+  // an arrow rather than passed as a bare `fetch` so the global keeps its own
+  // receiver — an unbound `fetch` throws "Illegal invocation" in a browser.
+  global: { fetch: withRequestTimeout((input, init) => fetch(input, init)) },
 });
 
 export type Role = 'client' | 'trainer' | 'owner';

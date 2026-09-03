@@ -9,8 +9,24 @@
 <meta property="og:title" content="Repple Coach — your whole book in one place">
 <meta property="og:description" content="Every client, programme, session and check-in in one book — instead of four apps and a notes file.">
 <meta property="og:url" content="https://www.repplefitness.com/trainer">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og-coach.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple Coach app icon beside the words “Repple Coach — clients, programmes, schedule and check-ins in one book instead of four apps.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="styles.css?v=276220735b">
 <link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -38,6 +54,10 @@ addEventListener('DOMContentLoaded', function () {
 </script>
 </head>
 <body class="tone-coach">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
 
 <header class="site">
   <div class="wrap">
@@ -67,7 +87,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main>
+<main id="main">
 
 <section class="hero" id="repple-coach-for-the-trainer">
   <div class="wrap">
@@ -81,6 +101,12 @@ addEventListener('DOMContentLoaded', function () {
           the handful of people who need you this week at the top of it, rather than all of them
           at once.
         </p>
+
+    <!-- Present for the document outline, not for the eye: this page went h1 → h3
+
+         and a screen reader was told a level was missing at the top of it. -->
+
+    <h2 class="vh">Get Repple Coach</h2>
 
     <div class="getbar" style="grid-template-columns:1fr;max-width:640px">
       <div class="app">

@@ -48,6 +48,12 @@ import { minorFromWhole, majorFromMinor } from '@lib/coachMoney';
 // What the sessions in a run say they were priced in, against what the
 // settlement row is about to be stamped with.
 import { settleCurrencyBlocker } from '@lib/gymRateCurrency';
+// The question asked before a run is recorded as paid. One step, carrying the
+// figure and the name — see the header of that module for why this screen had
+// none while the Reverse control beside it demanded a typed sentence.
+import {
+  payRunStops, payRunHeading, payRunBody, payRunYesLabel, PAY_RUN_NO_LABEL,
+} from '@lib/payRunConfirm';
 import {
   fetchTrainerPay, saveTrainerPay, withResolvedRates, payRateBlocker, parseRate,
   fetchAdjustments, addAdjustment, adjustmentBlocker, adjustmentSign,
@@ -198,6 +204,15 @@ export default function Payroll() {
   const [sessions, setSessions] = useState<PtSession[] | null>(null);
   const [trainers, setTrainers] = useState<GymTrainer[] | null>(null);
   const [runs, setRuns] = useState<Settlement[] | null>(null);
+  /**
+   * The run whose Mark-as-paid has been pressed once, by trainer id.
+   *
+   * Held by ID rather than by row: `rows` is rebuilt on every read and on every
+   * period change, and an armed confirmation holding a stale object would ask
+   * about one run and settle another. Resolved back to a live row below, so a
+   * period switch or a refresh that removes the row takes the question with it.
+   */
+  const [asking, setAsking] = useState<string | null>(null);
   const [sessionsErr, setSessionsErr] = useState<string | null>(null);
   const [trainersErr, setTrainersErr] = useState<string | null>(null);
   const [runsErr, setRunsErr] = useState<string | null>(null);
@@ -689,6 +704,10 @@ export default function Payroll() {
   const settle = async (r: RunRow) => {
     if (r.blocker || !ccy) return;
     if (r.outstanding.length + r.classes.length + r.adjustments.length === 0) return;
+    // The question is answered either way: a run that goes on to fail must not
+    // leave a confirmation standing over a row whose figures are about to be
+    // re-read, and one that succeeds has no row left to ask about.
+    setAsking(null);
     setSettling(r.trainerId);
     try {
       const id = await recordSettlement(supabase, tenantId, {
@@ -971,6 +990,9 @@ export default function Payroll() {
         rosterUnread={unread(trainers, trainersErr)}
         settling={settling}
         onSettle={settle}
+        asking={asking}
+        onAsk={setAsking}
+        periodLabel={period.label}
         method={method}
         onMethod={setMethod}
         ccy={ccy}
@@ -1394,12 +1416,33 @@ function Adjustments({ trainers, rows, ccy, tenantId, me, period, onChange }: {
 
 /* ── the run ───────────────────────────────────────────────────────────────── */
 
-function Run({ rows, unread, rosterUnread, settling, onSettle, method, onMethod, ccy }: {
+function Run({
+  rows, unread, rosterUnread, settling, onSettle, asking, onAsk, periodLabel, method, onMethod, ccy,
+}: {
   rows: RunRow[] | null; unread: Unread; rosterUnread: Unread;
   settling: string | null; onSettle: (r: RunRow) => void;
+  /** The trainer id whose button has been pressed once, or null. */
+  asking: string | null; onAsk: (id: string | null) => void;
+  periodLabel: string;
   method: SettlementMethod; onMethod: (m: SettlementMethod) => void;
   ccy: TenantCurrency;
 }) {
+  // Resolved from the id every render rather than held as a row. A period
+  // change or a refresh rebuilds `rows`, and a question standing over a row
+  // that is no longer in the run is a question about the wrong money.
+  const armed = asking ? (rows ?? []).find((r) => r.trainerId === asking) ?? null : null;
+  const armedAmount = armed ? amount(rowOwed(armed), ccy) : null;
+  const ask = armed ? {
+    who: armed.name,
+    amountText: armedAmount,
+    periodLabel,
+    sessions: armed.outstanding.length,
+    classes: armed.classes.length,
+    adjustments: armed.adjustments.length,
+    methodLabel: SETTLEMENT_METHOD_LABEL[method],
+  } : null;
+  const stops = ask ? payRunStops(ask) : null;
+
   const cols: Column<RunRow>[] = [
     { key: 'name', header: 'Trainer', value: (r) => r.name ?? '',
       render: (r) => (
@@ -1504,18 +1547,26 @@ function Run({ rows, unread, rosterUnread, settling, onSettle, method, onMethod,
       ) },
     { key: 'pay', header: '', value: () => 0, align: 'right',
       render: (r) => (
+        // Arms the question rather than writing the settlement. The press that
+        // writes it is the one below the table, and it carries the figure and
+        // the name — see @lib/payRunConfirm for why one press was wrong here
+        // and a typed sentence would have been wrong too.
         <button
           disabled={!!r.blocker || settling === r.trainerId}
-          onClick={() => onSettle(r)}
+          onClick={() => onAsk(asking === r.trainerId ? null : r.trainerId)}
+          aria-expanded={asking === r.trainerId}
           style={{
-            background: r.blocker ? 'var(--surface2)' : 'var(--brand)',
-            color: r.blocker ? 'var(--ink3)' : 'var(--brand-ink)',
-            border: 'none', borderRadius: 0, padding: '7px 12px', fontSize: 12.5,
+            background: r.blocker ? 'var(--surface2)' : asking === r.trainerId ? 'var(--surface2)' : 'var(--brand)',
+            color: r.blocker ? 'var(--ink3)' : asking === r.trainerId ? 'var(--ink)' : 'var(--brand-ink)',
+            border: asking === r.trainerId ? '1px solid var(--ring)' : 'none',
+            borderRadius: 0, padding: '7px 12px', fontSize: 12.5,
             fontWeight: 600, cursor: r.blocker ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
             fontFamily: 'var(--sans)',
           }}
         >
-          {settling === r.trainerId ? 'Recording…' : 'Mark as paid'}
+          {settling === r.trainerId ? 'Recording…'
+            : asking === r.trainerId ? 'Confirm below'
+            : 'Mark as paid'}
         </button>
       ) },
   ];
@@ -1564,6 +1615,63 @@ function Run({ rows, unread, rosterUnread, settling, onSettle, method, onMethod,
             </span>
           </div>
           <DataTable noun="payroll lines" rows={rows} columns={cols} rowKey={(r) => r.trainerId} empty="Nobody delivered anything in this period." />
+          {/*
+            * The step between the press and a permanent settlement row.
+            *
+            * Below the table rather than inside the row: the figure, the name,
+            * the period and the rows being stamped do not fit in a table cell,
+            * and the two facts that catch a mis-clicked row — who and how much
+            * — are exactly the ones that must not be abbreviated. Mounted only
+            * while a row is armed, and `role="alertdialog"` because it is a
+            * question a screen reader has to be handed rather than left to find
+            * after pressing a button that appeared to do nothing.
+            */}
+          {ask && armed ? (
+            <div
+              role="alertdialog"
+              aria-modal="false"
+              aria-label={payRunHeading(ask)}
+              style={{
+                margin: '0 14px 14px', padding: '12px 14px', background: 'var(--surface2)',
+                border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)',
+              }}
+            >
+              <strong style={{ display: 'block', fontSize: 13.5, color: 'var(--ink)' }}>
+                {payRunHeading(ask)}
+              </strong>
+              {stops ? (
+                <p style={{ margin: '7px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '76ch' }}>
+                  {stops}
+                </p>
+              ) : (
+                <p style={{ margin: '7px 0 10px', fontSize: 12.5, color: 'var(--ink2)', maxWidth: '76ch', lineHeight: 1.55 }}>
+                  {payRunBody(ask)}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                {stops ? null : (
+                  <button
+                    onClick={() => onSettle(armed)}
+                    disabled={settling === armed.trainerId}
+                    style={{
+                      background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none',
+                      borderRadius: 0, padding: '7px 13px', fontSize: 12.5, fontWeight: 600,
+                      cursor: 'pointer', fontFamily: 'var(--sans)',
+                    }}
+                  >
+                    {settling === armed.trainerId ? 'Recording…' : payRunYesLabel(ask)}
+                  </button>
+                )}
+                <button
+                  onClick={() => onAsk(null)}
+                  disabled={settling === armed.trainerId}
+                  style={{ ...field, cursor: 'pointer', fontWeight: 600 }}
+                >
+                  {PAY_RUN_NO_LABEL}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </>
       )}
     </Section>

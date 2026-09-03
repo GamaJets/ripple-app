@@ -21,6 +21,25 @@
 //   · so the promise never settles, the last `.then()` never runs, `refreshing`
 //     stays true and the wheel spins until the app is killed.
 //
+// ── This is now the BACKSTOP, not the defence ──────────────────────────────
+//
+// Read the paragraph above as history. src/lib/requestTimeout.ts has since put
+// a real ceiling on the request itself: every call through `observedFetch` now
+// carries an AbortController, a hung read fails as a labelled transport
+// failure at thirty seconds, reachability marks the app unreachable, and the
+// provider underneath reaches 'error' where its screen already has the right
+// copy. The read SETTLES. So on the reported fault this file's ceiling no
+// longer fires at all — the `.catch()` below does the work, ten seconds after
+// this hands the gesture back.
+//
+// Which is the order it should be, and the reason to keep both. This ceiling
+// is a claim about the SPINNER and it holds for a class of stall the network
+// layer cannot see: a `reload` that awaits something other than a request, a
+// promise a screen forgot to settle, a future call that finds its way around
+// `observedFetch`. It costs nothing when the layer below is working and it is
+// the only thing standing between a coach and a dead gesture when it is not.
+// Do not delete it because the timeout made it quiet.
+//
 // And it is worse than one stuck spinner, which is why this is a hook-level fix
 // rather than a screen-level one. The re-entry guard is a ref that is cleared in
 // that same final `.then()`, so a single hung read leaves `busy` true for the
@@ -66,9 +85,16 @@ export const MIN_SPIN_MS = 450;
  * How long the spinner may stay up at most, in milliseconds.
  *
  * Twenty seconds is far longer than any read this app makes on a working
- * connection and far shorter than forever, which is the only other number on
- * offer today. A person who has been watching a wheel for twenty seconds has
- * already decided it is broken; the point is that they can pull again.
+ * connection and far shorter than forever, which was the only other number on
+ * offer when this was written. A person who has been watching a wheel for
+ * twenty seconds has already decided it is broken; the point is that they can
+ * pull again.
+ *
+ * Deliberately BELOW `CALL_CEILING_MS` (30s) in src/lib/requestTimeout.ts, and
+ * the gap is the design: the gesture comes back first, and the truth about the
+ * network lands ten seconds later once the request itself has given up. Raising
+ * this above that ceiling would mean a spinner still turning on a read that has
+ * already failed and already drawn the offline banner behind it.
  */
 export const MAX_SPIN_MS = 20_000;
 

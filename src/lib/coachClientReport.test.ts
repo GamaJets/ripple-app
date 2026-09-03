@@ -22,6 +22,7 @@ import {
   coachReportCaveats,
   coachReportShareBlurb,
   sessionTally,
+  countableRows,
   COACH_REPORT_LIMITS,
   COACH_REPORT_NO_PHOTOS,
   COACH_REPORT_NO_RATE,
@@ -379,6 +380,34 @@ const FORBIDDEN = [
   ok(!d.html.includes('Repple'), 'and the platform name does not appear anywhere on it');
   ok(coachClientReportDoc(base({ brand: '' })).html.includes('Repple'),
     'an empty brand falls back to something rather than printing nothing on a handover');
+}
+
+/* ── 13. the preview panel may not count what the document refuses to ─────
+ *
+ * This is the rule `sessionTally` keeps — "a truncated read may be LISTED and
+ * may not be COUNTED" — asserted for the two figures on
+ * app/(trainer)/client-report.tsx that were reading `.rows.length` off the
+ * state instead. Under 'partial' those printed the PAGE as the total: 1000
+ * body-composition scans, and a day count pivoted from a page of a longer set,
+ * on the panel headed "What will be on it", beside a document that prints no
+ * total for that section at all.
+ *
+ * The pivot is why 'partial' cannot be softened here into "at least this many".
+ * `measures.rows` is one entry per DAY, built from rows that are one per site
+ * per day, so a truncated read does not merely shorten the list — the last day
+ * in it is a day whose sites are half missing, and neither its presence nor the
+ * count is something this app can stand behind.
+ */
+
+{
+  const rows = [1, 2, 3];
+  eq(countableRows(rows, 'ready'), 3, 'a whole read may be counted');
+  eq(countableRows([], 'ready'), 0, 'and an empty whole read counts as none — that is a real answer');
+  eq(countableRows(rows, 'partial'), null, 'a truncated read may not be counted, however many rows came back');
+  eq(countableRows(rows, 'error'), null, 'nor may a refused one, even holding rows from before it failed');
+  eq(countableRows(rows, 'loading'), null, 'nor one still in flight');
+  eq(countableRows(null, 'ready'), null, 'and null rows are not nought rows');
+  eq(countableRows(undefined, 'ready'), null, 'nor are absent ones');
 }
 
 declare const process: { exit(code: number): void };

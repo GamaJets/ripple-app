@@ -63,12 +63,16 @@
 // that was never going to end.
 
 import type { LoadStatus } from '../ui/loadStatus';
+import { READ_DEADLINE_MS, isDeadlineExceeded, withDeadline as raceDeadline, type Timers } from './deadline';
 
-/**
- * How long a first read may stay unanswered before a screen stops calling
- * itself busy and starts calling it a failure, in milliseconds.
- */
-export const READ_DEADLINE_MS = 25_000;
+// The ceiling itself is NOT declared here. src/lib/deadline.ts owns it, and its
+// header makes the same argument about the same condition for the console — a
+// captive portal at a gym's front desk, a socket accepted and then answered
+// never. One number, one place: two constants called READ_DEADLINE_MS in one
+// folder is how a phone and a console end up disagreeing about how long a
+// member's phone should wait, and there is no version of that disagreement
+// anybody would have chosen on purpose.
+export { READ_DEADLINE_MS } from './deadline';
 
 /**
  * True when a read has been in flight past the ceiling and has neither
@@ -116,55 +120,37 @@ export type Deadlined<T> =
   /** The ceiling passed first. The work may still settle later; nobody is waiting. */
   | { answered: false };
 
-export interface DeadlineOpts {
-  /** Defaults to READ_DEADLINE_MS. */
-  ms?: number;
-  /** Defaults to `setTimeout`. */
-  schedule?: (fn: () => void, ms: number) => unknown;
-  /** Defaults to `clearTimeout`. */
-  cancel?: (handle: unknown) => void;
-}
-
 /**
- * A promise that always settles, for the call sites that own their own read.
+ * A read that always comes back, for the call sites that own their own promise.
  *
- * A REJECTION passes straight through and is rethrown, deliberately: every
- * caller of this already has a catch that knows what a refused read means on
- * its screen, and swallowing the error into `{ answered: false }` would flatten
- * "the server said no" back into "the server said nothing" — the very
- * distinction src/lib/reachability.ts exists to keep.
+ * A thin shape over `withDeadline` in src/lib/deadline.ts, which owns the timer
+ * and the DeadlineExceeded class and is tested there. What this adds is the
+ * RETURN SHAPE, and it is the difference between the two callers:
  *
- * A late answer is not an unhandled rejection: both handlers are attached to
- * `work` unconditionally and simply return once the ceiling has already won.
+ *   · the console throws, because every screen there already has a 'failed' arm
+ *     holding the database's own sentence and wants a deadline to land in it;
+ *   · a client screen holding `T | null | undefined` does not want an exception
+ *     at all. `{ answered: false }` is a value it can branch on beside the
+ *     answer it already had, which is what lets a stalled PULL leave a balance
+ *     on screen while a stalled FIRST read says so. Wrapping that in try/catch
+ *     at each call site is the version that gets written wrong once.
+ *
+ * A REJECTION that is not a deadline is rethrown untouched, deliberately: a
+ * refusal and a silence get opposite treatment everywhere else in this codebase
+ * (src/lib/reachability.ts) and must not be flattened into each other here.
  */
-export function withDeadline<T>(work: Promise<T>, opts: DeadlineOpts = {}): Promise<Deadlined<T>> {
-  const ms = opts.ms ?? READ_DEADLINE_MS;
-  const schedule = opts.schedule ?? ((fn: () => void, d: number) => setTimeout(fn, d));
-  const cancel = opts.cancel ?? ((h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>));
-  // No usable ceiling means no ceiling. Returning a promise that resolves
-  // immediately as unanswered would be far worse than the bug: every read in
-  // the app would report failure on the first tick.
-  if (!Number.isFinite(ms) || ms <= 0) return work.then((value) => ({ answered: true as const, value }));
-  return new Promise<Deadlined<T>>((resolve, reject) => {
-    let done = false;
-    const handle = schedule(() => {
-      if (done) return;
-      done = true;
-      resolve({ answered: false });
-    }, ms);
-    work.then(
-      (value) => {
-        if (done) return;
-        done = true;
-        cancel(handle);
-        resolve({ answered: true, value });
-      },
-      (err) => {
-        if (done) return;
-        done = true;
-        cancel(handle);
-        reject(err);
-      },
-    );
-  });
+export async function withDeadline<T>(
+  work: Promise<T>,
+  opts: { ms?: number; timers?: Timers } = {},
+): Promise<Deadlined<T>> {
+  try {
+    // `wrote: false` — this is the READ half. Giving up on a write is a
+    // different sentence and deadline.ts says why; nothing routes a write
+    // through here.
+    const value = await raceDeadline(work, opts.ms ?? READ_DEADLINE_MS, false, undefined, opts.timers);
+    return { answered: true, value };
+  } catch (e) {
+    if (isDeadlineExceeded(e)) return { answered: false };
+    throw e;
+  }
 }

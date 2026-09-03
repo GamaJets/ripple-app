@@ -110,6 +110,33 @@ export type RequestKind = 'call' | 'transfer';
  * the coach can pull again, and the truth lands at 30s. Lining them up would
  * mean shortening a network ceiling to suit a spinner, which is the tail
  * wagging the dog.
+ *
+ * ── The one known rough edge, stated rather than tuned away ───────────────
+ *
+ * It also sits above `READ_DEADLINE_MS` (25s, src/lib/deadline.ts), which is
+ * the DISPLAY half of this problem: it escalates a provider's `LoadStatus`
+ * from 'loading' to 'error' without owning the request. So on a dead network
+ * the sequence a person sees is 20s spinner ends → 25s the screen says the
+ * read failed → 30s the app learns the network is why.
+ *
+ * In the five seconds between the last two, a phone that was online a minute
+ * ago still reads `currentReach() === 'online'`, so a screen asking
+ * `retryLine` for its second sentence gets "we reached the server and it did
+ * not accept that" — which is wrong, for five seconds, and then corrects
+ * itself and draws the offline banner.
+ *
+ * The obvious fix is to bring this number under 25 so the cascade runs in the
+ * right order, and it is deliberately NOT taken. A pathological but honest
+ * read — an EDGE handshake, up to PostgREST's 8s of server work, and a
+ * hundred-row page — lands around twenty seconds, so a ceiling in the low
+ * twenties has almost no margin over a read that was going to succeed. The
+ * two errors are not the same size: this one is five seconds of an imprecise
+ * sentence on a network that really is dead, and it fixes itself; the other is
+ * a permanent invented failure for every user on a slow-but-working
+ * connection, all at once. Shortening a transport ceiling to line up with a UI
+ * constant would be trading the small bounded error for the large unbounded
+ * one. If the cascade is worth tidying, the number to move is the display
+ * deadline, not this one.
  */
 export const CALL_CEILING_MS = 30_000;
 

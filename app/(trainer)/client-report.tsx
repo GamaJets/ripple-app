@@ -65,7 +65,7 @@ import { fetchInvoiceIssuer } from '../../src/ui/coachInvoices';
 import { useMyCoachLogo } from '../../src/ui/coachLogo';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
-  coachClientReportDoc, coachReportShareBlurb, sessionTally,
+  coachClientReportDoc, coachReportShareBlurb, sessionTally, countableRows,
   type CoachSessionRow, type ReportScan, type ReportMeasureEntry, type ReportInjury,
 } from '../../src/lib/coachClientReport';
 
@@ -416,6 +416,13 @@ export default function ClientReport() {
     reads.measures.status, reads.client.status, issuer.status,
   );
   const tally = sessionTally(reads.sessions.rows, reads.sessions.status);
+  // Null under anything but a whole read — see `countableRows`. The scans are
+  // counted as rows; the measurements are counted as DAYS, because that is what
+  // the row beside them is labelled and what the pivot above produced. Both are
+  // withheld by the same rule, since the pivot cannot restore a day whose rows
+  // fell off the end of the read.
+  const scanCount = countableRows(reads.scans.rows, reads.scans.status);
+  const measureDayCount = countableRows(reads.measures.rows, reads.measures.status);
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
   const G = layout.gutter;
 
@@ -481,12 +488,27 @@ export default function ClientReport() {
                 value={reads.training.status === 'error' ? 'not read'
                   : reads.training.status === 'loading' ? '…'
                   : board.dayCount == null ? '—' : String(board.dayCount)} />
+              {/* `countableRows`, not `.rows.length`. These two rows were the
+                  only figures in this panel not computed by a module that owns
+                  the truncation rule, and they were the two that broke it: a
+                  'partial' read fell straight through the 'error' and 'loading'
+                  arms and printed its page as a total. `measurements` is one row
+                  per site per day, so ten sites over a hundred measuring days
+                  reaches the cap — and the panel then said "1000 scans" about
+                  the very document that prints no total for that section and
+                  states on its front page that what it holds is not all of it.
+                  'more than could be read' is the sentence the Sessions row two
+                  above has always used for the same silence. */}
               <Row t={t} label="Body-composition scans"
                 value={reads.scans.status === 'error' ? 'not read'
-                  : reads.scans.status === 'loading' ? '…' : String(reads.scans.rows.length)} />
+                  : reads.scans.status === 'loading' ? '…'
+                  : scanCount == null ? 'more than could be read'
+                  : String(scanCount)} />
               <Row t={t} label="Days with tape measurements"
                 value={reads.measures.status === 'error' ? 'not read'
-                  : reads.measures.status === 'loading' ? '…' : String(reads.measures.rows.length)} />
+                  : reads.measures.status === 'loading' ? '…'
+                  : measureDayCount == null ? 'more than could be read'
+                  : String(measureDayCount)} />
               <Row t={t} label="Injuries they have disclosed"
                 value={reads.client.status === 'error' ? 'not read'
                   : reads.client.status === 'loading' ? '…' : String(injuries.length)} />

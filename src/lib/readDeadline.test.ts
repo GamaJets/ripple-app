@@ -6,6 +6,7 @@
 // log…" over dashes for ever, and the notice it already has written for a read
 // that failed is unreachable. See src/lib/readDeadline.ts for the mechanism.
 import { READ_DEADLINE_MS, stalled, escalate, withDeadline, type Deadlined } from './readDeadline';
+import type { Timers } from './deadline';
 import type { LoadStatus } from '../ui/loadStatus';
 
 const errors: string[] = [];
@@ -67,18 +68,26 @@ eq(escalate('error', true), 'error', 'a read that already failed stays failed');
 eq(escalate('error', false), 'error', 'a read that already failed stays failed inside the ceiling');
 
 /* ── withDeadline ──────────────────────────────────────────────────────── */
+//
+// The timer and the DeadlineExceeded class live in src/lib/deadline.ts and are
+// tested there. What is pinned here is the RETURN SHAPE this wrapper exists
+// for: a client screen branching on a value rather than catching an exception,
+// and the one kind of throw that must still reach it.
 
-// A fake clock: nothing here waits on a real timer, so the whole file runs in
-// microseconds and a ceiling of twenty-five seconds can be crossed on demand.
+// A fake clock, so nothing here waits on a real timer and a twenty-five second
+// ceiling can be crossed on demand.
 type Timer = { fn: () => void; ms: number; cancelled: boolean };
 const makeClock = () => {
-  const timers: Timer[] = [];
+  const armed: Timer[] = [];
+  const timers: Timers = {
+    setTimeout: (fn: () => void, ms: number) => { const t: Timer = { fn, ms, cancelled: false }; armed.push(t); return t; },
+    clearTimeout: (h: unknown) => { (h as Timer).cancelled = true; },
+  };
   return {
-    schedule: (fn: () => void, ms: number) => { const t: Timer = { fn, ms, cancelled: false }; timers.push(t); return t; },
-    cancel: (h: unknown) => { (h as Timer).cancelled = true; },
-    fire: () => { for (const t of timers) if (!t.cancelled) t.fn(); },
-    live: () => timers.filter((t) => !t.cancelled).length,
-    armedAt: () => timers.map((t) => t.ms),
+    timers,
+    fire: () => { for (const t of armed) if (!t.cancelled) t.fn(); },
+    live: () => armed.filter((t) => !t.cancelled).length,
+    armedAt: () => armed.map((t) => t.ms),
   };
 };
 
@@ -88,18 +97,17 @@ const settle = () => new Promise<void>((r) => { setImmediate(() => r()); });
   /* the answer arrives in time */
   {
     const clock = makeClock();
-    const got = await withDeadline(Promise.resolve(7), { ms: 25_000, schedule: clock.schedule, cancel: clock.cancel });
+    const got = await withDeadline(Promise.resolve(7), { ms: 25_000, timers: clock.timers });
     eq(got.answered, true, 'a read that answers is answered');
     eq(got.answered ? got.value : null, 7, 'the value comes back untouched');
     eq(clock.live(), 0, 'the ceiling is cancelled once the read lands, so nothing fires later');
   }
 
-  /* the read never answers */
+  /* the read never answers — the captive-portal socket, exactly */
   {
     const clock = makeClock();
-    // A promise that never settles — the captive-portal socket, exactly.
     const forever = new Promise<number>(() => {});
-    const p = withDeadline(forever, { ms: 25_000, schedule: clock.schedule, cancel: clock.cancel });
+    const p = withDeadline(forever, { ms: 25_000, timers: clock.timers });
     eq(clock.armedAt()[0], 25_000, 'the ceiling is armed at the number it was given');
     let done = false;
     p.then(() => { done = true; });
@@ -110,15 +118,24 @@ const settle = () => new Promise<void>((r) => { setImmediate(() => r()); });
     eq(got.answered, false, 'a read that never answers comes back unanswered rather than hanging');
   }
 
+  /* the default ceiling is the shared one */
+  {
+    const clock = makeClock();
+    const p = withDeadline(new Promise<number>(() => {}), { timers: clock.timers });
+    eq(clock.armedAt()[0], READ_DEADLINE_MS, 'a caller that names no ceiling gets the shared one');
+    clock.fire();
+    eq((await p).answered, false, 'and it fires');
+  }
+
   /* a refusal is not a silence */
   {
     const clock = makeClock();
     const refused = new Error('row-level security');
     let threw: unknown = null;
     try {
-      await withDeadline(Promise.reject(refused), { ms: 25_000, schedule: clock.schedule, cancel: clock.cancel });
+      await withDeadline(Promise.reject(refused), { ms: 25_000, timers: clock.timers });
     } catch (e) { threw = e; }
-    eq(threw, refused, 'a rejection passes straight through, so a refusal stays distinguishable from a silence');
+    eq(threw, refused, 'a rejection that is not a deadline passes straight through, so a refusal stays distinguishable from a silence');
     eq(clock.live(), 0, 'the ceiling is cancelled by a rejection too');
   }
 
@@ -127,23 +144,21 @@ const settle = () => new Promise<void>((r) => { setImmediate(() => r()); });
     const clock = makeClock();
     let land: (v: number) => void = () => {};
     const late = new Promise<number>((r) => { land = r; });
-    const p = withDeadline(late, { ms: 25_000, schedule: clock.schedule, cancel: clock.cancel });
+    const p = withDeadline(late, { ms: 25_000, timers: clock.timers });
     clock.fire();
     const got = await p;
     eq(got.answered, false, 'the ceiling won');
-    // The read is still out there and settles a minute later. Nothing may
-    // resolve twice and nothing may throw.
     land(99);
     await settle();
     eq(got.answered, false, 'a late answer does not re-resolve a promise that already came back');
   }
 
-  /* a late REJECTION after the ceiling has already won must not be unhandled */
+  /* a late REJECTION after the ceiling has already won must not crash the app */
   {
     const clock = makeClock();
     let fail: (e: unknown) => void = () => {};
     const late = new Promise<number>((_r, j) => { fail = j; });
-    const p = withDeadline(late, { ms: 25_000, schedule: clock.schedule, cancel: clock.cancel });
+    const p = withDeadline(late, { ms: 25_000, timers: clock.timers });
     clock.fire();
     const got = await p;
     eq(got.answered, false, 'the ceiling won before the failure');
@@ -157,23 +172,15 @@ const settle = () => new Promise<void>((r) => { setImmediate(() => r()); });
     eq(unhandled, null, 'a read that fails after the ceiling does not crash the app with an unhandled rejection');
   }
 
-  /* no usable ceiling means no ceiling, never an instant failure */
-  {
-    const clock = makeClock();
-    const got = await withDeadline(Promise.resolve('x'), { ms: 0, schedule: clock.schedule, cancel: clock.cancel });
-    eq(got.answered, true, 'a zero ceiling does not fail a read that answers');
-    eq(clock.armedAt().length, 0, 'a zero ceiling arms no timer at all');
-    const got2 = await withDeadline(Promise.resolve('y'), { ms: Number.NaN, schedule: clock.schedule, cancel: clock.cancel });
-    eq(got2.answered, true, 'an unreadable ceiling does not fail a read that answers');
-  }
-
   /* the shape a caller actually writes */
   {
     // Three reads in parallel, one of which never comes back — the ordinary
-    // shape of a screen's `load()`. Promise.all on its own would never settle.
+    // shape of a screen's `load()`. Promise.all on its own would never settle,
+    // which is what left Session Credits on "Reading what pays for your
+    // sessions…" with its own Try Again button gated behind `!loading`.
     const clock = makeClock();
     const both = withDeadline(Promise.all([Promise.resolve(1), new Promise<number>(() => {})]),
-      { ms: 25_000, schedule: clock.schedule, cancel: clock.cancel });
+      { ms: 25_000, timers: clock.timers });
     clock.fire();
     const got: Deadlined<number[]> = await both;
     eq(got.answered, false, 'one read that never answers no longer holds the whole screen open');

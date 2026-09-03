@@ -59,6 +59,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+import { useReadDeadline } from '../../src/ui/readDeadline';
 import {
   fetchCoachCredentials, fetchMyReview, canReview, writeReview, withdrawReview,
 } from '../../src/ui/reviews';
@@ -102,7 +103,10 @@ export default function MyCoach() {
   const t = useTheme();
   const router = useRouter();
   const [coach, setCoach] = useState<CoachProfile | null>(null);
-  const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // Under a ceiling — see src/lib/readDeadline.ts. Nothing here can leave
+  // 'loading' without a request settling, and a captive portal settles none.
+  const [readStatus, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const status = useReadDeadline(readStatus);
   // `useToday`, not `useMemo(() => todayKey(), [])`. That empty dependency list
   // fixes the day for the life of the MOUNT, and nothing here unmounts when a
   // phone goes in a pocket. This string is the second argument to every

@@ -36,6 +36,26 @@ import {
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
+
+/**
+ * The suite must never pass by disappearing.
+ *
+ * Found by mutating: with the retry rule broken so a POST is sent again, block
+ * 11d awaits a request that is never going to settle. Node then has an empty
+ * event loop, exits 0, and prints NOTHING — not the report, not the eleven
+ * assertions that had already failed. A broken timeout made the test that
+ * exists to catch it go quiet, which is the same shape of bug as the one under
+ * test and would have hidden three of the twelve mutations below.
+ *
+ * So: the report is the only thing allowed to end this process happily.
+ */
+let reported = false;
+process.on('exit', (code: number) => {
+  if (!reported && code === 0) {
+    console.error('requestTimeout: the suite never reached its report — something below never settled, so node was about to exit 0 with every assertion unreported.');
+    process.exitCode = 1;
+  }
+});
 const eq = (a: unknown, b: unknown, msg: string) =>
   ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
@@ -152,6 +172,18 @@ const REST = 'https://p.supabase.co/rest/v1/workouts?select=*&client_id=eq.abc';
   // thirty seconds for nothing and still believe it was online.
   ok(isTransportFailure(e), 'a timeout IS evidence of a network that did not carry the request');
   ok(!isTransportFailure(abort), 'while a real abort still is not');
+
+  // The marker, not the wording, is what makes that true — pinned because
+  // mutating the explicit check out of reachability.ts did NOT fail this suite:
+  // the error happens to pass the name-and-message sniffing anyway, so the
+  // check reads as redundant right up until somebody rewords the message and
+  // silently reopens the defect. Disguise a timeout as an abort and it must
+  // still count.
+  const disguised = requestTimeoutError(REST, 'GET', CALL_CEILING_MS);
+  disguised.name = 'AbortError';
+  disguised.message = 'The operation was aborted';
+  ok(isTransportFailure(disguised),
+    'the timeout marker outranks the name and the wording — reachability must not fall back to sniffing');
   ok(!/abort/i.test(e.message), "the message must not say 'abort', which reachability reads as ours-and-therefore-nothing");
   ok(/timed out/i.test(e.message), 'it says what happened');
   ok(e.message.includes('/rest/v1/workouts'), 'and which endpoint, which is the diagnostic value');
@@ -453,6 +485,7 @@ void (async () => {
 
   resetReach();
 
+  reported = true;
   if (errors.length) {
     console.error(`requestTimeout: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);
     for (const e of errors) console.error(`  ✗ ${e}`);

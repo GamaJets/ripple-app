@@ -33,6 +33,7 @@ import { sp, layout, hairline, radius, type as ty, numeric } from '../../src/the
 import { normaliseCode, checkoutCodeBlocker, type PromoTarget } from '../../src/lib/packagePromo';
 import { fetchMyPurchases, fetchTrainerPackages, packageLabels, buyPackage, openPurchasePortal, portalPurchase, type Purchase, type TrainerPackage } from '../../src/lib/connect';
 import { packBalance, type PackPurchase } from '../../src/lib/packDraw';
+import { withDeadline } from '../../src/lib/readDeadline';
 // What a validity window means on the client's own side of the sale: the day it
 // closes, and — where it closed with credits on it — how many they paid for and
 // did not take. Never a silent zero. See src/lib/packExpiry.ts.
@@ -136,7 +137,36 @@ export default function ClientPackages() {
       } catch { /* no usable cache; the reads below are the only source */ }
     }
 
-    const [p, s, c] = await Promise.all([fetchMyPurchases(), fetchMySubscriptions(), myCoachId()]);
+    // ── the network half, under a ceiling ───────────────────────────────
+    //
+    // Every read below reports a failure by handing back null, and this screen
+    // is built around that: a null leaves the cached list alone and raises the
+    // banner beside it. What none of them can report is a request that never
+    // SETTLES, and no request in this app carries a timeout — see
+    // src/lib/readDeadline.ts.
+    //
+    // That case cost this screen more than most, because `loading` gates the
+    // WHOLE body at line 346. The device's own copy of the purchases is read
+    // immediately above, precisely so a member in a basement can still see what
+    // they have bought — and on a gym wifi behind a captive portal
+    // `setLoading(false)` was never reached, so the spinner sat over that
+    // cached list for the life of the app. The fallback was unreachable in
+    // exactly the condition it was written for.
+    //
+    // A stall is reported as the failure it is: the rows already on screen stay
+    // (src/lib/staleRead.ts — a read that did not land is not a purchase that
+    // stopped existing), and the banners this screen already has say so.
+    const first = await withDeadline(Promise.all([fetchMyPurchases(), fetchMySubscriptions(), myCoachId()]));
+    if (!first.answered) {
+      setFailed(true);
+      setSubsFailed(true);
+      // Any non-null string raises the flag; the sentence itself is in the
+      // render. Not knowing who coaches you is exactly what this is.
+      setCoachErr('The server did not answer.');
+      setLoading(false);
+      return;
+    }
+    const [p, s, c] = first.value;
     // `p === null` is a failed read. Assigning it would wipe the cached list
     // above — replacing what somebody bought with the fact that we could not
     // ask, which is the exact substitution this screen's own header warns
@@ -150,7 +180,10 @@ export default function ClientPackages() {
     setCoachId(c.coachId); setCoachErr(c.error);
     // What the coach currently sells — null means the read failed, which is not
     // "your coach sells nothing".
-    const list = c.coachId ? await fetchTrainerPackages(c.coachId) : null;
+    // `null` is already this screen's word for "we could not read the coach's
+    // packages", and the flag under it is already written. A stall is that.
+    const listRead = c.coachId ? await withDeadline(fetchTrainerPackages(c.coachId)) : null;
+    const list = listRead == null ? null : listRead.answered ? listRead.value : null;
     setOffers(c.coachId ? list : []);
     // The name and the unit for every past purchase on this screen. A purchase
     // row carries neither of its own — no currency column at all, and no name —
@@ -159,8 +192,14 @@ export default function ClientPackages() {
     // part 147 means DELETED, not merely withdrawn: pkg_read now lets a buyer
     // read any package they paid for. See packageLabels.
     const ids = [...(p ?? []).map((r) => r.package_id), ...(s ?? []).map((r) => r.package_id)].filter(Boolean) as string[];
-    const info = await packageLabels(ids);
-    setPkgInfo(info);
+    // The names and currencies. A stall here leaves whatever the device's cache
+    // taught us in place rather than emptying the map: without it every amount
+    // on this screen renders as a dash, and a list of packs with no prices is
+    // barely a list. No currency is invented either way — an id this map does
+    // not hold still shows a dash rather than a number in some default unit.
+    const infoRead = await withDeadline(packageLabels(ids));
+    const info = infoRead.answered ? infoRead.value : null;
+    if (info) setPkgInfo(info);
     // Cached only when the purchases actually came back. `p === null` is a
     // failed read, and writing that over a good copy would replace what
     // somebody bought with the fact that we could not ask.
@@ -168,9 +207,11 @@ export default function ClientPackages() {
       setCachedAt(null);
       AsyncStorage.setItem(cacheKey('purchases', uid), packCache(p)).catch(() => { /* right this session either way */ });
       if (s) AsyncStorage.setItem(cacheKey('subscriptions', uid), packCache(s)).catch(() => { /* as above */ });
-      AsyncStorage.setItem(cacheKey('packageLabels', uid),
-        packCache([...info].map(([id, v]) => ({ id, name: v.name, currency: v.currency }))))
-        .catch(() => { /* as above */ });
+      if (info) {
+        AsyncStorage.setItem(cacheKey('packageLabels', uid),
+          packCache([...info].map(([id, v]) => ({ id, name: v.name, currency: v.currency }))))
+          .catch(() => { /* as above */ });
+      }
     }
     setLoading(false);
   }, [uid]);
