@@ -57,6 +57,26 @@ import { fmtClock, fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import {
   cancelClass, cancelSeriesFrom, deleteClass, restoreClass, updateClass, updateSeriesFrom,
 } from '../../src/lib/gymSchedule';
+// ── Telling the room ──────────────────────────────────────────────────────
+//
+// supabase/parts/493 writes an inbox row to everybody booked or waitlisted the
+// moment a class goes to 'cancelled', and that is the whole of what the schema
+// can do: nothing server-side in this product turns a `notifications` insert
+// into a push, because part 26's `messages` trigger is the only writer that
+// reaches pg_net at all. So the row existed and the phone never rang, and the
+// twelve people booked on a 6am found out when they next opened the app —
+// after they had travelled to a locked room, which is the exact failure part
+// 493's own header describes and only half closes.
+//
+// The push therefore goes from here, the handset that pressed the button, the
+// way every other push in this product does. The ROW stays the trigger's:
+// src/lib/notifyInbox.ts refuses to record this one, so a member gets one
+// notification and not two differently-worded copies of the same cancellation.
+import {
+  classOffBuckets, classOffConfirmation, classOffNotification,
+} from '../../src/lib/notifyCopy';
+import { capLimit } from '../../src/lib/rowCap';
+import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { supabase } from '../../src/lib/supabase';
 
 // The weekday name, the date order and the clock were all this file's own, and
@@ -297,6 +317,62 @@ export default function TrainerClasses() {
     void runWrite('Class updated', done, () => updateClass(supabase, c.id, patch));
   };
 
+  /**
+   * Tell everybody who had booked or was waiting.
+   *
+   * Called only with the ids of classes the server CONFIRMED it cancelled —
+   * `cancelClass` throws when the update matched nothing and `cancelSeriesFrom`
+   * returns only the rows it changed — so a second tap has nobody to notify
+   * rather than sending a second round of banners about the same cancellation.
+   *
+   * ── What the three numbers mean ─────────────────────────────────────────
+   *
+   * `people` null is a roster that could not be READ, which is not nobody: it
+   * is the case where the coach has to go and tell them, and reporting it as
+   * zero is how twelve people arrive at a locked room believing the app told
+   * them. `pushed` counts the people in the buckets whose send-push call was
+   * accepted — queued with Expo, never witnessed as delivered.
+   *
+   * The person who pressed the button is dropped, the same exclusion part 493's
+   * trigger makes with `auth.uid()`: a coach booked into their own class is
+   * watching it happen.
+   */
+  const tellTheRoom = useCallback(async (
+    classIds: readonly string[], classTitle: string, why: string,
+  ): Promise<{ people: number | null; pushed: number }> => {
+    if (!classIds.length) return { people: 0, pushed: 0 };
+    let me: string | null = null;
+    // A failed read of our own id costs the coach one notification about their
+    // own cancellation. A failed read of the roster costs twelve people theirs,
+    // which is why only the second one is reported.
+    try { me = (await supabase.auth.getUser()).data?.user?.id ?? null; } catch { me = null; }
+    const { data, error } = await supabase
+      .from('class_bookings')
+      .select('user_id, class_id')
+      .in('class_id', classIds as string[])
+      .limit(capLimit());
+    if (error) return { people: null, pushed: 0 };
+    const rows = (data ?? [])
+      .map((r: { user_id?: unknown; class_id?: unknown }) => ({
+        userId: String(r?.user_id ?? '').trim(),
+        classId: String(r?.class_id ?? '').trim(),
+      }))
+      .filter((r) => r.userId && r.classId && r.userId !== me);
+    // Grouped by how many of THEIR OWN bookings went, so nine weeks of a series
+    // is one notification per person rather than nine, and nobody is told a
+    // figure about somebody else's diary. See src/lib/notifyCopy.ts.
+    const buckets = classOffBuckets(rows);
+    let people = 0;
+    let pushed = 0;
+    for (const b of buckets) {
+      people += b.userIds.length;
+      const n = classOffNotification(classTitle, b.classes, why);
+      const res = await sendPushChecked(b.userIds, n.title, n.body, { route: n.route });
+      if (res.ok) pushed += b.userIds.length;
+    }
+    return { people, pushed };
+  }, []);
+
   const callOff = (c: GymClass) => {
     const why = mReason.trim();
     if (!why) {
@@ -304,24 +380,32 @@ export default function TrainerClasses() {
         'A cancelled class with no reason tells the next reader nothing. "Instructor off sick" and "nobody booked it" are the two answers that are worth having in three months.');
       return;
     }
-    if (mSeries && c.seriesId) {
-      void (async () => {
-        if (mBusy) return;
-        setMBusy(true);
-        try {
-          const n = await cancelSeriesFrom(supabase, c.seriesId as string, c.startsAt, why);
-          setManage(null);
-          refresh();
-          Alert.alert('Series called off', `${n} ${n === 1 ? 'class was' : 'classes were'} called off from this one onward. Every booking, every check-in and every waiting list is kept.`);
-        } catch (e) {
-          Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'That did not reach the server, so the classes are still on the timetable.');
-        } finally { setMBusy(false); }
-      })();
-      return;
-    }
-    void runWrite('Class called off',
-      'It stays on the timetable marked as cancelled, with its bookings, its check-ins and its waiting list. Deleting it instead would destroy the evidence that the slot was wanted.',
-      () => cancelClass(supabase, c.id, why));
+    const series = !!(mSeries && c.seriesId);
+    void (async () => {
+      if (mBusy) return;
+      setMBusy(true);
+      try {
+        // The ids of what was actually cancelled, and nothing else is notified.
+        // The single case is `[c.id]` only because `cancelClass` throws unless
+        // the update matched — see assertWrote in src/lib/wroteRows.ts.
+        let ids: string[];
+        if (series) {
+          ids = await cancelSeriesFrom(supabase, c.seriesId as string, c.startsAt, why);
+        } else {
+          await cancelClass(supabase, c.id, why);
+          ids = [c.id];
+        }
+        const told = await tellTheRoom(ids, c.title, why);
+        setManage(null);
+        refresh();
+        Alert.alert(
+          series ? 'Series called off' : 'Class called off',
+          classOffConfirmation(ids.length, told.people, told.pushed),
+        );
+      } catch (e) {
+        Alert.alert('Not saved', e instanceof Error && e.message ? e.message : 'That did not reach the server, so the classes are still on the timetable.');
+      } finally { setMBusy(false); }
+    })();
   };
 
   const putBackOn = (c: GymClass) => {

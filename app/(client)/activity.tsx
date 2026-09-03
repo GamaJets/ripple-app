@@ -33,6 +33,7 @@ import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/hr';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { FORWARD_ICON, turn } from '../../src/ui/direction';
+import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -52,9 +53,14 @@ function timeAgo(iso: string) {
   const days = Math.round(hrs / 24);
   return days === 1 ? 'yesterday' : `${days}d ago`;
 }
+// This was the whole of the pattern `fmtRelativeDay`'s header says it ended,
+// in one line: a hardcoded English weekday array, `${d.getDate()}/${d.getMonth() + 1}`
+// — which a member in the United States reads month-first, so 9 December
+// arrives as 12 September — and a 12-hour clock hand-built in English on a
+// screen most of whose readers are on a 24-hour locale. All three are the
+// reader's own now, through the shared helpers.
 function timeLabel(iso: string) {
-  const d = new Date(iso); let h = d.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
-  return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1} · ${h}${ap}`;
+  return `${fmtRelativeDay(iso)} · ${fmtTime(iso)}`;
 }
 
 export default function Activity() {

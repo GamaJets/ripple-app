@@ -60,6 +60,7 @@
 // client or coach who missed the banner genuinely has no other way to learn.
 
 import { num } from './format';
+import { CLASS_OFF_TITLE, CLASS_OFF_TITLE_MANY } from './notifyCopy';
 import type { LoadStatus } from '../ui/loadStatus';
 
 /** Icons the inbox draws. A subset of `IconName` in src/ui/Icon.tsx — narrowed
@@ -90,6 +91,45 @@ const EXPIRING = /\bjust opened\b/i;
 
 /** A push confirming something the recipient can already see recorded. */
 const RECEIPT = /\bhas read your\b/i;
+
+/**
+ * Pushes whose inbox row a DATABASE TRIGGER has already written.
+ *
+ * ── The second way to get two rows for one event ──────────────────────────
+ *
+ * Rule 1 above is about a push that duplicates the row `notify-message` writes.
+ * This is the same failure from the other side: a handset sends a push about a
+ * write that a trigger is notifying on ANYWAY, inside the same transaction, so
+ * `recordInbox` writes a second row for the identical event and the recipient's
+ * list reads as though it happened twice — in two different wordings, which is
+ * worse, because the two look like two things.
+ *
+ * Two are known:
+ *
+ *  · 'New coaching request'. app/(client)/trainers.tsx sends it the moment the
+ *    `coach_requests` insert lands, and `coach_requests_notify_trainer` (part
+ *    158) fires `after insert` on exactly that row and writes 'A coaching
+ *    request'. Both always happen, so the coach has always had two.
+ *  · the two class-off titles. supabase/parts/493 writes one row per member
+ *    booked or waitlisted the moment `gym_classes.status` goes to 'cancelled';
+ *    the push that carries it to a phone is sent by the handset that pressed
+ *    the button (src/lib/notifyCopy.ts says why the schema cannot send it
+ *    itself), and the row is the trigger's.
+ *
+ * Matched on the TITLE, which is brittle in the way rules 2 and 3 are and NOT
+ * in the way rule 1 is — there is no structural signal here, because the
+ * duplicate is caused by SQL this file cannot see. A reword that misses adds
+ * one extra row; it does not lose a notification. The titles are therefore
+ * imported from the module that produces them where that is possible
+ * (`CLASS_OFF_TITLE`), and written out where it is not: 'New coaching request'
+ * is a literal in app/(client)/trainers.tsx, and the test below is the thing
+ * that makes a reword of it visible.
+ */
+const SERVER_WROTE_THE_ROW: readonly string[] = [
+  'New coaching request',
+  CLASS_OFF_TITLE,
+  CLASS_OFF_TITLE_MANY,
+];
 
 /** Route → the icon that route's notifications are drawn with.
  *
@@ -123,6 +163,19 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   ['/(client)/bookings', 'calendar'],
   ['/(client)/pt-sessions', 'calendar'],
   ['/(client)/classes', 'calendar'],
+  // Where a client is sent when their coach answers a request for an hour the
+  // coach had not opened (app/(trainer)/sessions.tsx, part 740). Without an
+  // entry it fell to the generic bell — the icon that means "we have no idea
+  // what this is" — over a yes or a no about a specific time.
+  ['/(client)/request-session', 'calendar'],
+  // ── the two an answered coaching request opens ───────────────────────────
+  //
+  // 'people' is the shape this table already gives '/(trainer)/dashboard', the
+  // coach's side of the same conversation, and it is the icon CLIENT_NAV gives
+  // Your Coach (src/lib/features.ts). A request answered is the one row in a
+  // client's inbox that is about who is coaching them.
+  ['/(client)/my-coach', 'people'],
+  ['/(client)/trainers', 'people'],
   ['/(client)/workouts', 'dumbbell'],
   ['/(client)/achievements', 'trophy'],
   // Memberships & Packs, which part 160 sends a client to when their card is
@@ -301,6 +354,9 @@ export function inboxDecision(
   if (RECEIPT.test(t)) {
     return { record: false, icon, why: 'a read receipt; the acknowledgement itself is already on the injuries screen' };
   }
+  if (SERVER_WROTE_THE_ROW.includes(t)) {
+    return { record: false, icon, why: 'a trigger writes this row inside the same transaction; a second one would read as two events' };
+  }
   return { record: true, icon, why: 'nothing else tells the recipient this happened' };
 }
 
@@ -335,6 +391,22 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   // is the one an inbox row matters most for.
   { where: 'app/(trainer)/calendar.tsx', title: 'The slot you were waiting for is yours', body: '6:30 PM on Tue freed up and you were next on the list — it is booked for you.', route: '/(client)/calendar' },
   { where: 'src/ui/sessions.tsx', title: 'The slot you were waiting for is yours', body: 'Tue 6:30 PM with your coach just freed up and you were next on the list.', route: '/(client)/calendar' },
+  // The coaching request itself. NOT recorded, and it was until this entry was
+  // added: `coach_requests_notify_trainer` (part 158) writes 'A coaching
+  // request' on the same insert, so every coach has had two rows for every
+  // request since the push was added — one from the trigger and one from
+  // recordInbox, worded differently enough to read as two people asking.
+  { where: 'app/(client)/trainers.tsx', title: 'New coaching request', body: 'Sam Okafor has asked you to coach them - online.', route: '/(trainer)/dashboard' },
+  // The two halves of an answered coaching request. RECORDED — nothing else
+  // ever tells a client their request was answered, and a declined one has no
+  // surface at all on the client side once the row leaves 'pending'.
+  { where: 'src/ui/CoachRequests.tsx', title: 'Your coaching request was accepted', body: 'Alex Rivera has taken you on. Your Coach screen has them now.', route: '/(client)/my-coach' },
+  { where: 'src/ui/CoachRequests.tsx', title: 'Your coaching request was declined', body: 'Alex Rivera has declined it. You can ask a different coach from the directory.', route: '/(client)/trainers' },
+  // A called-off class. NOT recorded — supabase/parts/493 writes that row from
+  // inside the update's own transaction, and this push exists only because
+  // nothing in the schema can carry that row to a phone.
+  { where: 'app/(trainer)/classes.tsx', title: 'A class you booked is not running', body: '\u201cSpin\u201d has been called off: the instructor is off sick. Your booking is kept on the record.', route: '/(client)/classes' },
+  { where: 'app/(trainer)/classes.tsx', title: 'Classes you booked are not running', body: '3 of your \u201cSpin\u201d classes have been called off: the room is being re-floored.', route: '/(client)/classes' },
   { where: 'src/ui/intake.ts', title: 'Your coach asked for your intake', body: 'They need your intake form before your first session.', route: '/(client)/intake' },
   // The coach's check-in nudge. It does NOT go through sendPush() — it invokes
   // the send-push function directly — so recordInbox() never sees it, and it is

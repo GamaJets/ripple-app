@@ -64,6 +64,11 @@
 // Pure — no React, no Supabase, no clock of its own. Every function that needs
 // "now" is given it, so the whole of it is assertable under `npm test`.
 import { overlaps, type BusySpan } from './booking';
+// A type only. Two of the sentences below are about the QUALITY of a read
+// rather than about a request, and `src/lib/bookingsRead.ts` takes the same
+// import for the same reason: the vocabulary for "is this all of it" lives in
+// one place and a lib that writes a sentence about a read has to speak it.
+import type { LoadStatus } from '../ui/loadStatus';
 
 /* ── what one is ───────────────────────────────────────────────────────── */
 
@@ -346,6 +351,61 @@ export function askBlocker(
   }
   return null;
 }
+
+/**
+ * What the screen must say when the member's OWN diary is not a whole read.
+ *
+ * `askBlocker`'s `myBusy` clash check is not a convenience. It is the ONLY
+ * check of the member's own calendar that exists anywhere in this feature:
+ * part 740 refuses a clash on the COACH's diary and deliberately says nothing
+ * about the client's, on the reasoning that a member's own diary is theirs. So
+ * when the sessions read fails, `myBusy` arrives as `[]` — and an empty list of
+ * commitments is indistinguishable from a diary that could not be read. The
+ * check silently becomes "no clash", the member asks for an hour they are
+ * already booked for, their coach says yes, and they now hold two sessions at
+ * one time and are drawn for two credits at delivery.
+ *
+ * The screen cannot invent the answer, so it says which question it could not
+ * ask. Null under 'ready' — that is the one state in which the absence of a
+ * clash is a fact rather than a silence.
+ *
+ * Three statuses, three different sentences, because they are three different
+ * situations: one is still happening, one has finished and failed, and one has
+ * finished and is short. A single "we couldn't check" over all three would tell
+ * somebody mid-read that something had gone wrong.
+ */
+export function ownDiaryNote(status: LoadStatus): string | null {
+  switch (status) {
+    case 'ready':
+      return null;
+    case 'loading':
+      return 'We are still reading your own sessions, so we have not yet checked this time against what you already have booked.';
+    case 'partial':
+      return 'There are more sessions on your record than we can read in one go, so we may not have checked this time against all of them. Look at your calendar before you ask.';
+    case 'error':
+      return 'We couldn’t read your own sessions, so we have not checked whether you are already booked at this time. Your coach’s diary is checked when they answer — yours is not, so check your calendar before you ask.';
+  }
+}
+
+/**
+ * The sentence for a member who has no coach to ask.
+ *
+ * `request_session` already refuses this and `askRefusalNote('no-coach')` is
+ * the sentence for the refusal — but that arrives AFTER somebody has picked a
+ * day, an hour, a length and typed a note, on a screen headed "With your coach"
+ * whose button reads "Ask My Coach". Both of those are claims, and for a member
+ * with no coach linked they are false ones the app can prove are false before
+ * it makes them: `clients.trainer_id` is already read on launch and surfaced as
+ * `coachLinked`.
+ *
+ * Said only for a KNOWN absence. `coachLinked` is `boolean | null` and null
+ * means the read did not land — under which this screen must still offer the
+ * ask, because withdrawing the only way to reach a coach on the strength of a
+ * failed read is the same mistake in the other direction and costs the member
+ * more.
+ */
+export const NO_COACH_TO_ASK =
+  'You don’t have a coach on your account yet, so there is nobody to ask for a time. Find a coach first and this screen is how you ask them for an hour they haven’t opened.';
 
 /* ── the server's refusals, in words ───────────────────────────────────── */
 

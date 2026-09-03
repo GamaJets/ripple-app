@@ -44,7 +44,7 @@ import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { minorFromWhole } from '../../src/lib/coachMoney';
-import { hitSlopFor } from '../../src/lib/a11y';
+import { hitSlopFor, MIN_TARGET } from '../../src/lib/a11y';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
@@ -52,6 +52,20 @@ import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 // booked hour whose client the roster read never returned as a free one, on the
 // screen where a coach decides what to give away. See the module header.
 import { slotLabel, slotWhoName, unnamedSlotNote } from '../../src/lib/slotName';
+// The two questions the day sheet could not answer: whose hour this is, and
+// what they are due to train in it. Both were reachable only by LEAVING the
+// day — the client's record was behind Check In, which marks them present on
+// the way through, and their session for the day was three taps further on
+// behind the programme tab. See the header of src/lib/daySession.ts; every
+// sentence and every refusal below comes out of it, and none of them is
+// decided here.
+import {
+  clientTap, clientTapLabel, trainingOnDay, dayTrainingCaveat, dayPlanHeading, dayPlanUnread,
+} from '../../src/lib/daySession';
+// Which programme each client is on, and the day the coach said their block
+// begins. The same provider app/(trainer)/client-week.tsx resolves a week
+// from, read the same way — there is one answer to "which week" in this app.
+import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 // The group timetable this screen has always loaded and never drawn. See
 // src/lib/dayClasses.ts — the classes a coach teaches were invisible on the
 // coach's own day sheet while the same list was silently blocking bookings.
@@ -269,6 +283,21 @@ export default function TrainerSchedule() {
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
+  /* ── what each of them is due to train ──────────────────────────────────
+   *
+   * The day sheet listed a time, a duration and a status, and a coach standing
+   * in front of the day they were about to work could not find out from it what
+   * the 8am was supposed to be. It was on the client screen, behind the
+   * programme tab, three taps on.
+   *
+   * This provider already holds it — the programme and the coach's own start
+   * date for every client on the book — and `trainingOnDay` resolves the day
+   * out of it through `blockPosition`, `clientWeek` and `scheduledDay`, which
+   * is the machinery app/(trainer)/client-week.tsx already uses. Its own
+   * status is carried into every answer: a null programme under a failed read
+   * is UNKNOWN, and drawing it as a rest day is the one thing this must not do.
+   */
+  const ap = useAssignedPrograms();
   /* ── the group timetable, which this screen never asked about ───────────
    *
    * `addSession` checks `overlaps` against the `sessions` list and nothing
@@ -321,6 +350,27 @@ export default function TrainerSchedule() {
    */
   const nameOf = (id: string | null) => slotWhoName(id, roster, rosterStatus);
   const slotOf = (id: string | null) => slotLabel(id, roster, rosterStatus);
+  /**
+   * Whether a booked row opens onto somebody, and what to route with.
+   *
+   * The third reading off the SAME roster and the same status as the two
+   * above, from the same vocabulary — a fourth answer to "who is in this hour"
+   * invented here is how a row could say "Booked · not on your book any more"
+   * and still push at a record that cannot be drawn.
+   */
+  const tapOf = (id: string | null) => clientTap(id, roster, rosterStatus);
+  /** Open the client's record. `name` is passed ONLY when it is a name: the
+   *  record prints what it is handed as a title, and `slotWhoName` returns
+   *  noun phrases. Same rule and same route as `checkIn` below, minus the
+   *  write — a coach reading somebody's injuries before a session has not
+   *  marked them present. */
+  const openClient = (tap: ReturnType<typeof clientTap>) => {
+    if (!tap.can || !tap.clientId) return;
+    router.push({
+      pathname: '/(trainer)/client',
+      params: tap.name ? { clientId: tap.clientId, name: tap.name } : { clientId: tap.clientId },
+    });
+  };
 
   // ── The one person in the transaction this app never reminded ───────────
   //
@@ -571,7 +621,13 @@ export default function TrainerSchedule() {
     Promise.resolve(reloadWaits()), Promise.resolve(reloadFees()),
     Promise.resolve(reloadSeries()), Promise.resolve(reloadAvail()),
     Promise.resolve(reloadPolicy()),
-  ]), [refresh, refreshRoster, refreshClasses, reloadWaits, reloadFees, reloadSeries, reloadAvail, reloadPolicy]));
+    // The plan on each booked row is resolved from these. A pull that moved
+    // the diary and left the assignments would redraw the day against the
+    // programmes this phone was already holding — which under a failed read is
+    // exactly the state the row's own caveat is about, and a coach who pulls
+    // to clear it should actually be clearing it.
+    Promise.resolve(ap.reload()),
+  ]), [refresh, refreshRoster, refreshClasses, reloadWaits, reloadFees, reloadSeries, reloadAvail, reloadPolicy, ap]));
   // What is running. An ended arrangement stays in the table for the record and
   // is not listed — a coach's screen is their week, not their history — but it
   // is counted, so the empty state can tell "you have never made one" apart
@@ -1804,6 +1860,46 @@ export default function TrainerSchedule() {
     .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))
     .slice(0, 40), [sessions]);
 
+  /**
+   * The confirm in front of the move.
+   *
+   * A single tap on a row in the sheet moved somebody's hour and pushed a
+   * notification at them, with nothing in between — the one act on this screen
+   * that reaches another person's phone and the only one of the three that had
+   * no confirm. It now reads like `confirmCancel` beside it, and names both
+   * hours so a mis-tap two rows down is caught before the client hears about it.
+   *
+   * `moveConfirm` in src/lib/reschedule.ts is deliberately NOT used here, and
+   * neither are `rescheduleLines` or `rescheduleRefusalLine`. Those are the
+   * MEMBER's side of the same act and they say so in every sentence — "with the
+   * same coach", "no session comes off your pack", "your coach's calendar" —
+   * which is the client's voice read back to the coach. The coach's own
+   * vocabulary for this is `coachMoveRefusalLine` and `coachMovedLine`, which
+   * `doMove` already speaks. This is one confirm, not a second move path: it
+   * ends in the same `doMove`, which ends in the same `rescheduleClientSession`.
+   *
+   * The two facts it states are the two the whole feature rests on and they are
+   * the SERVER's, not this screen's — supabase/parts/461 moves the booking and
+   * carries its credit in one transaction, and nothing anywhere on the coach's
+   * path prices a move.
+   */
+  function confirmMove(from: TrainingSession, to: TrainingSession) {
+    const who = nameOf(from.clientId);
+    const fromLabel = `${dateLabel(from.startsAt)} at ${timeLabel(from.startsAt)}`;
+    const toLabel = `${dateLabel(to.startsAt)} at ${timeLabel(to.startsAt)}`;
+    Alert.alert(
+      'Move this session?',
+      `${who} moves from ${fromLabel} to ${toLabel}.\n\n`
+      + 'Nothing is charged and no session comes off their pack — it is the same session at a different time. '
+      + `${fromLabel} goes back on your calendar, or straight to whoever is first in line for it. `
+      + 'They are notified once it has moved.',
+      [
+        { text: 'Leave it', style: 'cancel' },
+        { text: 'Move', onPress: () => { void doMove(from, to); } },
+      ],
+    );
+  }
+
   async function doMove(from: TrainingSession, to: TrainingSession) {
     if (moveBusy) return;
     const who = nameOf(from.clientId);
@@ -2341,26 +2437,67 @@ export default function TrainerSchedule() {
                       : 'No sessions this day. Tap Add to book one.'}
               </Text>
             )
-          ) : selDaySessions.map((s, i) => (
-            <View key={s.id}>
-              {i > 0 ? <Rule /> : null}
-              <View style={{ paddingVertical: sp.md }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'booked' ? t.brand : s.status === 'blocked' ? t.warn : t.surface3 }} />
-                  <View style={{ flex: 1 }}>
+          ) : selDaySessions.map((s, i) => {
+            /* ── whose hour, and what they are due to train in it ─────────
+             *
+             * Both answers come out of src/lib/daySession.ts and neither is
+             * decided here. The tap is refused in words rather than silently
+             * dropped — a row that does nothing when pressed, on the screen a
+             * coach uses thirty seconds before a session, reads as the app
+             * having lost the client.
+             */
+            const tap = s.status === 'booked' ? tapOf(s.clientId) : null;
+            /* The plan is resolved for the DAY ON SCREEN, which is routinely
+             * next Tuesday and not today, so `selDay` goes in rather than a
+             * clock — `selDay` is built from the selected local date and is
+             * never a UTC slice. Only for a row that opens onto somebody: a
+             * client this screen's roster cannot name is one whose record it
+             * has already refused to draw, and a plan under their unnamed row
+             * would be a session attributed to nobody. */
+            const who = tap?.name ? tap.name.split(' ')[0] : 'This client';
+            const plan = tap?.can && tap.clientId
+              ? trainingOnDay(ap.getProgram(tap.clientId), ap.startsOn[tap.clientId] ?? null, selDay, ap.status, who)
+              : null;
+            const planCaveat = plan ? dayTrainingCaveat(plan) : null;
+            /* ONE warning mark on the row, on whichever sentence is the
+             * warning. `dayPlanUnread` is true both when the plan could not be
+             * read and when the plan is real but unconfirmed; the first has no
+             * caveat (its own line says it) and the second does, so the two
+             * tests together put the mark in exactly one place. */
+            const planLineWarns = plan != null && dayPlanUnread(plan) && planCaveat == null;
+            /* The identity of the row — the time, who is in it, and everything
+             * that qualifies that. Lifted out so the same block can be drawn
+             * bare or inside a Pressable; there is one copy of it either way. */
+            const unnamedNote = s.status === 'booked'
+              ? unnamedSlotNote(s.clientId, roster, rosterStatus) : null;
+            const identity = (
+              <View style={{ flex: 1 }}>
                     <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? slotOf(s.clientId) : s.status === 'blocked' ? 'Unavailable · nobody can book this' : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
                     {/* A booked hour whose client this screen cannot name. Said
                         in a sentence and not left to an odd-looking label,
                         because the coach's next decision is whether to hand the
                         hour to somebody else. Null for every ordinary row. */}
-                    {s.status === 'booked' && unnamedSlotNote(s.clientId, roster, rosterStatus) ? (
+                    {unnamedNote ? (
                       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 3 }}>
                         <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.warn, marginTop: 5 }} />
                         <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
-                          {unnamedSlotNote(s.clientId, roster, rosterStatus)}
+                          {unnamedNote}
                         </Text>
                       </View>
+                    ) : null}
+                    {/* And the half of it that is about the TAP. Deliberately
+                        short and deliberately under the line above, indented to
+                        sit with it: the two read as one thought — this hour is
+                        spoken for, and here is why their record will not open —
+                        rather than as the same warning said twice. It carries
+                        no mark of its own for the same reason, and stands
+                        unindented on the one row that has no line above it, a
+                        booked hour with nobody in it. */}
+                    {tap && !tap.can && tap.why ? (
+                      <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3, marginStart: unnamedNote ? 11 : 0 }}>
+                        {tap.why}
+                      </Text>
                     ) : null}
                     {/* Who is behind this hour. It changes what cancelling
                         means — the slot is handed straight over rather than
@@ -2394,8 +2531,58 @@ export default function TrainerSchedule() {
                     {s.approvalNote ? (
                       <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>“{s.approvalNote}”</Text>
                     ) : null}
-                  </View>
+              </View>
+            );
+            return (
+            <View key={s.id}>
+              {i > 0 ? <Rule /> : null}
+              <View style={{ paddingVertical: sp.md }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.status === 'booked' ? t.brand : s.status === 'blocked' ? t.warn : t.surface3 }} />
+                  {/* The row itself opens the client. Not a button beside it:
+                      the thing a coach reaches for is the person's name, and
+                      the one route that already existed to their record was
+                      Check In — which MARKS THEM PRESENT on the way through,
+                      and is the wrong write for somebody who only wanted to
+                      read their injuries before the session starts.
+
+                      Offered only where it goes somewhere. Every other reading
+                      has said why, in the identity block above. */}
+                  {tap?.can ? (
+                    <Pressable
+                      onPress={() => openClient(tap)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${timeLabel(s.startsAt)} · ${slotOf(s.clientId)}. ${clientTapLabel(tap)}`}
+                      hitSlop={hitSlopFor(MIN_TARGET)}
+                      style={{ flex: 1, flexDirection: 'row', minHeight: MIN_TARGET, alignItems: 'center' }}
+                    >
+                      {identity}
+                    </Pressable>
+                  ) : identity}
                 </View>
+
+                {/* ── what they are due to train on this day ──────────────
+                    Under the hour it belongs to, so a coach reading down the
+                    day sees each session and what is in it in one pass. The
+                    heading names the DAY rather than saying "Planned", because
+                    this sheet is routinely open on a date that is not today.
+
+                    A status colour is a mark and never ink: the two sentences
+                    that carry one go through `Flag`. */}
+                {plan ? (
+                  <View style={{ marginTop: sp.md, marginStart: sp.md + 6 }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>{dayPlanHeading(plan)}</Text>
+                    {planLineWarns ? (
+                      <View style={{ marginTop: sp.xs }}><Flag tone={t.warn}>{plan.line}</Flag></View>
+                    ) : (
+                      <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.xs }}>{plan.line}</Text>
+                    )}
+                    {planCaveat ? (
+                      <View style={{ marginTop: sp.xs }}><Flag tone={t.warn}>{planCaveat}</Flag></View>
+                    ) : null}
+                  </View>
+                ) : null}
+
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, marginStart: sp.md + 6 }}>
                   {s.status === 'booked' ? (<>
                     {/* Check in is the start of the session, and it is the one
@@ -2422,7 +2609,8 @@ export default function TrainerSchedule() {
                 </View>
               </View>
             </View>
-          ))}
+            );
+          })}
 
           {/* ── the classes on this day ──────────────────────────────────
               Below the one-to-ones because that is what this screen is for,
@@ -3116,13 +3304,25 @@ export default function TrainerSchedule() {
               {!known ? (
                 <Flag tone={t.warn}>Your calendar could not be read, so the hours you have free are not known. Nothing is listed below because nothing came back. Pull down to refresh and try again.</Flag>
               ) : moveTargets.length === 0 ? (
+                // Three states, not one. "You have no open slots" is a claim
+                // about the coach's own week and may only be made when the
+                // week was read whole: under 'loading' the list is empty
+                // because nothing has arrived yet, and under 'partial' it
+                // stopped at the row cap, so an hour that IS free can be
+                // missing from it. Both used to be stated as a coach with
+                // nowhere to put their client, which sends them back to
+                // Cancel — the exact outcome the move path exists to prevent.
                 <Text style={{ ...ty.label, color: t.ink3 }}>
-                  You have no open slots ahead of now, so there is nowhere to move this to. Open one from Weekly Availability or Add a Session first.
+                  {sessionsStatus === 'loading'
+                    ? 'Looking through your calendar for open hours…'
+                    : sessionsStatus === 'partial'
+                      ? 'Only part of your calendar came back, so the open hours in it are not all of them. Nothing is listed here yet — pull down to refresh and open this again.'
+                      : 'You have no open slots ahead of now, so there is nowhere to move this to. Open one from Weekly Availability or Add a Session first.'}
                 </Text>
               ) : (
                 <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
                   {moveTargets.map((o) => (
-                    <Pressable key={o.id} disabled={moveBusy} onPress={() => { void doMove(moveFrom, o); }}
+                    <Pressable key={o.id} disabled={moveBusy} onPress={() => confirmMove(moveFrom, o)}
                       accessibilityRole="button"
                       accessibilityLabel={`Move to ${DOW[new Date(o.startsAt).getDay()]} ${new Date(o.startsAt).getDate()} ${MON[new Date(o.startsAt).getMonth()].slice(0, 3)} at ${timeLabel(o.startsAt)}`}
                       style={{ paddingVertical: sp.md, borderBottomWidth: hairline, borderBottomColor: t.ring, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>

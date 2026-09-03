@@ -363,3 +363,265 @@ export function classStartsIn(startsAt: number, now: number): string {
   const days = Math.round(ms / DAY_MS);
   return days <= 1 ? 'It starts in about a day.' : `It starts in about ${days} days.`;
 }
+
+/* ── an answer to a coaching request ───────────────────────────────────────
+ *
+ * ── The silence this closes ───────────────────────────────────────────────
+ *
+ * app/(client)/trainers.tsx pushes the COACH the moment somebody asks to be
+ * coached. supabase/parts/158 says in as many words why the other half was
+ * left undone — "Not fired on UPDATE… the client's side of that answer is a
+ * separate decision about wording that has not been taken" — and nothing has
+ * taken it since. `coach_requests_notify_trainer` is `after insert` only, so
+ * the answer writes no row and sends nothing.
+ *
+ * What that costs is not symmetry. src/ui/CoachRequests.tsx presses Accept and
+ * writes `coaching_relationships`, `clients.trainer_id` and the request's
+ * status in one go; the coach reads "Client added" and the client reads
+ * nothing. They find out by opening the app and noticing their Coach screen has
+ * filled in.
+ *
+ * DECLINE is the half that matters more, and it is the reason this is a
+ * notification rather than a nicety. An accepted client eventually notices. A
+ * declined one sees exactly what they saw yesterday — a request they believe is
+ * still pending — and goes on waiting for somebody who has already said no. The
+ * app has no other surface that will ever tell them: `coach_requests` is not
+ * rendered on the client side once it leaves 'pending'.
+ *
+ * ── Two routes, because they are two different next steps ─────────────────
+ *
+ * Accepted opens Your Coach, which now has somebody in it. Declined opens the
+ * directory, which is the only useful thing left to do. Sending both to one
+ * screen would mean one of the two arrives somewhere that says nothing about
+ * what just happened.
+ */
+
+/** Where an accepted request sends the client: the screen that just changed. */
+export const COACH_ACCEPTED_ROUTE = '/(client)/my-coach';
+/** Where a declined one sends them: the only useful next step. */
+export const COACH_DECLINED_ROUTE = '/(client)/trainers';
+
+/** A notification with somewhere to go. `route` is kept apart from the body
+ *  because src/lib/notifyInbox.ts classifies on it and the caller passes it
+ *  through `data.route` rather than printing it. */
+export interface RoutedNotification extends Notification { route: string }
+
+/**
+ * What the client is told when their coaching request is answered.
+ *
+ * The coach's name is passed in rather than looked up, and a name that could
+ * not be read becomes "The coach you asked" rather than a blank: this sentence
+ * is read on a lock screen by somebody who may have asked two coaches, so the
+ * subject is never dropped altogether.
+ *
+ * Neither branch softens. "Has declined" is what happened, and a body that
+ * hedged it into "is not taking new clients right now" would be this app
+ * inventing a reason on a coach's behalf — the rule src/lib/nudge.ts and
+ * supabase/parts/140 spend their headers on.
+ */
+export function coachAnswerNotification(
+  accepted: boolean,
+  coachName: string | null | undefined,
+): RoutedNotification {
+  const who = (coachName ?? '').trim() || 'The coach you asked';
+  return accepted
+    ? {
+      title: 'Your coaching request was accepted',
+      body: clip(`${who} has taken you on. Your Coach screen has them now, and anything they set you from here arrives in your app.`, NOTICE_BODY_MAX),
+      route: COACH_ACCEPTED_ROUTE,
+    }
+    : {
+      title: 'Your coaching request was declined',
+      body: clip(`${who} has declined it. Nothing else on your app has changed, and you can ask a different coach from the directory.`, NOTICE_BODY_MAX),
+      route: COACH_DECLINED_ROUTE,
+    };
+}
+
+/**
+ * What the COACH reads after answering, saying which of the two things
+ * actually happened.
+ *
+ * Three outcomes and three sentences, because `sendPushChecked` reports two
+ * independent facts and a screen that collapsed them would be claiming a send
+ * it did not witness — the defect app/(owner)/promotions.tsx was written from.
+ *
+ *   ok            the send-push function accepted it. "Told", never
+ *                 "delivered": the push is queued with Expo and this app never
+ *                 learns what became of it.
+ *   recorded > 0  the push did not go out but the row did, so the client will
+ *                 see it when they next open the app.
+ *   recorded = 0  neither happened, and the decline branch says the consequence
+ *                 out loud: as far as their app is concerned they are still
+ *                 waiting.
+ */
+export function coachAnswerConfirmation(
+  accepted: boolean,
+  clientName: string,
+  told: { ok: boolean; recorded: number },
+): string {
+  // 'That client' rather than 'They': the sentence continues "is now on your
+  // roster", and a pronoun subject would make it ungrammatical on exactly the
+  // branch where the name could not be read.
+  const who = (clientName ?? '').trim() || 'That client';
+  const lead = accepted
+    ? `${who} is now on your roster.`
+    : `${who}’s request is declined.`;
+  if (told.ok) return `${lead} Their phone has been told.`;
+  if (told.recorded > 0) {
+    return `${lead} We couldn’t reach their phone, so they will see it in their notifications the next time they open the app.`;
+  }
+  return accepted
+    ? `${lead} We couldn’t tell them at all — nothing reached their phone and nothing was written to their notifications, so they will find out by opening the app and noticing you there.`
+    : `${lead} We couldn’t tell them at all — nothing reached their phone and nothing was written to their notifications, so as far as their app is concerned they are still waiting on you.`;
+}
+
+/* ── a class that was called off ───────────────────────────────────────────
+ *
+ * ── The silence this closes ───────────────────────────────────────────────
+ *
+ * supabase/parts/493 gave a called-off class an inbox row for everybody booked
+ * and waitlisted, which was the whole of the fix its header describes: "an
+ * owner cancels the 6am on a Sunday night… and every one of those twelve people
+ * arrives at a locked room on Monday." A row is not a phone. Nothing in this
+ * schema turns a `notifications` insert into a push — part 26's `messages`
+ * trigger is the only server-side writer that reaches pg_net at all — so the
+ * twelve people still find out when they next open the app, which for a 6am
+ * class is after they have already travelled to it.
+ *
+ * So the push is sent from the handset that pressed the button, the way every
+ * other push in this product is, and the ROW stays the trigger's.
+ * src/lib/notifyInbox.ts refuses to record this one for exactly that reason:
+ * two rows for one cancellation, worded differently, is the defect the chat
+ * rule exists to prevent, arrived at from a different direction.
+ *
+ * ── No clock time, and no date ────────────────────────────────────────────
+ *
+ * The same rule `classStartsIn` above is written for. `gym_classes` has no zone
+ * and `tenants` has none either, so "Thursday at 7pm" is right for whoever the
+ * server agrees with and wrong for everybody else. The class is named, the
+ * reason is passed on, and the Classes screen renders the time from the same
+ * timestamptz on the member's own device.
+ */
+
+/** The title part 493's trigger writes, reused verbatim so the banner and the
+ *  row a member later scrolls past are recognisably the same event. Imported by
+ *  src/lib/notifyInbox.ts, which uses it to refuse the duplicate row. */
+export const CLASS_OFF_TITLE = 'A class you booked is not running';
+
+/** The plural, for somebody whose whole series went. */
+export const CLASS_OFF_TITLE_MANY = 'Classes you booked are not running';
+
+/** Where a called-off class sends the member. */
+export const CLASS_OFF_ROUTE = '/(client)/classes';
+
+/**
+ * What one member is told, given how many of THEIR bookings went.
+ *
+ * `classes` is that member's own count and not the size of the cancellation:
+ * calling off nine weeks of a series tells somebody booked on two of them that
+ * two are off. A body claiming nine would be a number about somebody else's
+ * diary.
+ */
+export function classOffNotification(
+  classTitle: string | null | undefined,
+  classes: number,
+  reason: string | null | undefined,
+): RoutedNotification {
+  const name = (classTitle ?? '').trim() || 'A class';
+  const said = (reason ?? '').trim();
+  const why = said ? `: ${said}` : '';
+  const many = Number.isFinite(classes) && classes > 1;
+  return {
+    title: many ? CLASS_OFF_TITLE_MANY : CLASS_OFF_TITLE,
+    body: clip(
+      many
+        ? `${num(Math.floor(classes))} of your “${name}” classes have been called off${why}. Your bookings are kept on the record and there is nothing for you to do — your Classes screen has the rest of the timetable.`
+        : `“${name}” has been called off${why}. Your booking is kept on the record and there is nothing for you to do — your Classes screen has the rest of the timetable.`,
+      NOTICE_BODY_MAX,
+    ),
+    route: CLASS_OFF_ROUTE,
+  };
+}
+
+/** One send: the people whose own count is `classes`. */
+export interface ClassOffBucket { classes: number; userIds: string[] }
+
+/**
+ * Who gets which sentence, from the rosters of everything that was cancelled.
+ *
+ * ── Why this is not one send per class ────────────────────────────────────
+ *
+ * Calling off nine weeks of a Tuesday series would otherwise fire nine
+ * notifications at the same person in the same second. That is the phone whose
+ * notifications get turned off, and turning them off is what took the money
+ * channel down with the chat channel in the first place (src/lib/coachNotify.ts).
+ *
+ * ── And not one send to everybody either ──────────────────────────────────
+ *
+ * Because the count is per person. Somebody booked on two of the nine is told
+ * two. Grouping by that count is the smallest number of sends in which nobody
+ * is told a figure about somebody else's diary — usually one bucket, at most as
+ * many as there were occurrences.
+ *
+ * A (userId, classId) pair seen twice counts once: a member can hold both a
+ * booking and a waiting-list row on the same class, and it is still one class
+ * they are not going to.
+ */
+export function classOffBuckets(
+  rows: readonly { userId: string; classId: string }[],
+): ClassOffBucket[] {
+  const seen = new Set<string>();
+  const count = new Map<string, number>();
+  for (const r of rows ?? []) {
+    const u = (r?.userId ?? '').trim();
+    const c = (r?.classId ?? '').trim();
+    if (!u || !c) continue;
+    const key = `${u} ${c}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    count.set(u, (count.get(u) ?? 0) + 1);
+  }
+  const byCount = new Map<number, string[]>();
+  for (const [u, n] of count) {
+    const list = byCount.get(n);
+    if (list) list.push(u); else byCount.set(n, [u]);
+  }
+  return [...byCount.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([classes, userIds]) => ({ classes, userIds: userIds.sort() }));
+}
+
+/**
+ * What the coach reads after calling a class or a series off.
+ *
+ * `people` null is a roster that could not be READ, which is not nobody — the
+ * distinction `DeliveryReport.recipients` makes one screen up, and the one that
+ * decides whether the coach has to go and tell twelve people themselves.
+ *
+ * `pushed` is how many of them the send-push function accepted, and nothing
+ * here claims more than that. In particular it never says the cancellation is
+ * in their notifications: that row is written by part 493's trigger inside the
+ * same transaction, this app cannot see whether it landed, and a sentence
+ * promising a row that a missing trigger would make imaginary is exactly the
+ * kind of claim this file exists to refuse.
+ */
+export function classOffConfirmation(
+  cancelled: number,
+  people: number | null,
+  pushed: number | null,
+): string {
+  const n = Math.max(0, Math.floor(Number.isFinite(cancelled) ? cancelled : 0));
+  const lead = `${num(n)} ${n === 1 ? 'class was' : 'classes were'} called off. Every booking, every check-in and every waiting list is kept.`;
+  if (people == null) {
+    return `${lead} We couldn’t read who had booked, so nobody has been told — tell them yourself.`;
+  }
+  if (people === 0) return `${lead} Nobody had booked or was waiting, so there was nobody to tell.`;
+  const who = `${num(people)} ${people === 1 ? 'person had' : 'people had'} booked or ${people === 1 ? 'was' : 'were'} waiting`;
+  if (pushed == null || pushed === 0) {
+    return `${lead} ${who}, and we couldn’t reach any of their phones just now — tell them yourself if the class is soon.`;
+  }
+  if (pushed < people) {
+    return `${lead} ${who}. A push was queued to ${num(pushed)} of them; we couldn’t reach the rest, so tell them yourself if the class is soon.`;
+  }
+  return `${lead} ${who}, and a push was queued to all of them. Only people on a push-enabled build with notifications turned on will get one.`;
+}

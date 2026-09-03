@@ -627,14 +627,30 @@ export async function restoreClass(sb: Queryable, classId: string): Promise<void
 /**
  * Call off every occurrence of a series from `fromISO` onward.
  *
- * The count comes back so the screen can say "nine cancelled" rather than
- * "done" — a bulk write whose scale is not reported is one nobody can check.
- * Classes already cancelled are skipped rather than restamped, for the same
- * reason `cancelClass` guards: the first reason is the true one.
+ * The IDS come back so the screen can say "nine cancelled" rather than "done" —
+ * a bulk write whose scale is not reported is one nobody can check. Classes
+ * already cancelled are skipped rather than restamped, for the same reason
+ * `cancelClass` guards: the first reason is the true one.
+ *
+ * ── Why the ids and not the count ────────────────────────────────────────
+ *
+ * This returned `data.length` and threw the ids away, which was enough while
+ * the only consumer was a sentence. It is not enough to TELL anybody: the
+ * people who have to hear about a called-off class are the ones holding a
+ * `class_bookings` row against these specific occurrences, and a number cannot
+ * be joined to. `.select('id')` was already there, so what changes here is only
+ * that the answer survives the return; the caller's count is `.length`, which
+ * is the same figure it printed before, now measured off the same list it
+ * notified from rather than off a separate one.
+ *
+ * The list is also the guard against telling somebody twice. A second tap
+ * matches no rows — `.neq('status', 'cancelled')` — so it comes back empty and
+ * there is nobody to notify, rather than a second round of banners about a
+ * cancellation that already happened.
  */
 export async function cancelSeriesFrom(
   sb: Queryable, seriesId: string, fromISO: string, reason: string,
-): Promise<number> {
+): Promise<string[]> {
   const why = (reason ?? '').trim();
   if (!why) throw new Error('Say why the series is off. A cancelled class with no reason tells the next reader nothing.');
   const { data, error } = await sb
@@ -645,7 +661,7 @@ export async function cancelSeriesFrom(
     .neq('status', 'cancelled')
     .select('id');
   if (error) throw error;
-  return (data ?? []).length;
+  return (data ?? []).map((r: { id?: unknown }) => String(r?.id ?? '')).filter(Boolean);
 }
 
 /**

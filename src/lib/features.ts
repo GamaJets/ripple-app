@@ -83,6 +83,17 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'recovery', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery', icon: 'water', area: 'train', keywords: 'sleep hydration mobility rest' },
   { key: 'habits', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits', icon: 'check', area: 'train', keywords: 'water streak daily' },
   { key: 'calendar', label: 'Book a Session', note: 'Month calendar · book your coach', route: '/(client)/calendar', icon: 'calendar', area: 'train', keywords: 'booking session appointment', soloHide: true },
+  // Listed beside Book a Session rather than folded into it, because they are
+  // two different situations and a member in the second one has already looked
+  // at the first and found nothing. Book a Session shows the hours a coach has
+  // opened; this is for when none of them suit, or there are none at all —
+  // which, until this week, was every coach on the platform.
+  //
+  // It was reachable ONLY from three hardcoded pushes: no row here meant it was
+  // unsearchable and absent from the Me hub, so a member who had dismissed the
+  // prompt on the booking screen had no way back to it. That is the same defect
+  // item 49 is about, recurring on the newest screen in the app.
+  { key: 'request-session', label: 'Ask for a Time', note: 'Ask your coach for an hour they have not opened', route: '/(client)/request-session', icon: 'clock', area: 'train', keywords: 'request ask booking session appointment time slot propose suggest', soloHide: true },
   { key: 'injuries', label: 'Injuries & Limitations', note: 'Train around injuries — safer swaps', route: '/(client)/injuries', icon: 'heart', area: 'train', keywords: 'injury injuries pain limitation niggle shoulder knee back hurt rehab physio safer swaps avoid' },
   // Listed separately from Injuries rather than folded into it: somebody
   // holding a physio report in their hand is looking for "upload", "scan" or

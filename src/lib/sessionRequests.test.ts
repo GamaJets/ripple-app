@@ -11,12 +11,14 @@
 // The second group is the expiry rule, which is derived rather than stored and
 // therefore has no job to prove it works — only this.
 import {
-  COACH_ACCEPT_RULE, EXPIRY_RULE, NOT_A_BOOKING, OUTCOME_LABEL, REQUEST_HORIZON_DAYS,
+  COACH_ACCEPT_RULE, EXPIRY_RULE, NOT_A_BOOKING, NO_COACH_TO_ASK, OUTCOME_LABEL,
+  REQUEST_HORIZON_DAYS,
   REQUEST_LIVE_CAP, REQUEST_NOTE_MAX, answerRefusalNote, askBlocker, askRefusalNote,
   askedConfirmation, answeredConfirmation, asRequestState, coachQueue, coachQueueNote,
-  countByOutcome, isLive, myRequests, outcomeLine, outcomeOf, shapeRequests,
+  countByOutcome, isLive, myRequests, outcomeLine, outcomeOf, ownDiaryNote, shapeRequests,
   type RequestOutcome, type SessionRequest,
 } from './sessionRequests';
+import type { LoadStatus } from '../ui/loadStatus';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -247,6 +249,41 @@ for (const r of ANSWER_REASONS) {
 
 eq(REQUEST_NOTE_MAX, 400, 'the note limit matches the CHECK in part 740, or the write fails after it is typed');
 eq(REQUEST_LIVE_CAP, 10, 'and the live cap matches session_request_live_cap()');
+
+/* ── the member's own diary, and the silence when it could not be read ─── */
+
+// The clash below is the ONLY check of the member's own calendar in this whole
+// feature — part 740 refuses on the coach's diary and says nothing about the
+// client's. So the two branches that matter are: it fires when the diary is
+// known, and the screen is told to SAY SOMETHING when it is not.
+const alreadyBooked = [{ startsAt: at(2 * DAY), durationMin: 60 }];
+ok(askBlocker(at(2 * DAY), 60, NOW, { myBusy: alreadyBooked }) != null,
+  'asking across a session the member already holds is refused before the write');
+eq(askBlocker(at(2 * DAY), 60, NOW, { myBusy: [] }), null,
+  'and an empty diary refuses nothing — which is why an unread one must not arrive as empty');
+
+eq(ownDiaryNote('ready'), null, 'a whole read of the member’s own diary needs no sentence');
+const DIARY_STATES: LoadStatus[] = ['loading', 'partial', 'error'];
+const diaryNotes = DIARY_STATES.map((s) => ownDiaryNote(s));
+for (let i = 0; i < DIARY_STATES.length; i++) {
+  ok(typeof diaryNotes[i] === 'string' && diaryNotes[i]!.length > 0,
+    `${DIARY_STATES[i]}: the member is told the clash check could not be made`);
+}
+eq(new Set(diaryNotes).size, DIARY_STATES.length,
+  'still reading, read short and read failed are three different situations and three different sentences');
+ok(/not checked/.test(ownDiaryNote('error')!),
+  'a failed read says plainly that the check was not made, rather than staying quiet and reading as no clash');
+ok(!/no clash|you are free|nothing booked/i.test(ownDiaryNote('error')!),
+  'and never states the thing it could not read');
+
+/* ── nobody to ask ─────────────────────────────────────────────────────── */
+
+ok(/[.]$/.test(NO_COACH_TO_ASK.trim()), 'the no-coach sentence is a sentence');
+ok(!/book/i.test(NO_COACH_TO_ASK), 'and it does not use the word book, like every other sentence here');
+ok(NO_COACH_TO_ASK !== askRefusalNote('no-coach'),
+  'it is said BEFORE the ask, so it is not the server’s after-the-fact refusal reworded');
+ok(/nobody to ask/.test(NO_COACH_TO_ASK),
+  'and it states the fact the screen’s own heading would otherwise contradict');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('sessionRequests.test.ts — ok');

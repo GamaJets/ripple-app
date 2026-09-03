@@ -42,6 +42,11 @@ for (const p of KNOWN_PUSHES.filter((x) => [
   'Session booked', 'Session cancelled', 'A new offer', 'New booking',
   'Your coach asked about an injury', 'Your coach asked for your intake',
   'The slot you were waiting for is yours', 'A client set a personal best',
+  // The two halves of an answered coaching request. Nothing else in the
+  // product ever tells a client their request was answered — `coach_requests`
+  // is not rendered on the client side once the row leaves 'pending' — and a
+  // declined one has no surface at all.
+  'Your coaching request was accepted', 'Your coaching request was declined',
 ].includes(x.title))) {
   ok(inboxDecision(p.title, p.body, p.route).record, `“${p.title}” from ${p.where} is worth an inbox row`);
 }
@@ -55,6 +60,16 @@ for (const p of KNOWN_PUSHES.filter((x) => /message/i.test(x.title))) {
 for (const p of KNOWN_PUSHES.filter((x) => /just opened|has read your/i.test(x.title))) {
   ok(!inboxDecision(p.title, p.body, p.route).record, `“${p.title}” from ${p.where} is noise in an inbox`);
 }
+// Dropped: the three whose row a trigger writes inside the same transaction.
+// Not a judgement about whether the news is worth keeping — it is worth
+// keeping, and it IS kept; it is written by supabase/parts/158 and 493 rather
+// than by recordInbox, and a second copy would read as a second event.
+for (const p of KNOWN_PUSHES.filter((x) => [
+  'New coaching request', 'A class you booked is not running', 'Classes you booked are not running',
+].includes(x.title))) {
+  ok(!inboxDecision(p.title, p.body, p.route).record,
+    `“${p.title}” from ${p.where} must NOT be recorded — a trigger already wrote that row`);
+}
 
 // The catalogue is the thing the two rules above are read against, so it has to
 // still contain them. An empty filter passes a `for` loop silently.
@@ -62,9 +77,11 @@ ok(KNOWN_PUSHES.length >= 20, 'the catalogue still lists every push in the repo'
 ok(byTitle('Session cancelled').length === 2, 'both cancellation pushes are listed — the coach one and the client one');
 ok(byTitle('The slot you were waiting for is yours').length === 2,
   'both waitlist promotions are listed — the coach cancelling and the client cancelling send the same news');
-// Seven of the twenty: four that route to a chat thread (two from
+// Ten of the twenty-five: four that route to a chat thread (two from
 // messaging.ts, one from the coach's broadcast, one from the coach's nudge, all
-// four already written by part 26), two slot races, and one read receipt.
+// four already written by part 26), two slot races, one read receipt, and three
+// whose row a database trigger writes inside the same transaction (a coaching
+// request by part 158, a called-off class by part 493, singular and plural).
 // Stated as a total so that a rule which starts dropping something it did not
 // drop before fails here rather than quietly emptying somebody's inbox.
 //
@@ -72,11 +89,14 @@ ok(byTitle('The slot you were waiting for is yours').length === 2,
 // built are all on the recorded side, which is the whole point of them: they
 // are the kinds nothing else in the product tells anybody about. So is the
 // personal best: a coach who missed the banner learns about a record only by
-// opening that client's training screen and reading the sets.
-eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 7,
-  'seven of the twenty pushes are deliberately not recorded');
-eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 13,
-  'the other thirteen are');
+// opening that client's training screen and reading the sets. So are the two
+// halves of an answered coaching request, for the sharper version of the same
+// reason: a declined client has no screen anywhere that would ever show them
+// the answer.
+eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 10,
+  'ten of the twenty-five pushes are deliberately not recorded');
+eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 15,
+  'the other fifteen are');
 
 /* ── the rule that actually matters: chat is decided by route ──────────── */
 
@@ -131,6 +151,9 @@ eq(inboxIcon('/(client)/injuries'), 'heart', 'an injury ask is drawn as a heart'
 // it is a row that looks unclassified in a list where every neighbour is.
 eq(inboxIcon('/(client)/intake'), 'pencil', 'an intake ask is drawn as something to fill in');
 eq(inboxIcon('/(client)/notices'), 'info', 'a notice from a gym or a coach is drawn as a notice');
+eq(inboxIcon('/(client)/request-session'), 'calendar', 'a yes or no about an hour is drawn with the calendar');
+eq(inboxIcon('/(client)/my-coach'), 'people', 'an accepted coaching request is drawn as people');
+eq(inboxIcon('/(client)/trainers'), 'people', 'and so is a declined one');
 eq(inboxIcon('/(owner)/dashboard'), 'bell', 'an unmapped route falls back to the bell');
 eq(inboxIcon(null), 'bell', 'no route falls back to the bell');
 eq(inboxIcon(''), 'bell', 'an empty route falls back to the bell');
@@ -140,7 +163,12 @@ eq(inboxIcon('/(client)/calendar-archive'), 'bell', 'the icon map matches whole 
 
 // Every icon the map can yield has to be one the inbox is able to draw. This is
 // a type-level fact made runtime-checkable, because the map is data.
-const DRAWABLE: InboxIcon[] = ['bell', 'calendar', 'message', 'sparkle', 'heart', 'dumbbell', 'trophy', 'info', 'pencil'];
+// 'people' and 'grid' joined the list when a push started using them. They were
+// always in `InboxIcon` and always drawn by src/ui/Icon.tsx — the routes that
+// yield them ('/(trainer)/dashboard', '/(trainer)/payments') had only ever been
+// reached by SERVER_WRITTEN rows, which this assertion does not cover. An
+// answered coaching request is the first PUSH to open one.
+const DRAWABLE: InboxIcon[] = ['bell', 'calendar', 'message', 'sparkle', 'heart', 'dumbbell', 'trophy', 'info', 'pencil', 'people', 'grid'];
 for (const p of KNOWN_PUSHES) {
   ok(DRAWABLE.includes(inboxIcon(p.route)), `${p.where} yields a drawable icon`);
 }

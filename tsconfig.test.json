@@ -167,6 +167,7 @@
     "src/lib/rosterMerge.test.ts",
     "src/lib/ownTraining.test.ts",
     "src/lib/joinCodes.test.ts",
+    "src/lib/handOutCode.test.ts",
     "src/lib/codeReturn.test.ts",
     "src/lib/adMatch.test.ts",
     "src/lib/adsCallback.test.ts",
@@ -335,6 +336,10 @@
     "src/lib/sessionRequests.ts",
     "src/lib/sessionRequests.test.ts",
     "src/lib/profileSave.test.ts",
-    "src/lib/availabilityRange.test.ts"
+    "src/lib/availabilityRange.test.ts",
+    "src/lib/calendarNames.ts",
+    "src/lib/calendarNames.test.ts",
+    "src/lib/daySession.ts",
+    "src/lib/daySession.test.ts"
   ]
 }

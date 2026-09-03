@@ -31,10 +31,14 @@
 //      told nothing. Nothing in this repository can run that plpgsql, so these
 //      assertions are the only proof its five branches are right.
 import {
+  CLASS_OFF_ROUTE, CLASS_OFF_TITLE, CLASS_OFF_TITLE_MANY,
+  COACH_ACCEPTED_ROUTE, COACH_DECLINED_ROUTE,
   NOTICE_BODY_MAX, NOTICE_ROUTE, NOTICE_TITLE_MAX,
-  classStartsIn, clip, deliverySummary, invoiceNotification, noticeNotification, pushConsequence,
+  classOffBuckets, classOffConfirmation, classOffNotification, classStartsIn, clip,
+  coachAnswerConfirmation, coachAnswerNotification,
+  deliverySummary, invoiceNotification, noticeNotification, pushConsequence,
 } from './notifyCopy';
-import { safeRoute } from './notifyInbox';
+import { inboxDecision, safeRoute } from './notifyInbox';
 import type { CoachInvoice } from './coachInvoice';
 
 const errors: string[] = [];
@@ -263,6 +267,164 @@ eq(classStartsIn(NaN, T0), '', 'an unreadable start time produces nothing at all
 eq(classStartsIn(T0, NaN), '', 'and so does an unreadable now');
 eq(classStartsIn(Infinity, T0), '', 'infinity is not a start time');
 
+
+/* ── an answer to a coaching request ────────────────────────────────────────
+ *
+ * The fifth defect these assertions are aimed at: A PERSON LEFT WAITING ON AN
+ * ANSWER THAT HAS ALREADY BEEN GIVEN. `coach_requests_notify_trainer` is
+ * `after insert`, so the coach's answer wrote no row and sent nothing, and a
+ * DECLINED client sees exactly what they saw the day before — a request they
+ * believe is pending — for as long as they are willing to wait.
+ */
+
+{
+  const yes = coachAnswerNotification(true, 'Alex Rivera');
+  const no = coachAnswerNotification(false, 'Alex Rivera');
+  ok(yes.title !== no.title, 'a yes and a no do not share a heading');
+  ok(/accepted/i.test(yes.title), 'the yes says so in the heading, which is the half that renders on a lock screen');
+  ok(/declined/i.test(no.title), 'and so does the no');
+  ok(yes.body.includes('Alex Rivera'), 'the coach is named');
+  ok(no.body.includes('Alex Rivera'), 'in both');
+  // Two screens, because they are two different next steps.
+  eq(yes.route, COACH_ACCEPTED_ROUTE, 'an accepted request opens the screen that just changed');
+  eq(no.route, COACH_DECLINED_ROUTE, 'a declined one opens the only useful next step');
+  ok(yes.route !== no.route, 'and they are not the same screen');
+  eq(safeRoute(yes.route, 'client'), yes.route, 'the accepted route is one the client app will open');
+  eq(safeRoute(no.route, 'client'), no.route, 'and so is the declined one');
+  // A name that could not be read is a subject that is still there.
+  for (const missing of [null, undefined, '', '   ']) {
+    const n = coachAnswerNotification(false, missing);
+    ok(!n.body.startsWith(' '), `a ${JSON.stringify(missing)} name does not leave the sentence starting with a space`);
+    ok(n.body.includes('The coach you asked'), 'it names them as best it can rather than dropping the subject');
+  }
+  // The decline is not softened into a reason nobody gave.
+  ok(!/not taking|right now|at the moment/i.test(no.body),
+    'the decline states what happened and invents no reason on the coach\u2019s behalf');
+  // Recorded, both. Nothing else in the product would ever tell them.
+  ok(inboxDecision(yes.title, yes.body, yes.route).record, 'an accepted request is worth an inbox row');
+  ok(inboxDecision(no.title, no.body, no.route).record, 'and a declined one is the row that matters most');
+}
+
+/* what the coach is told, which is never more than happened */
+{
+  const sent = coachAnswerConfirmation(true, 'Sam', { ok: true, recorded: 1 });
+  const rowOnly = coachAnswerConfirmation(true, 'Sam', { ok: false, recorded: 1 });
+  const neither = coachAnswerConfirmation(true, 'Sam', { ok: false, recorded: 0 });
+  ok(sent !== rowOnly && rowOnly !== neither && sent !== neither,
+    'three outcomes, three sentences');
+  for (const line of [sent, rowOnly, neither]) {
+    ok(line.startsWith('Sam is now on your roster.'), 'the write that did happen is stated first, in every branch');
+    ok(!/delivered/i.test(line), 'nothing claims a delivery this app never witnessed');
+  }
+  ok(!/couldn/i.test(sent), 'the successful branch does not hedge');
+  ok(/couldn\u2019t reach their phone/.test(rowOnly), 'the row-only branch says the phone was not reached');
+  ok(/notifications the next time they open/.test(rowOnly), 'and where they will find it instead');
+  ok(/nothing was written to their notifications/.test(neither), 'the nothing-happened branch says nothing happened');
+
+  const declined = coachAnswerConfirmation(false, 'Sam', { ok: false, recorded: 0 });
+  ok(declined.includes('still waiting on you'),
+    'a decline nobody could deliver says the consequence out loud: their app still shows it pending');
+  ok(!coachAnswerConfirmation(false, 'Sam', { ok: true, recorded: 1 }).includes('roster'),
+    'a decline never says roster');
+  ok(coachAnswerConfirmation(true, '   ', { ok: true, recorded: 1 }).startsWith('That client is now on your roster.'),
+    'a name that could not be read still leaves a sentence with a subject, and a grammatical one');
+}
+
+/* ── a class that was called off ────────────────────────────────────────────
+ *
+ * The sixth: A ROW THAT IS NOT A PHONE. supabase/parts/493 writes one
+ * `notifications` row per member the moment a class is called off, and nothing
+ * in that schema can turn it into a push — so twelve people booked on a 6am
+ * still find out when they next open the app, which is after they have
+ * travelled to a locked room.
+ */
+
+{
+  // Mirrors the literal in supabase/parts/493 · class_cancelled_notify. The
+  // banner and the row a member later scrolls past have to be the same event.
+  eq(CLASS_OFF_TITLE, 'A class you booked is not running', 'the singular title is part 493\u2019s own');
+
+  const one = classOffNotification('Spin', 1, 'the instructor is off sick');
+  eq(one.title, CLASS_OFF_TITLE, 'one class off gets the singular heading');
+  ok(one.body.includes('Spin'), 'the class is named');
+  ok(one.body.includes('the instructor is off sick'), 'the reason the coach typed is passed on, not summarised');
+  eq(one.route, CLASS_OFF_ROUTE, 'it opens the timetable');
+  eq(safeRoute(one.route, 'client'), one.route, 'which is a screen the client app has');
+
+  const many = classOffNotification('Spin', 3, 'the room is being re-floored');
+  eq(many.title, CLASS_OFF_TITLE_MANY, 'more than one gets the plural heading');
+  ok(many.body.includes('3'), 'and says how many of THEIR bookings went');
+
+  const noReason = classOffNotification('Spin', 1, '   ');
+  ok(!noReason.body.includes(':'), 'a blank reason leaves no dangling colon');
+  const noName = classOffNotification(null, 1, null);
+  ok(noName.body.includes('A class'), 'a class with no title is still a class');
+
+  // No clock time and no calendar date, for the reason classStartsIn is
+  // written for: nothing here has a time zone to render one in.
+  for (const n of [one, many, noReason]) {
+    ok(!/\b\d{1,2}[:.]\d{2}\b/.test(n.body), 'no clock time in a body composed without a zone');
+    ok(!/\b(mon|tue|wed|thu|fri|sat|sun)day\b/i.test(n.body), 'and no weekday either');
+  }
+
+  // NOT recorded: part 493 wrote that row already.
+  ok(!inboxDecision(one.title, one.body, one.route).record,
+    'the singular class-off push leaves the row to the trigger');
+  ok(!inboxDecision(many.title, many.body, many.route).record,
+    'and so does the plural one');
+}
+
+/* who gets which sentence */
+{
+  eq(classOffBuckets([]).length, 0, 'nothing cancelled reaches nobody');
+  const one = classOffBuckets([{ userId: 'a', classId: 'c1' }, { userId: 'b', classId: 'c1' }]);
+  eq(one.length, 1, 'one class off is one send');
+  eq(one[0].classes, 1, 'and everybody on it is told one');
+  eq(one[0].userIds.join(','), 'a,b', 'with the roster in it');
+
+  // A member holding both a booking and a waiting-list row on the same class is
+  // still one class they are not going to.
+  const dup = classOffBuckets([{ userId: 'a', classId: 'c1' }, { userId: 'a', classId: 'c1' }]);
+  eq(dup.length, 1, 'a duplicated pair is one bucket');
+  eq(dup[0].classes, 1, 'and one class, not two');
+
+  // A series. Nobody is told a figure about somebody else's diary.
+  const series = classOffBuckets([
+    { userId: 'a', classId: 'c1' }, { userId: 'a', classId: 'c2' }, { userId: 'a', classId: 'c3' },
+    { userId: 'b', classId: 'c1' },
+    { userId: 'c', classId: 'c2' }, { userId: 'c', classId: 'c3' },
+  ]);
+  eq(series.length, 3, 'three distinct counts is three sends, not six');
+  eq(series.map((x) => x.classes).join(','), '1,2,3', 'ordered by how many each of them lost');
+  eq(series[0].userIds.join(','), 'b', 'the person who lost one is told one');
+  eq(series[2].userIds.join(','), 'a', 'and the person who lost three is told three');
+
+  // Damage is dropped rather than counted.
+  eq(classOffBuckets([{ userId: '', classId: 'c1' }, { userId: 'a', classId: '  ' }]).length, 0,
+    'a row with no person or no class is not somebody to notify');
+}
+
+/* what the coach is told about the fan-out */
+{
+  const unread = classOffConfirmation(1, null, null);
+  ok(unread.includes('couldn\u2019t read who had booked'),
+    'a roster that could not be read is never reported as nobody');
+  ok(!/\bnobody had booked\b/i.test(unread), 'and is not collapsed into the empty case');
+  ok(classOffConfirmation(1, 0, 0).includes('Nobody had booked'), 'an empty class had nobody to tell');
+  ok(classOffConfirmation(1, 4, 0).includes('tell them yourself'),
+    'four people and no push reached is four people the coach has to tell');
+  ok(classOffConfirmation(1, 4, 2).includes('2 of them'), 'a partial fan-out says which part');
+  ok(classOffConfirmation(1, 4, 4).includes('all of them'), 'and a whole one says so');
+  for (const line of [unread, classOffConfirmation(9, 4, 4), classOffConfirmation(1, 4, 2)]) {
+    ok(!/delivered/i.test(line), 'a queued push is never called a delivery');
+    // The row is part 493's and this app cannot see whether it landed, so
+    // nothing here may promise it is in anybody's notifications.
+    ok(!/in their notifications/i.test(line),
+      'nothing claims a row this app did not write and cannot see');
+  }
+  ok(classOffConfirmation(1, 1, 1).includes('1 class was'), 'one is singular');
+  ok(classOffConfirmation(9, 1, 1).includes('9 classes were'), 'nine is not');
+}
 
 if (errors.length) {
   console.error(`notifyCopy: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);

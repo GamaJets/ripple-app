@@ -67,9 +67,9 @@ import { keptOnPhoneNote, notKeptNote, sessionRequestExpiry } from '../../src/li
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { fetchMyRequests, askForSession, withdrawRequest } from '../../src/ui/sessionRequests';
 import {
-  EXPIRY_RULE, NOT_A_BOOKING, OUTCOME_LABEL, REQUEST_NOTE_MAX,
+  EXPIRY_RULE, NOT_A_BOOKING, NO_COACH_TO_ASK, OUTCOME_LABEL, REQUEST_NOTE_MAX,
   askBlocker, askRefusalNote, askedConfirmation, myRequests, outcomeLine, outcomeOf,
-  isLive, type SessionRequest,
+  ownDiaryNote, isLive, type SessionRequest,
 } from '../../src/lib/sessionRequests';
 
 /** How far ahead the day strip offers. Four weeks is as far as anybody plans a
@@ -104,7 +104,11 @@ export default function RequestSessionScreen() {
   const t = useTheme();
   const router = useRouter();
   const cd = useClientData();
-  const { sessions, refresh: refreshSessions } = useSessions();
+  // `status` as well as the rows. `myBusy` below is built out of this list and
+  // is the only check of the member's OWN calendar anywhere in this feature —
+  // see `ownDiaryNote`. Taking the sessions without the status is how a read
+  // that failed becomes a diary with nothing in it.
+  const { sessions, status: sessionsStatus, refresh: refreshSessions } = useSessions();
   const outbox = useOutbox();
 
   // The coach's name where it can be read, and a sentence that works without
@@ -126,6 +130,17 @@ export default function RequestSessionScreen() {
   const [note, setNote] = useState('');
 
   const waitingToSend = outbox?.countOf('session-request') ?? 0;
+
+  /**
+   * A KNOWN absence of a coach, which is a different thing from an unread one.
+   *
+   * `coachLinked` is `boolean | null` and its own header says so: "null means
+   * unread, never 'no coach'". Only the explicit false closes this screen down;
+   * under null the ask is still offered, because withdrawing the one route to a
+   * coach on the strength of a read that did not land costs the member more
+   * than the wasted tap it would save.
+   */
+  const noCoach = cd.coachLinked === false;
 
   const load = useCallback(async () => {
     const out = await fetchMyRequests();
@@ -178,6 +193,11 @@ export default function RequestSessionScreen() {
       .map((s) => ({ startsAt: s.startsAt, durationMin: s.durationMin })),
     [sessions, cd.id],
   );
+
+  /** Said where the button is when that list is not the member's whole diary.
+   *  Null under a whole read, which is the only state in which the absence of a
+   *  clash is a fact rather than a silence. */
+  const diaryNote = ownDiaryNote(sessionsStatus);
 
   const live = useMemo(() => rows.filter((r) => isLive(r)), [rows]);
   const blocker = askBlocker(startsAt, length, Date.now(), { myBusy, live });
@@ -273,7 +293,13 @@ export default function RequestSessionScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{coachName ? `With ${coachName}` : 'With your coach'}</Text>
+            {/* "With your coach" is a claim, and for a member with no coach
+                linked it is a false one this screen can prove is false before
+                it makes it. `coachLinked` is `boolean | null` and only the
+                explicit false is acted on — see the gate below. */}
+            <Text style={{ ...ty.micro, color: t.ink3 }}>
+              {coachName ? `With ${coachName}` : noCoach ? 'Nobody to ask yet' : 'With your coach'}
+            </Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Ask for a Time</Text>
           </View>
         </View>
@@ -285,6 +311,29 @@ export default function RequestSessionScreen() {
               would come back over it.
             </Flag>
           </Section>
+        ) : noCoach ? (
+          /* ── nobody to ask ──────────────────────────────────────────────
+             `request_session` refuses this too, and `askRefusalNote('no-coach')`
+             is the sentence for that refusal — but it arrives only after
+             somebody has picked a day, an hour and a length, typed a note and
+             tapped a button headed "Ask My Coach". The absence of a coach is
+             already known on launch (`clients.trainer_id`, surfaced as
+             `coachLinked`), so it is said first instead.
+
+             Gated on `=== false` and never on falsiness. `coachLinked` is null
+             while unread, and hiding the only route to a coach on the strength
+             of a read that did not land is the same mistake pointing the other
+             way — and the more expensive one, because the member who most needs
+             this screen is the one whose reads are failing. */
+          <>
+            <Section>
+              <Notice kicker="BEFORE YOU CAN ASK" title="You don’t have a coach yet" note={NO_COACH_TO_ASK} />
+            </Section>
+            <Section>
+              <Cta label="Find a Coach" onPress={() => router.push('/(client)/trainers')} wide
+                a11yLabel="Find a coach to work with" />
+            </Section>
+          </>
         ) : (
           <>
             <Section>
@@ -438,6 +487,14 @@ export default function RequestSessionScreen() {
               {/* The refusal is shown where the button is, in a sentence about
                   what the member did — not as an alert after the tap. */}
               {blocker ? <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{blocker}</Flag> : null}
+              {/* The clash check above is the only one of the member's own
+                  calendar that exists — part 740 refuses on the COACH's diary
+                  and deliberately says nothing about the client's. So a
+                  sessions read that failed makes `myBusy` empty and turns that
+                  check into silence, which reads exactly like "you are free".
+                  Said here rather than swallowed, because the cost is two
+                  sessions at one hour and two credits drawn at delivery. */}
+              {diaryNote ? <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{diaryNote}</Flag> : null}
               <Cta
                 label={busy ? 'Sending…' : 'Ask My Coach'}
                 onPress={ask}

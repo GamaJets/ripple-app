@@ -35,8 +35,8 @@ import {
   linkState, LINK_NOTES, syncEventId, isSyncEventId, SYNC_ID_PREFIX,
   plannedSyncEvents, pushSummaryLine, pushLabel, reversedClientRedirect,
   WRITE_PRIVACY_NOTE, REMOTE_SCOPE_NOTE, GOOGLE_READ_SCOPE, GOOGLE_WRITE_SCOPE,
-  NO_CALENDAR_LINK,
-  type BusySourceState, type SyncSessionInput,
+  NO_CALENDAR_LINK, syncClassEventId, syncClassesNote,
+  type BusySourceState, type SyncSessionInput, type SyncClassInput,
 } from './calendarSync';
 import { busyCandidates, type BusySpan } from './deviceBusy';
 import { setAppLocale } from './locale';
@@ -338,6 +338,98 @@ const google = (status: BusySourceState['status']): BusySourceState =>
   // diff against Google has nothing spurious in it.
   same(plannedSyncEvents(sessions, from, to), plannedSyncEvents([...sessions].reverse(), from, to),
     'the plan does not depend on the order the sessions arrived in');
+
+  /* ── the classes a coach teaches ────────────────────────────────────────
+   *
+   * The export half of the defect booking.ts holds the guard half of. A coach
+   * who publishes this diary was published as FREE for every hour they spend
+   * teaching, and the person reading it cannot tell that the timetable was
+   * never in there.
+   */
+  const ME = 'coach-1';
+  const classes: SyncClassInput[] = [
+    // mine, scheduled, inside the window
+    { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', startsAt: new Date(at(2026, 9, 8, 18)).toISOString(), durationMin: 45, status: 'scheduled', trainerId: ME },
+    // mine, but cancelled: the room gave the hour back and I am free in it
+    { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', startsAt: new Date(at(2026, 9, 9, 18)).toISOString(), durationMin: 45, status: 'cancelled', trainerId: ME },
+    // a colleague's class — their business, their room
+    { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', startsAt: new Date(at(2026, 9, 9, 19)).toISOString(), durationMin: 45, status: 'scheduled', trainerId: 'coach-2' },
+    // recorded against nobody. Part 165: every class studio-web wrote is one of
+    // these, so claiming them would fill one coach's private calendar with the
+    // whole gym's timetable.
+    { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', startsAt: new Date(at(2026, 9, 10, 19)).toISOString(), durationMin: 45, status: 'scheduled', trainerId: null },
+    // mine, outside the window
+    { id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', startsAt: new Date(at(2026, 9, 21, 18)).toISOString(), durationMin: 45, status: 'scheduled', trainerId: ME },
+  ];
+
+  const withClasses = plannedSyncEvents(sessions, from, to, { classes, uid: ME });
+  eq(withClasses.length, 3, 'the two booked sessions plus the one class I actually teach this week');
+  ok(withClasses.some((e) => e.id === syncClassEventId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')),
+    'the class I teach is in the plan');
+  ok(!withClasses.some((e) => e.id === syncClassEventId('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')),
+    'a cancelled class is not an hour I am busy in');
+  ok(!withClasses.some((e) => e.id === syncClassEventId('cccccccc-cccc-4ccc-8ccc-cccccccccccc')),
+    'a colleague’s class is not written into my calendar');
+  ok(!withClasses.some((e) => e.id === syncClassEventId('dddddddd-dddd-4ddd-8ddd-dddddddddddd')),
+    'nor is one nobody is recorded against');
+  ok(!withClasses.some((e) => e.id === syncClassEventId('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee')),
+    'and the window still bounds it');
+
+  const cls = withClasses.find((e) => e.id === syncClassEventId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'))!;
+  same(Object.keys(cls).sort(), ['endIso', 'id', 'startIso'],
+    'a class goes over the same three-field wire, with nowhere to put its title');
+  eq(Date.parse(cls.endIso) - Date.parse(cls.startIso), 45 * 60000, 'and runs for as long as the class does');
+
+  // Omitting the argument is what every caller did before classes existed, and
+  // it must keep meaning "no classes were asked about" rather than "there are
+  // none" — the server deletes what the plan does not name.
+  same(plannedSyncEvents(sessions, from, to), plan, 'a caller that says nothing about classes plans exactly what it used to');
+  same(plannedSyncEvents(sessions, from, to, { classes, uid: null }), plan,
+    'and without a uid there is no way to tell whose classes they are, so none are claimed');
+
+  same(withClasses, plannedSyncEvents(sessions, from, to, { classes: [...classes].reverse(), uid: ME }),
+    'the plan does not depend on the order the classes arrived in either');
+
+  /* ── a class id and a session id are different id spaces ───────────────── */
+
+  // coverage.test.ts already asserts these two can collide on the floor board.
+  // Here a collision would mint one Google event id for both, and writing the
+  // class would overwrite the appointment with a person in it.
+  const SHARED = '11111111-1111-4111-8111-111111111111';
+  ok(syncClassEventId(SHARED) !== syncEventId(SHARED),
+    'a class and a session with the same uuid do not mint the same event id');
+  ok(/^repple[0-9a-f]{32}$/.test(syncClassEventId(SHARED) || ''),
+    'and the class id still passes the gate the edge function applies to every write');
+  eq(syncClassEventId('not-a-uuid'), null, 'anything that is not a uuid gets no class id');
+  // A non-v4 uuid cannot be shown to sit outside the session space, so it gets
+  // no id at all rather than one that might collide.
+  eq(syncClassEventId('11111111-1111-1111-8111-111111111111'), null, 'and neither does a uuid that is not version 4');
+  eq(syncClassEventId('AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'), syncClassEventId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+    'case does not change which event a class is');
+
+  // Two locks on the same door. The version digit is the first: a session whose
+  // uuid IS version 4 can never share an id with any class. The second is the
+  // ordering, and this is what exercises it — a session id that is not a v4
+  // uuid, carrying the very digit a class is moved onto. Sessions are planned
+  // first, so the appointment with a person in it is the one that survives.
+  const NOT_V4 = '11111111-1111-c111-8111-111111111111';
+  eq(syncEventId(NOT_V4), syncClassEventId(SHARED), 'the one shape that could collide, constructed');
+  const collide = plannedSyncEvents(
+    [{ id: NOT_V4, startsAt: new Date(at(2026, 9, 8, 9)).toISOString(), durationMin: 45, status: 'booked' }],
+    from, to,
+    { classes: [{ id: SHARED, startsAt: new Date(at(2026, 9, 8, 18)).toISOString(), durationMin: 90, status: 'scheduled', trainerId: ME }], uid: ME },
+  );
+  eq(collide.length, 1, 'a collision produces one event, not two');
+  eq(Date.parse(collide[0].endIso) - Date.parse(collide[0].startIso), 45 * 60000,
+    'and it is the session — no class ever overwrites the appointment that already holds its id');
+}
+
+{
+  // A timetable that was not read is not an empty timetable, and the difference
+  // is somebody booking over an hour the coach is teaching in.
+  eq(syncClassesNote(true), null, 'nothing to add when the classes were read');
+  ok(/could not be read/i.test(syncClassesNote(false) || ''), 'an unread timetable says so');
+  ok(/free/i.test(syncClassesNote(false) || ''), 'and says what the reader of the calendar will wrongly conclude');
 }
 
 {
@@ -345,6 +437,12 @@ const google = (status: BusySourceState['status']): BusySourceState =>
   eq(pushLabel(1), 'Send 1 Session', 'one session is singular');
   eq(pushLabel(4), 'Send 4 Sessions', 'more than one is plural');
   eq(pushLabel(-1), null, 'a nonsense count disables it too');
+  eq(pushLabel(4, 0), 'Send 4 Sessions', 'a plan with no classes in it is still all sessions');
+  // A plan that is half timetable must not be called all sessions: the count
+  // was always right, and one word was telling the coach the wrong thing.
+  ok(!/Session/.test(pushLabel(6, 4) || ''), 'a plan carrying classes does not call itself sessions');
+  ok(/6/.test(pushLabel(6, 4) || ''), 'and still says how many it will send');
+  eq(pushLabel(0, 3), null, 'nothing to send is still nothing to send');
 
   // "Nothing happened" and "nothing worked" have opposite next steps, and this
   // repo keeps confusing them.
@@ -353,7 +451,9 @@ const google = (status: BusySourceState['status']): BusySourceState =>
   ok(pushSummaryLine({ created: 3, updated: 0, removed: 0 }).includes('3 added'), 'additions are counted');
   ok(pushSummaryLine({ created: 0, updated: 1, removed: 2 }).includes('1 updated'), 'changes are counted');
   ok(pushSummaryLine({ created: 0, updated: 1, removed: 2 }).includes('2 removed'), 'removals are counted');
-  ok(pushSummaryLine({ created: 1, updated: 0, removed: 0 }).includes('Only sessions Repple put there'),
+  // The promise is about PROVENANCE — nothing Repple did not create is touched
+  // — and it is said in those words now that classes go in the same calendar.
+  ok(pushSummaryLine({ created: 1, updated: 0, removed: 0 }).includes('Only events Repple put there'),
     'and every summary repeats what is never touched');
 }
 
@@ -376,6 +476,10 @@ const google = (status: BusySourceState['status']): BusySourceState =>
   ok(WRITE_PRIVACY_NOTE.includes('ever changed or deleted'),
     'and that nothing the coach made is touched');
   ok(WRITE_PRIVACY_NOTE.includes('Coaching session'), 'and names the title that is written');
+  // A class goes in under the same fixed title, so a coach is not left thinking
+  // their timetable will arrive in Google with its names on it.
+  ok(WRITE_PRIVACY_NOTE.includes('no class name'), 'and says a class arrives without its name too');
+  ok(/colleagues teach/.test(WRITE_PRIVACY_NOTE), 'and that somebody else’s class is never written');
 }
 
 {

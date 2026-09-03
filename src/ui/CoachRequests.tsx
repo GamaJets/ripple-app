@@ -17,6 +17,25 @@ import { reportError } from '../lib/reportError';
 import { notifySuccess } from './haptics';
 import { readCoachedMode, COACHED_MODE_SHORT, type CoachedMode } from '../lib/types';
 import { capLimit, capped } from '../lib/rowCap';
+// ── The other half of the request ─────────────────────────────────────────
+//
+// app/(client)/trainers.tsx pushes the coach the moment somebody asks. Nothing
+// pushed the client when the coach answered, and nothing wrote them a row
+// either: `coach_requests_notify_trainer` (supabase/parts/158) is `after
+// insert` only, and its header says why — "the client's side of that answer is
+// a separate decision about wording that has not been taken."
+//
+// So Accept rewrote the client's roster membership, their `clients.trainer_id`
+// and the request's status in one tap, told the coach "Client added", and told
+// the person it was about nothing at all. Decline is the half that matters
+// more: an accepted client eventually notices their Coach screen has filled
+// in, while a declined one sees exactly what they saw yesterday — a request
+// they believe is still pending — because `coach_requests` is not rendered on
+// the client side once the row leaves 'pending'.
+//
+// The wording is in src/lib/notifyCopy.ts with the rest of it, and pure.
+import { coachAnswerConfirmation, coachAnswerNotification } from '../lib/notifyCopy';
+import { sendPushChecked } from './pushNotifications';
 
 interface Req { id: string; clientId: string; name: string; mode: CoachedMode; at: string }
 
@@ -131,12 +150,58 @@ export function CoachRequests() {
         // If a roster row is ever missing after an accept, the bug is in that
         // function and belongs there — not in a second write from here.
       }
-      const { error: uErr } = await supabase.from('coach_requests')
+      // `.eq('status', 'pending')` and `.select('id')`, and both are load-bearing
+      // now that an answer sends a notification.
+      //
+      // The update used to be keyed on the id alone, so answering a request that
+      // had already been answered — a second tap, a second handset, the same
+      // card left open on a tablet — succeeded silently and restamped
+      // `responded_at`. That was harmless while nothing followed it. It is not
+      // harmless now: it would tell the client a second time, and the second
+      // time could say the opposite of the first.
+      //
+      // So the write is only a write if it MOVED the row out of 'pending', and
+      // the notification hangs off the row coming back rather than off the
+      // absence of an error. An empty answer is somebody else having got there
+      // first, which is not a failure and is not a reason to send anything.
+      const { data: answered, error: uErr } = await supabase.from('coach_requests')
         .update({ status: accept ? 'accepted' : 'declined', responded_at: new Date().toISOString() })
-        .eq('id', r.id);
+        .eq('id', r.id)
+        .eq('status', 'pending')
+        .select('id');
       if (uErr) { Alert.alert('Could not update the request', uErr.message); setBusy(null); return; }
       setReqs((p) => p.filter((x) => x.id !== r.id));
-      if (accept) { notifySuccess(); Alert.alert('Client added', `${r.name} is now on your roster.`); }
+      if (!(answered ?? []).length) {
+        // Not an error, and not a send. The accept branch's `link_coaching`
+        // above is idempotent, so the roster is right either way; what is wrong
+        // is claiming to have just done something somebody else already did.
+        Alert.alert('Already answered',
+          `${r.name}'s request had already been answered — from another device, or a second tap. Nothing has changed and they have not been told twice.`);
+        setBusy(null); return;
+      }
+
+      // The coach's own name, for the client's sentence. Read rather than
+      // assumed: this notification is read on a lock screen by somebody who may
+      // have asked two coaches, so the subject is never dropped.
+      // no-error-ok: a name that could not be read becomes "The coach you
+      // asked" in coachAnswerNotification — the answer itself is already
+      // written at this point, so a failure here costs a name and nothing else.
+      const { data: mine, error: mineErr } = await supabase
+        .from('profiles').select('full_name').eq('id', uid).maybeSingle();
+      const myName = mineErr ? '' : (mine?.full_name || '').trim();
+
+      // No channel. The six in COACH_CHANNELS are a COACH's switches and this
+      // is addressed to a client, who has never been shown one — passing a
+      // channel name here would filter the send against a preference they could
+      // not have set.
+      const note = coachAnswerNotification(accept, myName);
+      const told = await sendPushChecked([r.clientId], note.title, note.body, { route: note.route });
+
+      if (accept) notifySuccess();
+      // One sentence for both branches, and it says which of the two things
+      // actually happened rather than claiming a send either way.
+      Alert.alert(accept ? 'Client added' : 'Request declined',
+        coachAnswerConfirmation(accept, r.name, told));
     } catch (e) {
       reportError('coachRequests.respond', e);
       Alert.alert('Something went wrong', 'Check your connection and try again.');

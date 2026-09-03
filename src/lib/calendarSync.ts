@@ -412,9 +412,73 @@ export interface SyncSessionInput {
   status: string;
 }
 
+/** A class as this module needs to see it. A structural subset of `ClassSpan`
+ *  in src/lib/booking.ts, so the two halves of the same defect take the same
+ *  rows without either file importing the other's provider. */
+export interface SyncClassInput {
+  id: string;
+  startsAt: string;
+  durationMin: number;
+  /** 'scheduled' | 'cancelled'. Absent counts as live, as classClashes has it. */
+  status?: string;
+  /** The coach recorded as teaching it — `gym_classes.trainer_id`. */
+  trainerId?: string | null;
+}
+
+/** The classes half of a plan: the timetable, and who the reader is.
+ *
+ *  Both or neither. Without a uid there is no way to tell the classes this
+ *  coach teaches from the ones their colleagues do, and writing a gym's whole
+ *  timetable into one person's private calendar is a worse failure than the one
+ *  this closes. */
+export interface SyncTeaching {
+  classes: readonly SyncClassInput[];
+  uid: string | null;
+}
+
 /** How long a written event runs when the session does not say. The same
  *  default `sessions.duration_min` carries. */
 const DEFAULT_MINUTES = 60;
+
+/**
+ * The Google event id for a class this coach teaches, or null.
+ *
+ * ── why this is not just `syncEventId(class.id)` ──────────────────────────
+ *
+ * `gym_classes.id` and `sessions.id` are separate id spaces and can hold the
+ * same uuid — src/lib/coverage.test.ts asserts that outright about the floor
+ * board, where a class and a session sharing an id must stay two rows. Here the
+ * consequence would be worse than a merged row: the two would mint ONE Google
+ * event id, so writing the class would overwrite the one-to-one, and the
+ * session's hour would vanish out of the coach's diary with nothing anywhere
+ * saying it had.
+ *
+ * A separate textual prefix is not available. The deployed edge function
+ * carries its own copy of `/^repple[0-9a-f]{32}$/` and silently skips anything
+ * that fails it, so an id spelled any other way is dropped by the server and
+ * the class never appears at all.
+ *
+ * So the namespace is made inside the hex. Both tables default to a version-4
+ * uuid — `uuid_generate_v4()` for sessions, `gen_random_uuid()` for classes —
+ * and a v4 uuid always carries '4' as its thirteenth hex digit. Replacing that
+ * one digit with 'c' lands the class outside the whole of the v4 space that
+ * session ids are drawn from, changes nothing else, and stays 32 hex characters
+ * so the server's gate still passes it. Two different classes still get two
+ * different ids: one fixed position changes, and it changes the same way every
+ * time.
+ *
+ * Null for anything that is not a v4 uuid, rather than a guess. If the digit is
+ * not a '4' this cannot promise the result is outside the session space, and an
+ * id that might collide is the exact thing being avoided. `plannedSyncEvents`
+ * holds the second lock: it plans sessions first and refuses a class whose id
+ * is already spoken for.
+ */
+export function syncClassEventId(classId: string): string | null {
+  const hex = String(classId || '').replace(/-/g, '').toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(hex)) return null;
+  if (hex[12] !== '4') return null;
+  return SYNC_ID_PREFIX + hex.slice(0, 12) + 'c' + hex.slice(13);
+}
 
 /**
  * The events Repple would put in the coach's calendar for a window.
@@ -426,6 +490,35 @@ const DEFAULT_MINUTES = 60;
  * writing it back would be Repple telling the coach's calendar what the coach's
  * calendar told Repple.
  *
+ * ── and the classes they teach ────────────────────────────────────────────
+ *
+ * This was one-to-ones and nothing else, which is the export half of the defect
+ * src/lib/booking.ts describes at `classClashes`: classes live in `gym_classes`
+ * behind a provider the calendar never consulted. The guard half stops Repple
+ * opening a PT hour on top of a class. This half is what everybody ELSE sees —
+ * a coach who exports their diary to show a partner, a gym or their own phone
+ * was published as free for every hour they spend teaching, and the person
+ * reading it has no way to know the timetable was never in there.
+ *
+ * ONLY classes recorded against this coach. A class with no `trainer_id` is not
+ * theirs to claim — part 165 says every class studio-web wrote has that column
+ * null — and a colleague's class is a colleague's. Both would fill one person's
+ * private calendar with a gym's whole timetable. A cancelled class is not an
+ * hour: the room gave it back, and writing it would take the hour off a coach
+ * who is free.
+ *
+ * `teaching` omitted plans no classes at all, which is what every caller did
+ * before this existed. It is NOT the same as passing an empty list: the server
+ * removes any Repple event in the window that the plan does not name, so
+ * handing it `{ classes: [], uid }` after a failed timetable read would strip
+ * the coach's classes back out of Google and report it as a tidy-up. A caller
+ * whose read did not complete must pass nothing here — `syncClassesNote` below
+ * is the sentence for it.
+ *
+ * Sessions are planned first, deliberately: the `seen` set is what makes the
+ * one-to-one win if a class ever mints an id a session already holds, so the
+ * appointment with a person in it is never the one that gets overwritten.
+ *
  * Sorted by id so the plan is stable, and de-duplicated, so two calls with the
  * same sessions produce the same list and a diff against what is already there
  * has nothing spurious in it.
@@ -434,17 +527,16 @@ export function plannedSyncEvents(
   sessions: readonly SyncSessionInput[],
   fromMs: number,
   toMs: number,
+  teaching?: SyncTeaching | null,
 ): SyncWireEvent[] {
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) return [];
   const seen = new Set<string>();
   const out: SyncWireEvent[] = [];
-  for (const s of sessions) {
-    if (!s || s.status !== 'booked') continue;
-    const id = syncEventId(s.id);
-    if (!id || seen.has(id)) continue;
-    const startMs = Date.parse(String(s.startsAt));
-    if (!Number.isFinite(startMs) || startMs < fromMs || startMs >= toMs) continue;
-    const mins = Number(s.durationMin);
+  const add = (id: string, startsAt: unknown, durationMin: unknown): void => {
+    if (seen.has(id)) return;
+    const startMs = Date.parse(String(startsAt));
+    if (!Number.isFinite(startMs) || startMs < fromMs || startMs >= toMs) return;
+    const mins = Number(durationMin);
     const dur = Number.isFinite(mins) && mins > 0 ? Math.round(mins) : DEFAULT_MINUTES;
     seen.add(id);
     out.push({
@@ -452,9 +544,37 @@ export function plannedSyncEvents(
       startIso: new Date(startMs).toISOString(),
       endIso: new Date(startMs + dur * 60000).toISOString(),
     });
+  };
+  for (const s of sessions) {
+    if (!s || s.status !== 'booked') continue;
+    const id = syncEventId(s.id);
+    if (!id) continue;
+    add(id, s.startsAt, s.durationMin);
+  }
+  const uid = teaching?.uid ?? null;
+  if (uid) {
+    for (const c of teaching?.classes ?? []) {
+      if (!c || c.status === 'cancelled' || c.trainerId !== uid) continue;
+      const id = syncClassEventId(c.id);
+      if (!id) continue;
+      add(id, c.startsAt, c.durationMin);
+    }
   }
   out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return out;
+}
+
+/**
+ * What to say when the class timetable was not consulted. Null when it was.
+ *
+ * The same shape and the same reason as `classCheckCaveat` in booking.ts: a
+ * screen that says nothing here is publishing a diary it knows is short and
+ * letting the coach believe it is whole. Silence about a missing hour is the
+ * expensive direction — somebody books over it.
+ */
+export function syncClassesNote(classesKnown: boolean): string | null {
+  if (classesKnown) return null;
+  return 'Your class timetable could not be read, so only your one-to-one sessions are in this. Anybody reading your calendar will see the hours you teach as free.';
 }
 
 /** What the server did, as counts. Nothing about which sessions, because the
@@ -479,8 +599,13 @@ export function pushSummaryLine(r: PushResult): string {
   if (r.created > 0) parts.push(`${r.created} added`);
   if (r.updated > 0) parts.push(`${r.updated} updated`);
   if (r.removed > 0) parts.push(`${r.removed} removed`);
-  if (parts.length === 0) return 'Your Google calendar already matches your booked sessions, so nothing was changed.';
-  return `${parts.join(', ')} in your Google calendar. Only sessions Repple put there are ever touched.`;
+  if (parts.length === 0) return 'Your Google calendar already matches what is on your Repple schedule, so nothing was changed.';
+  // "Only sessions Repple put there" was true when sessions were all it wrote.
+  // The classes a coach teaches go in the same calendar now, and the promise
+  // being made is about PROVENANCE — nothing Repple did not create is touched —
+  // so it is said in those words rather than in the name of one of the two
+  // kinds of thing it creates.
+  return `${parts.join(', ')} in your Google calendar. Only events Repple put there are ever touched.`;
 }
 
 /**
@@ -490,12 +615,21 @@ export function pushSummaryLine(r: PushResult): string {
  * they drift apart.
  */
 export const WRITE_PRIVACY_NOTE =
-  `Repple makes a calendar of its own in your Google account, called "${BRAND.label} coaching", and writes only inside it. Each booked session appears as "Coaching session" with no client name, no notes, no address and no guests, so nothing about a client reaches Google. Nothing you or anybody else put in your calendar is ever changed or deleted, and removing this calendar removes everything Repple added.`;
+  `Repple makes a calendar of its own in your Google account, called "${BRAND.label} coaching", and writes only inside it. Each booked session, and each class you are recorded as teaching, appears as "Coaching session" with no client name, no class name, no notes, no address and no guests, so nothing about a client reaches Google. Classes nobody is recorded against, and classes your colleagues teach, are never written. Nothing you or anybody else put in your calendar is ever changed or deleted, and removing this calendar removes everything Repple added.`;
 
-/** The button, saying what it will do. Null when there is nothing to send,
- *  which is the caller's cue to disable it. */
-export function pushLabel(count: number): string | null {
+/**
+ * The button, saying what it will do. Null when there is nothing to send,
+ * which is the caller's cue to disable it.
+ *
+ * `count` is the whole plan and `classes` is how many of it are classes, so a
+ * button over a plan that is half timetable does not call it all sessions. A
+ * coach who presses "Send 6 Sessions" and finds four classes in their diary has
+ * been told the wrong thing by one word; the count itself was always right.
+ * Zero classes keeps the sentence it has always had.
+ */
+export function pushLabel(count: number, classes = 0): string | null {
   if (!Number.isInteger(count) || count < 1) return null;
+  if (Number.isInteger(classes) && classes > 0) return `Send ${count} to Google`;
   return count === 1 ? 'Send 1 Session' : `Send ${count} Sessions`;
 }
 

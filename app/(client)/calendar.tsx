@@ -89,6 +89,11 @@ import { dateParts } from '../../src/lib/localDate';
 // and look it.
 import { readBoundary, monthCoverage, monthCoverageNote, hasEnded, pastVerdict, PAST_STATE_NOTE } from '../../src/lib/sessionHistory';
 import { appLocale } from '../../src/lib/locale';
+// The names down the side of a month grid, in the reader's language. Only
+// the words move: the Sunday-first order is this app's and every grid below
+// is built to it. See src/lib/calendarNames.ts.
+import { monthNamesLong, weekdayNamesNarrow, weekdayNamesShort } from '../../src/lib/calendarNames';
+import { fmtAxisDay, fmtTime, monthNamesShort } from '../../src/lib/format';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 // Which week of the block a date belongs to. See src/lib/clientBlock.ts.
 import { useClientWeek } from '../../src/ui/clientWeek';
@@ -126,8 +131,16 @@ import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 // name we know rather than as the absence of one, so `isName` guards both call
 // sites below.
 const initialsOf = (name: string) => name.replace('Coach ', '').split(' ').map((x) => x[0]).join('').slice(0, 2);
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+// `DOW` and `MON` were two hardcoded English arrays here — the sixth and
+// seventh copies of the pattern `fmtRelativeDay`'s header says it ended, on the
+// one screen where being wrong about which day it is costs somebody a session
+// and a late-cancellation fee. Between them they wrote the month heading, the
+// weekday row, the spoken label on every cell, the selected-day heading, the
+// "Session booked" and "Not booked" alerts, and — through `slot` — the push
+// notification the COACH receives, so an English weekday was going into
+// somebody else's phone too. Every one of those is the reader's own now; see
+// src/lib/calendarNames.ts for why only the words move and the Sunday-first
+// order does not.
 
 // One key function for both of this screen's sources. A session's `startsAt` is
 // a timestamp and means an instant, but a workout's `performed_at` can come back
@@ -140,10 +153,13 @@ function dayKey(iso: string) {
   const p = dateParts(iso);
   return p ? `${p[0]}-${p[1]}-${p[2]}` : '';
 }
-function timeLabel(iso: string) {
-  const d = new Date(iso); let h = d.getHours(); const ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12;
-  const m = d.getMinutes(); return `${h}${m ? ':' + String(m).padStart(2, '0') : ''}${ap}`;
-}
+// A 12-hour clock hand-built in English lived here, which is the exact string
+// `fmtClock`'s header says it replaced: `${h % 12 || 12}…${h < 12 ? 'am' : 'pm'}`,
+// with no 24-hour form at all. Most of this app's readers are on a 24-hour
+// locale — en-GB included — and "7pm" is not a time to a member in Berlin. The
+// house form (a whole hour drops its minutes) survives inside `fmtClock`, so
+// nothing on this screen reads differently in English.
+const timeLabel = (iso: string) => fmtTime(iso);
 
 // "Tue · Sep 10" for a bare `YYYY-MM-DD`. Through `dateParts` for the same
 // reason `dayKey` is — the weekday of a date-only value read as UTC midnight is
@@ -152,7 +168,10 @@ function timeLabel(iso: string) {
 function planDayLabel(iso: string): string {
   const p = dateParts(iso);
   if (!p) return fig(null);
-  return `${DOW[new Date(p[0], p[1], p[2]).getDay()]} · ${MON[p[1]].slice(0, 3)} ${p[2]}`;
+  // `.slice(0, 3)` off a month name is an English habit: "Sept." is four
+  // characters in German and a Japanese month is not letters at all. The
+  // reader's own short month comes from `monthNamesShort`.
+  return `${weekdayNamesShort()[new Date(p[0], p[1], p[2]).getDay()]} · ${monthNamesShort()[p[1]]} ${p[2]}`;
 }
 
 // An icon per kind, so the panel below the grid is not relying on colour alone.
@@ -591,7 +610,9 @@ export default function Calendar() {
   // could have answered. The two that can report back are now awaited, and the
   // alert claims only what actually happened.
   async function book(s: TrainingSession) {
-    const slot = `${DOW[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}`;
+    // Into 'Session booked', into 'Not booked', and into the push the COACH
+    // receives — so an English weekday here was written into their phone too.
+    const slot = `${weekdayNamesShort()[new Date(s.startsAt).getDay()]} ${timeLabel(s.startsAt)}`;
     // Unknown counts as "might have had credits". A null balance means the
     // count could not be read, not that there is nothing to draw from, and
     // silence is the wrong side to err on when somebody's pack may not have
@@ -880,13 +901,19 @@ export default function Calendar() {
             <Pressable onPress={() => shiftMonth(-1)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Previous month" style={{ padding: 4 }}>
               <Icon name={BACK_ICON} size={18} color={t.ink2} />
             </Pressable>
-            <Text style={{ ...ty.head, color: t.ink }}>{MON[viewMonth]} {viewYear}</Text>
+            <Text style={{ ...ty.head, color: t.ink }}>{monthNamesLong()[viewMonth]} {viewYear}</Text>
             <Pressable onPress={() => shiftMonth(1)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Next month" style={{ padding: 4 }}>
               <Icon name={FORWARD_ICON} size={18} color={t.ink2} />
             </Pressable>
           </View>
           <View style={{ flexDirection: 'row', marginBottom: sp.sm }}>
-            {DOW.map((d) => <Text key={d} style={{ ...ty.micro, flex: 1, textAlign: 'center', color: t.ink3 }}>{d[0]}</Text>)}
+            {/* `weekday: 'narrow'` rather than the first character of the
+                short name: a letter is not a character in every script, and
+                the narrow English forms collide in two places anyway — which
+                is why each cell below carries a spoken label naming its date
+                rather than leaning on this row. Keyed by index, because the
+                narrow names are not unique. */}
+            {weekdayNamesNarrow().map((d, i) => <Text key={i} style={{ ...ty.micro, flex: 1, textAlign: 'center', color: t.ink3 }}>{d}</Text>)}
           </View>
           {Array.from({ length: cells.length / 7 }).map((_, row) => (
             <View key={row} style={{ flexDirection: 'row' }}>
@@ -910,7 +937,10 @@ export default function Calendar() {
                 // between "rest day planned" and "recovery logged" is the whole
                 // point of drawing them differently.
                 const a11y = [
-                  `${MON[viewMonth]} ${d}`,
+                  // The date in the reader's own order as well as their own
+                  // language: "14 Aug" and "Aug 14" are both right and only
+                  // one of them is right for any given reader.
+                  fmtAxisDay(viewYear, viewMonth, d),
                   dayPlan ? `planned ${DAY_TYPE_LABEL[dayPlan.type].toLowerCase()}` : null,
                   hasMine ? 'your session' : null,
                   hasOpen ? 'open slot' : null,
@@ -985,7 +1015,7 @@ export default function Calendar() {
 
         {/* ── the selected day ───────────────────────────────────────────── */}
         <Section>
-          <SectionHead title={`${DOW[selDate.getDay()]} · ${MON[selM].slice(0, 3)} ${selD}`} note={dayNote} />
+          <SectionHead title={`${weekdayNamesShort()[selDate.getDay()]} · ${fmtAxisDay(selY, selM, selD)}`} note={dayNote} />
 
           {/* Said before either list, because with the log unread everything
               below is half an answer and the reader has to be told which half is
