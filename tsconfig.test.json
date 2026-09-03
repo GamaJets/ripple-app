@@ -212,6 +212,7 @@
     "src/lib/notifyDispatch.test.ts",
     "src/lib/notifyDigest.test.ts",
     "src/lib/clientQuiet.test.ts",
+    "src/lib/pushSender.test.ts",
     "src/lib/memberChurn.test.ts",
     "src/lib/memberRecord.test.ts",
     "src/lib/memberBuy.test.ts",

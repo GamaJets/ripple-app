@@ -75,6 +75,13 @@
 // another user's id. That is worth naming rather than implying it is closed —
 // and the sender is now logged with it, which is the difference between an
 // abuse that can be traced and one that cannot.
+//
+// The rule itself is mirrored, and under test, in src/lib/pushSender.ts. It is
+// stated there rather than only here because the way to get it wrong is
+// invisible from inside this file: refusing the project's own service role
+// silences all twenty-six server-written notification kinds and reports
+// nothing, because the dispatcher that calls this is fire-and-forget and
+// swallows its own errors on purpose.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const CORS = {

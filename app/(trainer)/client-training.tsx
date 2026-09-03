@@ -313,6 +313,22 @@ export default function ClientTraining() {
     void load(picked, rangeDays, askable);
   }, [picked, rangeDays, askable, load]));
 
+  /**
+   * Read this client's training again — the same read the focus effect above
+   * and the pull-to-refresh below both run, named once so a component can be
+   * handed it.
+   *
+   * `ExerciseHistoryPanel` shows a read stamp and takes an `onRefresh`; without
+   * one the stamp says WHEN the movements were read and offers nothing to do
+   * about it, which is half an answer on a panel a coach is reading with the
+   * client standing in front of them. Stable across renders — an unstable
+   * callback handed to a child is how a render loop starts.
+   */
+  const reloadLog = useCallback(() => {
+    if (!picked) return;
+    void load(picked, rangeDays, askable);
+  }, [picked, rangeDays, askable, load]);
+
   const fullName = client?.name ?? (typeof params.name === 'string' ? params.name : '') ?? '';
   const who = (fullName || 'They').split(' ')[0];
   // A name we do not have must not become "They's". The fallback voice is
@@ -1061,7 +1077,7 @@ export default function ClientTraining() {
                     {status === 'partial' ? (
                       <Section>
                         <PartialRead what="training days" shown={board.days.length}
-                          onPress={() => { if (picked) void load(picked, rangeDays, askable); }} />
+                          onPress={reloadLog} />
                       </Section>
                     ) : null}
 
@@ -1279,7 +1295,8 @@ export default function ClientTraining() {
                         it, and the panel is shared with the member's own
                         history screen so the two apps cannot disagree either. */}
                     <Rule />
-                    <ExerciseHistoryPanel log={log} status={status} unit={unit} voice={voice} />
+                    <ExerciseHistoryPanel log={log} status={status} unit={unit} voice={voice}
+                      onRefresh={reloadLog} />
                   </>
                 )}
 

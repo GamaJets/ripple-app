@@ -348,7 +348,10 @@ export function UnexplainedDepartures({ reload }: { reload?: number }) {
     () => (rows && whole ? departureTally(rows.map((r) => ({ reason: r.reason, endedAt: r.endedAt }))) : null),
     [rows, whole],
   );
-  const note = useMemo(() => departureSectionNote(tally, DEPARTURE_WINDOW_DAYS), [tally]);
+  // `sectionNote` and not `note`: `record` below takes a `note` of its own —
+  // the words a client actually said — and two different things called note in
+  // one component is how the wrong one gets rendered.
+  const sectionNote = useMemo(() => departureSectionNote(tally, DEPARTURE_WINDOW_DAYS), [tally]);
   // The ones there is still something to ask about. `isEndReason` and not
   // `!= null`, so a value this build does not recognise is asked about rather
   // than silently counted as answered.
@@ -377,15 +380,20 @@ export function UnexplainedDepartures({ reload }: { reload?: number }) {
         <SectionHead title="Why People Have Left" note={`Last ${DEPARTURE_WINDOW_DAYS} days`} />
         {/* The one sentence both sections used to say. Withheld entirely under
             a truncated read, along with the counts below it. */}
-        {note ? <Text style={{ ...ty.label, color: t.ink2 }}>{note}</Text> : null}
+        {sectionNote ? <Text style={{ ...ty.label, color: t.ink2 }}>{sectionNote}</Text> : null}
+        {/* Truncated, which is not failed and not empty. The rows that DID come
+            back are real people a coach can ask, so they are still listed —
+            what is withheld is every figure over them, because a count over a
+            prefix is a fact about the row cap. src/ui/loadStatus.ts. */}
         {!whole ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-            More endings came back than can be listed here, so nothing on this card is counted or added up.
-            The people below are real and can be asked; how many there are in total is not something this
-            screen can state.
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            More people have left in this window than came back, so nothing here is counted or added up.
+            The ones listed below are real and can still be asked; how many there are altogether is not
+            something this screen can state.
           </Text>
         ) : null}
         {msg ? <View style={{ marginTop: sp.md }}><Flag tone={t.crit}>{msg}</Flag></View> : null}
+        {unexplained.length > 0 ? (
         <View style={{ marginTop: sp.md }}>
           {unexplained.map((d, i) => (
             <View key={d.clientId}
@@ -408,6 +416,7 @@ export function UnexplainedDepartures({ reload }: { reload?: number }) {
             </View>
           ))}
         </View>
+        ) : null}
 
         {/* ── and the answers already given, counted ──────────────────────
             Under the ask rather than over it: the ask is the thing a coach can

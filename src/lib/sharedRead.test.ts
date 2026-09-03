@@ -37,10 +37,17 @@ function deferrable<T>() {
   return {
     run,
     get runs() { return runs; },
-    /** Land the nth request still outstanding (oldest first). */
+    /**
+     * Land the nth request still outstanding (oldest first).
+     *
+     * Records a failure rather than throwing when there is no nth request. A
+     * mutant that makes FEWER round trips than it should is the interesting
+     * kind, and a throw here would take the suite down before the assertion
+     * that says which rule it broke had a chance to be reported.
+     */
     settle(o: ReadOutcome<T>, n = 0) {
       const f = settles[n];
-      if (!f) throw new Error(`nothing outstanding to settle at ${n}`);
+      if (!f) { errors.push(`nothing outstanding to settle at ${n} — a read that should have happened did not`); return; }
       f(o);
     },
   };
@@ -49,6 +56,17 @@ function deferrable<T>() {
 /** Let every already-resolved promise's continuations run. Four turns, because
  *  the implementation awaits inside an async wrapper. */
 const flush = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+
+// ── A suite that never finishes must not pass ─────────────────────────────
+//
+// Everything below awaits promises this file settles by hand. A mutant that
+// makes FEWER round trips than it should leaves one of them unsettled — and
+// node exits 0 when the event loop empties, so an unfinished suite would be a
+// silent green. Found by mutating `forget` so it no longer drops an in-flight
+// read: the run printed nothing at all and exited 0.
+//
+// So failure is the default and success has to be reached.
+process.exitCode = 1;
 
 async function main() {
   /* ── rule: one flight, one round trip ─────────────────────────────────── */
@@ -174,17 +192,26 @@ async function main() {
     const b = s.read('u1', d.run);      // asked after it
     eq(d.runs, 2, 'a caller arriving after the write does NOT join the read that predates it');
 
+    // The post-write read lands FIRST and the overtaken one straggles in after
+    // it. That order is the whole point: the other way round, a hold that
+    // wrongly accepted the stale answer would be papered over a moment later by
+    // the fresh one and nothing would be visible. A slow request that left
+    // before a write and arrives after it is an ordinary thing on a phone.
+    d.settle({ ok: true, value: 'new name' }, 1);
+    const rb = await b;
+    eq(rb.ok && rb.value, 'new name', 'the read asked after the write gets the new row');
+    await flush();
+
     d.settle({ ok: true, value: 'old name' }, 0);
     const ra = await a;
     eq(ra.ok && ra.value, 'old name',
       'the caller that was already awaiting still gets its answer — a successful write must not become a failed read');
-
-    d.settle({ ok: true, value: 'new name' }, 1);
-    await b;
     await flush();
+
     const c = await s.read('u1', d.run);
-    eq(d.runs, 2, 'the post-write answer is the one held');
-    eq(c.ok && c.value, 'new name', 'and the overtaken read was discarded rather than held');
+    eq(d.runs, 2, 'and nothing needed re-reading');
+    eq(c.ok && c.value, 'new name',
+      'the straggler was DISCARDED rather than held — otherwise the old name goes back on every screen');
   }
 
   /* ── forget with no key drops everything ──────────────────────────────── */
@@ -260,7 +287,15 @@ main().then(() => {
     process.exit(1);
   }
   console.log('sharedRead.test: ok');
+  process.exitCode = 0;
 }, (e) => {
   console.error('sharedRead.test: threw', e);
   process.exit(1);
 });
+
+// And a hang says so rather than sitting there. Unref'd where the runtime
+// offers it — under node it does, and the cast is because this file is compiled
+// by BOTH tsconfigs and React Native's `setTimeout` is typed as returning a
+// number. Belt and braces over the line above: that one already turns an
+// unfinished run into an exit 1 the moment the event loop empties, which is how
+// this class of mutant actually shows up.

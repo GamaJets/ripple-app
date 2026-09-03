@@ -962,11 +962,21 @@ export default function CoachProfile() {
           <RepdbAttribution />
         </Section>
 
-        <Rule />
+        {/* ── the stranded footer that used to be here ────────────────────
+            "Changes save automatically and appear on your clients' booking
+            screen. Tap a chip to remove it." — a caption in its own section at
+            the very bottom of the screen, below the RepDB credits.
 
-        <Section>
-          <Text style={{ ...ty.caption, color: t.ink3 }}>Changes save automatically and appear on your clients' booking screen. Tap a chip to remove it.</Text>
-        </Section>
+            Both halves are already said, in place and better. "Tap a chip to
+            remove" is the `note` on BOTH chip editors (Specialties and What
+            You Offer, above) — this third copy sat some five hundred points
+            further down, after the legal attribution block, referring to chips
+            the reader could not see and could not have been looking at. And
+            "changes save automatically" is what the save flag at the top of
+            the screen says with an actual timestamp against it.
+
+            Seen on a device it read as a caption belonging to whatever was
+            above it, which was the exercise-data credit. */}
 
       </ScrollView>
     </SafeAreaView>

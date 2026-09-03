@@ -1717,18 +1717,6 @@ export default function TrainerClients() {
             src/lib/coachFirstRun.ts holds the rule. */}
         <CoachSetupRow />
 
-        {/* Why people have left, and the ones still worth asking about — one
-            section off one read. Renders nothing when there are none and
-            nothing when the read failed: the Clients screen already carries
-            four honest warnings and a fifth saying "we could not check whether
-            anybody left" is noise. src/ui/EndReasonSheet.tsx.
-
-            `readNonce` is threaded in so a pull down this screen re-reads it.
-            The card owns its own state, so without it the gesture refreshed
-            everything around this section and not the section itself — the same
-            gap `CoachRequests` above had. */}
-        <UnexplainedDepartures reload={readNonce} />
-
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
           {/* ── the trial card, and the condition that was exactly backwards ──
@@ -1922,6 +1910,36 @@ export default function TrainerClients() {
                   : `Sessions marked as delivered in the last ${DELIVERED_WINDOW_DAYS} days.`}
           </Text>
         </Section>
+
+        {/* Why people have left, and the ones still worth asking about — one
+            section off one read. src/ui/EndReasonSheet.tsx.
+
+            ── why it is HERE and not at the top ────────────────────────────
+            It sat between the first-run row and the block headed "interrupts:
+            things that need a decision now", which split that block in two and
+            put a ninety-day review above an expired trial and a platform
+            invitation. Read as one screen rather than as a stack of cards, this
+            is not a morning interrupt: nothing in it is holding up somebody's
+            pay or somebody's reply today, and its own deadline is measured in
+            months. It is a fact about the business, so it reads directly under
+            the business — the count above says how many clients there are, and
+            this says who stopped being one and why.
+
+            Renders nothing when there are none and nothing when the read
+            failed: this screen already carries four honest warnings and a fifth
+            saying "we could not check whether anybody left" is noise.
+
+            `readNonce` is threaded in so a pull down this screen re-reads it.
+            The card owns its own state, so without it the gesture refreshed
+            everything around this section and not the section itself — the same
+            gap `CoachRequests` at the top of the screen had.
+
+            ABOVE the `<Rule />` below and not under it, because the component
+            draws its own leading rule. Under it there are two hairlines on a
+            screen where this section renders and, on the far commoner screen
+            where it renders nothing, none at all between This Month and
+            Coaching Tools. */}
+        <UnexplainedDepartures reload={readNonce} />
 
         <Rule />
 

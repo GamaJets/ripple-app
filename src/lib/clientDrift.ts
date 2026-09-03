@@ -338,12 +338,26 @@ function unknownReason(
 ): string {
   if (eventCount === 0) {
     if (d.observedDays != null) {
+      // ── the day they joined ──────────────────────────────────────────
+      // `observedDays` floors, so somebody added this morning is 0, and the
+      // sentence read "Nothing recorded in 0 days on your book" — on the
+      // Clients screen, in the suggested-check-ins card, and again on
+      // Analytics under At-risk Clients. It is literally true and it reads as
+      // a broken template, and worse: it prompts a coach to chase a client
+      // for silence they have not had time to break. Their first day is not a
+      // gap in their record; it is the whole of it.
+      if (d.observedDays === 0) {
+        return 'On your book since today, with nothing recorded yet — no check-ins, no logged workouts, no visits.';
+      }
       return `Nothing recorded in ${d.observedDays} day${d.observedDays === 1 ? '' : 's'} on your book — no check-ins, no logged workouts, no visits.`;
     }
     return `Nothing recorded in the last ${windows.historyDays} days — no check-ins, no logged workouts, no visits.`;
   }
   if (d.baselineSpanDays == null || d.baselineSpanDays < MIN_BASELINE_SPAN_DAYS) {
     const days = d.observedDays ?? Math.round(d.baselineSpanDays ?? 0);
+    // Same floor, same reason as above: "Only 0 days of record" is what a
+    // client who joined and trained on the same morning produced.
+    if (days === 0) return 'Their record starts today — too little to say whether anything has changed.';
     return `Only ${days} day${days === 1 ? '' : 's'} of record — too little to say whether anything has changed.`;
   }
   if (d.baselineActiveDays < MIN_BASELINE_ACTIVE_DAYS) {

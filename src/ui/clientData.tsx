@@ -337,15 +337,15 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       // absence is turned back into a failure HERE, explicitly, rather than
       // being inherited from a `.single()` nobody would think to look at.
       const profOut = await readMyProfileRow(sbUid);
-      {
-        const data = profOut.ok ? profOut.value : null;
-        if (!profOut.ok) { reportError('clientData.hydrate.profiles', profOut.error); failed = true; }
-        else if (data == null) {
-          reportError('clientData.hydrate.profiles', new Error('no profiles row for the signed-in account'));
-          failed = true;
-        }
-        else if (!cancelled) {
-          const fromProfile = typeof data?.full_name === 'string' ? data.full_name.trim() : '';
+      if (!profOut.ok) { reportError('clientData.hydrate.profiles', profOut.error); failed = true; }
+      else if (profOut.value == null) {
+        reportError('clientData.hydrate.profiles', new Error('no profiles row for the signed-in account'));
+        failed = true;
+      }
+      else if (!cancelled) {
+        {
+          const data = profOut.value;
+          const fromProfile = typeof data.full_name === 'string' ? data.full_name.trim() : '';
           if (fromProfile) setName(fromProfile);
           else {
             // The name signup collected, when the profiles row never received it.
@@ -375,7 +375,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               reportError('clientData.hydrate.authName', e);
             }
           }
-          if (typeof data?.avatar === 'string' && data.avatar) setPhoto(data.avatar);
+          if (typeof data.avatar === 'string' && data.avatar) setPhoto(data.avatar);
         }
       }
 
@@ -386,7 +386,9 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       // defaults on every single app launch.
       try {
         const cOut = await readMyClientRow(sbUid);
-        const cErr = cOut.ok ? null : cOut.error;
+        // Branched on `ok` rather than on a truthy error, because an outcome
+        // carries whatever was thrown and `throw undefined` is legal.
+        const cFailed = !cOut.ok;
         const c = cOut.ok ? cOut.value : null;
         // maybeSingle, not single. `single()` treats NO ROW as the error
         // PGRST116, and having no `clients` row is not a failure — it is the
@@ -396,8 +398,8 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         // and being structural it never cleared: the whole coach app ran with a
         // profile read it believed had failed. A row that is genuinely absent
         // now comes back as null with no error, which is the true answer.
-        if (cErr) { reportError('clientData.hydrate.clients', cErr); failed = true; }
-        if (!cancelled && !cErr && c) {
+        if (!cOut.ok) { reportError('clientData.hydrate.clients', cOut.error); failed = true; }
+        if (!cancelled && !cFailed && c) {
           const r = c as any;
           if (typeof r.dob === 'string' && r.dob) setDob(r.dob);
           if (r.height_cm != null && !Number.isNaN(Number(r.height_cm))) setHeightCm(Number(r.height_cm));

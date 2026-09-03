@@ -433,17 +433,19 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         // refused read apart from an account that has no `clients` row.
         const cOut = await readMyClientRow(uid);
         if (cancelled) return;
-        const data = cOut.ok ? cOut.value : null;
-        const error = cOut.ok ? null : cOut.error;
-        if (error) {
+        // Branched on `ok` and not on a truthy error. An outcome carries
+        // whatever was thrown, and `throw undefined` is legal — testing the
+        // error would let that one through as a successful read of nothing.
+        if (!cOut.ok) {
           // The read failed. Leave `writable` null so nothing is pushed for the
           // rest of this session: the client may well have chosen pounds on
           // another device, and publishing this device's default over it is
           // precisely the failure this guard exists for.
-          reportError('settings.units.read', error);
+          reportError('settings.units.read', cOut.error);
           setUnitsLoaded(true);
           return;
         }
+        const data = cOut.value;
         // maybeSingle rather than single: a trainer or owner signed into the
         // same build has no `clients` row, and that is an absence, not a fault
         // to report.
@@ -461,17 +463,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           // taking on this launch, for its own two columns.
           const pOut = await readMyProfileRow(uid);
           if (cancelled) return;
-          const prof = pOut.ok ? pOut.value : null;
-          const profErr = pOut.ok ? null : pOut.error;
-          if (profErr) {
+          if (!pOut.ok) {
             // Same reasoning as the clients read above: a failed read leaves
             // `writable` null so this device publishes nothing over a choice
             // made elsewhere.
-            reportError('settings.units.read', profErr);
+            reportError('settings.units.read', pOut.error);
             setUnitsLoaded(true);
             return;
           }
-          row = prof ?? null;
+          row = pOut.value ?? null;
           home = 'profiles';
         }
         unitHome.current = home;

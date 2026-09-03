@@ -1079,7 +1079,24 @@ export default function TrainerAnalytics() {
               baseline over 56 days, plus the band for a client there is nothing
               on record about — see src/lib/clientDrift.ts, and the Clients
               screen, which has always said it this way. */}
-          <SectionHead title="At-risk Clients" note={`${bandNote('at_risk')} Plus anyone there is nothing on record for.`} />
+          {/* ── and the explanation goes UNDER the head, not inside it ──────
+              This sentence was passed as `note`. `SectionHead` lays title and
+              note out as a two-child `space-between` row with no gap and no
+              shrink on either — the slot is for "Leaderboard ›" or "Last 90
+              days", three words at most. Two sentences in it rendered on a
+              device as "AT-RISK CLIENTSWell below their own rate over the last
+              14 days. …" — the title and the note touching with no space
+              between them, the first line running off the right edge of the
+              phone, and the remainder wrapping to a centred second line under
+              the whole row. Seen on an iPhone 17 Pro at the default text size,
+              so it is not an accessibility-size edge case.
+
+              Every other explanatory sentence on this screen is a caption
+              beneath its head; this one now is too. */}
+          <SectionHead title="At-risk Clients" />
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>
+            {bandNote('at_risk')} Plus anyone there is nothing on record for.
+          </Text>
           {/* Four renders, and the first three are the ones that were missing.
               "Everyone is on track" is a claim about every client the coach
               has: it may be made only over a whole roster AND a training record
