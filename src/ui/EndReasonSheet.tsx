@@ -32,7 +32,7 @@
 // recently" said over a refused query is a claim about a coach's business made
 // out of our own failure, and it is the sort of good news somebody stops
 // checking.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Modal, TextInput, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
@@ -44,10 +44,12 @@ import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
 import { capLimit, capped } from '../lib/rowCap';
 import {
   END_REASONS, END_REASON_LABEL, END_REASON_NOTE, MAX_END_NOTE, isEndReason,
-  recordEndReason, type EndReason,
+  recordEndReason, departureTally, type EndReason,
 } from '../lib/endCoaching';
-import type { LoadStatus } from './loadStatus';
+import { departureSectionNote } from '../lib/departureSection';
+import { isWhole, type LoadStatus } from './loadStatus';
 import { appLocale } from '../lib/locale';
+import { num } from '../lib/format';
 
 /* ── the sheet ─────────────────────────────────────────────────────────────── */
 
@@ -204,6 +206,15 @@ export interface Departure {
   /** True when the COACH ended it. False when the client did. Null when the
    *  row predates `ended_by` — which means unknown, not "the client". */
   endedByMe: boolean | null;
+  /**
+   * As stored, and deliberately not narrowed here.
+   *
+   * `unknown` rather than `EndReason | null` because the column is plain text
+   * and a value this build does not recognise must land in "nothing recorded"
+   * rather than being dropped or guessed at — the same rule `departureTally`
+   * states. `isEndReason` is the only thing that decides.
+   */
+  reason: unknown;
 }
 
 export interface DepartureRead {
@@ -222,13 +233,26 @@ export interface DepartureRead {
 export const DEPARTURE_WINDOW_DAYS = 90;
 
 /**
- * Recent endings on this coach's book with no reason recorded against them.
+ * EVERY ending on this coach's book in the window — explained or not.
  *
- * `end_reason is null` is the filter, so an ending the coach has already
- * explained drops off the card the moment they explain it, and one where the
- * CLIENT gave a reason never appears at all — there is nothing to ask.
+ * ── why the filter went ───────────────────────────────────────────────────
+ *
+ * This read used to carry `.is('end_reason', null)`, and the coach dashboard
+ * ran a SECOND read of the same table, for the same coach, over the same ninety
+ * days, without it — one to ask about the unexplained endings and one to count
+ * the explained ones. Two round trips to describe one book, and, because they
+ * were written by different hands, two sections that said the same fact in two
+ * voices whenever nothing had been recorded yet.
+ *
+ * One read now answers both. The unexplained ones are the rows `isEndReason`
+ * rejects, which is the same test `departureTally` applies, so the list a coach
+ * is asked to clear and the count of what is still missing cannot disagree.
+ *
+ * `reload` is a nonce: pass a number that changes and this re-reads. The card
+ * sits on a screen with pull-to-refresh, and without it the gesture refreshed
+ * everything around this section and not the section itself.
  */
-export function useDepartures(): DepartureRead {
+export function useDepartures(reload?: number): DepartureRead {
   const [rows, setRows] = useState<Departure[] | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
@@ -244,7 +268,6 @@ export function useDepartures(): DepartureRead {
         .select('client_id, ended_at, ended_by, end_reason, profiles!coaching_relationships_client_id_fkey(full_name)')
         .eq('coach_id', uid)
         .eq('status', 'ended')
-        .is('end_reason', null)
         .gte('ended_at', since)
         .order('ended_at', { ascending: false })
         .limit(capLimit());
@@ -261,6 +284,7 @@ export function useDepartures(): DepartureRead {
         name: (r.profiles?.full_name ?? '').trim() || null,
         endedAt: r.ended_at ?? null,
         endedByMe: typeof r.ended_by === 'string' ? r.ended_by === uid : null,
+        reason: r.end_reason ?? null,
       })));
       setStatus(page.truncated ? 'partial' : 'ready');
     } catch (e) {
@@ -269,24 +293,67 @@ export function useDepartures(): DepartureRead {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, reload]);
 
   return { rows, status, reload: load };
 }
 
 /**
- * The card. Renders nothing at all when there is nothing to ask about — which
- * includes a failed read, because a banner on the Clients screen saying "we
- * could not check whether anybody has left" is noise on a screen that already
- * has four honest warnings on it, and the read is retried on the next mount.
+ * Why people have left — the whole of it, in one section.
+ *
+ * ── the two sections this replaces ────────────────────────────────────────
+ *
+ * The coach dashboard drew this card and then, immediately under it, a second
+ * section counting departure reasons. Both were right. Both were well written.
+ * Between them they said the same fact in two voices, down to the month:
+ *
+ *   WHY THEY LEFT — "One person has left your book in the last three months
+ *   with nothing recorded about why. It is the cheapest thing you will ever
+ *   learn about your own business, and you will not remember it in March."
+ *
+ *   WHY PEOPLE HAVE LEFT · Last 90 days — "1 person has left your book in the
+ *   last 90 days, and nothing is recorded about why any of them did. Every one
+ *   of those answers is still gettable, and none of them will be in March."
+ *
+ * This one survived because it is the one a coach can ACT on: it names the
+ * person and offers Record Why. Everything the other said is carried across —
+ * `departureSectionNote` in src/lib/departureSection.ts holds the merged
+ * sentence and a test that says which claims may not be lost — and the counts
+ * it drew are now the read-back UNDER the ask, off the same single read.
+ *
+ * ── what it will not say ──────────────────────────────────────────────────
+ *
+ * Nothing at all when the read failed. A banner reading "we could not check
+ * whether anybody has left" is noise on a screen that already carries four
+ * honest warnings, and the read is retried on the next mount and on the next
+ * pull. Nothing when nobody has left, because "0 people have left you" reads as
+ * a compliment on a book that has never had anybody on it.
+ *
+ * And no TALLY when the read came back truncated. The list of people to ask is
+ * still drawn — they are real, and a coach can act on a prefix of them — but a
+ * count over a prefix is not a smaller count, it is a different one, and the
+ * commonest reason would be a fact about the row cap. `isWhole` is the gate;
+ * src/ui/loadStatus.ts records why 'partial' is not 'ready'.
  */
-export function UnexplainedDepartures() {
+export function UnexplainedDepartures({ reload }: { reload?: number }) {
   const t = useTheme();
-  const dep = useDepartures();
+  const dep = useDepartures(reload);
   const [asking, setAsking] = useState<Departure | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   const rows = dep.rows;
+  // Before the early return, because hooks are not conditional.
+  const whole = isWhole(dep.status);
+  const tally = useMemo(
+    () => (rows && whole ? departureTally(rows.map((r) => ({ reason: r.reason, endedAt: r.endedAt }))) : null),
+    [rows, whole],
+  );
+  const note = useMemo(() => departureSectionNote(tally, DEPARTURE_WINDOW_DAYS), [tally]);
+  // The ones there is still something to ask about. `isEndReason` and not
+  // `!= null`, so a value this build does not recognise is asked about rather
+  // than silently counted as answered.
+  const unexplained = useMemo(() => (rows ?? []).filter((r) => !isEndReason(r.reason)), [rows]);
+
   if (!rows || rows.length === 0) return null;
 
   const record = async (d: Departure, reason: EndReason | null, note: string | null) => {
@@ -307,15 +374,20 @@ export function UnexplainedDepartures() {
     <>
       <Rule />
       <Section>
-        <SectionHead title="Why they left" note={`${rows.length}`} />
-        <Text style={{ ...ty.label, color: t.ink2 }}>
-          {rows.length === 1 ? 'One person has' : `${rows.length} people have`} left your book in the last three
-          months with nothing recorded about why. It is the cheapest thing you will ever learn about your own
-          business, and you will not remember it in March.
-        </Text>
+        <SectionHead title="Why People Have Left" note={`Last ${DEPARTURE_WINDOW_DAYS} days`} />
+        {/* The one sentence both sections used to say. Withheld entirely under
+            a truncated read, along with the counts below it. */}
+        {note ? <Text style={{ ...ty.label, color: t.ink2 }}>{note}</Text> : null}
+        {!whole ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            More endings came back than can be listed here, so nothing on this card is counted or added up.
+            The people below are real and can be asked; how many there are in total is not something this
+            screen can state.
+          </Text>
+        ) : null}
         {msg ? <View style={{ marginTop: sp.md }}><Flag tone={t.crit}>{msg}</Flag></View> : null}
         <View style={{ marginTop: sp.md }}>
-          {rows.map((d, i) => (
+          {unexplained.map((d, i) => (
             <View key={d.clientId}
               style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
               <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{d.name ?? 'A former client'}</Text>
@@ -336,6 +408,35 @@ export function UnexplainedDepartures() {
             </View>
           ))}
         </View>
+
+        {/* ── and the answers already given, counted ──────────────────────
+            Under the ask rather than over it: the ask is the thing a coach can
+            do something about this morning, and this is the read-back. It was
+            a section of its own and had nothing to read back until at least one
+            answer existed — a heading with no rows under it, and a caption
+            pointing at counts that were not there.
+
+            Counts, never a rate. A percentage over the four people who left a
+            coach's book this quarter is noise, which is what
+            `MIN_COHORT_FOR_RATE` says elsewhere in the app. */}
+        {tally && tally.counts.length > 0 ? (
+          <View style={{ marginTop: sp.lg }}>
+            {tally.counts.map((c, i) => (
+              <View key={c.reason} style={{
+                flexDirection: 'row', justifyContent: 'space-between', gap: sp.md,
+                paddingVertical: sp.sm,
+                borderTopWidth: i ? hairline : 0, borderTopColor: t.ring,
+              }}>
+                <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{END_REASON_LABEL[c.reason]}</Text>
+                <Text style={{ ...ty.label, color: t.ink2 }}>{num(c.n)}</Text>
+              </View>
+            ))}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Counts, not percentages. Over a book this size a share would move by twenty points because one
+              person moved house, and it would read as a trend.
+            </Text>
+          </View>
+        ) : null}
       </Section>
 
       <Modal visible={!!asking} animationType="slide" onRequestClose={() => setAsking(null)}>

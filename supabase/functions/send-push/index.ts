@@ -158,12 +158,52 @@ Deno.serve(async (req: Request) => {
   // recipient list. `getUser` RESOLVES with a null user for a token it cannot
   // turn into a person rather than throwing — which is what the anon key does
   // — so the answer is checked, not the call merely wrapped.
-  const supa = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  //
+  // ── AND THE SERVER IS NOT A PERSON ──────────────────────────────────────
+  //
+  // The check above, written on its own, would have switched off every
+  // server-side notification in this product the moment it was deployed.
+  //
+  // `notifications_dispatch_push` (supabase/parts/900) is what turns a written
+  // notification into a push, and it posts here with
+  // `Authorization: Bearer ' || v_key` where `v_key` is the Vault secret
+  // `storage_service_key`. That secret is the project's SERVICE ROLE key: its
+  // claims are `{"role":"service_role"}` and it carries no `sub`, because it
+  // names a role rather than a person. `auth.getUser()` on it therefore
+  // resolves with no user — exactly as it does for the anon key, which is the
+  // case the check was written for — and this function would answer 401.
+  //
+  // Nothing would have reported that. `net.http_post` is fire-and-forget, the
+  // dispatcher is `exception when others then return null` on purpose, and no
+  // screen reads either. All twenty-eight server-written kinds — a subscription
+  // payment failing, a chargeback and its deadline, an intake coming back, an
+  // insurance certificate lapsing, an invoice ageing, a client gone quiet —
+  // would simply have stopped arriving, silently, and the inbox rows would have
+  // gone on being written so nothing would look broken.
+  //
+  // So the service role is recognised as a caller in its own right. It is not
+  // a hole in the check: `verify_jwt` is true on this function, so the platform
+  // has already established the bearer was signed by this project, and this
+  // compares the token to the service key THIS FUNCTION holds in its own
+  // environment. Nothing a client can obtain matches it — the anon key is
+  // public and is not this value — and a bearer that is neither a person nor
+  // the server is still refused.
+  //
+  // `senderId` becomes 'server' rather than a uuid, which is what the fan-out
+  // log below should say: a broadcast attributable to the dispatcher is
+  // attributable to whatever wrote the row, and the row is the record.
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+  const supa = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey);
+  const bearer = (req.headers.get('Authorization') || '').replace('Bearer ', '').trim();
   let senderId = '';
-  try {
-    const { data: who } = await supa.auth.getUser((req.headers.get('Authorization') || '').replace('Bearer ', ''));
-    senderId = who?.user?.id || '';
-  } catch { /* stays empty, and the refusal below is the answer */ }
+  if (serviceKey && bearer === serviceKey) {
+    senderId = 'server';
+  } else {
+    try {
+      const { data: who } = await supa.auth.getUser(bearer);
+      senderId = who?.user?.id || '';
+    } catch { /* stays empty, and the refusal below is the answer */ }
+  }
   if (!senderId) return json({ error: 'Sign in to Repple to send a notification.' }, 401);
 
   let user_ids: string[] = [], title = '', body = '', data: Record<string, unknown> = {};
