@@ -262,6 +262,7 @@ import {
   type PromoCode, type PromoTarget,
 } from '../../src/lib/packagePromo';
 import { isoToday } from '../../src/lib/dayPlan';
+import { useToday } from '../../src/ui/today';
 import {
   refundBlocker, refundableRow, refundableCents, refundAmountBlocker, refundBalanceNote, refundConfirmLine,
   isPartlyRefunded, isFullyRefunded,
@@ -1230,7 +1231,17 @@ export default function TrainerPayments() {
   // Fixed for the render. Every expiry sentence below is about a day rather
   // than an instant, and a bound recomputed per row would let two lines on the
   // same screen disagree about what today is across a midnight.
-  const todayKey = isoToday(new Date());
+  // `useToday()`, not `isoToday(new Date())`. This screen is registered
+  // `href: null` in app/(trainer)/_layout.tsx, so it mounts once and is never
+  // torn down, and this day is the second argument to every expiry judgement
+  // below — `packWindow`, `expiryLine`, `strandedNote`, `daysLeftOn`. A bare
+  // read here is only as fresh as the last render, and a screen nobody has
+  // touched does not render: a pack whose last day was yesterday would go on
+  // reading as live. Same failure as the one `check:frozen-day` was written
+  // for on app/(trainer)/credentials.tsx, one dependency array away from where
+  // that gate can see it. `useToday` re-reads at local midnight and on
+  // foreground and compares before it sets, so an open screen costs nothing.
+  const todayKey = useToday();
   // Cases that are still open, which is what the count beside the heading is
   // about. A closed one stays in the list — a coach looking for the money that
   // went missing last month has to be able to find it — but it is not a thing
@@ -1627,12 +1638,39 @@ export default function TrainerPayments() {
                   did not. Only the second is a conversation somebody has to
                   start, and folding the two into one count would hide it inside
                   a number that reads as ordinary business. */}
-              {buysStatus !== 'error' && stranded > 0 ? (
+              {/* ── `buysWhole`, not `buysStatus !== 'error'` ─────────────
+                  `stranded` is a SUM over `packs`, and `packs` under 'partial'
+                  is the page that came back rather than the book. "3 sessions
+                  your clients paid for ran out of time" said off a truncated
+                  read is a figure with a full stop after it, computed over an
+                  unknown fraction — and unlike the run-out count above it, this
+                  one is a coach's list of conversations to have. Three when it
+                  is thirty is the difference between an afternoon's phone calls
+                  and one.
+                  `!== 'error'` also let it draw while the read was still
+                  LOADING, off whatever had arrived. Five states, and only one
+                  of them may carry a total: the house rule is `isWhole`, never
+                  `!== 'error'`. The sibling if/else above already gets this
+                  right; this block was a separate sibling and did not. */}
+              {buysWhole && stranded > 0 ? (
                 <View style={{ marginBottom: sp.md }}>
                   <Flag tone={t.warn}>
                     {stranded === 1
                       ? 'One session somebody paid for ran out of time before it was used. It is marked below.'
                       : stranded + ' sessions your clients paid for ran out of time before they were used. They are marked below.'}
+                  </Flag>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{EXPIRY_IS_NOT_A_REFUND}</Text>
+                </View>
+              ) : buysStatus === 'partial' && stranded > 0 ? (
+                <View style={{ marginBottom: sp.md }}>
+                  {/* Stated as a floor, because that is what it is. Withholding
+                      it entirely would be worse than a floor: somebody's paid-
+                      for sessions have been lost and the coach can act on
+                      "at least one" — they cannot act on silence. */}
+                  <Flag tone={t.warn}>
+                    At least {stranded} session{stranded === 1 ? '' : 's'} your clients paid for ran out of time before
+                    {stranded === 1 ? ' it was' : ' they were'} used. Only part of your purchases loaded, so there may be more
+                    than this — the ones that did load are marked below.
                   </Flag>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{EXPIRY_IS_NOT_A_REFUND}</Text>
                 </View>

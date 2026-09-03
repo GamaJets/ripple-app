@@ -48,6 +48,7 @@ import { USE_SUPABASE } from '../lib/config';
 import { useAuthRevision } from './authRevision';
 import type { LoadStatus } from './loadStatus';
 import { useRecoverRead } from './readRefresh';
+import { useNow } from './today';
 
 /** How far back to read. A week is enough for a readiness average and short
  *  enough that a provider outage does not dominate it. */
@@ -141,9 +142,24 @@ export function DeviceSleepProvider({ children }: { children: ReactNode }) {
 
   // What the devices said today, before anything kept is folded in. Kept
   // separate because only these may be written back — see below.
+  /**
+   * The run of nights this week covers.
+   *
+   * `useNow()` and not a bare `recentNights(DEVICE_SLEEP_NIGHTS)`, and it is IN
+   * the dependency list. The clock read was inside a memo keyed `[reads]`, and
+   * `reads` moves when a DEVICE answers, not when the day does — so the seven
+   * night keys were the seven ending on the day this provider first mounted.
+   * app/(client)/recovery.tsx is reached from a tab and src/ui/readiness.ts
+   * mounts this hook for the whole app, so neither is ever torn down: a member
+   * who left the app open overnight had last night missing from their sleep
+   * week entirely, and the week silently kept sliding further behind every day
+   * the phone stayed in a pocket. See src/ui/today.ts.
+   */
+  const now = useNow();
+
   const fresh = useMemo(
-    () => mergeSleepNights(reads, recentNights(DEVICE_SLEEP_NIGHTS)),
-    [reads],
+    () => mergeSleepNights(reads, recentNights(DEVICE_SLEEP_NIGHTS, now)),
+    [reads, now],
   );
 
   const nights = useMemo(() => withStored(fresh, stored), [fresh, stored]);

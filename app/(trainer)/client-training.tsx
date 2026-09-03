@@ -92,6 +92,7 @@ import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHi
 // reads them exactly as app/(client)/history.tsx does.
 import { muscleBoard, unmatchedNote } from '../../src/lib/muscleVolume';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { useToday, useNow } from '../../src/ui/today';
 import {
   monthlyHistory, monthLabel, bestMonth, trainedMonths, longestGap,
   historySpan, stageOf, lifetimeTotals, volumeArc, tonnes, MAX_MONTHS,
@@ -374,9 +375,38 @@ export default function ClientTraining() {
    * bare date and the week number is counted in the reader's own days. Nothing
    * else on this screen is computed across that boundary.
    */
+  /* ── the clock this screen reads, and why it is a hook ──────────────────
+   *
+   * Every date on this screen used to come from a bare `new Date()` or
+   * `Date.now()` INSIDE a useMemo whose dependencies were the data. Not an
+   * empty array — so `check:frozen-day`, which looks for `useMemo(…, [])`,
+   * could not see any of them — but the effect is the same and lasts longer:
+   * `client-training` is registered `href: null` in app/(trainer)/_layout.tsx,
+   * which mounts it once and never tears it down. The memo then recomputes only
+   * when the LOG changes, and a client who has not trained is exactly the
+   * client whose log does not change.
+   *
+   * So a coach who opened this screen on Sunday and came back on Wednesday was
+   * shown: which week of the block the client is in, as of Sunday; a "last 28
+   * days" muscle board ending on Sunday; and a plan-versus-actual comparison
+   * asking whether Sunday's session had been logged. All of them stale, none of
+   * them marked, and a pull-to-refresh re-read the server and recomputed
+   * against the same frozen day — which makes the wrong answer look freshly
+   * confirmed. That last part is what makes this worth fixing rather than
+   * noting.
+   *
+   * `useToday` re-reads at the next local midnight and on foreground, and
+   * compares before it sets, so a screen sitting open costs nothing until the
+   * day actually turns. `useNow` additionally moves when the screen is focused,
+   * which is what a rolling "last 28 days" window wants: a coach coming back to
+   * this tab is asking about the 28 days ending now. See src/ui/today.ts.
+   */
+  const today = useToday();
+  const nowMs = useNow().getTime();
+
   const position = useMemo(
-    () => blockPosition(startsOn, isoToday(new Date()), weekCount(program)),
-    [startsOn, program],
+    () => blockPosition(startsOn, today, weekCount(program)),
+    [startsOn, program, today],
   );
   /**
    * The week of the block the comparison runs against.
@@ -434,20 +464,20 @@ export default function ClientTraining() {
   const muscleWindowRead = useMemo(() => {
     if (status === 'error' || status === 'loading' || !log) return false;
     if (status === 'ready') return true;
-    const from = new Date(Date.now() - muscleDays * 86_400_000);
+    const from = new Date(nowMs - muscleDays * 86_400_000);
     const p = (x: number) => (x < 10 ? '0' + x : String(x));
     const fromDay = `${from.getFullYear()}-${p(from.getMonth() + 1)}-${p(from.getDate())}`;
     return oldestDay != null && oldestDay <= fromDay;
-  }, [status, log, muscleDays, oldestDay]);
+  }, [status, log, muscleDays, oldestDay, nowMs]);
   const muscles = useMemo(
     () => muscleBoard(log ?? [], cat.rows, {
-      sinceMs: Date.now() - muscleDays * 86_400_000,
+      sinceMs: nowMs - muscleDays * 86_400_000,
       // No weigh-in series is read on this screen, so a bodyweight set carries
       // no load here. `unpricedSets` reports exactly how much work that leaves
       // out of the tonnage, which is the honest answer rather than a silent one.
       catalogueWhole: cat.status === 'ready',
     }),
-    [log, cat.rows, cat.status, muscleDays],
+    [log, cat.rows, cat.status, muscleDays, nowMs],
   );
   const muscleNote = useMemo(() => unmatchedNote(muscles), [muscles]);
 
@@ -464,8 +494,8 @@ export default function ClientTraining() {
    */
   const longWhole = status === 'ready' && log != null;
   const cells = useMemo(
-    () => (longWhole ? monthlyHistory(log ?? [], Date.now(), MAX_MONTHS) : []),
-    [longWhole, log],
+    () => (longWhole ? monthlyHistory(log ?? [], nowMs, MAX_MONTHS) : []),
+    [longWhole, log, nowMs],
   );
   const lifetime = useMemo(() => (longWhole ? lifetimeTotals(log ?? []) : null), [longWhole, log]);
   const arc = useMemo(() => volumeArc(cells), [cells]);
@@ -482,9 +512,9 @@ export default function ClientTraining() {
     // handed above, for the same reason.
     log: status === 'error' ? null : log,
     logStatus: status,
-    todayISO: isoToday(new Date()),
+    todayISO: today,
     oldestDay,
-  }), [compareWeek, assigned.status, status, log, oldestDay]);
+  }), [compareWeek, assigned.status, status, log, oldestDay, today]);
 
   /* ── the programme checks, re-run against what they are ACTUALLY on ─────
      `reviewProgram` ran once, in the builder, against a draft. Its seven rules

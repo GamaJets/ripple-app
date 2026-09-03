@@ -65,6 +65,8 @@ import { ConsoleGate } from '@/components/Gate';
 import { type Unread, type Read, reading, landed } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { Banner, Announce } from '@/components/Banner';
 import { fetchPayments, money, type GymPayment } from '@lib/gymRecord';
 import { fetchInvoices, type GymInvoiceRow } from '@lib/gymInvoices';
@@ -145,7 +147,7 @@ export default function Tax() {
 
   const [loaded, setLoaded] = useState<{ key: string; books: Books }>({ key: '', books: EMPTY });
 
-  const load = useCallback(async (tenantId: string, period: TaxPeriod) => {
+  const load = useCallback(async (tenantId: string, period: TaxPeriod): Promise<boolean> => {
     setLoaded({ key: '', books: EMPTY });
 
     // allSettled, never all. Under a single catch a refused invoice query would
@@ -175,6 +177,11 @@ export default function Tax() {
           : 'Which of these months have been closed could not be read, so every one of them is reported as open. That is the safe direction — a period called settled when the read failed is the expensive mistake.',
       },
     });
+
+    // Whole means all four came back. `useFetched` stamps only on a whole read,
+    // so a period whose cost register would not load leaves the stamp where it
+    // was rather than dating a set of books that is missing a side of itself.
+    return settledLanded([pay, inv, cost, cls]);
   }, []);
 
   useEffect(() => {
@@ -208,10 +215,36 @@ export default function Tax() {
       setProfile(tax.profile);
       setProfileState(tax.error ? 'error' : 'ready');
 
-      if (p) await load(who.tenantId, p);
     })();
     return () => { live = false; };
-  }, [load, p, key]);
+    // Identity, the gym record, the zone and the tax profile — read once. The
+    // books are read by the effect below, through `refresh`. They used to share
+    // one effect keyed on the period, so choosing a different quarter re-read
+    // the gym's tax registration and its timezone as well, three round trips
+    // that cannot have changed.
+  }, []);
+
+  /**
+   * The books for the chosen period, kept current and dated.
+   *
+   * The stamp matters more here than almost anywhere in this console: these are
+   * the figures a return is made from, and a quarter read on Tuesday and copied
+   * out on Thursday is a filing made against two days of missing payments with
+   * nothing on the page that said so.
+   *
+   * `loaded.key` is what drops a superseded read — a quarter changed while the
+   * previous one was still in flight writes under the old key and `books` falls
+   * back to EMPTY — and `useFetched` coalesces the second request rather than
+   * dropping it, so the new quarter is always read.
+   */
+  const { at: readAt, busy: reading_, refresh } = useFetched(
+    () => (me?.tenantId && p ? load(me.tenantId, p) : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.tenantId && p) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId, key, p?.fromIso, p?.toIso]);
 
   const books = loaded.key === key ? loaded.books : EMPTY;
 
@@ -253,6 +286,9 @@ export default function Tax() {
         The record a return is made from, for a period somebody files against. Not a
         return, and not a tax figure.
       </p>
+
+      <Fetched at={readAt} busy={reading_} onRefresh={refresh}
+               what="these books" style={{ margin: '2px 0 14px' }} />
 
       <Banner>{TAX_NO_RETURN_FIGURE}</Banner>
 

@@ -6,6 +6,7 @@
 // Deploy:  supabase functions deploy notify-message --use-api --no-verify-jwt
 // Secret:  supabase secrets set HOOK_SECRET=<same value you put in the SQL trigger>
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { secretMatches } from '../../../src/lib/sharedSecret.ts';
 
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } });
 const HOOK = Deno.env.get('HOOK_SECRET') ?? '';
@@ -14,7 +15,13 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
   let b: any = {};
   try { b = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
-  if (!HOOK || String(b.secret || '') !== HOOK) return json({ error: 'forbidden' }, 403);
+  // This was `!HOOK || String(b.secret || '') !== HOOK`, and it was the last of
+  // the three shared-secret compares still short-circuiting on the first
+  // differing byte — in the one function of the three deployed with verify_jwt
+  // OFF, where this line is the entire gate rather than a second one. The rule
+  // is in src/lib/sharedSecret.ts, which also refuses when HOOK_SECRET is unset
+  // rather than letting an empty offered secret match an empty configured one.
+  if (!secretMatches(b.secret, HOOK)) return json({ error: 'forbidden' }, 403);
 
   const clientId = b.client_id as string | undefined;
   const sender = String(b.sender || '');

@@ -13,7 +13,7 @@
 // infinite return and wins every comparison.
 import {
   LAST_TOUCH_NOTE, MIN_CLIENTS_TO_COMPARE, NOISE_P, codeFigures, codeReturn,
-  costPerClient, enoughToTell, parseSpend, returnLine, shapeCodeReturns, spendFieldValue,
+  costPerClient, enoughToTell, parseSpend, returnLine, shapeCodeReturns, spendCurrency, spendFieldValue,
   splitP, stayedLine, tellApart,
   type Apart, type CodeReturn, type CodeReturnRow, type RawCodeReturn, type Tell,
 } from './codeReturn';
@@ -222,26 +222,67 @@ eq(shapeCodeReturns([raw({ spend_cents: 40000, spend_currency: null })])[0].spen
 
 /* ── what the coach types into the spend field ─────────────────────────── */
 
-eq(parseSpend('').kind, 'clear', 'an empty field clears the record — unknown, which is not zero');
-eq(parseSpend('   ').kind, 'clear', 'and so does whitespace');
-eq(parseSpend(null).kind, 'clear', 'and nothing at all');
-const zero = parseSpend('0');
+const cents = (r: ReturnType<typeof parseSpend>) => (r.kind === 'amount' ? r.cents : -1);
+
+eq(parseSpend('', 'GBP').kind, 'clear', 'an empty field clears the record — unknown, which is not zero');
+eq(parseSpend('   ', 'GBP').kind, 'clear', 'and so does whitespace');
+eq(parseSpend(null, 'GBP').kind, 'clear', 'and nothing at all');
+// A cleared field is cleared whatever the currency situation is: erasing a
+// figure needs no unit, and a coach who cannot clear a wrong number goes on
+// having their channels compared against it.
+eq(parseSpend('', null).kind, 'clear', 'clearing needs no currency, because there is no figure to have one');
+const zero = parseSpend('0', 'GBP');
 eq(zero.kind, 'amount', 'a typed zero is a claim the coach is making');
-eq(zero.kind === 'amount' ? zero.cents : -1, 0, 'and it is recorded as zero, not as unknown');
-const p250 = parseSpend('250');
-eq(p250.kind === 'amount' ? p250.cents : -1, 25000, 'whole units in, minor units out');
-const p2505 = parseSpend('250.50');
-eq(p2505.kind === 'amount' ? p2505.cents : -1, 25050, 'and the pennies survive');
-const psym = parseSpend('£1,250');
-eq(psym.kind === 'amount' ? psym.cents : -1, 125000, 'a coach asked for an amount types a currency symbol; that is not an error');
-eq(parseSpend('-5').kind, 'bad', 'negative spend is refused');
-eq(parseSpend('lots').kind, 'bad', 'and so is a word');
-eq(parseSpend('999999999999').kind, 'bad', 'an extra run of zeros is caught rather than drowning every other code');
+eq(cents(zero), 0, 'and it is recorded as zero, not as unknown');
+eq(cents(parseSpend('250', 'GBP')), 25000, 'whole units in, minor units out');
+eq(cents(parseSpend('250.50', 'GBP')), 25050, 'and the pennies survive');
+eq(parseSpend('£1250', 'GBP').kind, 'amount', 'a coach asked for an amount types a currency symbol; that is not an error');
+eq(cents(parseSpend('£1250', 'GBP')), 125000, 'and the symbol does not change the figure');
+eq(parseSpend('-5', 'GBP').kind, 'bad', 'negative spend is refused');
+eq(parseSpend('lots', 'GBP').kind, 'bad', 'and so is a word');
+eq(parseSpend('999999999999', 'GBP').kind, 'bad', 'an extra run of zeros is caught rather than drowning every other code');
+
+// ── the hundred that was written into the database ────────────────────────
+//
+// This was `Math.round(Number(bare) * 100)` under a `\d{1,2}` regex, and the
+// figure goes into coach_code_spend.amount_cents, permanently. A coach in
+// Kuwait typing 250 had 25,000 fils recorded — KWD 25 against a campaign that
+// cost 250 — and a coach in Tokyo typing 50000 had five million yen recorded.
+eq(cents(parseSpend('250', 'KWD')), 250000, 'a dinar has a thousand fils, so 250 KWD is 250,000 of them');
+eq(cents(parseSpend('250.125', 'KWD')), 250125, 'and a three-place dinar figure the old regex refused outright is an amount');
+eq(cents(parseSpend('50000', 'JPY')), 50000, 'a yen has no minor unit, so ¥50,000 is 50,000 minor units and not five million');
+eq(parseSpend('250.50', 'JPY').kind, 'bad', 'and there is nothing after the point in a yen, so that is a slip and is said to be one');
+
+// No currency, no figure. The refusal is the point: set_code_spend raises
+// 22023 at this coach anyway, and a number scaled by a factor nobody chose
+// would be written before they ever saw that.
+eq(parseSpend('250', null).kind, 'bad', 'a figure typed with no currency established is refused, not scaled by a guessed hundred');
+eq(parseSpend('250', '').kind, 'bad', 'and an empty currency is the same silence');
+eq(parseSpend('250', 'ZZZ').kind, 'amount', 'an unknown three-letter code still has two places — it is a currency, just not one of Stripe’s special ones');
+
+// Where the currency comes from on the screen.
+eq(spendCurrency(row({ spend: { cents: 1, currency: 'KWD' }, revenue: { cents: 9, currency: 'GBP' } })), 'KWD',
+  'the unit already recorded against the spend wins — it is what the figure in the box is in');
+eq(spendCurrency(row({ spend: null, revenue: { cents: 0, currency: 'GBP' } })), 'GBP',
+  'a code nobody has bought through still carries the house currency, so its first spend can be recorded');
+eq(spendCurrency(row({ spend: null, revenue: null })), null,
+  'and a coach with no packages, no gym currency and none of their own has no unit — which is an answer, not a zero');
 
 eq(spendFieldValue(row()), '', 'a code with no recorded spend opens with an empty field, not a zero');
 eq(spendFieldValue(row({ spend: { cents: 25000, currency: 'GBP' } })), '250', 'a round amount comes back round');
 eq(spendFieldValue(row({ spend: { cents: 25050, currency: 'GBP' } })), '250.50', 'and a pennies amount comes back whole');
 eq(spendFieldValue(row({ spend: { cents: 0, currency: 'GBP' } })), '0', 'a recorded zero comes back as a zero, so the coach can see they said it');
+// The seed and the read are two halves of one hundred, and both of them were
+// it. A KWD coach opening the sheet was shown a tenth of what they had
+// recorded, would correct it, and would write the error in properly.
+eq(spendFieldValue(row({ spend: { cents: 250000, currency: 'KWD' } })), '250', 'a dinar figure seeds the box at what was recorded');
+eq(spendFieldValue(row({ spend: { cents: 250125, currency: 'KWD' } })), '250.125', 'with all three of its places');
+eq(spendFieldValue(row({ spend: { cents: 50000, currency: 'JPY' } })), '50000', 'and a yen figure seeds it with no decimal point at all');
+// Round trip: what the box shows, typed back in, is what was recorded.
+for (const [c, minor] of [['GBP', 25050], ['KWD', 250125], ['JPY', 50000], ['GBP', 0]] as [string, number][]) {
+  eq(cents(parseSpend(spendFieldValue(row({ spend: { cents: minor, currency: c } })), c)), minor,
+    `a ${c} figure read out of the box and typed back in is the same number of minor units`);
+}
 
 /* ── the one sentence about attribution ────────────────────────────────── */
 

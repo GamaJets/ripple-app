@@ -50,6 +50,7 @@ import type { ProviderId } from '../lib/wearables/types';
 import type { LoadStatus } from './loadStatus';
 import { useWearables } from './wearables';
 import { useAuthRevision } from './authRevision';
+import { useToday } from './today';
 
 export interface DeviceHrvValue {
   /** What a connected device reported for the most recent night, or null when
@@ -179,18 +180,33 @@ export function useDeviceHrv(): DeviceHrvValue {
     return () => { cancelled = true; };
   }, [uid, status, tonight]);
 
+  /**
+   * Tonight's night key when there is no reading yet.
+   *
+   * `useToday()` and not `recentNights(1)[0]`, which reads the clock inside a
+   * memo whose dependencies are `[nights, tonight]` — neither of which moves
+   * when the day does. app/(client)/devices.tsx is reached from a tab and is
+   * never unmounted, so the fallback night was the day the hook first ran, for
+   * the life of the process: after midnight, with no reading in yet, the
+   * baseline below excluded YESTERDAY from its seven nights and counted
+   * tonight, which is the opposite of what it is for. `recentNights` builds the
+   * same local `YYYY-MM-DD` that `todayKey` does, so this is the same string,
+   * kept current.
+   */
+  const today = useToday();
+
   const baseline = useMemo(
-    () => hrvBaseline(nights, tonight?.night ?? recentNights(1)[0]),
-    [nights, tonight],
+    () => hrvBaseline(nights, tonight?.night ?? today),
+    [nights, tonight, today],
   );
   const trend = useMemo(() => hrvTrendOf(tonight?.ms ?? null, baseline), [tonight, baseline]);
   // The count behind the baseline, excluding tonight — the same set
   // `hrvBaseline` looks at, so the sentence about "3 of 7 nights" cannot
   // disagree with the reason there is no trend.
   const nightsKept = useMemo(() => {
-    const t = tonight?.night ?? recentNights(1)[0];
+    const t = tonight?.night ?? today;
     return new Set(nights.filter((n) => n.night !== t).map((n) => n.night)).size;
-  }, [nights, tonight]);
+  }, [nights, tonight, today]);
 
   return { tonight, nights, status, baseline, trend, nightsKept, reload: load };
 }

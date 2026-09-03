@@ -13,6 +13,8 @@ import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import { Banner as SharedBanner, Announce } from '@/components/Banner';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import {
   fetchPlans, createPlan, setPlanActive,
   fetchMemberships, createMembership, setMembershipStatus,
@@ -110,7 +112,7 @@ export default function Money() {
    * month with no income rather than as a query that never came back. A read
    * that failed stays null, and every figure drawn from it shows a dash.
    */
-  const load = useCallback(async (tenantId: string, windowDays: number) => {
+  const load = useCallback(async (tenantId: string, windowDays: number): Promise<boolean> => {
     const [pRes, mRes, payRes, ptRes] = await Promise.allSettled([
       fetchPlans(supabase, tenantId),
       fetchMemberships(supabase, tenantId),
@@ -136,7 +138,27 @@ export default function Money() {
 
     if (ptRes.status === 'fulfilled') { setPassTypes(ptRes.value); setPassTypesErr(null); }
     else { setPassTypes(null); setPassTypesErr(why(ptRes.reason, 'Could not read the pass price book.')); }
+
+    // Whole means all four came back. `useFetched` stamps only on a whole read,
+    // so a refresh that lost the payments leaves the stamp where it was and the
+    // section's own banner is what says which read is missing — counting what
+    // the server confirmed, not what was sent.
+    return settledLanded([pRes, mRes, payRes, ptRes]);
   }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * No poll: nothing here is written while somebody stands at the desk — that
+   * is /door and /orders. What this screen needed was the sentence, because
+   * every figure on it is money. "AED 4,120 taken" read at 09:00 and read at
+   * 16:00 were the same pixels, on the page an owner reconciles the till
+   * against, and a payment somebody else recorded at the front desk twenty
+   * minutes ago was simply not here.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId, windowDays) : Promise.resolve(false)),
+  );
 
   useEffect(() => {
     let live = true;
@@ -166,14 +188,30 @@ export default function Money() {
         const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
         setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId, windowDays);
     })();
     return () => { live = false; };
-    // `windowDays` deliberately re-runs this: changing the window is a fresh
-    // READ, not a filter over rows already in hand. Filtering would show a
-    // longer window that is still only thirty days of rows, with nothing on
-    // screen to say the rest was never fetched.
-  }, [load, windowDays]);
+    // Identity and the gym record only. The rows are read by the effect below,
+    // through `refresh`, so that the first read stamps exactly like every later
+    // one — a read fired from here would put figures on screen with no date on
+    // them until somebody pressed the button.
+  }, []);
+
+  // The first read, and every re-read caused by moving the window.
+  //
+  // Keyed on the tenant id rather than fired at the end of the effect above:
+  // `useFetched` holds the reader in a ref assigned during RENDER, so calling
+  // `refresh()` in the same tick as `setMe(who)` would run the closure from the
+  // previous render — the one where `me` is still undefined — and the reader
+  // would answer `false` without having read anything.
+  //
+  // `windowDays` is in the deps for the reason the old comment here gave:
+  // changing the window is a fresh READ, not a filter over rows already in
+  // hand. Filtering would show a longer window that is still only thirty days
+  // of rows, with nothing on screen to say the rest was never fetched.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId, windowDays]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -211,7 +249,11 @@ export default function Money() {
   // is what makes `amount()` withhold the figure rather than pick a side.
   const takenCcy = sum == null || sum.payments === 0 ? ccy : sum.takenCurrency;
   const mrrCcy = sum == null || sum.mrrCents == null ? ccy : sum.mrrCurrency;
-  const refresh = () => load(tenantId, windowDays);
+  // `refresh` is the hook's, not a second reader. It was a local
+  // `() => load(tenantId, windowDays)` handed to every section's `onChange`, so
+  // recording a payment re-read the screen WITHOUT moving the read stamp — the
+  // one moment on this page when the figures are provably current would have
+  // been the one where the line under them went on ageing.
 
   // summarise needs all three reads, so any one of them failing leaves every
   // figure above the tables unknown. Name the reads that did not arrive: a bare
@@ -230,6 +272,9 @@ export default function Money() {
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         What the gym sells, who holds a membership, and what has actually been paid.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this gym’s money" style={{ margin: '2px 0 16px' }} />
 
       {gymNameErr ? (
         <Banner tone="crit">

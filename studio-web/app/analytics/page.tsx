@@ -71,6 +71,8 @@ import { ConsoleGate, Loading } from '@/components/Gate';
 import { type Unread, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 // The console's banner, with the live region it never had. The local copy of
 // this component that used to sit at the bottom of this file — and still sits
 // at the bottom of eighteen other page files — rendered every sentence this
@@ -185,7 +187,7 @@ export default function Analytics() {
   const [payments, setPayments] = useState<Read<MoneyRow>>(reading);
   const [err, setErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setMemberships(reading); setVisits(reading); setClasses(reading);
     setDoor({ state: 'loading', at: null }); setErr(null);
 
@@ -242,6 +244,10 @@ export default function Analytics() {
       failure(pRes, 'the payments of the last thirteen months'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length ? trouble.join(' · ') : null);
+
+    // Whole means all five came back. `useFetched` stamps only on a whole read,
+    // so a trend drawn without the door log leaves the stamp where it was.
+    return settledLanded([mRes, vRes, cRes, dRes, pRes]);
   }, []);
 
   useEffect(() => {
@@ -265,10 +271,33 @@ export default function Analytics() {
       // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
       const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
       if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the five reads are the effect below's.
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * "Which way it is moving" is a claim about a window ending now, and this
+   * page never said which now. The thirteen-month payments read and the
+   * thirty-day door read are both cut at the moment of the request, so a tab
+   * left open across a month boundary draws last month's chart under this
+   * month's heading.
+   */
+  // `reading` is taken here by `Read`'s constructor from lib/read.
+  const { at: readAt, busy: refetching, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  // The first read. Keyed on the tenant id rather than fired at the end of the
+  // effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling `refresh()` in the same tick as `setMe(who)` would run
+  // the closure from the previous render, where `me` is still undefined.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
   // Frozen for the life of the page. `Date.now()` read in the render body moves
   // on every keystroke elsewhere, which would make every memo below recompute
@@ -643,6 +672,9 @@ export default function Analytics() {
         whether the people who arrived are still coming through the door, and how
         often.
       </p>
+
+      <Fetched at={readAt} busy={refetching} onRefresh={refresh}
+               what="these trends" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {doorState === 'silent' ? (

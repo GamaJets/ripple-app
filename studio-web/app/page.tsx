@@ -17,6 +17,7 @@ import { failure } from '@/lib/read';
 // When this page last read the gym, and a way to ask again. See `load` below
 // for why the front page in particular could not go without one.
 import { useFetched, Fetched } from '@/components/Fetched';
+import { nextFromSearch } from '@lib/consoleNext';
 import { Banner as SharedBanner } from '@/components/Banner';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
@@ -943,7 +944,20 @@ function SignIn() {
     setBusy(true); setErr(null);
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     if (error) { setErr(error.message); setBusy(false); return; }
-    location.reload();
+    // Back to the screen they were sent to, when they were sent to one.
+    //
+    // `ConsoleGate` has always said "Sign in and it will open on the screen you
+    // asked for" and this line was `location.reload()`, which reloads `/`. The
+    // destination now arrives as `?next=`, and `nextFromSearch` hands back only
+    // an absolute path on this origin — never a URL, never `//host` — so a link
+    // written by somebody else cannot bounce a person who has just typed their
+    // password on to a sign-in page that is not this one.
+    //
+    // `assign`, not `replace`: Back should return to the sign-in page rather
+    // than to whatever was before it, because a person who lands somewhere
+    // unexpected reaches for Back first.
+    const next = nextFromSearch(window.location.search);
+    if (next) location.assign(next); else location.reload();
   };
 
   const linkish = {

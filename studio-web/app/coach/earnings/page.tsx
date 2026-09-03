@@ -28,7 +28,7 @@
 // settlementBlocker and is printed word for word, because "3 sessions still
 // need an outcome recorded." tells a coach what to chase and "—" alone does
 // not.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 // `Unresolved` comes from here rather than being declared at the bottom of
 // this file. Seven console screens held a byte-identical copy, every one of
@@ -38,6 +38,8 @@ import { ConsoleGate, Unresolved } from '@/components/Gate';
 import { type Unread, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import {
@@ -400,7 +402,7 @@ export default function CoachEarnings() {
    */
   const load = useCallback(async (
     tenantId: string, trainerId: string, p: Period, stale: () => boolean = () => false,
-  ) => {
+  ): Promise<boolean> => {
     setSessions(null); setRuns(null); setRunsPrefix(false); setNamesErr(null);
 
     // allSettled, not all: one failing read must not take the other with it.
@@ -413,7 +415,9 @@ export default function CoachEarnings() {
       fetchMySettlements(tenantId, trainerId),
     ]);
 
-    if (stale()) return;
+    // A read superseded by a month change writes nothing and stamps nothing:
+    // it landed, but not on what is on screen.
+    if (stale()) return false;
 
     // A read that failed is null, never []. [] is the gym saying there were
     // none; null is nobody knowing. Here those two answers differ by a month's
@@ -429,6 +433,12 @@ export default function CoachEarnings() {
 
     const trouble = [s, r].filter((x): x is string => x !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
+
+    // Whole means both came back. `useFetched` stamps only on a whole read, so
+    // a month read without the settlements — the half that says what has
+    // already been paid — leaves the stamp where it was rather than dating an
+    // outstanding figure that is missing its subtrahend.
+    return settledLanded([sRes, rRes]);
   }, []);
 
   useEffect(() => {
@@ -459,13 +469,34 @@ export default function CoachEarnings() {
   // The month is a dependency on purpose: changing it is a fresh read, not a
   // filter over rows already in hand. Filtering would show August's sessions
   // under September's heading until something else happened to trigger a load.
+  const generation = useRef(0);
+  const { at: readAt, busy: reading, refresh } = useFetched(async () => {
+    if (!me?.tenantId) return false;
+    const mine = (generation.current += 1);
+    return load(me.tenantId, me.id, period, () => generation.current !== mine);
+  });
+
+  /**
+   * The month, kept current and dated.
+   *
+   * The month is a dependency on purpose: changing it is a fresh read, not a
+   * filter over rows already in hand. Filtering would show August's sessions
+   * under September's heading until something else happened to trigger a load.
+   * A change made while the previous month is still in flight is COALESCED by
+   * `useFetched` rather than dropped, and the superseded read neither writes
+   * nor stamps.
+   *
+   * The stamp is what a coach needed here: this is the screen a payslip is
+   * checked against, and a session marked by the owner ten minutes ago moves
+   * the outstanding figure. Left open on a phone all afternoon it answered
+   * about lunchtime and said nothing about it.
+   */
   useEffect(() => {
     if (me === undefined) return;
     if (!me?.tenantId) { setSessions([]); setRuns([]); setNamesErr(null); return; }
-    let dropped = false;
-    load(me.tenantId, me.id, period, () => dropped);
-    return () => { dropped = true; };
-  }, [me, period, load]);
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, period]);
 
   // The gym's fee is in whole units; everything downstream is minor units.
   //
@@ -674,7 +705,9 @@ export default function CoachEarnings() {
   const line = lines?.[0] ?? null;
   const notPaidByPolicy = line ? line.noShows + line.cancelled : 0;
 
-  const refresh = () => load(me.tenantId!, me.id, period);
+  // `refresh` is the hook's, not a second reader. The local one it replaces
+  // passed no `stale` callback at all, so a re-read fired from a button after a
+  // month change could land last and paint the other month's sessions.
 
   return (
     <Shell me={me} gymName={gymName} current="/coach/earnings">
@@ -685,6 +718,9 @@ export default function CoachEarnings() {
         a booked slot whose time has passed is not a delivered session, and this
         screen will not price one as though it were.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this month" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
 

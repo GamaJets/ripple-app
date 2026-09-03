@@ -209,7 +209,73 @@ export function minorFromWhole(whole: number | null | undefined, currency: strin
   return Number.isSafeInteger(scaled) ? scaled : null;
 }
 
-export function readMinorAmount(typed: string | null | undefined, currency: string | null | undefined): TypedAmount {
+/**
+ * A decimal figure that came from SOMEWHERE ELSE, in minor units.
+ *
+ * The third door, and the reason there are three rather than one is that the
+ * three have different rights of refusal:
+ *
+ *   `readMinorAmount`   a person typed it. Refuses ambiguity outright — a
+ *                       thousands separator, a fraction longer than the money
+ *                       has places, a dinar figure Stripe could not charge —
+ *                       because the next thing that happens is a card being
+ *                       debited by it and a refusal is cheaper than a guess.
+ *   `minorFromWhole`    a number the database already holds in whole units.
+ *   `minorFromDecimal`  a decimal an OUTSIDE SYSTEM stated, and this one may
+ *                       not refuse the same things. Meta reports "1265.87",
+ *                       Google's micros arrive here as "12.345678", and a
+ *                       Kuwaiti ad account reports thousandths that Stripe's
+ *                       whole-ten rule has nothing to do with. Refusing those
+ *                       would drop a coach's real ad spend on the floor and
+ *                       report it as unknown, which is a hole in a figure they
+ *                       compare their revenue against.
+ *
+ * So this one ROUNDS the places the currency does not have, and rounds them on
+ * the digits: the fraction is padded, the places the money has are kept, and
+ * the first place beyond them decides whether the last kept one goes up. No
+ * float is multiplied at any point, so 12.345 in a two-place currency is 1235
+ * — not 1234.999999999999 truncated to 1234.
+ *
+ * Null when nobody said which money it is, and null is never a zero. Null too
+ * for anything that is not a plain non-negative decimal: an empty field, the
+ * word "unknown" and a negative are all "we do not know what this cost", and a
+ * zero would say the coach got it for free.
+ */
+export function minorFromDecimal(raw: string | number | null | undefined, currency: string | null | undefined): number | null {
+  const dp = currencyDecimals(currency);
+  if (dp == null || raw == null) return null;
+  const s = String(raw).trim().replace(/[,\s]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const dot = s.indexOf('.');
+  const intPart = dot === -1 ? s : s.slice(0, dot);
+  // One place further than the money has, so the rounding digit is always there
+  // to read even when the source stated no fraction at all.
+  const frac = (dot === -1 ? '' : s.slice(dot + 1)).padEnd(dp + 1, '0');
+  const digits = intPart + frac.slice(0, dp);
+  if (digits.length > 15) return null;
+  const base = Number(digits);
+  if (!Number.isSafeInteger(base)) return null;
+  const out = frac.charCodeAt(dp) - 48 >= 5 ? base + 1 : base;
+  return Number.isSafeInteger(out) ? out : null;
+}
+
+/**
+ * `chargeable` is Stripe's whole-ten rule for the three-place currencies, and
+ * it is TRUE by default because nearly every box this reads is a box whose
+ * value goes to Stripe.
+ *
+ * Pass false where the figure is not a charge: a coach recording what they
+ * spent on an Instagram ad is stating a fact about their own bank statement,
+ * and a Kuwaiti account can perfectly well have billed them 12.345 KWD. Stripe
+ * has no opinion about that number and refusing it would drop a real cost out
+ * of the coach's own cost-per-client — which is a hole in the figure, not a
+ * safety.
+ *
+ * Every OTHER refusal still applies at both settings, because those are about
+ * whether the digits are an amount at all rather than about what may be
+ * charged.
+ */
+export function readMinorAmount(typed: string | null | undefined, currency: string | null | undefined, chargeable = true): TypedAmount {
   const cur = (currency || '').trim().toUpperCase();
   const dp = currencyDecimals(currency);
   if (!cur || dp == null) {
@@ -253,7 +319,7 @@ export function readMinorAmount(typed: string | null | undefined, currency: stri
   // Stripe's own rule for the thousandth-unit currencies: the amount is charged
   // in minor units and the last of the three must be a nought. Refused rather
   // than rounded, because rounding it is choosing an amount the coach did not.
-  if (dp === 3 && minorUnits % 10 !== 0) {
+  if (chargeable && dp === 3 && minorUnits % 10 !== 0) {
     return { ok: false, reason: `${cur} is charged in thousandths and the last place must be a nought. 12.340 is an amount; 12.345 is not one that can be charged.` };
   }
   return { ok: true, minorUnits };

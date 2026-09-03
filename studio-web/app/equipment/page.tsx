@@ -27,6 +27,8 @@ import { ConsoleGate, Unresolved } from '@/components/Gate';
 import { type Unread, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchEquipment, addEquipment, setStatus, recordService,
@@ -105,7 +107,7 @@ export default function EquipmentPage() {
   const [zone, setZone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // allSettled, not all: one failing read must not take the other with it.
     // Under Promise.all a refused gym_classes query also emptied the register,
     // so a gym with four machines out of action read as a gym with none — and
@@ -132,6 +134,11 @@ export default function EquipmentPage() {
       failure(lRes, 'the maintenance and incident log'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
+
+    // Whole means all three came back. `useFetched` stamps only on a whole
+    // read, so a register read without the coming week's classes leaves the
+    // stamp where it was rather than dating a seat count nobody computed.
+    return settledLanded([kRes, cRes, lRes]);
   }, []);
 
   useEffect(() => {
@@ -152,10 +159,32 @@ export default function EquipmentPage() {
       // what an engineer charged is a permanent record that has to say in what.
       const t = await readTenant(supabase, who.tenantId);
       if (live) { setGymName(t.name); setCcy(t.currency); setZone(t.zone); setGymNameUnread(!!t.error); }
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the three reads are the effect below's.
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * The register is written at the machine: a trainer marks a rower out of
+   * action from the floor while the owner has this screen open in the office,
+   * and "what is out of action" is exactly the figure somebody is about to
+   * decide a class on. The classes read is bounded at NOW and seven days out,
+   * so it also moves under a tab nobody has touched.
+   */
+  const { at: readAt, busy: refetching, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  // The first read. Keyed on the tenant id rather than fired at the end of the
+  // effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling `refresh()` in the same tick as `setMe(who)` would run
+  // the closure from the previous render, where `me` is still undefined.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -186,7 +215,7 @@ export default function EquipmentPage() {
   }
 
   const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId);
+  // `refresh` is the hook's, not a second reader — see /money for the same note.
 
   // The gym's own calendar day — the same date every service deadline on this
   // screen is compared against. This product sells in AED, four hours ahead of
@@ -220,6 +249,9 @@ export default function EquipmentPage() {
         seats out of. A broken rower is a scheduling fact, not just a
         maintenance one.
       </p>
+
+      <Fetched at={readAt} busy={refetching} onRefresh={refresh}
+               what="this register" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
 

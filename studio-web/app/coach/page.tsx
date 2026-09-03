@@ -34,6 +34,8 @@ import { ConsoleGate, Unresolved } from '@/components/Gate';
 import { type Unread, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { readTenant, amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
@@ -283,7 +285,7 @@ export default function Coach() {
    *  four reads failed sets err while the other three are perfectly fine. */
   const [settled, setSettled] = useState(false);
 
-  const load = useCallback(async (trainerId: string) => {
+  const load = useCallback(async (trainerId: string): Promise<boolean> => {
     const now = new Date();
     const since = new Date(now.getTime() - WINDOW_DAYS * DAY).toISOString();
     // To the end of today, so a session booked for this evening still shows up
@@ -355,9 +357,27 @@ export default function Coach() {
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
     setSettled(true);
+
+    // Whole means every read this screen shows came back. `aRes` is conditional
+    // — it is only asked when there are sessions to ask about — so an absent
+    // one is not a failure; it is a question nobody needed to put.
+    return settledLanded([sRes, qRes, rRes]) && (!aRes || aRes.status === 'fulfilled');
   }, []);
 
-  const refresh = useCallback(() => { if (me?.id) return load(me.id); }, [load, me?.id]);
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * This screen is called Your Day and it is read on a phone between clients.
+   * Everything on it is cut at "the end of today" — the sessions, the queue of
+   * unmarked ones, who has gone quiet — and a tab opened at eight in the
+   * morning went on answering about eight in the morning with nothing saying
+   * so. A client who booked at lunchtime was simply not on it.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.id && (me.role === 'trainer' || me.role === 'owner')
+      ? load(me.id)
+      : Promise.resolve(false)),
+  );
 
   useEffect(() => {
     let live = true;
@@ -384,11 +404,18 @@ export default function Coach() {
           setGymErr(t.error);
         }
       }
-      if (who.role !== 'trainer' && who.role !== 'owner') return;
-      await load(who.id);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the three reads are the effect below's.
+  }, []);
+
+  // The first read, once the identity is in state. `useFetched` holds the
+  // reader in a ref assigned during RENDER, so firing it in the same tick as
+  // `setMe(who)` would run the closure that has no coach on it.
+  useEffect(() => {
+    if (me?.id) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id, me?.role]);
 
   const now = Date.now();
   // The GYM's day, and the gym's day for each session, so both sides of the
@@ -546,6 +573,9 @@ export default function Coach() {
         Your sessions, your clients and your requests — nobody else&apos;s.
         {me.role === 'owner' ? ' You own this gym; the gym-wide view is under Sessions.' : ''}
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="your day" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {gymErr ? (

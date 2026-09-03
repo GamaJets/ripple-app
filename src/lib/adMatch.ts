@@ -101,28 +101,99 @@ export type MatchResult = {
   adsSeen: number;
 };
 
+/* ── how many places this money has ────────────────────────────────────────
+ *
+ * Copied from src/lib/coachMoney.ts rather than imported, and the copy is
+ * forced rather than lazy. This module is imported by three edge functions
+ * (`ads-sync`, `ads-google`, `ads-tiktok`), Deno resolves a relative specifier
+ * literally, and `coachMoney.ts` imports `./locale` — an extensionless path
+ * Deno cannot open. So a module an edge function imports has to be a LEAF with
+ * no relative imports at all; scripts/check-functions.mjs enforces exactly
+ * that, and `supabase/functions/owner-metrics/index.ts` carries the same copy
+ * for the same reason and says so.
+ *
+ * What stops the copies drifting is not discipline, it is an assertion:
+ * adMatch.test.ts imports `currencyDecimals` from coachMoney and this file's
+ * `adCurrencyDecimals` and requires the two to agree on every currency in both
+ * sets. A copy nothing compares is a copy that has already drifted.
+ *
+ * Stripe's own two lists. There are no fils in a yen, and there are a THOUSAND
+ * of them in a Kuwaiti dinar.
+ */
+const ZERO_DECIMAL = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf']);
+const THREE_DECIMAL = new Set(['bhd', 'jod', 'kwd', 'omr', 'tnd']);
+
+/** How many decimal places this money has, or null when nobody said which
+ *  money it is. Null rather than 2: there is no default currency in this
+ *  product and there is therefore no default number of places either. */
+export function adCurrencyDecimals(currency: string | null | undefined): number | null {
+  const cur = (currency || '').trim().toLowerCase();
+  if (!cur) return null;
+  if (ZERO_DECIMAL.has(cur)) return 0;
+  if (THREE_DECIMAL.has(cur)) return 3;
+  return 2;
+}
+
 /**
  * A provider's decimal amount → the minor units the rest of Repple stores.
  *
- * Multiplied by 100 flatly, because that is what `money()` in gymRecord.ts
- * divides by for every currency including the ones with no minor unit. A yen
- * figure of "1234" therefore becomes 123400 and renders as "JPY 1,234.00",
- * which is the right amount with a decimal place nobody uses — the same
- * compromise `client_purchases.amount_cents` already makes. Changing it here
- * alone would make ad spend and revenue disagree by a hundredfold.
+ * ── This used to be `Math.round(n * 100)` and the reason given was false ──
+ *
+ * The comment that stood here said the flat hundred was deliberate, "because
+ * that is what `money()` in gymRecord.ts divides by for every currency" — so a
+ * ¥1,234 ad stored 123400 and rendered as "JPY 1,234.00", the right amount with
+ * a decimal place nobody in Japan uses.
+ *
+ * `money()` has not done that for some time. It delegates to `minorMoney` in
+ * coachMoney.ts, which asks `currencyDecimals` how many places the money has:
+ * JPY has none, so 123400 minor units renders as "JPY 123,400". A coach in
+ * Tokyo was shown their advertising spend as a HUNDRED TIMES what they spent,
+ * and their cost-per-client with it, because a comment about the renderer went
+ * on being true of the writer after the renderer was fixed.
+ *
+ * The other end is the same defect the other way. A Kuwaiti account reporting
+ * 12.340 stored 1234, and `minorMoney` reads 1234 fils as KWD 1.234 — a tenth
+ * of the real figure. Revenue on the same screen comes from
+ * `client_purchases.amount_cents`, which is TRUE minor units as Stripe charged
+ * them, so the two sides of part 98's whole comparison were denominated
+ * differently in twenty-one currencies and nothing on the screen said so.
+ *
+ * ── So the currency is required, and it is the ad account's own ───────────
+ *
+ * There is no default currency in this product and therefore no default factor.
+ * Null when nobody said which money it is — `matchAds` passes the account
+ * currency it has already established, and a run with no currency, or with two,
+ * is refused whole by every caller before a figure is recorded.
+ *
+ * The scaling is done on the DIGITS — the same arithmetic, line for line, as
+ * `minorFromDecimal` in coachMoney.ts, which this cannot import for the
+ * leaf-module reason above — so nothing is multiplied as a float and 12.345 in
+ * a two-place currency is 1235 rather than 1234.999999999999 truncated to 1234.
+ * It ROUNDS a place the currency does not have rather than refusing it:
+ * Google's micros reach here as "12.345678" and a provider is not a person
+ * typing into a box, so dropping the ad would put a hole in the coach's spend
+ * where a rounded half-fils belongs.
  *
  * Null for anything unreadable, and null is never a zero. An empty string, a
  * missing field and the word "unknown" all mean we do not know what this ad
  * cost, and a zero would say the coach got it for free.
  */
-export function centsFromAmount(v: string | number | null | undefined): number | null {
-  if (v == null) return null;
-  const raw = String(v).trim().replace(/,/g, '');
-  if (!raw) return null;
-  if (!/^\d+(\.\d+)?$/.test(raw)) return null;
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return null;
-  const cents = Math.round(n * 100);
+export function centsFromAmount(v: string | number | null | undefined, currency: string | null | undefined): number | null {
+  const dp = adCurrencyDecimals(currency);
+  if (dp == null || v == null) return null;
+  const s = String(v).trim().replace(/[,\s]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const dot = s.indexOf('.');
+  const intPart = dot === -1 ? s : s.slice(0, dot);
+  // Padded one place further than the money has, so the rounding digit is there
+  // to read even when the provider stated no fraction at all.
+  const frac = (dot === -1 ? '' : s.slice(dot + 1)).padEnd(dp + 1, '0');
+  const digits = intPart + frac.slice(0, dp);
+  if (digits.length > 15) return null;
+  const base = Number(digits);
+  if (!Number.isSafeInteger(base)) return null;
+  const cents = frac.charCodeAt(dp) - 48 >= 5 ? base + 1 : base;
+  if (!Number.isSafeInteger(cents)) return null;
   // The same ceiling part 98 puts on a typed figure. An amount past it is a
   // provider fault or a units mix-up, not a campaign.
   if (cents < 0 || cents >= 100000000000) return null;
@@ -287,9 +358,18 @@ export function matchAds(ads: AdInsight[] | null | undefined, codes: KnownCode[]
     else if (unmatchedCents != null) unmatchedCents += cents;
   };
 
+  // The unit every figure below is scaled into. It is the ACCOUNT's currency,
+  // established from the ads themselves above, and it is deliberately not read
+  // per ad: where the ads disagree there is no account currency, `currency` is
+  // null, and every caller refuses the whole run rather than recording a total
+  // in a unit that is not one of them. Null here therefore makes every amount
+  // unreadable, which is the right answer — a spend figure with no currency is
+  // a number, and the screen it feeds compares it against what clients paid.
+  const unit = currencyConflict ? null : currency;
+
   for (const a of list) {
     const urls = (a?.urls || []).map((u) => String(u || '').trim()).filter(Boolean);
-    const cents = centsFromAmount(a?.spend);
+    const cents = centsFromAmount(a?.spend, unit);
     // An unreadable amount first: we cannot attribute a number we do not have,
     // and pretending it is zero would let it disappear into a matched code.
     if (cents == null) { dropInUnmatched(a, urls[0] ?? null, null, 'no-amount'); continue; }

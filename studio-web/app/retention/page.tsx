@@ -63,6 +63,8 @@ import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { sliceLanded, slicesLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships } from '@lib/gymRecord';
 import { gymDateText } from '@lib/gymWhen';
@@ -149,13 +151,18 @@ export default function RetentionPage() {
   const [wide, setWide] = useState<RetentionRecord>(EMPTY);
   const [contacts, setContacts] = useState<Slice<Contact>>(sliceLoading());
 
-  const loadContacts = useCallback(async (tenantId: string) => {
+  const loadContacts = useCallback(async (tenantId: string): Promise<boolean> => {
     setContacts(sliceLoading());
     const sinceIso = new Date(Date.now() - INTERVENTION_DAYS * DAY).toISOString();
-    setContacts(await slice(() => fetchContacts(tenantId, sinceIso)));
+    const got = await slice(() => fetchContacts(tenantId, sinceIso));
+    setContacts(got);
+    // Returned rather than only stored: the read stamp below covers the contact
+    // log as well as the roster, and this read's answer was previously
+    // destructured off the end of a `Promise.all` and dropped on the floor.
+    return sliceLanded(got);
   }, []);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setWide(EMPTY);
     const sinceIso = new Date(Date.now() - ACTIVITY_DAYS * DAY).toISOString();
 
@@ -164,7 +171,7 @@ export default function RetentionPage() {
     // page is allowed to be partial, but only if it says which part and what
     // that part was carrying. The interventions read is the same: a broken
     // `member_interventions` must leave the retention half standing.
-    const [memberships, visits, bookings, sessions] = await Promise.all([
+    const [memberships, visits, bookings, sessions, contactsLanded] = await Promise.all([
       slice(() => fetchMemberships(supabase, tenantId)),
       slice(() => fetchVisits(supabase, tenantId, { sinceIso })),
       slice(() => fetchBookings(tenantId, sinceIso)),
@@ -172,6 +179,12 @@ export default function RetentionPage() {
       loadContacts(tenantId),
     ]);
     setWide({ memberships, visits, bookings, sessions });
+
+    // Whole means all five answered. `useFetched` stamps only on a whole read,
+    // so a refresh that lost the door log leaves the stamp where it was — and
+    // on this screen the door log is the whole of the one finding a gym cannot
+    // get anywhere else: who is still training but no longer booking.
+    return contactsLanded && slicesLanded([memberships, visits, bookings, sessions]);
   }, [loadContacts]);
 
   useEffect(() => {
@@ -206,10 +219,28 @@ export default function RetentionPage() {
         const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
         setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the five reads are the effect below's.
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * Every figure here is a list of people somebody is about to ring, and the
+   * contact log records whether they already did. Two members of staff working
+   * the list from two tabs is the ordinary case, and a tab that answered about
+   * the moment it was opened had them ringing the same member twice with
+   * nothing on screen saying the list was old.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
   // `now` is pinned per render of the record rather than read inside each
   // helper, so the cohort spine, the drift windows, every cooldown and every
@@ -266,6 +297,9 @@ export default function RetentionPage() {
         pattern, how many have gone quiet — and the one only a gym with a door
         log can see: how many are still training but no longer on the timetable.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this roster" style={{ margin: '2px 0 14px' }} />
 
       {g.warning ? <Banner tone="crit">{g.warning}</Banner> : null}
       {g.caveat ? <Banner>{g.caveat}</Banner> : null}

@@ -48,7 +48,7 @@ import { bookableCredits, creditsHeroNote, routeReason,
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
 import { packDeadline, bookedBy } from '../../src/lib/packDeadline';
-import { useToday } from '../../src/ui/today';
+import { useToday, useNow } from '../../src/ui/today';
 import { Fetched } from '../../src/ui/fetched';
 import { useReadStamp } from '../../src/ui/readStamp';
 import type { LoadStatus } from '../../src/ui/loadStatus';
@@ -138,8 +138,18 @@ export default function SessionCredits() {
   const route: CreditRoute = book.route;
   const lines = book.lines;
   const left = book.left;
+  /* The instant the ledger is split on, and it is IN the dependency list.
+   * `buildLedger` defaults its third argument to `Date.now()`, so leaving it
+   * off read the clock inside a memo keyed `[sessions, route]` — neither of
+   * which moves when time does. `isPast` and `ledgerStateOf` are both judged
+   * against it, so a session that has since been taken stayed under Upcoming
+   * and went on being counted as a credit still to spend. This screen is
+   * reached from a tab and is never unmounted, so that was true until the app
+   * was killed. See src/ui/today.ts. */
+  const nowMs = useNow().getTime();
+
   const ledger: Ledger | null = useMemo(
-    () => (sessions === undefined ? null : buildLedger(sessions, route)), [sessions, route]);
+    () => (sessions === undefined ? null : buildLedger(sessions, route, nowMs)), [sessions, route, nowMs]);
   const expected = useMemo(() => expectedDraws(ledger), [ledger]);
   const shortfalls = useMemo(() => shortfallLine(ledger), [ledger]);
 

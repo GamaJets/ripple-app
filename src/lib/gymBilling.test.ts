@@ -142,6 +142,24 @@ const pay = (o: Partial<GymPayment> = {}): GymPayment => ({
     'the amount is typed POSITIVE and Repple applies the minus — a screen that asked for a negative would one day be handed a positive and file a second payment');
   ok(reversalBlocker(original, 0, NaN) != null, 'an unparseable amount is refused rather than written');
 
+  // The sentence names the money, and it names it in the right number of
+  // places. It was `(remaining / 100).toFixed(2)`, which is a bare figure in a
+  // factor that is right for sterling and wrong for twenty-one currencies —
+  // a gym in Tokyo owed ¥6,300 was told "63.00 is still outstanding".
+  ok(/GBP 50\.00/.test(reversalBlocker(original, 0, 6000) ?? ''),
+    'what is left is quoted with its currency on it, in that currency\u2019s own places');
+  ok(/JPY 6,300/.test(reversalBlocker(pay({ amountCents: 6300, currency: 'JPY' }), 0, 9000) ?? ''),
+    'a yen has no minor unit, so \u00a56,300 is \u00a56,300 and not 63.00');
+  ok(/KWD 12\.340/.test(reversalBlocker(pay({ amountCents: 12340, currency: 'KWD' }), 0, 99999) ?? ''),
+    'and a dinar is quoted to three places, not to a hundredth of itself');
+  // A payment whose currency nobody recorded is still refused, and simply does
+  // not quote two figures in a money it cannot name. The column is NOT NULL, so
+  // the shape this actually arrives in is an empty string — which is the same
+  // fact as a null one and is treated as such everywhere in this file.
+  const noCcy = reversalBlocker(pay({ currency: '' }), 0, 6000);
+  ok(noCcy != null, 'a payment with no currency can still not be over-reversed');
+  ok(!/\d/.test(noCcy ?? ''), 'and the refusal quotes no bare number, because a bare number is read in whatever money the reader is thinking in');
+
   // Correcting a correction: the amount is already negative, so a second minus
   // would ADD money to the ledger.
   ok(reversalBlocker(pay({ kind: 'refund', amountCents: -5000, reversesPaymentId: 'p1' }), 0, 100) != null,

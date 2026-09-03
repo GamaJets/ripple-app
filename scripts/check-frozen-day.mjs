@@ -256,7 +256,11 @@ for (const f of files) {
     if (!text) continue;
     // An empty dependency array as the second argument. `[]` and nothing else:
     // a memo with real dependencies re-runs when they move and is not this bug.
-    if (!/,\s*\[\s*\]\s*\)$/.test(text)) continue;
+    // The `,?` allows the trailing comma this tree writes on a multi-line call.
+    // Without it `useMemo(() => todayKey(), [],)` matches nothing and is
+    // invisible to this gate — the same blind spot that hid two frozen memos
+    // from the first draft of scripts/check-frozen-hook.mjs.
+    if (!/,\s*\[\s*\]\s*,?\s*\)$/.test(text)) continue;
     if (!READS_CLOCK.test(text)) continue;
     const line = lineOf(i);
     if (marked(line)) continue;

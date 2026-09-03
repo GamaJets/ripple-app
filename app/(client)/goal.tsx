@@ -36,6 +36,7 @@ import { fmtFullDay } from '../../src/lib/format';
 // The chip's span turned into a day on the MEMBER'S calendar. See the header of
 // that file for the two whole-day errors the expression this replaced carried.
 import { targetDayIn } from '../../src/lib/goalDeadline';
+import { useNow } from '../../src/ui/today';
 // Whether a row is still on this phone. The queue was built for goals set with
 // no signal and this screen was never told about it: the waiting row was drawn
 // exactly like a stored one, could not be removed or ticked off, and both
@@ -138,6 +139,24 @@ export default function Goal() {
   const [amount, setAmount] = useState('');
   const [title, setTitle] = useState('');
   const [days, setDays] = useState<number | null>(84);
+  /**
+   * The clock the chips are read against, and the one the save writes with.
+   *
+   * ONE instant for both, deliberately. The chip says "12 wks" and the line
+   * under it now says which day that is, and those two must be the same day the
+   * row ends up carrying — a preview computed from one clock and a write from
+   * another can disagree across midnight, and the member would be shown a date
+   * and given a different one.
+   *
+   * `useNow` (src/ui/today.ts) rather than a bare `Date.now()`: this screen is
+   * registered `href: null` in app/(client)/_layout.tsx, so it is mounted once
+   * and never torn down, and the preview would otherwise still be offering
+   * yesterday's answer a week later. It re-reads at the next local midnight, on
+   * every foreground and whenever the screen is focused.
+   */
+  const nowMs = useNow().getTime();
+  /** Which day the chosen chip lands on, or null for "No date". */
+  const targetDay = targetDayIn(days, nowMs);
   const [saving, setSaving] = useState(false);
 
   const seriesFor = (k: MeasuredKind): Point[] =>
@@ -187,7 +206,11 @@ export default function Goal() {
     // argued and asserted in src/lib/goalDeadline.ts. Computed at the moment of
     // the tap rather than held in a memo, so a screen left open across midnight
     // counts from the day the member is actually in when they press Save.
-    const targetDateISO = targetDayIn(days);
+    //
+    // The same `targetDay` the line under the chips is showing, not a second
+    // call: what the member was shown before they tapped Save is what gets
+    // written down.
+    const targetDateISO = targetDay;
     setSaving(true);
     let ok: GoalSaved = false;
     if (kind === 'custom') {
@@ -442,6 +465,19 @@ export default function Goal() {
                   </Pressable>
                 ))}
               </View>
+              {/* Which day the chip actually is.
+                  "12 wks" is a span, and the thing a member plans around is a
+                  date — it is what the list below prints ("By 2 Jun"), what
+                  `isOverdue` judges them against, and what their coach reads. It
+                  was only visible AFTER saving, so the one moment somebody could
+                  have said "that is the week I'm away" was the one moment the
+                  screen would not tell them. Read from the same instant the save
+                  writes with, so the two cannot disagree. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }} accessibilityLiveRegion="polite">
+                {targetDay
+                  ? `That is ${shortDate(targetDay)}.`
+                  : 'No date. The goal stays open until you mark it done, and nothing will call it overdue.'}
+              </Text>
 
               <View style={{ marginTop: sp.lg }}>
                 <Cta label={saving ? 'Saving…' : 'Save Goal'} wide disabled={saving} onPress={save} />

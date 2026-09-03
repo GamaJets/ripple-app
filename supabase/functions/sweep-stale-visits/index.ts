@@ -58,6 +58,7 @@
 // closed on a missing configuration, not open.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { secretConfigured, secretMatches } from '../../../src/lib/sharedSecret.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -102,15 +103,16 @@ Deno.serve(async (req: Request) => {
 
   // Fail closed. An unset secret is a misconfigured deploy, and the wrong
   // response to one is to start writing to every gym in the database.
-  if (!SECRET) return json({ ok: false, error: 'not configured' }, 503);
+  if (!secretConfigured(SECRET)) return json({ ok: false, error: 'not configured' }, 503);
   if (!SUPABASE_URL || !SERVICE) return json({ ok: false, error: 'not configured' }, 503);
 
   const offered = req.headers.get('x-sweep-secret') ?? '';
-  // Length-first, then a constant-time-ish compare over the whole string. This
-  // is a scheduled job rather than a login, so the threat is low — but a
-  // short-circuiting `===` on a secret is the kind of thing that is only ever
-  // noticed after it matters.
-  if (offered.length !== SECRET.length || !timingSafeEqual(offered, SECRET)) {
+  // The compare lives in src/lib/sharedSecret.ts now. The reasoning that used to
+  // stand here — that a short-circuiting `===` on a secret is the kind of thing
+  // only ever noticed after it matters — is still the reasoning, and it is
+  // written there once for all three functions guarded by a shared secret.
+  // Two of the three had already drifted apart by the time anybody looked.
+  if (!secretMatches(offered, SECRET)) {
     return json({ ok: false, error: 'refused' }, 401);
   }
 
@@ -157,10 +159,3 @@ Deno.serve(async (req: Request) => {
   });
 });
 
-/** Compare two equal-length strings without returning early on the first
- *  difference. Not a substitute for a real MAC, and not pretending to be. */
-function timingSafeEqual(a: string, b: string): boolean {
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}

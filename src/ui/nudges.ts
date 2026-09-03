@@ -50,6 +50,7 @@ import { worstStatus, type LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import { useRoster } from './roster';
 import { useTenant } from './tenant';
+import { useNow } from './today';
 import {
   readClientActivity, isQueryableId, DEFAULT_WINDOWS,
   type ActivityEvent, type Drift,
@@ -328,6 +329,11 @@ export function useNudges(): NudgeBook {
   // candidates the board was built from, so a client cannot be assessable by one
   // and not the other — and only for candidates whose activity actually came
   // back, which is `activity.read` and not "their event list is empty".
+  /** The instant lateness is measured from. `useNow()` rather than a
+   *  `Date.now()` in the memo body, and it is IN the dependency list below —
+   *  see src/ui/today.ts. */
+  const nowMs = useNow().getTime();
+
   const dueBack = useMemo(() => {
     if (combined !== 'ready' || !board) return null;
     const already = new Set<string>([
@@ -338,12 +344,12 @@ export function useNudges(): NudgeBook {
     for (const c of loaded.candidates) {
       if (!c.activity.read) continue;
       if (already.has(c.clientId)) continue;
-      const cadence = assessCadence(c.activity.events, Date.now(), DEFAULT_WINDOWS.historyDays);
+      const cadence = assessCadence(c.activity.events, nowMs, DEFAULT_WINDOWS.historyDays);
       if (!worthRaising(cadence)) continue;
       rows.push({ clientId: c.clientId, name: c.name, cadence });
     }
     return byLateness(rows);
-  }, [combined, board, loaded.candidates]);
+  }, [combined, board, loaded.candidates, nowMs]);
 
   const note = useMemo(() => {
     if (combined === 'error') {

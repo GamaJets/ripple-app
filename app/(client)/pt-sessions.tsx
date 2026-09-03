@@ -292,9 +292,18 @@ export default function PtSessions() {
    * row whose slot state moved after the fact, and dropping a cancellation from
    * a history is precisely what supabase/parts/195 argues against.
    */
+  /* `nowMs` passed, and IN the dependency list. `pastSessions` defaults its
+   * second argument to `Date.now()`, so leaving it off put the clock read
+   * inside a memo keyed `[sessions, c.id]` — the same defect the `mine` memo
+   * above was fixed for, in the same file, one screen apart. It is the
+   * UNDER-including direction again: `hasEnded` kept only sessions whose start
+   * had passed at the moment this screen first mounted, and this screen is
+   * reached from a tab registered `href: null`, so it never unmounts. A session
+   * the member took this afternoon was simply absent from their own history —
+   * not marked, not disputed, not there — while the coach's copy showed it. */
   const history = useMemo(
-    () => pastSessions(sessions.filter((s) => s.clientId === c.id)),
-    [sessions, c.id],
+    () => pastSessions(sessions.filter((s) => s.clientId === c.id), nowMs),
+    [sessions, c.id, nowMs],
   );
   /* How far back these rows actually reach. The provider reads newest-first and
    * capped (src/lib/rowCap.ts), so under 'partial' the cut is at the OLD end of

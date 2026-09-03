@@ -28,6 +28,8 @@ import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import { Banner as SharedBanner, Announce } from '@/components/Banner';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { slicesLanded } from '@lib/readLanded';
 import {
   fetchMemberships, fetchPayments, money,
   type Membership, type GymPayment,
@@ -125,7 +127,7 @@ export default function Members() {
   // and this is the screen the six-hundred-member roster lives on.
   const [q, setQ] = useState('');
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setRec(EMPTY);
     const sinceIso = new Date(Date.now() - WINDOW_DAYS * DAY).toISOString();
 
@@ -147,14 +149,40 @@ export default function Members() {
     // gym that has not applied part 197 yet — where this table does not exist —
     // gets one stated failure on one section instead of a page that will not
     // load. Everything else on this screen is unaffected by it.
+    let recsLanded = true;
     try {
       setGymRecs(byMember(await fetchMemberRecords(supabase, tenantId)));
       setGymRecsErr(null);
     } catch (e: any) {
+      recsLanded = false;
       setGymRecs(null);
       setGymRecsErr(e?.message ?? 'The gym’s own notes on your members could not be read.');
     }
+
+    // Whole means all eight reads answered. `useFetched` stamps only on a whole
+    // read, so a refresh that lost the door log leaves the stamp where it was
+    // and the section's own banner is what says which read is missing —
+    // counting what the server confirmed, not what was sent. A TRUNCATED slice
+    // still counts as an answer: see src/lib/readLanded.ts, and the truncation
+    // has a banner of its own.
+    return recsLanded && slicesLanded([
+      memberships, payments, visits, bookings, sessions, passes, invites,
+    ]);
   }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * The whole roster in one read, and every figure on it is one a member of
+   * staff acts on: who is overdue, who has not been in for six weeks, whose
+   * pass has run out. A console left open on the front desk answered about the
+   * moment the tab was opened and did not say which moment that was — so
+   * "last in 41 days ago" was read at nine in the morning and believed at four
+   * in the afternoon, after the person had walked past the desk.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
 
   useEffect(() => {
     let live = true;
@@ -184,10 +212,22 @@ export default function Members() {
         const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
         setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only. The eight reads are fired by the effect
+    // below, through `refresh`, so the first read stamps exactly like every
+    // later one.
+  }, []);
+
+  // The first read. Keyed on the tenant id rather than fired at the end of the
+  // effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling `refresh()` in the same tick as `setMe(who)` would run
+  // the closure from the previous render — the one where `me` is still
+  // undefined — and answer `false` without having read anything.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
   const dossiers = useMemo(() => buildDossiers(rec), [rec]);
   const active = doorLogActive(rec);
@@ -306,6 +346,9 @@ export default function Members() {
         against classes attended, one-to-ones and passes.
       </p>
 
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this roster" style={{ margin: '2px 0 16px' }} />
+
       {warning ? <Banner tone="crit">{warning}</Banner> : null}
       {cut ? <Banner tone="crit">{cut}</Banner> : null}
       {caveat ? <Banner>{caveat}</Banner> : null}
@@ -377,7 +420,7 @@ export default function Members() {
           d={chosen} rec={rec} active={active} onClose={() => pick(null)} ccy={ccy}
           today={today} zone={zone}
           gymRec={gymRecs?.get(chosen.memberId) ?? null} gymRecsRead={gymRecs !== null}
-          tenantId={tenantId} me={me} onSaved={() => load(tenantId)}
+          tenantId={tenantId} me={me} onSaved={refresh}
         />
       ) : (
         <Section title="One member" sub="Pick somebody above to open their record.">

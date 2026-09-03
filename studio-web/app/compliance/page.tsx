@@ -66,6 +66,8 @@ import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { type Unread, type Read, reading } from '@/lib/read';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships, money, type Membership } from '@lib/gymRecord';
 // The reader's locale, the GYM's zone. A signature date and a document's filing
@@ -162,7 +164,7 @@ export default function Compliance() {
   const [members, setMembers] = useState<Read<Membership>>(reading);
   const [feed, setFeed] = useState<Read<Activity>>(reading);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // allSettled, never all. A refused documents read must not empty the
     // signatures beside it — a gym would then be shown as having nobody signed
     // up to anything because a different table failed, which on this screen is
@@ -179,6 +181,12 @@ export default function Compliance() {
     setDocuments(landed(dRes, 'the documents on file'));
     setMembers(landed(mRes, 'the member roster'));
     setFeed(landed(fRes, 'the activity log'));
+
+    // Whole means all five came back. `useFetched` stamps only on a whole read
+    // — and on the one screen in this console whose subject is what the gym can
+    // PRODUCE when an insurer asks, a figure with no date on it is not evidence
+    // of anything.
+    return settledLanded([aRes, sRes, dRes, mRes, fRes]);
   }, []);
 
   /**
@@ -217,10 +225,34 @@ export default function Compliance() {
       if (!live) return;
       setGymName(t.name); setCcy(t.currency); setZone(t.zone); setGymErr(t.error);
       await readRetention(who.tenantId);
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load, readRetention]);
+    // Identity, the gym record and the retention period. The five reads below
+    // are the effect after next's.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * Somebody signs a waiver at the desk while the owner has this open, and the
+   * screen that says who has agreed to what goes on saying what it said an hour
+   * ago. That is the wrong direction for this page in particular: the reading
+   * an owner takes off it is "these members may train".
+   */
+  // `reading` is taken here by `Read`'s constructor from lib/read.
+  const { at: readAt, busy: refetching, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  // The first read. Keyed on the tenant id rather than fired at the end of the
+  // effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling `refresh()` in the same tick as `setMe(who)` would run
+  // the closure from the previous render, where `me` is still undefined.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -255,7 +287,7 @@ export default function Compliance() {
   }
 
   const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId);
+  // `refresh` is the hook's, not a second reader — see /money for the same note.
 
   return (
     <Shell me={me} gymName={gymName} gymNameUnread={!!gymErr} current="/compliance">
@@ -265,6 +297,9 @@ export default function Compliance() {
         the log of what has been done to its record. Everything here is what the gym has to be able
         to produce when somebody asks — an insurer, a regulator, or the member themselves.
       </p>
+
+      <Fetched at={readAt} busy={refetching} onRefresh={refresh}
+               what="this record" style={{ margin: '2px 0 14px' }} />
 
       <Retention
         years={retentionYears} why={retentionErr} tenantId={tenantId}

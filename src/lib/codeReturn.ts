@@ -22,6 +22,7 @@
 // unread revenue figure is not no revenue. Both arrive here as null and leave
 // as a dash.
 import { num } from './format';
+import { currencyDecimals, majorFromMinor, readMinorAmount } from './coachMoney';
 import { money } from './gymRecord';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -344,6 +345,26 @@ function oneIn(p: number): string {
 }
 
 /**
+ * Which money this row's spend box is denominated in, or null when nobody has
+ * established one.
+ *
+ * The spend already recorded first, because that is the unit the figure in the
+ * box is IN and a coach editing "250" is editing 250 of that. Then the code's
+ * revenue currency, which `my_code_returns()` fills from the same chain
+ * `set_code_spend` resolves a spend with — the coach's packages if they agree,
+ * their gym, their own currency when they have no gym (supabase/parts/1082) —
+ * and which is present even on a code nobody has bought through, because the
+ * function returns the house currency beside a zero total.
+ *
+ * Null is a real answer and it is the one that matters: a coach with no
+ * packages, no gym currency and none of their own has no unit, and there is no
+ * default currency in this product to lend them.
+ */
+export function spendCurrency(row: CodeReturnRow): string | null {
+  return row.spend?.currency ?? row.revenue?.currency ?? null;
+}
+
+/**
  * What the coach typed into the spend field → what to send.
  *
  * Blank CLEARS the record rather than storing zero, and those are different
@@ -353,33 +374,88 @@ function oneIn(p: number): string {
  * the top of every comparison.
  *
  * Whole units in, minor units out — a coach types 400, not 40000.
+ *
+ * ── The currency is an argument because the factor is not a hundred ───────
+ *
+ * This was `Math.round(Number(bare) * 100)` under a `^\d+(\.\d{1,2})?$` regex,
+ * and both halves of that hardcoded two decimal places into a figure that is
+ * WRITTEN TO THE DATABASE — `coach_code_spend.amount_cents`, which part 98's
+ * cost-per-client is then divided out of and which `money()` renders through
+ * `minorMoney`, a function that asks the currency how many places it has.
+ *
+ * A coach in Kuwait typing 250 had 25,000 fils recorded: KWD 25 against a
+ * campaign that cost 250. A coach in Tokyo typing 50000 had 5,000,000 recorded
+ * and was shown ¥5,000,000. The regex was wrong in both directions at once —
+ * it refused a legitimate three-place dinar figure and accepted "250.50" in a
+ * currency that has no half.
+ *
+ * ── Where the scaling belongs, and what it costs ──────────────────────────
+ *
+ * `set_code_spend` takes `p_currency` and resolves one itself when the caller
+ * states none, so the SERVER is the authority on which money a coach's spend is
+ * in. The client scaled first and the server labelled afterwards, and the two
+ * never spoke: the client's hundred and the server's answer could disagree, and
+ * on a yen account they always did.
+ *
+ * So the currency is passed in, the figure is scaled with it, and the caller
+ * sends that same currency to the server as `p_currency` — link 1 of the chain
+ * — which makes the unit the number was scaled in and the unit it is stored
+ * under the same fact rather than two guesses that happen to meet.
+ *
+ * With no currency this REFUSES. That is the cost, and it is a real one: a
+ * coach with no packages, no gym currency and none of their own cannot record
+ * what a code cost them until somebody says what money they are in. They could
+ * not before either — `set_code_spend` raises `22023` at them — but they now
+ * meet the refusal in the field instead of after the save, which is the honest
+ * place for it. What they must never get is a number recorded in a unit nobody
+ * established.
  */
 export type SpendInput =
   | { kind: 'clear' }
-  | { kind: 'amount'; cents: number }
+  | { kind: 'amount'; cents: number; currency: string }
   | { kind: 'bad'; reason: string };
 
-export function parseSpend(input: string | null | undefined): SpendInput {
-  const raw = String(input ?? '').trim().replace(/[, ]/g, '');
+export function parseSpend(input: string | null | undefined, currency?: string | null): SpendInput {
+  const raw = String(input ?? '').trim().replace(/\s/g, '');
   if (!raw) return { kind: 'clear' };
+  const cur = (currency || '').trim().toUpperCase();
+  if (!cur || currencyDecimals(cur) == null) {
+    return {
+      kind: 'bad',
+      reason: 'Repple does not know what money you are in yet, so a figure typed here would not be an amount of anything. Price a package, or set your currency, and this will take what the code cost you.',
+    };
+  }
   // Currency symbols are what a person types when asked for an amount of
   // money, and refusing them teaches nothing.
-  const bare = raw.replace(/^[^\d.\-]+/, '');
-  if (!/^\d+(\.\d{1,2})?$/.test(bare)) {
-    if (/^-/.test(bare) || /^[^\d.]*-/.test(raw)) return { kind: 'bad', reason: 'Spend cannot be negative.' };
-    return { kind: 'bad', reason: 'Enter what you spent as a number — 250, or 250.50. Leave it empty if you do not know.' };
-  }
-  const cents = Math.round(Number(bare) * 100);
-  if (!Number.isFinite(cents)) return { kind: 'bad', reason: 'That is not an amount.' };
-  if (cents >= 100000000000) return { kind: 'bad', reason: 'That is more than Repple will record against one code — check the zeros.' };
-  return { kind: 'amount', cents };
+  const bare = raw.replace(/^[^\d.,\-]+/, '');
+  if (/^-/.test(bare) || /^[^\d.,]*-/.test(raw)) return { kind: 'bad', reason: 'Spend cannot be negative.' };
+  // The house reader, not a second one. `chargeable: false` because this is
+  // what the coach's ad platform billed them, not a figure going to Stripe —
+  // a Kuwaiti account can bill 12.345 KWD and Stripe's whole-ten rule has
+  // nothing to say about it.
+  const read = readMinorAmount(bare, cur, false);
+  if (!read.ok) return { kind: 'bad', reason: read.reason };
+  if (read.minorUnits >= 100000000000) return { kind: 'bad', reason: 'That is more than Repple will record against one code — check the zeros.' };
+  return { kind: 'amount', cents: read.minorUnits, currency: cur };
 }
 
-/** What is already in the spend field when the sheet opens, or '' for unknown. */
+/**
+ * What is already in the spend field when the sheet opens, or '' for unknown.
+ *
+ * This was `cents / 100`, which showed a coach in Kuwait ten times what they
+ * had recorded and a coach in Tokyo a hundredth of it — and a wrong figure in
+ * an EDITABLE box is worse than a wrong one on a label, because the coach
+ * corrects it and writes the error in properly. `majorFromMinor` asks the
+ * currency instead.
+ *
+ * A fraction that is all noughts is dropped, as it always was: a coach who
+ * typed 250 sees 250 rather than 250.00, and in a three-place currency 250
+ * rather than 250.000.
+ */
 export function spendFieldValue(row: CodeReturnRow): string {
   if (!row.spend) return '';
-  const whole = row.spend.cents / 100;
-  return Number.isInteger(whole) ? String(whole) : whole.toFixed(2);
+  const major = majorFromMinor(row.spend.cents, row.spend.currency);
+  return major.replace(/\.0+$/, '');
 }
 
 /**

@@ -83,6 +83,8 @@ import { ConsoleGate, Unresolved } from '@/components/Gate';
 import { type Unread, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { Banner as SharedBanner } from '@/components/Banner';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
@@ -202,7 +204,7 @@ export default function Classes() {
   /** Which place the figures below cover. See ALL_PLACES / NO_PLACE above. */
   const [place, setPlace] = useState<string>(ALL_PLACES);
 
-  const load = useCallback(async (tenantId: string, window: number) => {
+  const load = useCallback(async (tenantId: string, window: number): Promise<boolean> => {
     setClasses(null); setTrainers(null); setUpcoming(null); setErr(null);
     // Back to the whole gym on every reload. A 7-day window and a 90-day one do
     // not have to contain the same places, and a filter left pointing at a place
@@ -238,6 +240,11 @@ export default function Classes() {
       failure(uRes, 'the classes still to run'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
+
+    // Whole means all three came back. `useFetched` stamps only on a whole
+    // read, so a window whose classes would not load leaves the stamp where it
+    // was rather than dating a fill rate computed from nothing.
+    return settledLanded([cRes, tRes, uRes]);
   }, []);
 
   useEffect(() => {
@@ -262,10 +269,29 @@ export default function Classes() {
         const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
         setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId, days);
     })();
     return () => { live = false; };
-  }, [load, days]);
+    // Identity and the gym record only. The classes are read by the effect
+    // below, through `refresh` — which is also what stopped changing the window
+    // from re-reading the gym's name and timezone on every press.
+  }, []);
+
+  /**
+   * The chosen window's classes, kept current and dated.
+   *
+   * Fill and show are both cut at the moment of the read — the window ends
+   * "now" — and this page never said which now. A tab open since the morning
+   * reported a fill rate over a window that stopped in the morning, on the
+   * screen an owner uses to decide whether to cancel a class this evening.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId, days) : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId, days]);
 
   const nameOf = useCallback((c: GymClass): string => {
     const written = c.instructor?.trim();
@@ -363,7 +389,7 @@ export default function Classes() {
   }
 
   const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId, days);
+  // `refresh` is the hook's, not a second reader — see /money for the same note.
 
   // err is only ever set by a finished load, so a state still null once it is
   // set is a read that was refused rather than one still in flight.
@@ -439,6 +465,9 @@ export default function Classes() {
         Fill is how much of the room sold. Show is how much of what sold turned up. They are
         different problems with opposite fixes, so they are never added together here.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="these classes" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
 

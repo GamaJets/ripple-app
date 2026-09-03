@@ -41,7 +41,13 @@ async function refresh(provider: string, refreshToken: string) {
 
   const postForm = base();
   postForm.set('client_secret', clientSecret);
-  const attempts = [
+  // Annotated rather than inferred. Left bare, TypeScript gives this array a
+  // UNION element type — the first entry has no `Authorization` key, the second
+  // does — and `a.headers` below is then a union that `fetch` will not accept as
+  // `HeadersInit`. Deno's own types are laxer and let it through, which is why
+  // it deploys; the check:functions type gate reads it with the DOM lib and is
+  // right to object. `Record<string, string>` is what both entries actually are.
+  const attempts: { headers: Record<string, string>; body: URLSearchParams }[] = [
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: postForm },
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: 'Basic ' + btoa(`${clientId}:${clientSecret}`) }, body: base() },
   ];

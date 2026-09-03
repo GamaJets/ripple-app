@@ -19,7 +19,7 @@
 // So when anything in the period is still unmarked, the payable total is a dash
 // with the count beside it, never a number — not even a number labelled
 // "provisional", because the provisional number is the one that gets paid.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 // `Unresolved` comes from here rather than being declared at the bottom of
 // this file. Seven console screens held a near-identical copy, every one of
@@ -28,6 +28,8 @@ import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 // screen keeps only its 13px, through `style`.
 import { ConsoleGate, Unresolved } from '@/components/Gate';
 import { type Unread, failure } from '@/lib/read';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
@@ -256,7 +258,7 @@ export default function Payroll() {
     // was in hand when the read went out.
     gymZone: string | null,
     stale: () => boolean = () => false,
-  ) => {
+  ): Promise<boolean> => {
     setSessions(null); setTrainers(null); setRuns(null);
 
     // allSettled, not all: one failing read must not take the others with it.
@@ -302,7 +304,11 @@ export default function Payroll() {
       fetchAwaitingOutcome(supabase, tenantId, p.fromIso),
     ]);
 
-    if (stale()) return;
+    // A read that has been superseded — the month was changed while it was in
+    // flight — writes nothing and stamps nothing. It landed, but not on what is
+    // on screen, and dating July's figures by August's read is the same lie the
+    // stamp exists to prevent.
+    if (stale()) return false;
 
     // The pay rates get their own error rather than joining the banner above.
     // A failed read here does not empty the run — every session falls back to
@@ -336,6 +342,12 @@ export default function Payroll() {
 
     const trouble = [s, t, r].filter((x): x is string => x !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
+
+    // Whole means all eight came back. `useFetched` stamps only on a whole
+    // read, so a run that lost the settlements — the read that says what has
+    // ALREADY been paid — leaves the stamp where it was rather than dating a
+    // payable total computed without it.
+    return settledLanded([sRes, tRes, rRes, pRes, cRes, aRes, closesRes, uRes]);
   }, []);
 
   useEffect(() => {
@@ -398,20 +410,47 @@ export default function Payroll() {
   // not a filter over rows already in hand. Filtering would have shown August's
   // sessions under September's heading until something else triggered a load —
   // on a screen that pays people, under the wrong month's total.
-  useEffect(() => {
-    if (me === undefined) return;
-    if (!me?.tenantId) { setSessions([]); setTrainers([]); setRuns([]); return; }
+  /**
+   * The run itself, kept current and dated.
+   *
+   * `dropped` is held in a ref rather than in the effect's closure because the
+   * reader now also runs from the Read-again button and from the tab coming
+   * back, neither of which the effect knows about. A read is superseded exactly
+   * when a NEWER one has started, which is what bumping the ref on every pass
+   * says.
+   *
+   * No poll. A payroll month does not move while somebody looks at it — what
+   * moves is the sessions inside it, marked at the desk by somebody else, and
+   * that is what the stamp and the button are for.
+   */
+  const generation = useRef(0);
+  const { at: readAt, busy: reading, refresh } = useFetched(async () => {
+    if (!me?.tenantId) return false;
     // The gym row first. See `gymRead`: the class-pay lines are DATED at read
     // time and cannot be re-dated afterwards, so firing this before the zone
     // is in hand would build the run out of lines cut on the reader's
     // calendar. `gymRead` is set on the refused branch as well, so a gym whose
     // row will not read still gets its run — with the reader-clock note under
     // the period picker, which is then the honest description of it.
-    if (!gymRead) return;
-    let dropped = false;
-    load(me.tenantId, period, zone, () => dropped);
-    return () => { dropped = true; };
-  }, [me, period, load, gymRead, zone]);
+    if (!gymRead) return false;
+    const mine = (generation.current += 1);
+    return load(me.tenantId, period, zone, () => generation.current !== mine);
+  });
+
+  // The period is a dependency on purpose: changing the month is a fresh read,
+  // not a filter over rows already in hand. Filtering would have shown August's
+  // sessions under September's heading until something else triggered a load —
+  // on a screen that pays people, under the wrong month's total.
+  //
+  // A change made while the previous month is still in flight is COALESCED by
+  // `useFetched` rather than dropped; the superseded read writes nothing and
+  // does not stamp.
+  useEffect(() => {
+    if (me === undefined) return;
+    if (!me?.tenantId) { setSessions([]); setTrainers([]); setRuns([]); return; }
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, period, gymRead, zone]);
 
   // The gym's fee is in whole units; everything downstream is minor units.
   //
@@ -485,7 +524,13 @@ export default function Payroll() {
   }
 
   const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId, period, zone);
+  // `refresh` is the hook's, not a second reader. It was a local
+  // `() => load(tenantId, period, zone)` handed to every write on this screen
+  // — settling a run, adding an adjustment, marking a session — so the moment
+  // the figures were provably current was the one moment the line under them
+  // went on ageing. It also passed no `stale` callback, so a settlement landing
+  // after a period switch painted the previous month's rows under the new
+  // month's heading.
 
   // err is only ever set by a finished load, so a state still null once it is
   // set is a read that was refused rather than one still in flight.
@@ -805,6 +850,9 @@ export default function Payroll() {
         a recorded outcome and nothing else. A booked slot whose time has passed
         is not a delivered session, and this screen will not price one.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this run" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
 

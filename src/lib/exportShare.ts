@@ -24,6 +24,7 @@ import { progressChangeLines, progressSpanLabel, progressSummary, figure, dayLab
 // exactly the sort of thing a coach notices and the app never would.
 import { localDate } from './localDate';
 import { money } from './gymRecord';
+import { minorFromWhole } from './coachMoney';
 // The client's unit reaches these builders as an argument. Nothing here reads a
 // provider, so a report can be built for whoever's row is in hand.
 import { weightIn, convertedNote, type WeightUnit } from './units';
@@ -461,8 +462,15 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     // payroll30For multiplies by it) and `money()` takes minor units, which is
     // the mismatch that once printed AED 63.00 for a gym owed AED 6,300 — so it
     // is converted here rather than assumed either way.
+    //
+    // `minorFromWhole`, not `Math.round(payroll30 * 100)`. The factor is a
+    // property of the currency, not of the arithmetic: a yen has no minor unit,
+    // so a hundred there overstates what a gym is owed a hundredfold, and a
+    // dinar has a thousand of them. It returns null for a gym that has not
+    // stated a currency, which lands on the same dash `money()` would have
+    // rendered and which the note under the table already explains.
     ['Value of those sessions',
-      money(d.payroll30 == null ? null : Math.round(d.payroll30 * 100), d.currency) ?? '\u2014'],
+      money(minorFromWhole(d.payroll30, d.currency), d.currency) ?? '\u2014'],
     ['Avg clients / trainer', d.avgClientsPerTrainer == null ? '\u2014' : String(d.avgClientsPerTrainer)],
     ['Trainers needing a look', String(d.atRiskCount)],
     ['Clients with those trainers', String(d.atRiskClients)],

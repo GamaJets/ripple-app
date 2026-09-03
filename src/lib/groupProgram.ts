@@ -170,9 +170,35 @@ export interface FanOutBlock {
   clientId: string; name: string; label: string; reason: string;
 }
 
+/**
+ * Where the programme being fanned out came from, which decides the WORDS in
+ * the two refusals that are about the thing itself rather than about a person.
+ *
+ * 'chosen'  the coach picks an existing programme — the Groups screen and the
+ *           template library. "Choose one from your library" is the act.
+ * 'written' the coach is WRITING the programme on this screen, in
+ *           app/(trainer)/builder.tsx. Telling somebody mid-build to go and
+ *           pick one from their library is backwards, and telling a coach who
+ *           has ticked nobody that "this group" is empty is a sentence about a
+ *           group that does not exist. Both were seen on a device.
+ */
+export type FanOutOrigin = 'chosen' | 'written';
+
+/** Why nothing may be sent, as something a screen can branch on rather than a
+ *  sentence it would have to match. A screen that already says one of these in
+ *  its own better words — the builder says both 'no-program' and 'nobody'
+ *  right above the button, with the start-date misdiagnosis answered — can
+ *  then skip the notice instead of printing the fact twice. Null when the
+ *  assign is allowed. */
+export type FanOutHold =
+  | 'list-loading' | 'list-partial' | 'list-error'
+  | 'overwrite' | 'no-program' | 'nobody' | 'injuries';
+
 export interface FanOutPlan {
   /** True only when at least one client may be written to right now. */
   allowed: boolean;
+  /** Which refusal this is, or null when nothing is being refused. */
+  code: FanOutHold | null;
   /** What to put on the control. Null when it may carry its usual label —
    *  which is only when every member is going to be assigned. */
   label: string | null;
@@ -190,8 +216,8 @@ export interface FanOutPlan {
   blocked: FanOutBlock[];
 }
 
-const NOTHING = (label: string, reason: string): FanOutPlan =>
-  ({ allowed: false, label, reason, heldNote: null, send: [], blocked: [] });
+const NOTHING = (code: FanOutHold, label: string, reason: string): FanOutPlan =>
+  ({ allowed: false, code, label, reason, heldNote: null, send: [], blocked: [] });
 
 /**
  * What would happen if the coach tapped Assign right now.
@@ -213,31 +239,46 @@ export function planFanOut(
   members: readonly FanOutMember[],
   hasProgram: boolean,
   subject: string,
+  /** Defaults to 'chosen', which is what the Groups screen and the template
+   *  library are. Only the builder writes its own. */
+  origin: FanOutOrigin = 'chosen',
 ): FanOutPlan {
   // Asked before anything else, because every question below is asked ABOUT
   // this list. A short or unread list makes the per-client checks below
   // meaningless: they would all pass, for the people who happened to arrive.
   if (listStatus === 'loading') {
-    return NOTHING('Checking Who Is In This Group…', 'Still reading who is in this group. Assigning now could reach only the people who have loaded so far.');
+    return NOTHING('list-loading', 'Checking Who Is In This Group…', 'Still reading who is in this group. Assigning now could reach only the people who have loaded so far.');
   }
   if (listStatus === 'partial') {
-    return NOTHING('Cannot assign to part of a group', 'Only part of this group came back, so this screen cannot tell you who is in it. Assigning would send the programme to the people who happened to load and leave the rest on what they are on, with nothing saying which was which.');
+    return NOTHING('list-partial', 'Cannot assign to part of a group', 'Only part of this group came back, so this screen cannot tell you who is in it. Assigning would send the programme to the people who happened to load and leave the rest on what they are on, with nothing saying which was which.');
   }
   if (listStatus === 'error') {
-    return NOTHING('Cannot assign to an unread group', 'Who is in this group could not be read. An empty list here means the read failed, not that the group is empty, so the assign is held until it loads.');
+    return NOTHING('list-error', 'Cannot assign to an unread group', 'Who is in this group could not be read. An empty list here means the read failed, not that the group is empty, so the assign is held until it loads.');
   }
 
   // Writing over somebody's training without having read it is the thing the
   // overwrite guard exists for, and one tap here is as many overwrites as
   // there are members.
   const over = guardOverwrite(programStatus, subject);
-  if (!over.allowed) return NOTHING(over.label as string, over.reason as string);
+  if (!over.allowed) return NOTHING('overwrite', over.label as string, over.reason as string);
 
+  // ── the two refusals that are about the programme, not about a person ────
+  //
+  // Both used to be written for a group and only for a group, and this function
+  // is shared with app/(trainer)/builder.tsx, where a coach is writing the
+  // programme rather than choosing one. Seen on a device: an empty draft in the
+  // builder showed "HELD — Pick a Programme First — This group has no programme
+  // yet. Choose one from your library…" with no group anywhere on the screen,
+  // and the correct sentence sitting directly underneath it.
   if (!hasProgram) {
-    return NOTHING('Pick a Programme First', 'This group has no programme yet. Choose one from your library and it can go out to everybody in the group at once.');
+    return origin === 'written'
+      ? NOTHING('no-program', 'Nothing To Assign Yet', 'There are no exercises in this programme yet. Add at least one and it can go out.')
+      : NOTHING('no-program', 'Pick a Programme First', 'This group has no programme yet. Choose one from your library and it can go out to everybody in the group at once.');
   }
   if (!members.length) {
-    return NOTHING('Nobody In This Group Yet', 'Add the clients who should be on this programme, then assign it to all of them at once.');
+    return origin === 'written'
+      ? NOTHING('nobody', 'Nobody Ticked Yet', 'Tick everybody who should get this — one client or twenty — and it goes out to all of them at once.')
+      : NOTHING('nobody', 'Nobody In This Group Yet', 'Add the clients who should be on this programme, then assign it to all of them at once.');
   }
 
   const send: string[] = [];
@@ -253,6 +294,7 @@ export function planFanOut(
   if (!send.length) {
     return {
       allowed: false,
+      code: 'injuries',
       label: blocked.length === 1 ? (blocked[0].label) : 'Read Their Injuries First',
       reason: blocked.length === 1
         ? blocked[0].reason
@@ -265,6 +307,7 @@ export function planFanOut(
 
   return {
     allowed: true,
+    code: null,
     label: blocked.length ? `Assign to ${send.length} of ${members.length}` : null,
     reason: null,
     heldNote: blocked.length

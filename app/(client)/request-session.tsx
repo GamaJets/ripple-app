@@ -62,7 +62,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useThreadPeerName } from '../../src/ui/messaging';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { useOutbox } from '../../src/ui/outbox';
-import { useToday } from '../../src/ui/today';
+import { useToday, useNow } from '../../src/ui/today';
 import { outboxNote } from '../../src/lib/outbox';
 import { keptOnPhoneNote, notKeptNote, sessionRequestExpiry } from '../../src/lib/recordQueue';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
@@ -208,8 +208,18 @@ export default function RequestSessionScreen() {
    *  clash is a fact rather than a silence. */
   const diaryNote = ownDiaryNote(sessionsStatus);
 
-  const live = useMemo(() => rows.filter((r) => isLive(r)), [rows]);
-  const blocker = askBlocker(startsAt, length, Date.now(), { myBusy, live });
+  /* The instant a request stops being a live question, and it is IN the
+   * dependency list below. `isLive` defaults its second argument to
+   * `Date.now()`, so leaving it off read the clock inside a memo keyed
+   * `[rows]` — and `rows` moves when the SERVER answers, not when a request
+   * lapses. `askBlocker` re-filters with its own `now`, so the cap it enforces
+   * was never wrong; the SENTENCE was. `live.length` is printed at the foot of
+   * this screen as "N requests are waiting on your coach", and a request whose
+   * hour had come and gone went on being counted there for as long as the app
+   * lived, because this screen is reached from a tab and is never unmounted. */
+  const nowMs = useNow().getTime();
+  const live = useMemo(() => rows.filter((r) => isLive(r, nowMs)), [rows, nowMs]);
+  const blocker = askBlocker(startsAt, length, nowMs, { myBusy, live });
 
   async function ask() {
     if (blocker) { Alert.alert('Not sent', blocker); return; }

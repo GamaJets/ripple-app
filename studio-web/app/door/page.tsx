@@ -24,6 +24,8 @@ import { ConsoleGate, Unresolved } from '@/components/Gate';
 import { type Unread, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { Banner as SharedBanner, Announce } from '@/components/Banner';
 import {
@@ -169,7 +171,7 @@ export default function Door() {
   const [records, setRecords] = useState<Map<string, GymMemberRecord> | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // allSettled, not all: one failing read must not take the others with it.
     // Under Promise.all a refused gym_passes query also emptied the other three
     // — the visits table said "No visits logged today" on a morning that had
@@ -217,6 +219,13 @@ export default function Door() {
       failure(rRes, 'the gym’s notes on your members — no next of kin and no medical note can be shown'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
+
+    // Whole means all six came back. The poll below stamps only on a whole
+    // read, so a pass that would not read leaves the stamp where it was — and
+    // on a desk that reads "Inside now" out loud during an evacuation, the
+    // difference between "read 8 seconds ago" and "read 40 minutes ago, and it
+    // may have moved since" is the whole value of the line.
+    return settledLanded([vRes, pRes, tRes, mRes, cRes, rRes]);
   }, []);
 
   useEffect(() => {
@@ -241,10 +250,10 @@ export default function Door() {
         const z = parseGymZone((t as any)?.timezone);
         setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the six reads are the poll's, below.
+  }, []);
 
   /**
    * Re-read the door log on a timer, when the tab comes back, and when the
@@ -280,33 +289,70 @@ export default function Door() {
   // the day that is actually compared against is `gymDay(Date.now(), zone) ??
   // dayTick` sixty lines below, which asks the gym first.
   const [dayTick, setDayTick] = useState(() => isoDate(new Date()));
+
+  /**
+   * The six reads, on a timer, saying when they last landed.
+   *
+   * This screen already polled and already re-read when the tab came back —
+   * `useFetched` does both, on the same thirty seconds, and suspends the poll
+   * while the tab is hidden exactly as the hand-written version did. What it
+   * adds is the sentence, and this is the screen in the console that most
+   * needed one: a desk tablet has no other way to tell a poll that is running
+   * from a poll that has been failing for twenty minutes, because the figures
+   * look identical either way.
+   *
+   * `enabled` keeps the poll off for anybody who cannot read the tables anyway
+   * — the role gates below render a refusal, not a door log, and a browser
+   * re-asking a refused query every thirty seconds is a wrong sentence with a
+   * cost attached.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    {
+      everyMs: REFRESH_MS,
+      enabled: !!me?.tenantId && (me?.role === 'owner' || me?.role === 'trainer'),
+    },
+  );
+
+  // The first read, once the identity is in state — see the same note on
+  // /revenue: the reader is held in a ref assigned during RENDER, so firing it
+  // in the same tick as `setMe` would run the closure that has no tenant.
   useEffect(() => {
-    if (!me?.tenantId) return;
-    if (me.role !== 'owner' && me.role !== 'trainer') return;
-    const tenantId = me.tenantId;
-    let stopped = false;
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
-    const tick = () => {
-      // The day first, so a rollover repaints even if the read is in flight.
-      // reader-day-ok: the repaint clock again — see `dayTick` above.
+  /**
+   * The repaint clock, kept apart from the reads.
+   *
+   * `today` is computed once per render pass, so a tablet left on overnight
+   * kept yesterday's date and showed yesterday's arrivals as this morning's: a
+   * desk opening up at 6am read a busy screen and a full "Inside now" for a
+   * building that was empty. This moves with the gym's own local midnight
+   * rather than UTC's — the same date the visits below are compared against.
+   *
+   * It runs whether or not the tab is visible and whether or not the reads are
+   * enabled, because it is a clock rather than a query: a tablet that was
+   * hidden across midnight must have the new date in hand the moment it is
+   * looked at, not thirty seconds afterwards.
+   */
+  useEffect(() => {
+    const tick = () => setDayTick((prev) => {
+      // reader-day-ok: the repaint clock again — see `dayTick` above. This is
+      // not a day anybody reads; its only job is to change value when the
+      // machine with the tab open crosses midnight, so a tablet nobody has
+      // touched since yesterday re-renders. The day actually compared against
+      // is `gymDay(Date.now(), zone) ?? dayTick`, which asks the gym first.
       const d = isoDate(new Date());
-      setDayTick((prev) => (prev === d ? prev : d));
-      if (document.visibilityState === 'hidden') return;
-      if (stopped) return;
-      void load(tenantId);
-    };
-
+      return prev === d ? prev : d;
+    });
     const every = window.setInterval(tick, REFRESH_MS);
-    // A tablet that was asleep for an hour is the worst case, not the best:
-    // coming back to the tab is exactly when the snapshot is furthest out.
-    const onShow = () => { if (document.visibilityState === 'visible') tick(); };
-    document.addEventListener('visibilitychange', onShow);
+    document.addEventListener('visibilitychange', tick);
     return () => {
-      stopped = true;
       window.clearInterval(every);
-      document.removeEventListener('visibilitychange', onShow);
+      document.removeEventListener('visibilitychange', tick);
     };
-  }, [me, load]);
+  }, []);
 
   /**
    * The writes this machine is holding because the network would not take them.
@@ -316,8 +362,10 @@ export default function Door() {
    * role gates below. The tenant is '' until `loadMe` answers, which holds
    * nothing and flushes nothing.
    */
-  const reload = useCallback(() => { if (me?.tenantId) void load(me.tenantId); }, [me, load]);
-  const queue = useDoorQueue(me?.tenantId ?? '', reload);
+  // The queue's re-read is the hook's `refresh`, so a check-in that finally
+  // reached the server moves the stamp with it. It was a bare `load`, which
+  // re-read the desk without dating it.
+  const queue = useDoorQueue(me?.tenantId ?? '', refresh);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -348,7 +396,6 @@ export default function Door() {
   }
 
   const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId);
 
   // The gym's own calendar day, not UTC's. This product sells in AED, so the
   // desk that reads this is four hours ahead of UTC and the UTC date does not
@@ -406,6 +453,9 @@ export default function Door() {
         Every visit, not just the booked ones. A member who trains on the floor
         counts the same as one who books a class.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="the desk" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
 

@@ -33,6 +33,8 @@ import { ConsoleGate, Loading } from '@/components/Gate';
 import { type Unread, type Read, reading, landed, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchPayments, money, type GymPayment } from '@lib/gymRecord';
 import {
@@ -285,7 +287,7 @@ export default function Accounting() {
   // figure that was briefly the wrong month's is a figure that can be copied.
   const [loaded, setLoaded] = useState<{ key: string; books: Books }>({ key: '', books: EMPTY });
 
-  const load = useCallback(async (tenantId: string, mw: MonthWindow) => {
+  const load = useCallback(async (tenantId: string, mw: MonthWindow): Promise<boolean> => {
     setLoaded({ key: '', books: EMPTY });
 
     // Payments are read wider than the month on purpose. The month's own
@@ -341,6 +343,12 @@ export default function Accounting() {
         costs: landed(cRes, 'the recorded costs'),
       },
     });
+
+    // Whole means all six came back. `useFetched` stamps only on a whole read,
+    // so a month whose settlements would not load leaves the stamp where it was
+    // rather than dating a reconciliation that is missing one of the two
+    // records it reconciles.
+    return settledLanded([iRes, pRes, sRes, mRes, oRes, cRes]);
   }, []);
 
   useEffect(() => {
@@ -383,10 +391,36 @@ export default function Accounting() {
       // would let somebody raise the invoice they came here to raise.
       // eslint-disable-next-line -- no-error-ok: fetchMemberships throws on a refusal; null is the failed state the form renders
       fetchMemberships(supabase, link.tenantId).then((r) => { if (live) setMembers(r); }).catch(() => { if (live) setMembers(null); });
-      if (w) await load(link.tenantId, w);
     })();
     return () => { live = false; };
-  }, [load, w, key]);
+    // Identity, the gym record, the zone and the roster — read once. The books
+    // are read by the effect below, through `refresh`. They shared one effect
+    // keyed on the month, so choosing a different month re-read the gym's name,
+    // currency, timezone AND the whole membership list: four round trips for
+    // facts that cannot have changed, on the slowest screen in the console.
+  }, []);
+
+  /**
+   * The chosen month's books, kept current and dated.
+   *
+   * This is the page an accountant copies figures out of, and it never said
+   * when it read them. A month left open on a Friday and worked through on the
+   * Monday reconciles a payment register that stops on Friday against invoices
+   * that stop on Friday — and the two agreeing is exactly what this screen
+   * reports as a clean month.
+   *
+   * `loaded.key` is what drops a superseded read; `useFetched` coalesces a
+   * month change made while the previous month is in flight rather than
+   * dropping it, so the month on screen is always the month that was asked for.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId && w ? load(me.tenantId, w) : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.tenantId && w) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId, key]);
 
   const books = loaded.key === key ? loaded.books : EMPTY;
 
@@ -443,6 +477,9 @@ export default function Accounting() {
         collected, how old the debt is, and what the two records disagree about.
       </p>
 
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this month’s books" style={{ margin: '2px 0 14px' }} />
+
       {gymNameErr ? (
         <Banner tone="crit">
           This account is linked to a gym, but the gym&rsquo;s name could not be read:{' '}
@@ -467,7 +504,11 @@ export default function Accounting() {
         ? <Banner tone="crit">{key} is not a month this console can open.</Banner>
         : <Month at={at!} zone={zone} zoneErr={zoneErr} books={books} gymName={gymName} ccy={ccy} members={members}
                  tenantId={me.tenantId} me={me}
-                 onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }} />}
+                 /* The hook's `refresh`: raising an invoice here is the one
+                    moment these books are provably current, and re-reading
+                    without moving the stamp left the line under them ageing
+                    from before the write. */
+                 onChange={refresh} />}
     </Shell>
   );
 }

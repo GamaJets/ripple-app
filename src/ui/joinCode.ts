@@ -102,11 +102,35 @@ export async function fetchMyCodeReturns(): Promise<CodeReturnsRead> {
  * either way, and the caller re-reads rather than patching the row.
  *
  * `codeId` null is the coach's default code, which has no row of its own.
+ *
+ * ── `currency` is the unit the figure was SCALED in, not a preference ─────
+ *
+ * `cents` is minor units, and how many minor units a whole one holds is a
+ * property of the currency: 100 in sterling, 1 in yen, 1000 in Kuwaiti dinar.
+ * `parseSpend` in src/lib/codeReturn.ts does that scaling and it needs a
+ * currency to do it, so whatever it used has to travel with the number.
+ *
+ * `set_code_spend` takes `p_currency` as link 1 of the chain in
+ * supabase/parts/1082 — stated by the caller, else the coach's packages if they
+ * agree, else their gym, else their own currency when they have no gym. Before
+ * this the client sent no currency at all and scaled by a flat hundred while
+ * the server independently picked a code to stamp on the result, so on a yen
+ * account the number was a hundred times the amount and the label agreed with
+ * it. Sending the unit the figure is actually in makes those one fact.
+ *
+ * Omitted, the parameter is not sent and the server resolves it exactly as it
+ * did — which is right for a caller that is clearing the record, where there is
+ * no figure to have a unit.
  */
-export async function saveCodeSpend(codeId: string | null, cents: number | null): Promise<{ ok: true } | { ok: false; reason: string }> {
+export async function saveCodeSpend(codeId: string | null, cents: number | null, currency?: string | null): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (!USE_SUPABASE) return { ok: false, reason: 'Sign in to Repple to record what a code cost.' };
   try {
-    const { error } = await supabase.rpc('set_code_spend', { p_code_id: codeId, p_amount_cents: cents });
+    const cur = (currency || '').trim().toUpperCase();
+    const { error } = await supabase.rpc('set_code_spend', {
+      p_code_id: codeId,
+      p_amount_cents: cents,
+      ...(cur ? { p_currency: cur } : {}),
+    });
     if (error) {
       reportError('joinCode.spend', error);
       return {

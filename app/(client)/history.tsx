@@ -94,6 +94,7 @@ import {
 import { tonnageNote } from '../../src/lib/bodyweightSets';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
+import { useNow } from '../../src/ui/today';
 import { ExerciseHistoryPanel } from '../../src/ui/ExerciseHistory';
 // Volume by muscle group — the first question anybody asks of a training
 // history and the one nothing in this app could answer. See
@@ -704,9 +705,18 @@ function MuscleSection({ log, unit, weightSeries }: {
   const t = useTheme();
   const [days, setDays] = useState<7 | 28>(7);
   const { rows, status, signedOut } = useExerciseCatalogue();
+  /* `useNow()`, and it is IN the dependency list. `Date.now()` in the memo body
+   * with `[log, rows, days, weightSeries, status]` around it is a window whose
+   * start is fixed at the moment this section first mounted: History is reached
+   * from a tab and nothing here unmounts it, so "last 7 days" — which is what
+   * the heading says, in those words — went on meaning the seven days ending
+   * whenever the member first opened the screen. The question it exists to
+   * answer is "have I trained legs this week", and it was answering it about
+   * some other week. See src/ui/today.ts. */
+  const now = useNow();
   const board = useMemo(
     () => muscleBoard(log, rows, {
-      sinceMs: Date.now() - days * 86_400_000,
+      sinceMs: now.getTime() - days * 86_400_000,
       history: weightSeries,
       // Only a whole read may support "you have not trained this". A truncated
       // or failed catalogue is a list we have not seen the end of, and naming
@@ -714,7 +724,7 @@ function MuscleSection({ log, unit, weightSeries }: {
       // from a query that did not finish.
       catalogueWhole: status === 'ready',
     }),
-    [log, rows, days, weightSeries, status],
+    [log, rows, days, weightSeries, status, now],
   );
   const note = unmatchedNote(board);
   const trained = board.groups.reduce((a, g) => a + g.sets, 0);

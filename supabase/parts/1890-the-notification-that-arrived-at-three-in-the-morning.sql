@@ -93,6 +93,24 @@
 -- part cannot make anybody's notification arrive at a worse time than it does
 -- now. It can only make it arrive at a better one.
 --
+-- ── HOW MANY COACHES THIS ACTUALLY REACHES TODAY, MEASURED ───────────────
+--
+-- Probed read-only against production, with the exact expression
+-- `notice_local_tz` uses:
+--
+--   coaches 8 · with a zone 1 (Asia/Dubai) · without 7
+--
+-- So on the day this is applied, seven of eight coaches keep 07:00 UTC and one
+-- moves to their own morning. That is not an argument against the part; it is
+-- the shape of the thing. `notify_quiet_hours.tz` is NOT NULL, so every coach
+-- who ever sets quiet hours acquires a zone, and part 650 already made
+-- src/ui/availability.ts stamp the device zone on every availability write. The
+-- population with a zone only grows, and this part is what turns having one
+-- into a notification that arrives in the morning rather than at three.
+--
+-- It also means the blast radius on the first night is one coach, which is the
+-- right size for a change to when six nightly jobs fire.
+--
 -- ══ 2 · A THREE-HOUR WINDOW, NOT AN HOUR ═════════════════════════════════
 --
 -- The gate is `local hour between 7 and 9`, not `= 7`, for two reasons.
@@ -209,6 +227,13 @@
 -- It does not change a single word any pass says, a single threshold, or a
 -- single date comparison. Every body below is `pg_get_functiondef` output with
 -- two lines added.
+--
+-- And it does not undo part 1870. That part, written the same night and also
+-- unapplied, re-points the same five notice jobs at
+-- `run_notices_with_digest()` so that nine invoices ageing on one night are one
+-- banner rather than nine. Both parts schedule the same job names, and a job
+-- has one command; section 6 is where they are reconciled, and the short of it
+-- is that 1870 owns the COMMAND and this part owns the SCHEDULE.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -956,35 +981,98 @@ on conflict (pass, coach_id, utc_day) do nothing;
 -- parts 202, 471, 612, 613 and 650 set them — seven apart, off the top of the
 -- hour — so the six still do not contend, and so that anybody reading
 -- `cron.job` sees the same six numbers they saw before with the hour opened up.
+--
+-- ══ RECONCILED WITH PART 1870, WHICH RE-POINTS THE SAME FIVE JOBS ════════
+--
+-- `supabase/parts/1870-nine-invoices-and-nine-banners.sql` was written the same
+-- night as this part and is also unapplied. It fixes a different defect in the
+-- same six jobs: each pass inserts one row at a time in a loop, and part 900's
+-- `notifications_dispatch_push` is `for each statement`, so a coach with nine
+-- invoices ageing on one night gets nine separate banners inside a minute. Part
+-- 1870 adds `run_notices_with_digest(p_fn text)`, which holds the dispatcher for
+-- the length of the pass and then posts ONE push per recipient per channel and
+-- route, and it re-points the five NOTIFYING jobs at that wrapper.
+--
+-- Both parts therefore call `cron.schedule` on the same five job names, and a
+-- cron job has exactly one command and one schedule. Applied in number order,
+-- this part runs second and would have silently undone the digest.
+--
+-- It does not, because the two changes compose exactly:
+--
+--   · 1870 decides HOW WHAT A PASS WRITES IS ANNOUNCED. Its wrapper takes the
+--     pass name as an argument specifically so it can wrap any of them, and
+--     calls the pass unaltered.
+--   · this part decides WHICH COACHES A PASS RUNS FOR, and at what hour. That
+--     lives inside the pass body, in a claim and an `= any(v_due)`, where the
+--     wrapper cannot see it and does not need to.
+--
+-- So the command below is 1870's, and only the SCHEDULE is this part's. Every
+-- notification a coach receives is digested by 1870's rules and timed by this
+-- part's, and neither had to know about the other.
+--
+-- ── the two things that had to be checked rather than assumed ────────────
+--
+-- The wrapper refuses any name that is not one of the five notice passes, so
+-- 'open-slot-extension' cannot be routed through it — which is what part 1870
+-- wanted anyway, in its own words: it "extends open slots and writes no
+-- notifications, so there is nothing for a digest to coalesce and wrapping it
+-- would be a claim that it notifies." It is scheduled bare here, as it is
+-- there.
+--
+-- And the digest is per RUN, not per day. Hourly runs mean each hour's cohort
+-- of coaches gets its own digest, which is the correct grain: a coach is
+-- processed in exactly one run per UTC day (section 3), so every row that pass
+-- writes for them is written inside one transaction and coalesces into one
+-- push. Nothing is spread across hours for one person.
+--
+-- ── the jobs this part ends up owning, for verification ──────────────────
+--
+--   overdue-client-notices     12 * * * *  run_notices_with_digest('run_overdue_client_notices')
+--   credential-expiry-notices  19 * * * *  run_notices_with_digest('run_credential_expiry_notices')
+--   block-ended-notices        26 * * * *  run_notices_with_digest('run_block_ended_notices')
+--   pack-expiry                33 * * * *  run_notices_with_digest('run_pack_expiry')
+--   invoice-ageing-notices     40 * * * *  run_notices_with_digest('run_invoice_ageing_notices')
+--   open-slot-extension        48 * * * *  run_open_slot_extension()
+--
+-- No other cron job is touched by this part. `materialise-session-series`,
+-- `purge-account-files`, `purge-progress-photo-files`,
+-- `storage-purge-backlog-alarm` and `sweep-stale-visits` are left exactly as
+-- they are.
 -- ═════════════════════════════════════════════════════════════════════════
 
 create extension if not exists pg_cron;
 
 do $$
+declare
+  j record;
 begin
-  if exists (select 1 from cron.job where jobname = 'overdue-client-notices') then
-    perform cron.unschedule('overdue-client-notices');
-  end if;
-  if exists (select 1 from cron.job where jobname = 'credential-expiry-notices') then
-    perform cron.unschedule('credential-expiry-notices');
-  end if;
-  if exists (select 1 from cron.job where jobname = 'block-ended-notices') then
-    perform cron.unschedule('block-ended-notices');
-  end if;
-  if exists (select 1 from cron.job where jobname = 'pack-expiry') then
-    perform cron.unschedule('pack-expiry');
-  end if;
-  if exists (select 1 from cron.job where jobname = 'invoice-ageing-notices') then
-    perform cron.unschedule('invoice-ageing-notices');
-  end if;
+  for j in
+    select * from (values
+      ('overdue-client-notices',    '12 * * * *', 'run_overdue_client_notices'),
+      ('credential-expiry-notices', '19 * * * *', 'run_credential_expiry_notices'),
+      ('block-ended-notices',       '26 * * * *', 'run_block_ended_notices'),
+      ('pack-expiry',               '33 * * * *', 'run_pack_expiry'),
+      ('invoice-ageing-notices',    '40 * * * *', 'run_invoice_ageing_notices')
+    ) as v(jobname, sched, fn)
+  loop
+    if exists (select 1 from cron.job where jobname = j.jobname) then
+      perform cron.unschedule(j.jobname);
+    end if;
+    -- Part 1870's command, verbatim. Only `sched` is this part's.
+    perform cron.schedule(
+      j.jobname,
+      j.sched,
+      format('select public.run_notices_with_digest(%L);', j.fn)
+    );
+  end loop;
+
+  -- The one pass that notifies nobody, so there is nothing to digest.
   if exists (select 1 from cron.job where jobname = 'open-slot-extension') then
     perform cron.unschedule('open-slot-extension');
   end if;
+  perform cron.schedule(
+    'open-slot-extension',
+    '48 * * * *',
+    $cron$ select public.run_open_slot_extension(); $cron$
+  );
 end $$;
-
-select cron.schedule('overdue-client-notices',    '12 * * * *', $cron$ select public.run_overdue_client_notices(); $cron$);
-select cron.schedule('credential-expiry-notices', '19 * * * *', $cron$ select public.run_credential_expiry_notices(); $cron$);
-select cron.schedule('block-ended-notices',       '26 * * * *', $cron$ select public.run_block_ended_notices(); $cron$);
-select cron.schedule('pack-expiry',               '33 * * * *', $cron$ select public.run_pack_expiry(); $cron$);
-select cron.schedule('invoice-ageing-notices',    '40 * * * *', $cron$ select public.run_invoice_ageing_notices(); $cron$);
-select cron.schedule('open-slot-extension',       '48 * * * *', $cron$ select public.run_open_slot_extension(); $cron$);

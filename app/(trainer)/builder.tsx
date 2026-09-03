@@ -1329,7 +1329,13 @@ export default function Builder() {
   // the coach just made with their own thumb, and there is no read of it that
   // could have come back short. The roster it was ticked FROM carries its own
   // banner above.
-  const plan = planFanOut('ready', programStatus, pickedIds.map(asMember), blockExercises > 0, fanOutSubject(pickedIds.length));
+  //
+  // 'written' and not the default 'chosen': this screen is where the programme
+  // is being WRITTEN. With the default, an empty draft here rendered "HELD —
+  // Pick a Programme First — This group has no programme yet. Choose one from
+  // your library…" — seen on a device, over a screen with no group on it,
+  // telling a coach mid-build to go and pick something instead.
+  const plan = planFanOut('ready', programStatus, pickedIds.map(asMember), blockExercises > 0, fanOutSubject(pickedIds.length), 'written');
   // What the sweeping gesture is allowed to claim, given how the roster read
   // went — "Select All" over a roster that came back at its row limit ticks a
   // thousand people and calls it everybody. See src/lib/bulkActions.ts.
@@ -1923,8 +1929,8 @@ export default function Builder() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Programs</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Builder</Text>
+          <Text style={{ ...ty.micro, color: t.ink3 }}>Programmes</Text>
+          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Programme Builder</Text>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Build a weekly plan, save it as a template, and assign it to as many clients as you like.</Text>
         </View>
 
@@ -1996,8 +2002,8 @@ export default function Builder() {
                   : programStatus !== 'ready'
                   ? `What ${client.name.split(' ')[0]} is currently on could not be read`
                   : assignedNow
-                    ? 'Currently on a coach-assigned program'
-                    : `${client.name.split(' ')[0]} is on their auto-generated program`} · goal: {client.goal ?? '—'}
+                    ? 'Currently on a coach-assigned programme'
+                    : `${client.name.split(' ')[0]} is on their auto-generated programme`} · goal: {client.goal ?? '—'}
               </Text>
             </View>
           ) : null}
@@ -2065,7 +2071,7 @@ export default function Builder() {
 
         {/* ── the program itself ─────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="Program" />
+          <SectionHead title="Programme" />
 
           {/* Why the builder below is empty. Without this the coach sees a
               blank program with no explanation and starts typing one, which is
@@ -2115,7 +2121,7 @@ export default function Builder() {
             </Flag>
           ) : null}
 
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Program name</Text>
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Programme name</Text>
           <TextInput value={title} onChangeText={setTitle} placeholder="e.g. Push · Pull · Legs" placeholderTextColor={t.ink3}
             style={[inp, { marginBottom: sp.lg }]} />
 
@@ -3310,7 +3316,7 @@ export default function Builder() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
                     {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
                     <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
-                      {c.goal}{replaces ? ' · replaces the program they are on' : ''}
+                      {c.goal}{replaces ? ' · replaces the programme they are on' : ''}
                     </Text>
                   </View>
                   {/* Their own sentence, on their own row. A count of how many
@@ -3364,7 +3370,13 @@ export default function Builder() {
               for as long as the app stayed open — a wall with no door, which
               the coach could only escape by force-quitting. This re-runs both
               reads the gate depends on. */}
-          {!plan.allowed && plan.reason ? (
+          {/* Not for the two holds this screen already states in its own,
+              better words directly above the button — an empty programme and
+              nobody ticked. Those sentences carry things `planFanOut` cannot
+              know: that the start date is not what is blocking it, and that
+              one client is as valid as twenty. Two boxes saying the same thing
+              is how a coach learns to stop reading either. */}
+          {!plan.allowed && plan.reason && plan.code !== 'no-program' && plan.code !== 'nobody' ? (
             <View style={{ marginBottom: sp.lg }}>
               <Notice tone={t.warn} kicker="Held" title={plan.label ?? 'This cannot go out yet'} note={plan.reason}>
                 {readFailed ? (
@@ -3411,7 +3423,7 @@ export default function Builder() {
           {blockExercises === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.sm }}>
               Add at least one exercise to assign this program.
-              {startsOn ? ' The start date is not what is holding it — an empty program is.' : ''}
+              {startsOn ? ' The start date is not what is holding it — an empty programme is.' : ''}
             </Text>
           ) : pickedIds.length === 0 ? (
             <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginBottom: sp.sm }}>
@@ -3458,7 +3470,7 @@ export default function Builder() {
               same client is how a coach ends up unsure which one they pressed. */}
           {assignedNow && !unassignable.some((u) => u.clientId === clientId) ? (
             <View style={{ marginTop: sp.md }}>
-              <Ghost label="Revert to Auto-generated Program" onPress={revert} />
+              <Ghost label="Revert to Auto-generated Programme" onPress={revert} />
             </View>
           ) : null}
         </Section>

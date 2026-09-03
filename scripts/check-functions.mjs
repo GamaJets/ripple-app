@@ -13,22 +13,47 @@
 // ── What this checks, and what it deliberately does not ────────────────────
 //
 // It PARSES every function with the TypeScript compiler and reports syntax
-// errors, and it resolves every relative import to a file that exists. That is
-// narrower than `deno check` and it is chosen rather than settled for: a full
-// type check needs the Deno standard library and the npm:stripe types, neither
-// of which is installed here, and a gate that cannot run is not a gate.
+// errors, and it resolves every relative import to a file that exists.
 //
-// What it catches is what actually goes wrong in this repo: a file truncated by
-// an interrupted write, an edit that loses a brace, and an import pointing at a
-// module that moved. All three produce a function that deploys and then throws
+// What that catches is what actually goes wrong in this repo: a file truncated
+// by an interrupted write, an edit that loses a brace, and an import pointing at
+// a module that moved. All three produce a function that deploys and then throws
 // on its first request — which for stripe-webhook means payments silently
 // stop being recorded.
 //
-// What it does NOT catch is a type error, and it says so rather than implying
-// the functions are verified. `deno check` remains the thing to run before a
-// deploy that matters; this is the floor, not the ceiling.
-import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs';
+// ── and, since the audit of 4 Sep, it TYPE CHECKS them too ─────────────────
+//
+// The line that used to stand here said a full type check "needs the Deno
+// standard library and the npm:stripe types, neither of which is installed
+// here, and a gate that cannot run is not a gate". That was true of a check
+// that tries to type the whole world. It is not true of the check this repo
+// actually needs.
+//
+// The valuable half is not `Deno.env.get`'s signature — it is the boundary
+// between a function and the app's own rules that it imports. `stripe-webhook`
+// pulls four modules out of src/lib, and those files are edited by every lane.
+// A renamed export is already caught above; a CHANGED SIGNATURE is not, and it
+// is the same class of failure — a 500 on the first request that touches it.
+// `packExpiry.ts` gained a fourth parameter on `strandedNote` this week and
+// nothing in this repo would have noticed a caller left on three.
+//
+// So: three specifiers cannot be resolved from a laptop — `https://esm.sh/...`,
+// `jsr:...` and `npm:stripe` — and exactly those are declared `any` in an
+// ambient shim written to a temp file below, along with the two pieces of Deno
+// this codebase uses. Everything else is checked for real, with strict null
+// checks ON because without them a `{ ok: true } | { ok: false }` result union
+// does not narrow and the output is seventy lines of noise about properties
+// that do exist.
+//
+// `noImplicitAny` stays OFF. It is the one strict flag that would demand
+// annotations on the Supabase row callbacks throughout, which is a different
+// job from the one this gate is for.
+//
+// This is still narrower than `deno check`, and `deno check` remains the right
+// thing before a deploy that touches money. It is no longer the floor it was.
+import { readdirSync, statSync, readFileSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
+import { tmpdir } from 'node:os';
 import ts from 'typescript';
 
 const ROOT = process.cwd();
@@ -169,6 +194,165 @@ for (const [file, src] of REACHED) {
   }
 }
 
+// ── a hundred is not a currency ────────────────────────────────────────────
+//
+// `check:currency` and `check:decimals` enforce the house money rule — minor
+// units, no default currency, never `* 100` — over ROOTS of `app`, `src` and
+// `studio-web`. `supabase/functions` is in none of them, so the one place that
+// talks to Stripe directly was the one place the rule was not gated. It happens
+// to be clean today; this is what keeps it that way.
+//
+// A hardcoded hundred is 100× wrong in yen, which has no minor unit at all, and
+// 10× wrong in dinar, which has a thousand fils. Both print a plausible number.
+//
+// The single legitimate shape is a conversion that has ACTUALLY thought about
+// it — `owner-metrics` divides by 100, and by 1000, and by nothing, according to
+// two named sets of currency codes. So a file that declares both sets is a file
+// where the divide is the answer rather than the bug, and is allowed. A file
+// that does not is asserting that every currency on earth has two decimals.
+// COMMENTS ARE BLANKED FIRST, and that is not a nicety.
+//
+// This repo documents the broken form on purpose — `connect-checkout` explains
+// "This was `pkg.currency || 'usd'`, and a literal here..." and carries the
+// worked `/ 100` arithmetic in a comment right above the code that avoids it.
+// A gate that reads prose would fail the build on the very sentences written to
+// stop the bug, which is the failure mode `check:prose` was built around. The
+// spans are replaced with spaces rather than removed so every reported line
+// number still points at the real line.
+const blankComments = (src, file) => {
+  // Parsed, not scanned. `ts.createScanner` on its own cannot tell `/` dividing
+  // from `/` opening a regular expression, and one wrong guess swallows the rest
+  // of the line — which is how a first attempt at this blanked 224 of
+  // connect-checkout's comments and silently missed the one that matters. The
+  // PARSER gets that right, so the tokens it produces are taken as the truth and
+  // everything between them — whitespace and comments, which is all trivia can
+  // be — is blanked.
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  const out = src.split('');
+  const keep = [];
+  const visit = (node) => {
+    if (node.getChildCount(sf) === 0) keep.push([node.getStart(sf), node.getEnd()]);
+    else node.forEachChild(visit);
+  };
+  sf.forEachChild(visit);
+  keep.sort((a, b) => a[0] - b[0]);
+  let at = 0;
+  const blank = (from, to) => { for (let i = from; i < to; i++) if (out[i] !== '\n') out[i] = ' '; };
+  for (const [from, to] of keep) { if (from > at) blank(at, from); at = Math.max(at, to); }
+  blank(at, out.length);
+  return out.join('');
+};
+
+const MONEY_WORD = /(amount|price|cents|minor|fee|total|cost|revenue|payout|refund|balance|charge|subtotal|unit_amount)/i;
+const HUNDRED = /([^\n]{0,48}?)([*/])\s*100(?![0-9])/g;
+for (const file of files) {
+  const src = blankComments(REACHED.get(file) ?? readFileSync(file, 'utf8'), file);
+  const currencyAware = src.includes('ZERO_DECIMAL') && src.includes('THREE_DECIMAL');
+  if (currencyAware) continue;
+  for (const m of src.matchAll(HUNDRED)) {
+    if (!MONEY_WORD.test(m[1])) continue; // a percentage of something is not money
+    const line = src.slice(0, m.index).split('\n').length;
+    problems.push(
+      `  ${relative(ROOT, file)}:${line}  \`${m[2]} 100\` next to \`${m[1].trim().slice(-40)}\``
+      + ` — money in this product is minor units and there is no default currency.`
+      + ` A hundred is 100× wrong in JPY and 10× wrong in KWD. Convert against the`
+      + ` currency (see ZERO_DECIMAL/THREE_DECIMAL in supabase/functions/owner-metrics/index.ts) or leave it in minor units.`);
+  }
+  for (const m of src.matchAll(/(\|\||\?\?)\s*['"]([a-z]{3})['"]/g)) {
+    const before = src.slice(Math.max(0, m.index - 60), m.index);
+    if (!/currency/i.test(before)) continue;
+    const line = src.slice(0, m.index).split('\n').length;
+    problems.push(
+      `  ${relative(ROOT, file)}:${line}  a currency falls back to '${m[2]}'`
+      + ` — Repple is white-labelled and has no default currency. Refuse the sale instead`
+      + ` (supabase/functions/gym-checkout/index.ts does: "priced in a currency your gym has not set").`);
+  }
+}
+
+// ── and now the types ──────────────────────────────────────────────────────
+//
+// See the header. One Program over every function, with the three specifiers a
+// laptop cannot fetch — and only those — declared `any` in an ambient shim.
+//
+// The shim is written to a temp directory rather than into the repo, because a
+// `.d.ts` under supabase/functions/ would be walked by this very script and a
+// `.d.ts` under scripts/ is a file somebody has to work out the purpose of. It
+// lives for the length of one run.
+//
+// `esm.sh` and `jsr:` are wildcarded because the version is in the specifier and
+// pinning it here would mean this gate needs editing every time supabase-js
+// moves. `npm:stripe` is likewise matched by prefix.
+const shimDir = mkdtempSync(join(tmpdir(), 'repple-edge-types-'));
+const shimPath = join(shimDir, 'edge-globals.d.ts');
+writeFileSync(shimPath, [
+  '// Written by scripts/check-functions.mjs. Not a Deno type definition —',
+  '// only the surface these functions actually touch, so that a real one',
+  '// arriving later is an upgrade rather than a conflict.',
+  'declare const Deno: {',
+  '  env: { get(name: string): string | undefined };',
+  '  serve(handler: (req: Request) => Response | Promise<Response>): unknown;',
+  '};',
+  // SHORTHAND ambient modules — no body. That is the form that makes every",
+  '// binding imported from them `any`, named imports included; a body with',
+  "  // `export = x` in it accepts a default import and rejects `{ createClient }`.",
+  "declare module 'https://esm.sh/*';",
+  "declare module 'jsr:*';",
+  "declare module 'npm:*';",
+  '',
+].join('\n'), 'utf8');
+
+const program = ts.createProgram([shimPath, ...files], {
+  noEmit: true,
+  skipLibCheck: true,
+  // Strict null checks ON. Without them a `{ ok: true; body: T } | { ok: false;
+  // error: string }` return — the shape ads-google, ads-tiktok, calendar-sync
+  // and instagram-publish all use — does not narrow on `if (!r.ok)`, and the
+  // gate reports seventy properties that are plainly there. With them, zero.
+  strict: true,
+  // OFF, deliberately, and it is the one flag that would turn this gate into a
+  // week of annotating Supabase row callbacks. Different job.
+  noImplicitAny: false,
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  allowImportingTsExtensions: true,
+  lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
+  types: [],
+});
+
+// Two kinds of diagnostic are dropped, and only two.
+//
+// 2307 is "cannot find module". The shim answers it for the three remote
+// specifiers; a RELATIVE one reaching here is a real missing file, and the
+// resolver above has already said so in plainer words — so it is dropped rather
+// than reported twice.
+//
+// And anything whose complaint names one of the three wildcard specifiers.
+// `stripe-webhook` writes `Stripe.Checkout.Session` in type position sixty
+// times, and this gate has no copy of Stripe's object model to check those
+// against — a shorthand ambient module gives a namespace with no members, so
+// every one of them reads as an error about a type that is perfectly real. The
+// honest thing is to say the boundary is untyped rather than to hand-write a
+// fake Stripe namespace that would accept `Stripe.Chekout` just as happily.
+// This is exactly the gap `deno check` closes, and the closing message says so.
+const UNTYPED_EDGE = /"(?:npm:\*|jsr:\*|https:\/\/esm\.sh\/\*)"/;
+const typeDiags = [
+  ...program.getSemanticDiagnostics(),
+  ...program.getSyntacticDiagnostics(),
+].filter((d) => d.code !== 2307
+  && !UNTYPED_EDGE.test(ts.flattenDiagnosticMessageText(d.messageText, ' ')));
+
+for (const d of typeDiags.slice(0, 40)) {
+  const f = d.file;
+  const where = f
+    ? `${relative(ROOT, f.fileName)}:${f.getLineAndCharacterOfPosition(d.start ?? 0).line + 1}`
+    : 'supabase/functions';
+  problems.push(`  ${where}  ${ts.flattenDiagnosticMessageText(d.messageText, ' ')} (TS${d.code})`);
+}
+if (typeDiags.length > 40) {
+  problems.push(`  ...and ${typeDiags.length - 40} more type error(s), not listed.`);
+}
+
 if (problems.length) {
   console.error(`${problems.length} problem(s) in supabase/functions:\n`);
   console.error(problems.join('\n'));
@@ -177,10 +361,13 @@ An edge function that does not parse deploys perfectly well and throws on its
 first request. For stripe-webhook that means payments quietly stop being
 recorded, with nothing on any screen to say so.
 
-Note this gate parses and resolves imports; it does NOT type check — that needs
-Deno and the npm: types, which are not installed here. Run \`deno check\` before
-a deploy that touches money.`);
+This gate parses, resolves every relative import, type checks against the app's
+own modules, and holds the money rule. It still does not type the Deno standard
+library or npm:stripe — those three specifiers are typed as any here — so
+\`deno check\` remains the last word before a deploy that touches money.`);
   process.exit(1);
 }
 
-console.log(`check:functions — ${files.length} edge function file(s) parse, and every relative import resolves (syntax and imports only, not types)`);
+console.log(
+  `check:functions — ${files.length} edge function file(s) parse and type check, every relative import resolves,`
+  + ` and no amount is divided by a hardcoded hundred (https:, jsr: and npm: specifiers are typed as any)`);

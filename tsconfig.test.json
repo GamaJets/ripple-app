@@ -56,6 +56,7 @@
     "src/lib/quietHours.test.ts",
     "src/lib/packExpiry.ts",
     "src/lib/packExpiry.test.ts",
+    "src/lib/sharePercent.test.ts",
     "src/lib/disputes.ts",
     "src/lib/disputes.test.ts",
     "src/lib/weekStart.ts",
@@ -488,6 +489,10 @@
     "src/lib/sharedRead.test.ts",
     "src/lib/whoAmI.ts",
     "src/lib/whoAmI.test.ts",
+    "src/lib/readLanded.ts",
+    "src/lib/readLanded.test.ts",
+    "src/lib/consoleNext.ts",
+    "src/lib/consoleNext.test.ts",
     "src/lib/departureSection.ts",
     "src/lib/departureSection.test.ts",
     "src/lib/sumCurrency.ts",
@@ -495,6 +500,8 @@
     "src/lib/goalDeadline.ts",
     "src/lib/goalDeadline.test.ts",
     "src/lib/upcomingWindow.ts",
-    "src/lib/upcomingWindow.test.ts"
+    "src/lib/upcomingWindow.test.ts",
+    "src/lib/sharedSecret.ts",
+    "src/lib/sharedSecret.test.ts"
   ]
 }

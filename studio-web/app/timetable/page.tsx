@@ -27,6 +27,8 @@ import { parseGymZone } from '@lib/gymZone';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchEquipment, capacityFor, type Equipment } from '@lib/gymEquipment';
 import {
@@ -118,7 +120,7 @@ export default function Timetable() {
     return { from: weekOpened.toISOString(), to: lastMoment.toISOString(), weekOpened };
   }, [weekOffset]);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     const { from, to } = range();
     setRaw(null); setLoadFail(null);
     // allSettled, not all: which half failed is the useful part of the message.
@@ -136,10 +138,16 @@ export default function Timetable() {
     const missing: string[] = [];
     if (c.status === 'rejected') missing.push(`classes (${c.reason?.message ?? 'unknown error'})`);
     if (p.status === 'rejected') missing.push(`one-to-ones (${p.reason?.message ?? 'unknown error'})`);
-    if (missing.length) { setLoadFail(missing.join(' and ')); return; }
+    if (missing.length) { setLoadFail(missing.join(' and ')); return false; }
     if (c.status === 'fulfilled' && p.status === 'fulfilled') {
       setRaw({ classes: c.value, slots: p.value });
     }
+
+    // Whole means both halves of the board came back. `useFetched` stamps only
+    // on a whole read, so a week whose one-to-ones would not load leaves the
+    // stamp where it was rather than dating a board that is missing half of
+    // what is on the floor.
+    return settledLanded([c, p]);
   }, [range]);
 
   useEffect(() => {
@@ -171,10 +179,33 @@ export default function Timetable() {
       fetchMemberships(supabase, who.tenantId)
         .then((rows) => { if (live) { setMembers(rows); setMembersErr(null); } })
         .catch((e: any) => { if (live) { setMembers(null); setMembersErr(e?.message ?? 'Could not read the member list.'); } });
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity, the gym record and the roster only. The board itself is read
+    // by the effect below, through `refresh`.
+  }, []);
+
+  /**
+   * The week on the board, kept current and dated.
+   *
+   * A timetable is the most-shared screen in a gym — the office has it open,
+   * the desk has it open, and a coach moves a class from their phone. Until now
+   * every one of those tabs answered about the moment it was opened and said
+   * nothing about which moment that was, on a board people read to decide which
+   * room to walk into.
+   *
+   * `range()` closes over the week offset, so changing week is a fresh read;
+   * `useFetched` coalesces a second change made while the first is in flight
+   * rather than dropping it.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId, weekOffset]);
 
   // Cancelled classes are OFF the merged board, and everything computed from
   // the board — floor cover, clashes, "on the floor at six" — is therefore
@@ -252,7 +283,9 @@ export default function Timetable() {
   const owner = me.role === 'owner';
 
   const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId);
+  // `refresh` is the hook's, not a second reader. It was a local
+  // `() => load(tenantId)`, handed to every write on this board, so adding a
+  // class re-read the week WITHOUT moving the stamp under it.
   const { weekOpened } = range();
   // The same calendar arithmetic as `range` above, for the same reason: on a
   // clocks-change week `weekOpened + 6 * DAY` lands an hour either side of
@@ -428,6 +461,8 @@ export default function Timetable() {
             {weekLabel} · classes and one-to-ones on one board
             {owner ? null : ' · take a register from any class here'}
           </p>
+          <Fetched at={readAt} busy={reading} onRefresh={refresh}
+                   what="this board" style={{ margin: '6px 0 0' }} />
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setWeekOffset((w) => w - 1)} style={ghostBtn}>← Previous</button>

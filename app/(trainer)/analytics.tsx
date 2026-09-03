@@ -220,6 +220,28 @@ export default function TrainerAnalytics() {
   const onTrack = rosterWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 85).length : null;
   const watch = rosterWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length : null;
   const riskCount = rosterWhole ? roster.filter((c) => c.adherence != null && c.adherence < 70).length : null;
+  /**
+   * The clients none of the three bands above counts.
+   *
+   * ── The zero over a list that was not empty ───────────────────────────
+   *
+   * Seen on an iPhone: "On track 0 · Watch 0 · At risk 0" and, a section
+   * below it, "AT-RISK CLIENTS" listing a person by name. Nothing was broken
+   * and every figure was true — the three bands are computed from
+   * `adherence`, which is null for a client with no check-ins, and every one
+   * of them was null. The at-risk list below is computed from
+   * src/lib/clientDrift.ts, which is a different measure over a different
+   * population and does have something to say about a client with nothing on
+   * record.
+   *
+   * A coach does not read two definitions. They read a zero, then a name
+   * under a heading that says the zero was wrong, and conclude the screen is
+   * broken. So the fourth band is drawn: it makes the bar the whole roster
+   * rather than the part of it that has check-ins, and it turns three zeroes
+   * into the fact that was actually true — nobody has anything on record —
+   * which is itself the thing to act on.
+   */
+  const noRecord = rosterWhole ? roster.filter((c) => c.adherence == null).length : null;
   // Sessions those clients actually took this month, at the trainer's rate —
   // not `at-risk count x rate x 4`, which invented a subscription nobody pays,
   // and no longer "booked and in the past", which counted the no-shows of the
@@ -886,19 +908,34 @@ export default function TrainerAnalytics() {
                   : 'Your roster could not be read, so the split between on-track, watch and at-risk is not drawn. It is unknown, not empty.'}
             </Text>
           ) : (<>
+            {/* Four bands, and the fourth is the one that was missing. See
+                `noRecord` above: without it this bar was drawn over the
+                clients who have check-ins and read as though it were drawn
+                over the book. */}
             <DistBar segments={[
               { label: STATUS_LABEL.on_track, value: onTrack, color: t.brand },
               { label: STATUS_LABEL.watch, value: watch, color: t.warn },
               { label: STATUS_LABEL.at_risk, value: riskCount, color: t.crit },
+              ...(noRecord ? [{ label: STATUS_LABEL.idle, value: noRecord, color: t.ink3 }] : []),
             ]} />
-            <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
-              {([[STATUS_LABEL.on_track, onTrack, t.brand], [STATUS_LABEL.watch, watch, t.warn], [STATUS_LABEL.at_risk, riskCount, t.crit]] as const).map(([l, v, col]) => (
+            <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md, flexWrap: 'wrap' }}>
+              {([[STATUS_LABEL.on_track, onTrack, t.brand], [STATUS_LABEL.watch, watch, t.warn], [STATUS_LABEL.at_risk, riskCount, t.crit],
+                 ...(noRecord ? [[STATUS_LABEL.idle, noRecord, t.ink3] as const] : [])] as const).map(([l, v, col]) => (
                 <View key={l} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: col }} />
                   <Text style={{ ...ty.caption, color: t.ink2 }}>{l} {v}</Text>
                 </View>
               ))}
             </View>
+            {/* Which measure these four bands are, said out loud, because the
+                At-risk list further down this same screen is a different one.
+                Two measures on one screen is fine; two measures on one screen
+                with nothing saying so is how a coach comes to distrust both. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {noRecord
+                ? `Measured on check-in adherence. ${noRecord === 1 ? 'One client has' : `${noRecord} clients have`} no check-ins at all, so ${noRecord === 1 ? 'they are' : 'they are'} counted as ${STATUS_LABEL.idle.toLowerCase()} rather than as on track — an absence is not a pass. At-risk Clients below is a different measure — each client against their own pattern — and does have something to say about them.`
+                : 'Measured on check-in adherence. At-risk Clients below is a different measure: each client against their own pattern.'}
+            </Text>
           </>)}
         </Section>
 

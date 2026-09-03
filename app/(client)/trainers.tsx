@@ -101,7 +101,7 @@ import { readSessionFee, sessionFeeAmount, sessionFeeShort, sessionFeeNote, type
 // writing them, but a value that has been in a column once can be in it again,
 // and a broken circle in a directory reads as a coach who has not bothered.
 import { avatarSource } from '../../src/lib/avatarImage';
-import { useToday } from '../../src/ui/today';
+import { useToday, useNow } from '../../src/ui/today';
 import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
 
 // `n.split(' ').map((x) => x[0]).join('')` is the obvious version and it is
@@ -460,9 +460,18 @@ export default function FindTrainer() {
   // is tested — including the two this screen would otherwise get wrong: a plan
   // attached but unreadable is not "no plan", and a gym this account cannot yet
   // read the name of is described rather than named.
+  /* `nowMs` passed, and IN the dependency list. `gymInviteCards` defaults its
+   * third argument to `Date.now()`, and that argument is what `isRedeemable`
+   * decides on — which invitations are OPEN, which order the cards come in, and
+   * what each card's sentence says. Read inside a memo keyed on the invites and
+   * the gym names, it was the moment the screen first mounted, and this screen
+   * is reached from a tab that never unmounts. An invitation that lapsed while
+   * the phone was in a pocket kept its Accept button, and the tap came back
+   * with the server's refusal instead of the card saying it had run out. */
+  const gymCardsNow = useNow().getTime();
   const gymCards = useMemo(
-    () => gymInviteCards(gym.invites, { byTenant: gym.gymNames }),
-    [gym.invites, gym.gymNames],
+    () => gymInviteCards(gym.invites, { byTenant: gym.gymNames }, gymCardsNow),
+    [gym.invites, gym.gymNames, gymCardsNow],
   );
 
   /**

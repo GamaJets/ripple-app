@@ -46,6 +46,27 @@
 // were doing.
 import type { Me } from '@/lib/supabase';
 import type { Unread } from '@/lib/read';
+import { signInHref } from '@lib/consoleNext';
+
+/**
+ * Where the reader is, as a thing sign-in can be asked to come back to.
+ *
+ * Read off `location` at render rather than through `useSearchParams`, which
+ * under Next 15 forces the whole page into a Suspense boundary for one string —
+ * the same trade /members already makes for `?member=`. Guarded because Next
+ * also renders this component on the server, where `location` does not exist:
+ * there it answers null, `signInHref` gives the bare `/` this link has always
+ * been, and the first client render replaces it. A destination is a
+ * convenience, and nothing here may throw to protect one.
+ */
+function hereNow(): string | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    return `${window.location.pathname}${window.location.search}`;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The page to show instead of this screen.
@@ -81,7 +102,17 @@ export function ConsoleGate({ me, failed = false, onRetry }: {
         <p style={body}>
           This console is your gym&rsquo;s. Sign in and it will open on the screen you asked for.
         </p>
-        <p style={{ marginTop: 14 }}><a href="/">Sign in</a></p>
+        {/* And now it does. This was `<a href="/">`, carrying nothing, under
+            that exact sentence — so every deep link into the console became the
+            Overview after a session lapsed, on all thirty gated routes. The one
+            that made it a dead end rather than an annoyance is /retention's
+            `/members?member=<uuid>`: a person cannot retype a uuid, so the
+            member they were sent to look at was simply unreachable.
+
+            `signInHref` refuses anything that is not a path on this origin, so
+            a `?next=` written into a link by somebody else cannot make this
+            console a hop to a login form that is not ours. */}
+        <p style={{ marginTop: 14 }}><a href={signInHref(hereNow())}>Sign in</a></p>
       </main>
     );
   }

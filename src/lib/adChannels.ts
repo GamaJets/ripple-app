@@ -87,28 +87,35 @@
 // the money has, and ZERO_DECIMAL and THREE_DECIMAL are the two answers that
 // are not two.
 //
-// adMatch.centsFromAmount multiplies a major-unit figure by 100 FLATLY anyway,
-// for every currency, and this file follows it deliberately rather than being
-// cleverer:
+// This section used to argue the opposite, at length, and it was wrong.
 //
-//   · A JPY account reporting ¥1,234 stores 123400 and renders as "JPY
-//     1,234.00" — the right amount of money with a decimal place nobody in
-//     Japan uses. Dividing by 1 instead of 100 for the sixteen ZERO_DECIMAL
-//     currencies would store 1234, which `money()` would then render as "JPY
-//     12.34". A hundredfold error on a coach's own spend, in the currencies
-//     where nobody reviewing it would have caught it.
-//   · A KWD account reporting 12.340 stores 1234 and renders as "KWD 12.340",
-//     because minorMoney pads to the three places THREE_DECIMAL asks for and
-//     1234 hundredths is 12.34 dinars. The third decimal place is where this
-//     convention actually costs something: a figure of 12.345 rounds to 1234
-//     and loses half a fils. That is bounded, it is per ad rather than
-//     compounding, and it is the same rounding `client_purchases` already
-//     makes on the revenue side — so spend and revenue agree, which is the
-//     comparison part 98 exists to make. Changing it here alone would make
-//     them disagree by a hundredfold and nothing on screen would say so.
+// It said adMatch.centsFromAmount multiplied by 100 FLATLY for every currency,
+// that this file followed it deliberately, and that a JPY account reporting
+// ¥1,234 therefore stored 123400 and rendered as "JPY 1,234.00" — the right
+// amount with a decimal place nobody in Japan uses. That render has not been
+// true since `money()` started delegating to `minorMoney`: 123400 minor units
+// in a currency with no minor unit is ¥123,400, and a coach in Tokyo was shown
+// their advertising spend, and their cost per client, at a hundred times what
+// they had actually spent. The KWD paragraph was the same error inverted —
+// 12.340 stored as 1234 reads back as KWD 1.234, a tenth of it.
 //
-// One conversion, one place, and the reasoning written down rather than
-// rediscovered by whoever adds the fourth channel.
+// The paragraph's own premise is what gave it away: it correctly stated that
+// `minorMoney` asks `currencyDecimals` how many places the money has, and then
+// concluded that the writer should ignore the answer. A writer and a renderer
+// that disagree about the unit produce a figure that is wrong in both
+// directions depending on which end you read it from.
+//
+// So there is no flat hundred anywhere in this chain now. adMatch.
+// centsFromAmount takes the ad account's currency and scales by 10^places on
+// the digits, and the revenue side it is compared against — client_purchases.
+// amount_cents, written from what Stripe actually charged — has always been
+// true minor units. The two agree for the first time in the twenty-one
+// currencies where they did not.
+//
+// What `majorFromMicros` below does is unchanged and was never part of the
+// error: it moves Google's decimal point six places and hands on the same
+// major-unit decimal string Meta and TikTok already report. One conversion,
+// one place, and the currency question asked exactly once, downstream of it.
 
 /** The channels a coach can connect. Order is the order they are shown in. */
 export const AD_CHANNELS = ['meta', 'google', 'tiktok'] as const;

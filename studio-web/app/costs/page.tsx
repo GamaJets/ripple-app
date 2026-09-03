@@ -52,6 +52,7 @@ import { ConsoleGate, Loading } from '@/components/Gate';
 import { type Unread, type Read, reading } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
 import { Banner, Announce } from '@/components/Banner';
 import { DataTable, type Column } from '@/components/DataTable';
 import { money } from '@lib/gymRecord';
@@ -131,16 +132,20 @@ export default function Costs() {
   // August's costs under a September heading.
   const [loaded, setLoaded] = useState<{ key: string; costs: Read<GymCost> }>({ key: '', costs: reading() });
 
-  const load = useCallback(async (tenantId: string, mw: MonthWindow) => {
+  const load = useCallback(async (tenantId: string, mw: MonthWindow): Promise<boolean> => {
     setLoaded({ key: '', costs: reading() });
     try {
       const rows = await fetchGymCosts(supabase, tenantId, mw.firstDay, mw.lastDay);
       setLoaded({ key: mw.key, costs: { rows, state: null, why: null } });
+      return true;
     } catch (e: any) {
       setLoaded({
         key: mw.key,
         costs: { rows: null, state: 'failed', why: `The recorded costs could not be read: ${e?.message ?? 'the read was refused'}.` },
       });
+      // Not a landing. The stamp stays where it was and the banner above says
+      // which read is missing.
+      return false;
     }
   }, []);
 
@@ -167,10 +172,31 @@ export default function Costs() {
       setZone(t.zone);
       setGymNameUnread(!!t.error);
       setTenantErr(t.error);
-      if (w) await load(link.tenantId, w);
     })();
     return () => { live = false; };
-  }, [load, w, key]);
+    // Identity and the gym record only. The month's costs are read by the
+    // effect below, through `refresh`. They shared one effect keyed on the
+    // month, so choosing a different month also re-read the gym's name,
+    // currency and timezone — three facts that cannot have changed.
+  }, []);
+
+  /**
+   * The chosen month's costs, kept current and dated.
+   *
+   * This is a book somebody else at the gym is also writing into: a manager
+   * enters the engineer's invoice while the owner has August open on the office
+   * machine, and until now the owner's screen answered about whenever their tab
+   * was opened without saying when that was — under a total they were about to
+   * take into a month close.
+   */
+  const { at: readAt, busy: reading_, refresh } = useFetched(
+    () => (me?.tenantId && w ? load(me.tenantId, w) : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.tenantId && w) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId, key]);
 
   const costs = loaded.key === key ? loaded.costs : reading<GymCost>();
 
@@ -228,6 +254,9 @@ export default function Costs() {
         there is no profit figure in this product.
       </p>
 
+      <Fetched at={readAt} busy={reading_} onRefresh={refresh}
+               what="this month’s costs" style={{ margin: '2px 0 14px' }} />
+
       {tenantErr ? (
         <Banner tone="crit">
           This account is linked to a gym, but the gym&rsquo;s record could not be read:{' '}
@@ -261,7 +290,11 @@ export default function Costs() {
           <Month
             w={w} costs={costs} ccy={ccy} zone={zone} gymName={gymName}
             tenantId={me.tenantId ?? null} me={me}
-            onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }}
+            /* The hook's `refresh`, not a bare `load`: a cost recorded here is
+               the one moment this screen is provably current, and re-reading
+               without moving the stamp would leave the line under it ageing
+               from before the write. */
+            onChange={refresh}
           />
         )}
     </Shell>

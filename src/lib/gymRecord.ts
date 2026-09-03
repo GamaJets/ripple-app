@@ -601,6 +601,16 @@ export type CorrectionKind = 'refund' | 'correction';
  * person would say it. The sign is applied by `reversePayment`, never typed,
  * because a screen that asks somebody to enter a negative number will one day
  * be handed a positive one and file a second payment.
+ *
+ * The over-reversal sentence used to read `(remaining / 100).toFixed(2)`, and
+ * it is the one line here that prints a figure rather than a rule. A hundred is
+ * the factor for about eighty per cent of currencies and for none of the
+ * twenty-one others: a gym in Tokyo owed ¥6,300 was told "63.00 is still
+ * outstanding", and one in Kuwait was told ten times what was left. It goes
+ * through `money()` now, which asks the currency how many places it has and
+ * puts the code in front of the figure — and the currency is the payment's own,
+ * which `reversePayment` also copies onto the correction, so the sentence and
+ * the row it refuses are denominated the same way.
  */
 export function reversalBlocker(
   original: GymPayment,
@@ -618,7 +628,15 @@ export function reversalBlocker(
     return 'This payment has already been reversed in full. Reversing it again would take back money the gym never had.';
   }
   if (amountCents > remaining) {
-    return `That is more than is left on this payment — ${(remaining / 100).toFixed(2)} of ${(original.amountCents / 100).toFixed(2)} is still outstanding against it.`;
+    const left = money(remaining, original.currency);
+    const whole = money(original.amountCents, original.currency);
+    // A payment whose currency nobody recorded still cannot be over-reversed —
+    // the refusal stands, and it simply does not quote two figures in a money
+    // it cannot name. A bare "6300.00" is read in whatever currency the reader
+    // happens to be thinking in.
+    return left && whole
+      ? `That is more than is left on this payment — ${left} of ${whole} is still outstanding against it.`
+      : 'That is more than is left on this payment.';
   }
   return null;
 }

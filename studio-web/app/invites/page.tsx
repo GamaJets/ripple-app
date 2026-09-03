@@ -44,6 +44,8 @@ import { supabase, writeFailedText, loadMe, ME_UNREADABLE, type Me } from '@/lib
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchPlans, type MembershipPlan } from '@lib/gymRecord';
 import { gymDateText } from '@lib/gymWhen';
@@ -100,7 +102,7 @@ export default function Invites() {
   const [plans, setPlans] = useState<MembershipPlan[] | null>(null);
   const [plansErr, setPlansErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // Two reads, deliberately not one Promise.all behind a single catch. A price
     // book that will not load must not empty the invitation list with it.
     const [iRes, pRes] = await Promise.allSettled([
@@ -111,6 +113,9 @@ export default function Invites() {
     else { setInvites(null); setInvitesErr(iRes.reason?.message ?? 'Could not read the invitations.'); }
     if (pRes.status === 'fulfilled') { setPlans(pRes.value); setPlansErr(null); }
     else { setPlans(null); setPlansErr(pRes.reason?.message ?? 'Could not read the price book.'); }
+
+    // Whole means both came back. `useFetched` stamps only on a whole read.
+    return settledLanded([iRes, pRes]);
   }, []);
 
   useEffect(() => {
@@ -140,10 +145,27 @@ export default function Invites() {
         const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
         setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the two reads are the effect below's.
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * An invitation's state is written by somebody else: the person accepts it on
+   * their phone, or it quietly expires. This list said "sent" about an invite
+   * accepted an hour ago, on the screen an owner uses to decide whether to
+   * chase somebody.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
   const summary = useMemo(() => (invites ? summariseInvites(invites) : null), [invites]);
 
@@ -189,7 +211,7 @@ export default function Invites() {
   }
 
   const tenantId = me.tenantId!;
-  const refresh = () => load(tenantId);
+  // `refresh` is the hook's — see /money for the same note.
   const unread = invites === null;
 
   return (
@@ -199,6 +221,9 @@ export default function Invites() {
         A membership belongs to a person, not to a row of spreadsheet text. This
         is where the person is asked.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="these invitations" style={{ margin: '2px 0 14px' }} />
 
       {/* This said "Nothing here sends an email", which was true and was the
           whole gap: an invite is a row addressed to somebody who has not been

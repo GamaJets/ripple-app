@@ -345,7 +345,24 @@ Deno.serve(async (req) => {
         member_id: uid,
         repple_account: gymAccount,
       },
-    }, acctOpts);
+    }, {
+      ...acctOpts,
+      // Keyed on the order, which is written above and exists before this call.
+      //
+      // What it stops: the Stripe SDK retrying this request itself after a
+      // network error, which without a key mints a SECOND live Checkout Session
+      // against one `gym_orders` row — and only the second one's id is recorded
+      // below, so the first becomes a payable session this app has no record of.
+      // `connect-onboard` and `gym-onboard` took keys for the same reason and
+      // this was the sale left without one.
+      //
+      // What it does NOT stop, said plainly rather than left to be assumed: a
+      // member tapping Buy twice. That is two requests, so two order rows and
+      // two ids, so two keys — and the fix for it is to dedupe the ORDER, not
+      // the session, which is a change to what this function does rather than
+      // to how safely it does it.
+      idempotencyKey: `repple-gym-session:${orderId}`,
+    });
   } catch (e) {
     // Nobody was charged: there is no session. The order is closed rather than
     // left pending forever, so the member's screen does not show a purchase

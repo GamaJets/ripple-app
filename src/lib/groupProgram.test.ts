@@ -170,6 +170,70 @@ const P = (title: string, name: string, sets: number, reps: string): Program => 
   ok(typeof e.reason === 'string' && e.reason.length > 0, 'an empty group must say so');
 }
 
+// ══ planFanOut — the words, when the coach is WRITING the programme ════════
+//
+// `planFanOut` is shared by three screens, and two of its refusals are about
+// the programme rather than about a person. Both were written for a group, and
+// app/(trainer)/builder.tsx is not a group: it is one coach writing one block.
+// Seen on an iPhone, with an empty draft open in the builder — "HELD · Pick a
+// Programme First · This group has no programme yet. Choose one from your
+// library and it can go out to everybody in the group at once." There was no
+// group. And telling somebody who is halfway through writing a programme to go
+// and pick an existing one is the opposite of what they are doing.
+{
+  const noProgGroup = planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT);
+  const noProgBuild = planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT, 'written');
+  ok(!noProgGroup.allowed && !noProgBuild.allowed, 'neither may assign a programme that does not exist');
+  eq(noProgGroup.code, 'no-program', 'the refusal is named so a screen can branch on it rather than match its sentence');
+  eq(noProgBuild.code, 'no-program', 'and it is the same refusal whichever screen asked');
+  ok(/group/i.test(noProgGroup.reason as string), 'the group screen still talks about a group');
+  ok(!/group/i.test(noProgBuild.reason as string) && !/group/i.test(noProgBuild.label as string),
+    'and the builder never mentions a group, because there is not one on that screen');
+  ok(!/library/i.test(noProgBuild.reason as string),
+    'nor sends a coach who is writing a programme off to pick one from their library');
+  ok(/exercise/i.test(noProgBuild.reason as string),
+    'it names what is actually missing, which is exercises');
+
+  const noneGroup = planFanOut('ready', 'ready', [], true, SUBJECT);
+  const noneBuild = planFanOut('ready', 'ready', [], true, SUBJECT, 'written');
+  eq(noneGroup.code, 'nobody', 'an empty recipient list is its own refusal');
+  eq(noneBuild.code, 'nobody', 'on both screens');
+  ok(/group/i.test(noneGroup.label as string), 'which for a group is about who is in the group');
+  ok(!/group/i.test(noneBuild.reason as string) && !/group/i.test(noneBuild.label as string),
+    'and in the builder is about who the coach has ticked, because nobody has been added to anything');
+  ok(/tick/i.test(noneBuild.reason as string), 'and it names the gesture that fixes it');
+}
+
+// The default is the group wording, so no existing caller changed behaviour by
+// this parameter being added.
+{
+  const a = planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT);
+  const b = planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT, 'chosen');
+  eq(a.reason, b.reason, 'omitting the origin is the same as asking for the chosen-programme wording');
+  eq(a.label, b.label, 'in the label too');
+}
+
+// Every refusal carries a code, and an allowed plan carries none — so a screen
+// cannot accidentally suppress a notice by matching a null.
+{
+  const holds = [
+    planFanOut('loading', 'ready', [clear('a', 'Priya')], true, SUBJECT),
+    planFanOut('partial', 'ready', [clear('a', 'Priya')], true, SUBJECT),
+    planFanOut('error', 'ready', [clear('a', 'Priya')], true, SUBJECT),
+    planFanOut('ready', 'error', [clear('a', 'Priya')], true, SUBJECT),
+    planFanOut('ready', 'ready', [clear('a', 'Priya')], false, SUBJECT),
+    planFanOut('ready', 'ready', [], true, SUBJECT),
+    planFanOut('ready', 'ready', [undisclosed('a', 'Priya')], true, SUBJECT),
+  ];
+  for (const h of holds) {
+    ok(!h.allowed, 'each of these is a refusal');
+    ok(h.code !== null, `and each names itself: ${h.label}`);
+  }
+  eq(new Set(holds.map((h) => h.code)).size, holds.length, 'and no two different refusals share a code');
+  eq(planFanOut('ready', 'ready', [clear('a', 'Priya')], true, SUBJECT).code, null,
+    'an assign that may go ahead is refusing nothing and says so with a null');
+}
+
 // ══ planFanOut — the injury gate, PER CLIENT ═══════════════════════════════
 //
 // MUTATION CHECK, and the one that matters most. The failure being guarded

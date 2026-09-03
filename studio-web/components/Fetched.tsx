@@ -57,7 +57,24 @@ export interface Fetching {
   at: number | null;
   /** A read is in flight right now. */
   busy: boolean;
-  /** Ask again. Safe to call while one is already running — it is ignored. */
+  /**
+   * Ask again.
+   *
+   * Safe to call while one is already running: the request is COALESCED, not
+   * dropped. One more read runs as soon as the one in flight finishes, however
+   * many times it was asked for in between.
+   *
+   * It used to be dropped, and that is wrong on any screen where the reader
+   * closes over something a person can change — /payroll's month, /money's
+   * payment window, /tax's quarter. Switching month while the previous month is
+   * still in flight would be silently ignored, and the screen would sit under
+   * the new heading showing the old month's total with no sign that the read
+   * had not happened. A refresh that was asked for and quietly not performed is
+   * precisely the staleness this component exists to make visible.
+   *
+   * One queued run, never a counter: ten clicks are one re-read, and the
+   * screen cannot be made to chase its own tail.
+   */
   refresh: () => void;
 }
 
@@ -101,12 +118,28 @@ export function useFetched(
   const readRef = useRef(read);
   readRef.current = read;
   const running = useRef(false);
+  /** A refresh was asked for while one was in flight. At most one is held. */
+  const queued = useRef(false);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
+  // `refresh` calls itself when a run was queued, and a `useCallback` cannot
+  // name itself in its own body. The ref is the same trick `readRef` uses two
+  // fields up, and it keeps the dependency list of every effect below at one
+  // stable identity. Declared before the callback and assigned after it, which
+  // is the only order that has neither a circular initialiser nor a temporal
+  // dead zone.
+  const refreshRef = useRef<() => void>(() => {});
+
   const refresh = useCallback(() => {
-    if (running.current || !enabled) return;
+    if (!enabled) return;
+    // Coalesced rather than dropped — see `Fetching.refresh`. The screen's
+    // reader is re-read from the ref on every pass, so the queued run uses
+    // whatever the reader closes over NOW, which is the month or window the
+    // person just chose and not the one that was on screen when they chose it.
+    if (running.current) { queued.current = true; return; }
     running.current = true;
+    queued.current = false;
     setBusy(true);
     void (async () => {
       let whole = false;
@@ -120,12 +153,16 @@ export function useFetched(
       } finally {
         running.current = false;
         if (alive.current) {
-          setBusy(false);
           if (whole) setAt(Date.now());
+          // Still busy if another pass is about to start: the control must not
+          // flicker back to "Read again" between two halves of one refresh.
+          if (queued.current) refreshRef.current();
+          else setBusy(false);
         }
       }
     })();
   }, [enabled]);
+  refreshRef.current = refresh;
 
   // Back to the tab.
   useEffect(() => {

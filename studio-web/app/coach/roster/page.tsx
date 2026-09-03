@@ -55,6 +55,7 @@ import { ConsoleGate, Unresolved } from '@/components/Gate';
 import { type Unread, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
 import { DataTable, type Column } from '@/components/DataTable';
 // `money()` is deliberately not imported: the only amount on this screen is a
 // pack price, and `client_purchases` carries no currency for it to print.
@@ -292,7 +293,7 @@ export default function CoachRoster() {
    *  real but short, which is worse than no list unless it is said out loud. */
   const [partial, setPartial] = useState<string | null>(null);
 
-  const load = useCallback(async (coachId: string) => {
+  const load = useCallback(async (coachId: string): Promise<boolean> => {
     setErr(null);
     setPartial(null);
 
@@ -341,7 +342,9 @@ export default function CoachRoster() {
       setRows(null);
       setPacks(null);
       setErr(bookTrouble.join(' · '));
-      return;
+      // Nothing landed. The stamp stays where it was, and the banner above says
+      // which read is missing.
+      return false;
     }
     if (bookTrouble.length) {
       setPartial(
@@ -365,7 +368,10 @@ export default function CoachRoster() {
       setPacks([]);
       setPacksErr(false);
       setErr(bookTrouble.length ? bookTrouble.join(' · ') : null);
-      return;
+      // A book with nobody on it is a complete answer, and the decorating reads
+      // were never sent because there was nobody to ask about. Whole unless one
+      // of the two halves of the book itself failed.
+      return bookTrouble.length === 0;
     }
 
     // Everything that decorates a client who is on the book either way. Settled
@@ -626,6 +632,12 @@ export default function CoachRoster() {
       failure(cpRes, 'their session packs'),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
+
+    // Whole means every one of the nine reads came back — the two halves of the
+    // book, and the seven that decorate it. `useFetched` stamps only on a whole
+    // read, so a roster whose check-ins would not load leaves the stamp where
+    // it was rather than dating a "gone quietest" order computed without them.
+    return trouble.length === 0;
   }, []);
 
   useEffect(() => {
@@ -653,11 +665,30 @@ export default function CoachRoster() {
           setZone(z.kind === 'zone' ? z.zone : null);
         }
       }
-      if (who.role !== 'trainer' && who.role !== 'owner') return;
-      await load(who.id);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the book is the effect below's.
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * "Ordered by who has gone quietest, so the top of this list is the morning's
+   * call list" — and the order is computed from reads bounded at the moment of
+   * the request. A coach who opens this at eight and works down it at eleven is
+   * ringing people in an order struck three hours ago, with somebody who has
+   * since trained still at the top.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.id && (me.role === 'trainer' || me.role === 'owner')
+      ? load(me.id)
+      : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.id) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.id, me?.role]);
 
   // Ranked before the table sees them, so the default view already answers
   // "who first" without anyone clicking a column header.
@@ -913,6 +944,9 @@ export default function CoachRoster() {
         those columns is nothing recorded in that span, not nothing on record. Goals and
         session packs are read in full, however old they are.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="your book" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {partial ? <Banner>{partial}</Banner> : null}

@@ -26,6 +26,8 @@ import { supabase, loadMe, ME_UNREADABLE, writeFailed, type Me } from '@/lib/sup
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { sliceLanded, slicesLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { Banner as SharedBanner, Announce } from '@/components/Banner';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
@@ -144,7 +146,7 @@ export default function Staff() {
    */
   const [policyCode, setPolicyCode] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setRec(EMPTY);
     const now = Date.now();
     const fromIso = new Date(now - WINDOW_DAYS * DAY).toISOString();
@@ -175,6 +177,12 @@ export default function Staff() {
       : await slice(() => fetchActivity(tenantId, clients.rows));
 
     setRec({ trainers, sessions, shifts, clients, activity, classes });
+
+    // Whole means all six answered. `useFetched` stamps only on a whole read,
+    // so a rota that would not load leaves the stamp where it was rather than
+    // dating a screen whose whole left-hand column is about who was on shift.
+    return slicesLanded([trainers, sessions, shifts, clients, classes])
+      && sliceLanded(activity);
   }, []);
 
   useEffect(() => {
@@ -215,10 +223,28 @@ export default function Staff() {
         setZoneRead(true);
       }
       setFeeRead(tErr ? 'failed' : 'ok');
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only — the six reads are the effect below's.
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * The rota is the part that moves: somebody swaps a shift, somebody marks a
+   * session, and this screen compares rostered hours against hours the record
+   * can confirm. A tab open since this morning compares last night's rota
+   * against last night's sessions, under a heading that claims the window ends
+   * now.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
   // The gym's stated policy, and the floor to use where it has not stated one.
   // Delivered-only cannot overpay anybody, so it is safe as a fallback — but it
@@ -278,6 +304,9 @@ export default function Staff() {
         rostered against the hours the record can confirm they were delivering,
         and who is drifting on their book.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this rota" style={{ margin: '2px 0 14px' }} />
 
       {/* The gym's answer, read rather than offered. Two checkboxes stood here
           and saved nothing: an owner ticked "Pay no-shows", read a bigger number

@@ -18,6 +18,8 @@ import { parseGymZone } from '@lib/gymZone';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
+import { Fetched, useFetched } from '@/components/Fetched';
+import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import {
@@ -121,7 +123,7 @@ export default function Sessions() {
    * "no trainer has ever been paid for anything", and the reasonable response
    * to that is to pay them all again.
    */
-  const load = useCallback(async (tenantId: string) => {
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
     const [rows, runs] = await Promise.allSettled([
       fetchSessions(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString()),
       fetchSettlements(supabase, tenantId),
@@ -145,6 +147,12 @@ export default function Sessions() {
       setSettlements(null);
       setSettlementsError((runs.reason as any)?.message ?? 'Could not read what has already been paid.');
     }
+
+    // Whole means both came back. `useFetched` stamps only on a whole read, so
+    // a refresh that lost the settlements — the read that says what has ALREADY
+    // been paid — leaves the stamp where it was rather than dating a screen
+    // that is about to offer to pay those sessions again.
+    return settledLanded([rows, runs]);
   }, []);
 
   useEffect(() => {
@@ -175,10 +183,33 @@ export default function Sessions() {
         const z = error ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
         setZone(z.kind === 'zone' ? z.zone : null);
       }
-      await load(who.tenantId);
     })();
     return () => { live = false; };
-  }, [load]);
+    // Identity and the gym record only. The sessions are read by the effect
+    // below, through `refresh`, so the first read stamps exactly like every
+    // later one.
+  }, []);
+
+  /**
+   * Kept current, and it says when it was last read.
+   *
+   * "One-to-ones delivered on your floor in the last 30 days" is a window cut
+   * at the moment of the read, and this screen never said which moment. A
+   * console open since Monday still offered to settle a list ending on Monday,
+   * and the sessions marked at the desk since were simply not on it.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+  );
+
+  // The first read. Keyed on the tenant id rather than fired at the end of the
+  // effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling `refresh()` in the same tick as `setMe(who)` would run
+  // the closure from the previous render, where `me` is still undefined.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.tenantId]);
 
   /**
    * The gym's stated policy, and what to do when it has not stated one.
@@ -374,7 +405,10 @@ export default function Sessions() {
   }
 
   const tenantId = me.tenantId;
-  const refresh = () => load(tenantId);
+  // `refresh` is the hook's, not a second reader. It was a local
+  // `() => load(tenantId)` handed to marking, undoing and settling, so the one
+  // moment this screen was provably current was the one moment the line under
+  // it went on ageing.
 
   const mark = async (s: PtSession, outcome: SessionOutcome) => {
     try {
@@ -459,7 +493,7 @@ export default function Sessions() {
         // the reader checks, rather than a defaulted value nobody sees.
         currency: ccy,
       });
-      await load(me.tenantId);
+      refresh();
     } catch (e: any) {
       // The worst duplicate in the product: a settlement written twice pays a
       // trainer twice, out of a table /accounting and /close both read back as
@@ -479,6 +513,9 @@ export default function Sessions() {
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         One-to-ones delivered on your floor in the last 30 days, and what they are worth.
       </p>
+
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this month’s sessions" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
 

@@ -48,6 +48,7 @@ import { fetchMyCurrency } from '../../src/lib/myCurrency';
 import type { MyCurrency } from '../../src/lib/currencySource';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { hitSlopFor, MIN_TARGET } from '../../src/lib/a11y';
+import { sharePercent } from '../../src/lib/sharePercent';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
@@ -2357,7 +2358,7 @@ export default function TrainerSchedule() {
       Alert.alert('Nobody to offer it to', `${timeLabel(s.startsAt)} stays open on your calendar, but you have no clients on your roster to tell about it. Add one from the Clients tab.`, [{ text: 'OK' }]);
       return;
     }
-    Alert.alert('Re-offer this slot?', `Push all ${ids.length} of your clients that ${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is open to book.`, [
+    Alert.alert('Offer this slot round?', `Push all ${ids.length} of your clients that ${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} is open to book.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: `Notify ${ids.length}`, onPress: () => { void doReoffer(s, ids); } },
     ]);
@@ -2530,7 +2531,22 @@ export default function TrainerSchedule() {
                 ? 'Only part of your calendar loaded, so it cannot be counted. The days below show what did come back.'
                 : totalSlots === 0
                   ? 'Nothing scheduled yet — add a session or set your weekly availability.'
-                  : `${open.length} open slot${open.length === 1 ? '' : 's'} · ${Math.round((booked.length / totalSlots) * 100)}% of your slots are filled`}
+                  // `sharePercent`, not `Math.round(… * 100)`. On a device
+                  // this block read "Booked · 1 session" over "248 open slots ·
+                  // 0% of your slots are filled" — one booking in 249 slots
+                  // rounds to nought, so the screen said in one breath that a
+                  // session was booked and that none of the slots were. See
+                  // src/lib/sharePercent.ts: a percentage may print 0% only
+                  // when the count is actually nought.
+                  : `${open.length} open slot${open.length === 1 ? '' : 's'}${
+                      // The clause is dropped rather than dashed. `totalSlots
+                      // === 0` is already answered above, so a null here can
+                      // only mean a total this screen could not read — and
+                      // "— of your slots are filled" is a sentence with a hole
+                      // in it, not a measurement (check:prose).
+                      sharePercent(booked.length, totalSlots)
+                        ? ` · ${sharePercent(booked.length, totalSlots)} of your slots are filled`
+                        : ''}`}
           // The ring is a proportion, which is a figure like any other. Drawn
           // from a partial read it would show a coach a filled-up week off a
           // fraction of it.
@@ -2679,7 +2695,22 @@ export default function TrainerSchedule() {
               half — and hiding the row there would leave a coach reading a
               release note about a feature they cannot find. The note says what
               is missing instead, and the sheet says it again in full. */}
+          {/* ── two rows that say the feature is not here, drawn as though
+                 it were ────────────────────────────────────────────────────
+              Seen on a device: this row and Google Calendar below it, adjacent,
+              both saying the thing does not exist on this build, and both
+              drawing the brand-coloured icon and the same chevron as every
+              working row above them. A coach reads two live-looking rows that
+              lead nowhere and concludes the screen is broken rather than the
+              build is old.
+
+              They stay tappable — the argument above still holds, and the
+              sheet says it in full — but the icon goes to the quiet ink, which
+              is the difference between "here is a thing you can do" and "here
+              is a thing you cannot do yet, and here is why". The chevron stays
+              because there IS somewhere to go: the explanation. */}
           <ListRow icon="calendar" title="Block Time From Your Calendar"
+            tone={HAS_NATIVE_CALENDAR ? undefined : t.ink3}
             note={HAS_NATIVE_CALENDAR
               ? 'Read when your phone says you are busy, times only, and pick what to block'
               : 'Needs a newer build of the app. Blocking time by hand is unaffected'}
@@ -2692,6 +2723,7 @@ export default function TrainerSchedule() {
               A row that said "Not connected" for any of them would send a
               coach to sign in to something they are already signed in to. */}
           <ListRow icon="calendar" title="Google Calendar"
+            tone={CALENDAR_SYNC_CONFIGURED ? undefined : t.ink3}
             note={!CALENDAR_SYNC_CONFIGURED
               ? 'Not available in this version of Repple yet'
               : syncStatus === 'error'
@@ -3008,7 +3040,13 @@ export default function TrainerSchedule() {
                   </>) : s.status === 'blocked' ? (
                     <View style={{ flex: 1 }}><Ghost label="Free This Time Up" onPress={() => removeOpen(s)} /></View>
                   ) : (<>
-                    <View style={{ flex: 1 }}><Ghost label="Re-offer" onPress={() => reoffer(s)} /></View>
+                    {/* "Re-offer" on a slot that has never been booked reads
+                        as though somebody had cancelled — a coach seeing it on
+                        an ordinary open hour looks for the booking that was
+                        lost. This branch is `status === 'available'`, which is
+                        every open slot, most of which nobody ever held. The
+                        act is the same act; the word was the wrong one. */}
+                    <View style={{ flex: 1 }}><Ghost label="Offer It Round" onPress={() => reoffer(s)} /></View>
                     <View style={{ flex: 1 }}><Ghost label="Remove" onPress={() => removeOpen(s)} /></View>
                   </>)}
                 </View>

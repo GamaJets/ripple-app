@@ -11,9 +11,9 @@ import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from './components';
-import { Icon } from './Icon';
 import { Cta, Ghost } from './kit';
 import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
+import { MIN_TARGET } from '../lib/a11y';
 import { submitAppFeedback } from './appFeedback';
 import { notifySuccess } from './haptics';
 
@@ -63,25 +63,51 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
           iOS in window coordinates and is right in both mountings; there is no
           docked bar here that would need src/ui/keyboardLift.ts instead. */}
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+        {/* Back leads the row rather than trailing it. It trailed here, which
+            put the one control that leaves the screen at the far RIGHT — where
+            iOS has never put it, and where the rest of this app does not put it
+            either (see the Money screen, which reads back-then-title). A coach
+            reaching for the top-left corner found nothing there. The a11yLabel
+            is not decoration: without one the button is announced as "button"
+            and there is no other back affordance on this screen. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Feedback</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Send Feedback</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>{audience}. Tell us what to fix, what is confusing, or what you would love to see.</Text>
 
+        {/* The five buttons carried a trophy each and nothing else. Unrated,
+            that is five IDENTICAL grey glyphs: nothing on the row says it is a
+            scale, nothing says which end is good, and a trophy means "you won"
+            rather than "this was fine" — the one question the row is asking.
+            Seen on an iPhone 17 Pro at the default text size.
+
+            The digit is the fix rather than a star because there is no star in
+            src/ui/Icon.tsx and inventing one to carry this meaning is a larger
+            change than the defect. A number needs no legend, scales with the
+            text size, and is read out as itself. The fill-to-N behaviour is
+            unchanged — tapping 3 lights 1, 2 and 3 — so the row still reads as
+            a magnitude and not five separate choices, and the end labels say
+            which direction that magnitude runs in. */}
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>How is the experience?</Text>
-        <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>
+        <View style={{ flexDirection: 'row', gap: sp.sm }}>
           {[1, 2, 3, 4, 5].map((n) => (
             <Pressable key={n} onPress={() => setRating(n)} hitSlop={6}
                 accessibilityRole="button"
                 accessibilityLabel={`Rate ${n} out of 5`}
-                accessibilityState={{ selected: rating >= n }} style={{ flex: 1, alignItems: 'center', paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: rating >= n ? t.brand : t.surface2, borderWidth: hairline, borderColor: rating >= n ? t.brand : t.ring }}>
-              <Icon name="trophy" size={18} color={rating >= n ? t.brandInk : t.ink3} />
+                accessibilityState={{ selected: rating >= n }} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: MIN_TARGET, paddingVertical: sp.md, borderRadius: radius.sm, backgroundColor: rating >= n ? t.brand : t.surface2, borderWidth: hairline, borderColor: rating >= n ? t.brand : t.ring }}>
+              <Text style={{ ...ty.body, fontWeight: '600', color: rating >= n ? t.brandInk : t.ink3 }}>{n}</Text>
             </Pressable>
           ))}
+        </View>
+        {/* Which way the row runs, said once and quietly. Without it a 1 is as
+            likely to be read as "first place" as "worst". */}
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: sp.xs, marginBottom: sp.xl }}>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>Poor</Text>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>Great</Text>
         </View>
 
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Type</Text>
@@ -96,7 +122,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Details</Text>
         <TextInput value={body} onChangeText={setBody} placeholder="What happened, or what would make this better?" placeholderTextColor={t.ink3} multiline style={{ ...ty.body, color: t.ink, backgroundColor: t.surface, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.xl }} />
 
-        <Cta label={busy ? 'Sending...' : 'Send Feedback'} onPress={submit} disabled={busy} wide />
+        <Cta label={busy ? 'Sending…' : 'Send Feedback'} onPress={submit} disabled={busy} wide />
       </ScrollView>
     </SafeAreaView>
   );

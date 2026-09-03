@@ -788,10 +788,20 @@ export default function TrainerSessions() {
         automaticallyAdjustKeyboardInsets
         refreshControl={pull}
       >
+        {/* ── the back control that pointed forwards ─────────────────────
+            This drew `FORWARD_ICON` — a bare `›` — in the back position,
+            behind an accessibility label that said "Back". Seen on a device,
+            reached by deep link from a notification: a chevron pointing away
+            from the direction it takes you, with no target ring around it,
+            beside Invoices and Statement which both draw the circled `‹`
+            that every other screen in this app uses.
+
+            `Ghost icon="back"` is that control. It carries the ring, the
+            44pt target and `BACK_ICON`, so it mirrors correctly in RTL
+            without this screen knowing about direction at all — which is the
+            whole point of src/ui/direction. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
-          </Pressable>
+          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Mark Sessions</Text>
         </View>
 

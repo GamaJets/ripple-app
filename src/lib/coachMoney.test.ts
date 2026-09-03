@@ -39,7 +39,7 @@
 //    the counts of unlabelled and unpriced rows ADD rather than being taken
 //    from whichever side had more, and neither subtotal is modified — the
 //    screen renders both of them beside the total.
-import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, currencyDecimals, readMinorAmount, feeMismatches, type TakenRow, type PackRow, minorFromWhole, majorFromMinor} from './coachMoney';
+import { sumTaken, combineTaken, sumRecurring, since, monthStart, packLeft, packRunOut, moneyIn, minorMoney, wholeMoney, currencyDecimals, readMinorAmount, feeMismatches, type TakenRow, type PackRow, minorFromWhole, majorFromMinor, minorFromDecimal} from './coachMoney';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -326,6 +326,43 @@ eq(minorFromWhole(1e18, 'kwd'), null, 'a figure past safe integers is refused ra
 // fee, store minor units, show it back. It has to survive both odd families.
 eq(majorFromMinor(minorFromWhole(40, 'kwd'), 'kwd'), '40.000', 'a dinar fee reads back as the fee');
 eq(majorFromMinor(minorFromWhole(6300, 'jpy'), 'jpy'), '6300', 'and so does a yen one');
+
+/* ── minorFromDecimal: a figure an OUTSIDE system stated ───────────────────
+ *
+ * The third door, and the one whose right of refusal differs. Meta and TikTok
+ * report a decimal in the ad account's currency and Google's micros arrive as
+ * one; a provider figure with more places than the money has must be ROUNDED,
+ * because refusing it drops a real cost out of a coach's own spend and reports
+ * it as unknown. Everything is done on the digits, so no float is multiplied. */
+eq(minorFromDecimal('120.00', 'gbp'), 12000, 'a two-place currency scales by a hundred');
+eq(minorFromDecimal('1234', 'jpy'), 1234, 'a yen has no minor unit, so the figure is already in them');
+eq(minorFromDecimal('12.340', 'kwd'), 12340, 'a dinar has a thousand fils in it');
+eq(minorFromDecimal('12.345', 'kwd'), 12345, 'and a third place is kept — this is not a Stripe charge');
+eq(minorFromDecimal('12.3456', 'kwd'), 12346, 'a fourth place is rounded rather than refusing the whole figure');
+eq(minorFromDecimal('12.345', 'gbp'), 1235, 'rounding is half-up');
+eq(minorFromDecimal('12.344', 'gbp'), 1234, 'and down below the half');
+eq(minorFromDecimal('1234.5', 'jpy'), 1235, 'a fraction a yen does not have is rounded, not dropped');
+eq(minorFromDecimal('0', 'gbp'), 0, 'a real zero is a real figure — an ad that ran and cost nothing');
+eq(minorFromDecimal('1,250.50', 'gbp'), 125050, 'a provider grouping is not ambiguity: a machine wrote it');
+eq(minorFromDecimal('120.00', null), null, 'no currency, no factor, no figure');
+eq(minorFromDecimal('120.00', ''), null, 'and a blank currency is the same silence');
+eq(minorFromDecimal(null, 'gbp'), null, 'a missing amount is unknown, never a zero');
+eq(minorFromDecimal('unknown', 'gbp'), null, 'and so is a word');
+eq(minorFromDecimal('-5', 'gbp'), null, 'a negative is not something an ad account reports');
+// Deliberately NOT a float multiplication. 12.345 * 100 is 1234.4999999999998
+// in binary, which truncates to 1234 and loses a penny per ad.
+eq(minorFromDecimal('12.345', 'gbp'), Math.round(12.345 * 100), 'and it agrees with the rounding a float would have reached, without doing one');
+
+/* ── readMinorAmount refuses Stripe's rule only where Stripe is involved ─── */
+const kwdCharge = readMinorAmount('12.345', 'KWD');
+ok(!kwdCharge.ok, 'a dinar amount Stripe cannot charge is refused in a box whose value goes to Stripe');
+const kwdStated = readMinorAmount('12.345', 'KWD', false);
+ok(kwdStated.ok && kwdStated.minorUnits === 12345,
+  'and accepted where the coach is stating what something already cost them, which Stripe has no opinion about');
+const stillAmbiguous = readMinorAmount('1,234', 'GBP', false);
+ok(!stillAmbiguous.ok, 'every other refusal still stands: a thousands separator is ambiguity, not a charging rule');
+ok(!readMinorAmount('250.50', 'JPY', false).ok, 'and a yen still has nothing after the point');
+ok(!readMinorAmount('250', null, false).ok, 'and no currency is still no amount');
 
 if (errors.length) { console.error(`coachMoney: ${errors.length} failure(s)\n` + errors.map((e) => '  - ' + e).join('\n')); process.exit(1); }
 console.log('coachMoney ok — currencies stay apart, the two halves of a coach’s takings add without merging currencies, unlabelled amounts stay counted, memberships have no balance');

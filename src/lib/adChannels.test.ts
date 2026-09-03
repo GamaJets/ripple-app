@@ -47,23 +47,29 @@ eq(majorFromMicros('12.5'), null, 'and micros are whole; a decimal one is not a 
 // The whole point, as one line: Google's micros and Meta's decimal reach the
 // same stored figure. Reading 12500000 as if it were already hundredths would
 // tell a coach they had spent £125,000 on one ad.
-const viaMicros = (m: number) => centsFromAmount(majorFromMicros(m));
+const viaMicros = (m: number) => centsFromAmount(majorFromMicros(m), 'GBP');
 eq(viaMicros(12500000), 1250, 'twelve dollars fifty in micros is 1250 hundredths');
-eq(viaMicros(12500000), centsFromAmount('12.50'), 'the two channels agree on the figure');
+eq(viaMicros(12500000), centsFromAmount('12.50', 'GBP'), 'the two channels agree on the figure');
 eq(viaMicros(0), 0, 'a real zero is a real figure — an ad that ran and cost nothing');
 eq(viaMicros(1000000), 100, 'one whole unit is a hundred hundredths');
 eq(viaMicros(5000), 1, 'half a penny of spend rounds to the nearest hundredth');
 eq(viaMicros(4999), 0, 'and just under half rounds down, rather than being dropped');
 ok(viaMicros(12500000) !== 12500000, 'micros are not hundredths, and are never read as them');
-eq(centsFromAmount(majorFromMicros('999999999990000')), 99999999999,
+eq(centsFromAmount(majorFromMicros('999999999990000'), 'GBP'), 99999999999,
   'the largest figure part 98 holds is still an amount');
-eq(centsFromAmount(majorFromMicros('1000000000000000')), null,
+eq(centsFromAmount(majorFromMicros('1000000000000000'), 'GBP'), null,
   'and one past it is refused rather than stored wrong');
 
 // TikTok reports account currency, like Meta, so it takes the SAME reader. The
 // assertion is here so that a later change to one of them cannot be made
 // without a test disagreeing.
-eq(centsFromAmount('1265.87'), 126587, 'TikTok’s decimal string is read as major units, exactly as Meta’s is');
+eq(centsFromAmount('1265.87', 'GBP'), 126587, 'TikTok’s decimal string is read as major units, exactly as Meta’s is');
+
+// And the currency is asked, not assumed, whichever channel the figure came
+// from. Google reports micros of the account's base unit; a yen account's
+// 1,234,000,000 micros is ¥1,234 and 1234 minor units, not 123,400.
+eq(centsFromAmount(majorFromMicros(1234000000), 'JPY'), 1234, 'Google’s micros in a currency with no minor unit are not multiplied by a hundred');
+eq(centsFromAmount(majorFromMicros(12345000), 'KWD'), 12345, 'nor divided by ten in one with three places');
 
 /* ── naming the channels ───────────────────────────────────────────────── */
 

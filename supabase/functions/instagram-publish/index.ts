@@ -67,6 +67,7 @@ import {
   CARD_BUCKET, CARD_OBJECT_TTL_MIN, cardObjectAbsent, cardObjectKey, cardObjectRemoved,
   cardPublicUrl, isJpegBytes, ratioAccepted, tooLarge,
 } from '../../../src/lib/instagramPublish.ts';
+import { secretConfigured, secretMatches } from '../../../src/lib/sharedSecret.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-sweep-secret' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -243,15 +244,13 @@ Deno.serve(async (req) => {
    * unauthenticated. */
   if (action === 'sweep') {
     const secret = Deno.env.get('SWEEP_SECRET') || '';
-    if (!secret) return fail('The sweep is not configured on this project. Set SWEEP_SECRET as a Supabase secret to schedule it.');
-    // Length first, then a compare that does not return on the first differing
-    // byte. This was a bare `!==`, which supabase/functions/sweep-stale-visits
-    // — the other holder of this same SWEEP_SECRET — already refuses to use,
-    // for the reason written there: "a short-circuiting `===` on a secret is
-    // the kind of thing that is only ever noticed after it matters". One
-    // secret guarding two endpoints should not be compared two ways.
+    if (!secretConfigured(secret)) return fail('The sweep is not configured on this project. Set SWEEP_SECRET as a Supabase secret to schedule it.');
+    // One secret guarding two endpoints should not be compared two ways — and
+    // for a while it was compared three, because notify-message holds a shared
+    // secret too and was still on a bare `!==`. The rule is now stated once, in
+    // src/lib/sharedSecret.ts, and tested there.
     const offered = req.headers.get('x-sweep-secret') || '';
-    if (offered.length !== secret.length || !timingSafeEqual(offered, secret)) {
+    if (!secretMatches(offered, secret)) {
       return json({ ok: false, error: 'no' }, 401);
     }
     return json({ ok: true, ...(await sweep(service)) });
@@ -610,14 +609,3 @@ function randomHex32(): string {
   return Array.from(b).map((n) => n.toString(16).padStart(2, '0')).join('');
 }
 
-/** Compare two equal-length strings without returning early on the first
- *  difference. Byte-identical to the helper in
- *  supabase/functions/sweep-stale-visits, which guards the same SWEEP_SECRET —
- *  duplicated rather than imported because the leaf-module rule keeps an edge
- *  function's imports free of relative imports of their own, and this is six
- *  lines. Not a substitute for a real MAC, and not pretending to be. */
-function timingSafeEqual(a: string, b: string): boolean {
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
