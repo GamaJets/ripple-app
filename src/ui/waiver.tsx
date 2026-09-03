@@ -10,16 +10,18 @@
 // a fresh install does not ask twice.
 import { useCallback, useEffect, useState } from 'react';
 import { BRAND } from '../lib/brands';
-import { View, Text, ScrollView, Pressable, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Pressable, Modal, ActivityIndicator, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from './components';
 import { Icon } from './Icon';
-import { Cta, Flag } from './kit';
+import { Cta, Ghost, Flag } from './kit';
 import { sp, layout, radius, type as ty } from '../theme/scale';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthRevision } from './authRevision';
+import { useAuth } from './auth';
+import { useRouter } from 'expo-router';
 import {
   WAIVER_CLAUSES, WAIVER_VERSION, bothGiven, waiverGate, waiverState,
   type WaiverRead, type WaiverState,
@@ -124,6 +126,38 @@ function Tick({ on, label, detail, onPress }: {
   );
 }
 
+/**
+ * The way out of a gate that cannot be passed.
+ *
+ * The gate is right to refuse — letting somebody through on a release that was
+ * never recorded is the harm it exists to prevent — and it had no exit at all:
+ * `onRequestClose={() => {}}` swallows the Android back gesture, the modal
+ * covers the whole app, and there is no route to Settings. So a member who
+ * reinstalls on the way to the gym, with no signal, gets an app that is either
+ * a spinner or a form that cannot be submitted, for ever, on the wrong account
+ * with no way to reach another one.
+ *
+ * Signing out is not passing the gate: it agrees to nothing, records nothing
+ * and leaves the release exactly where it was. It is the one thing a person
+ * genuinely stuck here needs, and it is the only door this screen may open.
+ */
+function SignOutWay({ label }: { label: string }) {
+  const auth = useAuth();
+  const router = useRouter();
+  return (
+    <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>
+      <Ghost label={label} onPress={() => Alert.alert(
+        'Sign out?',
+        'You have agreed to nothing and nothing is recorded either way. Sign out and you can sign back in — on this account or another one — and the release will be waiting exactly as it is now.',
+        [
+          { text: 'Stay', style: 'cancel' },
+          { text: 'Sign Out', style: 'destructive', onPress: () => { void auth.signOut().finally(() => { try { router.replace('/welcome'); } catch { /* the gate unmounts with the session either way */ } }); } },
+        ],
+      )} />
+    </View>
+  );
+}
+
 function WaiverScreen({ state, accept, reload, insets }: {
   state: WaiverState;
   accept: () => Promise<{ ok: boolean; error?: string }>;
@@ -195,6 +229,8 @@ function WaiverScreen({ state, accept, reload, insets }: {
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
           Your agreement is recorded against your account with the date. Version {WAIVER_VERSION}.
         </Text>
+        {/* The exit. Not a way past the gate — see `SignOutWay`. */}
+        <SignOutWay label="Sign Out Instead" />
       </ScrollView>
     </View>
   );
@@ -214,8 +250,21 @@ export function WaiverGate({ children }: { children: React.ReactNode }) {
       {children}
       <Modal visible={blocked || waiting} animationType="fade" onRequestClose={() => {}}>
         {waiting ? (
-          <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center' }}>
+          // A bare spinner with no words and no timeout was the whole of this,
+          // over a read that may never answer. It now says what it is doing,
+          // offers the read again, and offers the door.
+          <View style={{ flex: 1, backgroundColor: t.bg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: layout.gutter }}>
             <ActivityIndicator color={t.brand} />
+            <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg, textAlign: 'center' }}>
+              Checking whether you have already agreed to the release.
+            </Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs, textAlign: 'center' }}>
+              This needs the server. With no signal it will wait here rather than let you past a release nobody has recorded.
+            </Text>
+            <View style={{ marginTop: sp.lg }}>
+              <Cta label="Try Again" onPress={reload} />
+            </View>
+            <SignOutWay label="Sign Out" />
           </View>
         ) : (
           <WaiverScreen state={state} accept={accept} reload={reload} insets={insets} />

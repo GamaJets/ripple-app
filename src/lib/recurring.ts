@@ -39,6 +39,7 @@ import {
   insideNoticeWindow, lateCancelFee, noticeHoursOf, noticeLabel,
   feeAmountLine, unstatedCurrency, type CancellationPolicy, type FeeVerdict,
 } from './booking';
+import { fmtClock, weekdayName } from './format';
 
 /** Sunday-first, matching `extract(dow)` in Postgres and `Date.getDay()`, so
  *  nothing anywhere has to translate between two conventions. */
@@ -142,6 +143,30 @@ export function clockLabel(hour: number, minute: number): string {
 export function seriesLabel(s: Pick<RecurringSeries, 'dow' | 'hour' | 'minute'>): string {
   const day = DOW_NAMES[((s.dow % 7) + 7) % 7];
   return `Every ${day} at ${clockLabel(s.hour, s.minute)}`;
+}
+
+/**
+ * The same arrangement, written in the READER'S language and clock.
+ *
+ * `seriesLabel` above is English and 12-hour by construction, and it was the
+ * title of every row on app/(client)/standing.tsx, the subject of the pause
+ * confirmation, of the end confirmation and of the "ended" alert — directly
+ * above "Next Tue 09:00", which the same screen renders through the app's own
+ * locale formatters. So a member in Milan read their own clock on one line and
+ * an English "Every Tuesday at 7:00 am" on the line above it, about the same
+ * arrangement.
+ *
+ * The hour is NOT converted: it is a wall-clock hour in the SERIES' zone, which
+ * is the argument `clockLabel` makes and it is right. `fmtClock` takes the hour
+ * and the minute as numbers for exactly this reason — it never touches a zone —
+ * so what changes is the writing, not the time.
+ *
+ * `seriesLabel` stays because the coach's screens and the tests are written on
+ * it, and because a series belongs to the coach's own diary where their wording
+ * is the one on the invoice.
+ */
+export function memberSeriesLabel(s: Pick<RecurringSeries, 'dow' | 'hour' | 'minute'>): string {
+  return `Every ${weekdayName(s.dow)} at ${fmtClock(s.hour, s.minute)}`;
 }
 
 /**

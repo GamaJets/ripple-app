@@ -57,6 +57,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useClientData } from '../../src/ui/clientData';
+import { fmtFullDay } from '../../src/lib/format';
 import { useSettings } from '../../src/ui/settings';
 import { reportError } from '../../src/lib/reportError';
 import { Rule, Section, SectionHead, Ghost, Flag } from '../../src/ui/kit';
@@ -177,7 +178,9 @@ export default function Compare() {
   const rows = pair && cd.scansStatus === 'ready'
     ? compareRows(pair.before.takenAt, pair.after.takenAt, cd.scans, wu)
     : null;
-  const dayOf = (p: ProgressPhoto) => new Date(p.takenAt).toLocaleDateString();
+  // The app's resolver, and guarded: this string also goes into the summary
+  // the member shares, where "Invalid Date" would travel out of the app.
+  const dayOf = (p: ProgressPhoto) => fmtFullDay(p.takenAt);
 
   const sendFigures = () => {
     if (!pair || !rows) return;

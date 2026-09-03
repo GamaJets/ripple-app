@@ -50,6 +50,8 @@ import { shownStreak, weekStats, personalRecords, streakRisk, freezeBudget } fro
 import { severeSummary } from '../../src/lib/injuries';
 import { booksInPerson, coachedRemotely, COACHED_MODE_SHORT, COACHING_MODE_NOTE } from '../../src/lib/types';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
+import { allows } from '../../src/lib/notifyPrefs';
+import { notifyPrefs } from '../../src/lib/notifyPrefsLatch';
 import { NotificationBell } from '../../src/ui/notifications';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { GUIDE_SEEN_KEY } from '../guide';
@@ -285,7 +287,38 @@ export default function Home() {
     // (src/ui/motivationNudges.tsx) — this button stays because it is the one
     // that lets somebody arm it on a day the automatic rule would not, and
     // because a control that vanishes is a control somebody reports missing.
-    try { await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + streak + '-day streak going.', when, { route: '/(client)/workouts' }, 'motivation'); } catch { /* ignore */ }
+    // ── the button that said nothing ────────────────────────────────────
+    //
+    // The id was thrown away and every outcome looked the same from here.
+    // `scheduleLocal` returns null for four different things — the category
+    // switched off, the shifted time already past, no notifications module, a
+    // throw — so a member who had turned "Streaks And Badges" off in the app's
+    // own Notifications screen tapped the only button on the banner telling
+    // them their streak was about to break, and nothing happened anywhere. No
+    // alert, no state change, no mark. app/(client)/reminders.tsx answers the
+    // same four outcomes with four different sentences.
+    if (!pushAvailable()) {
+      Alert.alert('Nothing scheduled', 'This build cannot schedule notifications, so no reminder has been set. Your streak is unaffected.');
+      return;
+    }
+    if (!allows('motivation', notifyPrefs())) {
+      Alert.alert(
+        'Motivation nudges are off',
+        'You have turned off nudges about streaks and badges, so this reminder was not scheduled. Turn them back on in Notifications and this button will work.',
+        [
+          { text: 'Not Now', style: 'cancel' },
+          { text: 'Open Notifications', onPress: () => router.push('/(client)/notification-prefs') },
+        ],
+      );
+      return;
+    }
+    let id: string | null = null;
+    try { id = await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + streak + '-day streak going.', when, { route: '/(client)/workouts' }, 'motivation'); } catch { id = null; }
+    if (!id) {
+      Alert.alert('Nothing scheduled', 'That reminder could not be set — this phone may not be allowing notifications from us. Nothing has changed about your streak.');
+      return;
+    }
+    Alert.alert('Reminder set', `We will nudge you at ${when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })} tonight. Log a session before then and you can ignore it.`);
   };
   // Priced with the member's own weight over time, so a pull-up counts. See
   // src/lib/bodyweightSets.ts — an unweighed member's bodyweight sets are

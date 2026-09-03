@@ -14,6 +14,7 @@
 // number up.
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { num } from '../../src/lib/format';
+import { fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +25,7 @@ import {
   DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen,
 } from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
+import { hitSlopFor } from '../../src/lib/a11y';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Diet, Goal } from '../../src/lib/types';
 import { useClientData } from '../../src/ui/clientData';
@@ -119,7 +121,10 @@ const DAY_TYPES = [
  */
 const rateIn = (kgPerWeek: number, unit: WeightUnit) =>
   Math.abs(unit === 'lb' ? kgToLb(kgPerWeek) : kgPerWeek).toFixed(2).replace(/0$/, '').replace(/\.$/, '');
-const onDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+// Through the app's own resolver rather than the device's, like every other
+// date in this app. This one is the deadline the whole calorie target is
+// explained by.
+const onDate = (ms: number) => fmtFullDay(new Date(ms).toISOString());
 
 /**
  * One sentence saying what set today's calorie target. Never a figure the plan
@@ -957,6 +962,9 @@ export default function Nutrition() {
                       accessibilityRole="button"
                       accessibilityState={{ selected: on }}
                       accessibilityLabel={`${n} meals per day`}
+                      // About 28pt, and a mis-tap rebuilds the day's meals and
+                      // the macro split behind them.
+                      hitSlop={hitSlopFor(28)}
                       style={{ minWidth: 34, paddingHorizontal: sp.md, paddingVertical: 5, borderRadius: radius.pill, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
                       <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{n}</Text>
                     </Pressable>
@@ -1166,9 +1174,12 @@ export default function Nutrition() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg, marginBottom: sp.lg }}>
                 <Text style={{ ...ty.label, color: t.ink2 }}>Servings</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.sm, paddingVertical: 4 }}>
-                  <Pressable accessibilityLabel="Fewer servings" accessibilityRole="button" onPress={() => setBatch((b) => Math.max(1, b - 1))} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={15} color={t.ink} /></Pressable>
+                  {/* 30pt, eight points apart, and both write the same figure
+                      into the log — so the likely mis-hit is the other one.
+                      `hitSlopFor` brings each up to MIN_TARGET. */}
+                  <Pressable accessibilityLabel="Fewer servings" accessibilityRole="button" hitSlop={hitSlopFor(30)} onPress={() => setBatch((b) => Math.max(1, b - 1))} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="minus" size={15} color={t.ink} /></Pressable>
                   <Text style={{ ...value(16), color: t.ink, minWidth: 18, textAlign: 'center' }}>{batch}</Text>
-                  <Pressable accessibilityLabel="More servings" accessibilityRole="button" onPress={() => setBatch((b) => Math.min(8, b + 1))} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={15} color={t.ink} /></Pressable>
+                  <Pressable accessibilityLabel="More servings" accessibilityRole="button" hitSlop={hitSlopFor(30)} onPress={() => setBatch((b) => Math.min(8, b + 1))} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="plus" size={15} color={t.ink} /></Pressable>
                 </View>
                 {recipe.steps && recipe.steps.length > 0 ? (
                   <View style={{ flex: 1 }}><Cta label="Cook Mode" wide onPress={() => { setCookStep(0); setCook(true); }} /></View>

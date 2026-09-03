@@ -130,5 +130,10 @@ export function useGymInvites(): GymInvitesValue {
     }
   }, []);
 
-  return { invites, status, gymNames, reload: () => { void load(); }, accept };
+  // Stable across renders: app/(client)/trainers.tsx puts this in a
+  // `useCallback` dependency list for its pull-to-refresh, and a new function
+  // every render would rebuild that handler on every render.
+  const reload = useCallback(() => { void load(); }, [load]);
+
+  return { invites, status, gymNames, reload, accept };
 }

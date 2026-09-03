@@ -45,6 +45,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Card, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { fmtFullDay } from '../../src/lib/format';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { INJURY_AREAS, areaLabel, newInjuryId, type InjurySeverity } from '../../src/lib/injuries';
 import {
@@ -81,12 +82,14 @@ type Verdict = 'open' | 'added' | 'rejected';
  *  picks one. */
 interface Draft { area: string; severity: InjurySeverity | null; note: string; verdict: Verdict }
 
+// Twelve English month names written out by hand, on a screen a member in
+// Berlin reads. `fmtFullDay` is the app's own resolver (src/lib/locale.ts) and
+// carries the same null-for-unparseable guard this had.
 const dayLabel = (iso: string | null): string | null => {
   if (!iso) return null;
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return null;
-  const d = new Date(ms);
-  return `${d.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()]} ${d.getFullYear()}`;
+  return fmtFullDay(new Date(ms).toISOString());
 };
 
 export default function InjuryDoc() {

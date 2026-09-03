@@ -47,6 +47,7 @@ import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale
 import type { IconName } from '../../src/ui/Icon';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useClientData } from '../../src/ui/clientData';
+import { fmtFullDay } from '../../src/lib/format';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -116,7 +117,10 @@ export default function Membership() {
       if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) days.add(d.toDateString());
       const ts = Date.parse(e.t); if (ts > latest) latest = ts;
     }
-    const lastLabel = latest ? new Date(latest).toLocaleDateString() : '—';
+    // `day()` at the top of this file already goes through `appLocale()`; this
+    // line was the one that did not, so two dates on one screen were written
+    // two different ways.
+    const lastLabel = latest ? fmtFullDay(new Date(latest).toISOString()) : '—';
     return { visits: days.size, last: lastLabel };
   }, [log]);
 

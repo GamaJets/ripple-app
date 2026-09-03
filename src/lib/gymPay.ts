@@ -53,6 +53,8 @@ import { assertWhole, capLimit, readAll } from './rowCap';
 import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
 import { sharedCurrency } from './gymRecord';
+// The one reader for a typed amount in this product. See parseRate.
+import { readMinorAmount } from './coachMoney';
 // A timestamp read as the day it fell on IN THE GYM'S OWN TIMEZONE. Slicing the
 // ISO string would give the UTC day, and a class at nine on the last evening of
 // the month in a gym west of Greenwich is a UTC row for the 1st — filed, and
@@ -191,9 +193,11 @@ export async function fetchTrainerPay(sb: Queryable, tenantId: string): Promise<
 export function payRateBlocker(
   sessionRate: string, classRate: string, classKind: ClassPayKind | '', currency: string | null,
 ): string | null {
-  const s = parseRate(sessionRate);
+  // The currency this function already takes, now passed down. It was in scope
+  // the whole time and `parseRate` was doing its own arithmetic beside it.
+  const s = parseRate(sessionRate, currency);
   if (s.kind === 'bad') return `Session rate: ${s.reason}`;
-  const c = parseRate(classRate);
+  const c = parseRate(classRate, currency);
   if (c.kind === 'bad') return `Class rate: ${c.reason}`;
   if (c.kind === 'rate' && classKind === '') {
     return 'Say how the class rate is counted — a flat amount for the class, or an amount per person. "80" and "8 a head" are the same number of digits and completely different money.';
@@ -222,19 +226,45 @@ export type RateInput =
  * make deliberately — a volunteer, an owner coaching their own clients — and
  * which must not be reachable by tabbing past an empty box.
  */
-export function parseRate(input: string | null | undefined): RateInput {
-  const raw = String(input ?? '').trim().replace(/[,\s]/g, '');
+export function parseRate(input: string | null | undefined, currency: string | null | undefined): RateInput {
+  // ── the two bugs that were in one line ───────────────────────────────────
+  //
+  // This began `.replace(/[,\s]/g, '')` and ended `Math.round(Number(bare) *
+  // 100)`, and it is the SHARED rate parser: the console's payroll editor and
+  // the owner phone's class-rate editor both price people through it.
+  //
+  // The comma strip made `52,50` — how most of Europe writes it — into `5250`,
+  // and the hundred then made that 525,000 minor units. A front desk setting a
+  // coach's rate to fifty-two fifty set it to five thousand two hundred and
+  // fifty, on both surfaces, silently.
+  //
+  // The hundred was wrong on its own terms too. It is right for a sterling gym
+  // and wrong for a third of the currencies this product supports: a Tokyo gym
+  // paying ¥5,000 an hour recorded ¥500,000, and the `\d{1,2}` decimal rule
+  // made a Kuwaiti gym's three-place rate unstatable in the first place.
+  //
+  // `readMinorAmount` takes the places from the currency, refuses a thousands
+  // separator rather than guessing which side of the Channel the typist grew up
+  // on, and refuses a third decimal place rather than rounding it. It is the
+  // one reader for a typed amount in this product, and this was the last write
+  // path doing its own arithmetic.
+  //
+  // The currency is an argument with no default. A rate with no currency is a
+  // number, and this is what somebody is paid.
+  const raw = String(input ?? '').trim();
   if (!raw) return { kind: 'clear' };
-  const bare = raw.replace(/^[^\d.-]+/, '');
   if (/-/.test(raw)) return { kind: 'bad', reason: 'A rate cannot be negative. A deduction is an adjustment line, not a rate.' };
-  if (!/^\d+(\.\d{1,2})?$/.test(bare)) {
-    return { kind: 'bad', reason: 'Enter it as a number — 45, or 52.50. Leave it empty for the gym’s standard fee.' };
-  }
-  const cents = Math.round(Number(bare) * 100);
-  if (!Number.isFinite(cents) || cents > 2_147_483_647) {
+
+  const read = readMinorAmount(raw, currency);
+  if (!read.ok) return { kind: 'bad', reason: read.reason };
+
+  // `rate_cents` is a plain integer column, so anything past 2^31-1 is refused
+  // by the database with a 22003 after the form has closed. The ceiling is in
+  // MINOR units, which is what the column holds.
+  if (read.minorUnits > 2_147_483_647) {
     return { kind: 'bad', reason: 'That is more than Repple will record as a rate — check the zeros.' };
   }
-  return { kind: 'rate', cents };
+  return { kind: 'rate', cents: read.minorUnits };
 }
 
 /**
@@ -483,7 +513,9 @@ export interface Adjustment {
 
 /** Why an adjustment cannot be recorded, or null. */
 export function adjustmentBlocker(amount: string, note: string, currency: string | null): string | null {
-  const r = parseRate(amount);
+  // Same as payRateBlocker: the currency was already a parameter here and
+  // parseRate was doing its own arithmetic beside it.
+  const r = parseRate(amount, currency);
   if (r.kind === 'bad') return r.reason;
   if (r.kind === 'clear') return 'Enter the amount, as a positive number. Repple applies the minus for a deduction or an advance.';
   if (r.cents === 0) return 'An adjustment of nothing changes nothing. Leave it off the run instead.';

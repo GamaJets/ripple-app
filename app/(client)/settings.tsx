@@ -38,6 +38,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BRAND } from '../../src/lib/brands';
+import { hitSlopFor } from '../../src/lib/a11y';
 import { View, Text, Pressable, ScrollView, Alert, Platform, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -147,7 +148,12 @@ function Units<T extends string>({ options, value, onPick, t }: { options: reado
       {options.map((u) => {
         const on = value === u;
         return (
+          // A ty.label at 7 top and bottom is about 32pt — under MIN_TARGET, on
+          // the control that decides whether every weight in this app is read
+          // as kilograms or pounds. A mis-tap reinterprets the member's whole
+          // history, so the target gets the slop the helper exists to give it.
           <Pressable key={u} onPress={() => onPick(u)} accessibilityRole="radio" accessibilityState={{ selected: on }}
+            hitSlop={hitSlopFor(32)}
             style={{ paddingHorizontal: sp.lg, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: on ? t.brand : t.surface2 }}>
             <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{u}</Text>
           </Pressable>

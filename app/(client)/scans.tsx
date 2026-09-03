@@ -66,6 +66,8 @@ import { useToast } from '../../src/ui/toast';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
+import { fmtFullDay } from '../../src/lib/format';
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote, readNumber } from '../../src/lib/units';
@@ -194,14 +196,67 @@ async function ocrInBody(b64?: string): Promise<SheetRead & { error?: string }> 
   }
 }
 
-function Wheel({ items, index, onChange, t }: { items: string[]; index: number; onChange: (i: number) => void; t: Theme }) {
+/**
+ * One scroll wheel of the scan-date picker.
+ *
+ * ── What a screen reader got out of this ─────────────────────────────────
+ *
+ * Nothing. It was a bare `ScrollView` with `snapToInterval` and
+ * `onMomentumScrollEnd`: no role, no label, no value, and no path to `onChange`
+ * that is not a FLING. Three of them are the only control that sets a scan's
+ * date, and the date is what decides which scan re-tunes the member's calorie
+ * target — this screen says so itself, four hundred lines down. So a VoiceOver
+ * user could not date a scan at all, and with nothing set it silently takes
+ * today.
+ *
+ * `accessibilityRole="adjustable"` is the RN role for exactly this shape: the
+ * rotor's up/down (and a switch's increment) send `increment` and `decrement`,
+ * which land on `onAccessibilityAction` and move the selection by one — the
+ * same thing the fling does, through a path that does not need a fling.
+ * `accessibilityValue` is what is read out after each step, so the wheel says
+ * "March" rather than announcing a scroll position.
+ *
+ * The buttons beside it are the other half, and they are not only for screen
+ * readers: a wheel is a poor target for anybody whose hands are cold, and this
+ * app has eighty-four other places where the answer to "too small" was a
+ * bigger target rather than a steadier finger.
+ */
+function Wheel({ items, index, onChange, t, label }: { items: string[]; index: number; onChange: (i: number) => void; t: Theme; label: string }) {
+  const step = (by: number) => onChange(Math.max(0, Math.min(items.length - 1, index + by)));
   return (
-    <View style={{ flex: 1, height: ITEM_H * VISIBLE }}>
-      <ScrollView showsVerticalScrollIndicator={false} snapToInterval={ITEM_H} decelerationRate="fast" contentOffset={{ x: 0, y: index * ITEM_H }}
-        onMomentumScrollEnd={(e) => onChange(Math.max(0, Math.min(items.length - 1, Math.round(e.nativeEvent.contentOffset.y / ITEM_H))))}
-        contentContainerStyle={{ paddingVertical: ITEM_H * 2 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-        {items.map((it, i) => (<View key={i} style={{ height: ITEM_H, alignItems: 'center', justifyContent: 'center' }}><Text style={i === index ? { ...value(20), color: t.ink } : { ...ty.body, ...numeric, color: t.ink3 }}>{it}</Text></View>))}
-      </ScrollView>
+    <View style={{ flex: 1 }}>
+      <Text style={{ ...ty.micro, color: t.ink3, textAlign: 'center', marginBottom: 2 }}>{label}</Text>
+      <View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={label}
+        accessibilityValue={{ text: items[index] ?? '' }}
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === 'increment') step(1);
+          else if (e.nativeEvent.actionName === 'decrement') step(-1);
+        }}
+        style={{ height: ITEM_H * VISIBLE }}>
+        <ScrollView showsVerticalScrollIndicator={false} snapToInterval={ITEM_H} decelerationRate="fast" contentOffset={{ x: 0, y: index * ITEM_H }}
+          onMomentumScrollEnd={(e) => onChange(Math.max(0, Math.min(items.length - 1, Math.round(e.nativeEvent.contentOffset.y / ITEM_H))))}
+          contentContainerStyle={{ paddingVertical: ITEM_H * 2 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+          {items.map((it, i) => (<View key={i} style={{ height: ITEM_H, alignItems: 'center', justifyContent: 'center' }}><Text style={i === index ? { ...value(20), color: t.ink } : { ...ty.body, ...numeric, color: t.ink3 }}>{it}</Text></View>))}
+        </ScrollView>
+      </View>
+      {/* Two full-size targets per wheel, for the same reason the heatmap on
+          Consistency grew a stepper: a control nobody can hit is a control. */}
+      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: sp.sm, marginTop: sp.xs }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Previous ${label.toLowerCase()}`}
+          onPress={() => step(-1)}
+          style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+          <Icon name="minus" size={14} color={t.ink2} />
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Next ${label.toLowerCase()}`}
+          onPress={() => step(1)}
+          style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+          <Icon name="plus" size={14} color={t.ink2} />
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -1124,7 +1179,7 @@ export default function Scans() {
   const photoActions = (p: ProgressPhoto) => {
     const state = shareStateOf(p.id, shares);
     const pubState = publishStateOf(p.id, pubs);
-    const when = new Date(p.takenAt).toLocaleDateString();
+    const when = fmtFullDay(p.takenAt);
     const buttons: { text: string; style?: 'cancel' | 'destructive'; onPress?: () => void }[] = [];
     if (state === 'sent') buttons.push({ text: 'Take back from coach', onPress: () => takeBackFromCoach(p) });
     else if (state === 'private') buttons.push({ text: 'Send to coach', onPress: () => sendToCoach(p) });
@@ -1554,7 +1609,7 @@ export default function Scans() {
                           silently dropped: the coach can still see it, so it is
                           named by the date it was sent. */}
                       <Text style={{ ...ty.label, color: t.ink }}>
-                        {p ? new Date(p.takenAt).toLocaleDateString() : 'A photo not in the list above'}
+                        {p ? fmtFullDay(p.takenAt) : 'A photo not in the list above'}
                       </Text>
                       <Pressable onPress={() => { if (p && !shareBusy) takeBackFromCoach(p); }} hitSlop={8} disabled={!p || shareBusy}>
                         <Text style={{ ...ty.caption, fontWeight: '600', color: p ? t.brand : t.ink3 }}>Take back</Text>
@@ -1603,7 +1658,7 @@ export default function Scans() {
                   return (
                     <View key={g.photoId} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 5 }}>
                       <Text style={{ ...ty.label, color: t.ink }}>
-                        {p ? new Date(p.takenAt).toLocaleDateString() : 'A photo not in the list above'}
+                        {p ? fmtFullDay(p.takenAt) : 'A photo not in the list above'}
                       </Text>
                       <Pressable onPress={() => { if (p && !pubBusy) stopPublishing(p); }} hitSlop={8} disabled={!p || pubBusy}>
                         <Text style={{ ...ty.caption, fontWeight: '600', color: p ? t.brand : t.ink3 }}>Take back</Text>
@@ -1664,7 +1719,7 @@ export default function Scans() {
                         this would say the comparison runs the other way, which
                         is the one thing the line exists to state. */}
                     <Text style={{ ...ty.label, color: t.ink2 }}>
-                      {new Date(sel.before.takenAt).toLocaleDateString()} → {new Date(sel.after.takenAt).toLocaleDateString()} · {spanLabel(sel.days)}
+                      {fmtFullDay(sel.before.takenAt)} → {fmtFullDay(sel.after.takenAt)} · {spanLabel(sel.days)}
                     </Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       Open them side by side, with the scan figures recorded on each of those two days.
@@ -1689,7 +1744,7 @@ export default function Scans() {
                   return (
                     <Pressable key={p.id} onPress={() => toggleCmp(p.id)} onLongPress={() => photoActions(p)} delayLongPress={400}
                       accessibilityRole="button"
-                      accessibilityLabel={`Progress photo from ${new Date(p.takenAt).toLocaleDateString()} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}${pubSaid}`}
+                      accessibilityLabel={`Progress photo from ${fmtFullDay(p.takenAt)} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}${pubSaid}`}
                       accessibilityHint="Tap to compare, press and hold to send it to your coach or delete it">
                       <View style={{ borderRadius: radius.md, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
                         {p.url ? (
@@ -1712,7 +1767,7 @@ export default function Scans() {
                           <Text style={{ ...ty.caption, fontWeight: '500', textAlign: 'center', color: shState === 'sent' ? t.brand : '#fff' }}>{shareLabel(shState)}</Text>
                         </View>
                       </View>
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{new Date(p.takenAt).toLocaleDateString()}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, textAlign: 'center' }}>{fmtFullDay(p.takenAt)}</Text>
                     </Pressable>
                   );
                 })}
@@ -1980,9 +2035,9 @@ export default function Scans() {
           <View style={{ position: 'relative' }}>
             <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2 }} />
             <View style={{ flexDirection: 'row' }}>
-              <Wheel items={Array.from({ length: daysIn(dM, pickedYear) }, (_, i) => String(i + 1))} index={Math.min(dD, daysIn(dM, pickedYear) - 1)} onChange={setDD} t={t} />
-              <Wheel items={MONTHS} index={dM} onChange={setDM} t={t} />
-              <Wheel items={years.map(String)} index={dY} onChange={setDY} t={t} />
+              <Wheel label="Day" items={Array.from({ length: daysIn(dM, pickedYear) }, (_, i) => String(i + 1))} index={Math.min(dD, daysIn(dM, pickedYear) - 1)} onChange={setDD} t={t} />
+              <Wheel label="Month" items={MONTHS} index={dM} onChange={setDM} t={t} />
+              <Wheel label="Year" items={years.map(String)} index={dY} onChange={setDY} t={t} />
             </View>
           </View>
         </View>

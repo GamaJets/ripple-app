@@ -88,6 +88,28 @@ export function fmtRelativeDay(iso: string, now: Date = new Date()): string {
  * all — a Hermes build without ICU — for the same reason `FALLBACK_LOCALE`
  * exists: something must be written, and this is what the app already wrote.
  */
+/**
+ * A weekday name in the reader's own language — "Tuesday", "Dienstag",
+ * "martedì".
+ *
+ * `dow` is 0 = Sunday, the same convention `Date.getDay()` and Postgres's
+ * `extract(dow)` use, which is what `DOW_NAMES` in src/lib/recurring.ts is
+ * indexed by. Built from a fixed UTC date whose UTC weekday is known —
+ * 2024-01-07 was a Sunday — and formatted in UTC, so the reader's own zone
+ * cannot shift it by a day.
+ *
+ * Falls back to English on a runtime with no Intl, for the same reason
+ * `fmtClock` does: a fallback should not also be a blank.
+ */
+const EN_DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+export function weekdayName(dow: number): string {
+  const i = ((Math.trunc(dow) % 7) + 7) % 7;
+  try {
+    return new Intl.DateTimeFormat(appLocale(), { weekday: 'long', timeZone: 'UTC' })
+      .format(new Date(Date.UTC(2024, 0, 7 + i)));
+  } catch { return EN_DOW[i]; }
+}
+
 export function monthNamesShort(locale: string = appLocale()): string[] {
   try {
     const f = new Intl.DateTimeFormat(locale, { month: 'short' });

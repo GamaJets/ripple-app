@@ -999,8 +999,10 @@ function RateEditor({ trainer, existing, ccy, tenantId, me, onDone, onCancel, on
 
   const save = async () => {
     if (blocker) { onErr(blocker); return; }
-    const s = parseRate(session);
-    const c = parseRate(cls);
+    // `ccy` is the gym's own currency, and `blocker` above already refused a
+    // null one. Passed down because a rate with no currency is a number.
+    const s = parseRate(session, ccy);
+    const c = parseRate(cls, ccy);
     setBusy(true);
     try {
       await saveTrainerPay(supabase, tenantId, {
@@ -1079,7 +1081,7 @@ function Adjustments({ trainers, rows, ccy, tenantId, me, period, onChange }: {
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (blocker || !ccy) { setErr(blocker); return; }
-    const r = parseRate(amt);
+    const r = parseRate(amt, ccy);
     if (r.kind !== 'rate') return;
     setBusy(true); setErr(null);
     try {

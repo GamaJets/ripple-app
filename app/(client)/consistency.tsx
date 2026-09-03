@@ -12,12 +12,15 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
-import { sp, layout, hairline, grown, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { shownStreak, longestStreak, freezeBudget } from '../../src/lib/streaks';
 import { heatmapDayLabel, heatmapColumnLabel, heatmapSummary } from '../../src/lib/heatmap';
 import { WEEK_DAYS, startOfWeek } from '../../src/lib/weekStart';
+import { Icon } from '../../src/ui/Icon';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { MIN_TARGET } from '../../src/lib/a11y';
 
 const WEEKS = 12;
 /** The grid's rows, in the order src/lib/weekStart.ts draws a week. */
@@ -226,9 +229,29 @@ export default function Consistency() {
           {/* The date of the square that was tapped. A sighted member could see
               a gap and could not tell which week it was; this is the answer to
               that, in the same words the screen reader gets. */}
-          <Text style={{ ...ty.caption, color: picked ? t.ink2 : t.ink3, marginTop: sp.md }}>
-            {picked ? heatmapDayLabel(picked, known ? (counts[key(picked)] || 0) : null, today) : 'Tap a square to read its date.'}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
+            <Text style={{ ...ty.caption, color: picked ? t.ink2 : t.ink3, flex: 1 }}>
+              {picked ? heatmapDayLabel(picked, known ? (counts[key(picked)] || 0) : null, today) : 'Tap a square to read its date, or step through the days.'}
+            </Text>
+            {/* ── the other way to reach a day ────────────────────────────
+                Eighty-four squares at 14pt, four points apart, are a long way
+                under MIN_TARGET and cannot be brought up to it: a 44pt target
+                on this grid would overlap its neighbours, and the answer to a
+                control that is too small is never a control that hits the wrong
+                thing. So the grid keeps its size and gains a companion — two
+                full-size buttons that move the selection a day at a time, which
+                is the same job done with a target anybody can hit. */}
+            <Pressable accessibilityRole="button" accessibilityLabel="Previous day"
+              onPress={() => setPicked((p) => { const d = new Date(p ?? today); d.setDate(d.getDate() - 1); return d; })}
+              style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+              <Icon name={BACK_ICON} size={15} color={t.ink2} />
+            </Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Next day"
+              onPress={() => setPicked((p) => { const d = new Date(p ?? today); d.setDate(d.getDate() + 1); return d; })}
+              style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, backgroundColor: t.surface2 }}>
+              <Icon name={FORWARD_ICON} size={15} color={t.ink2} />
+            </Pressable>
+          </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md }}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>Less</Text>
             <View style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }} />

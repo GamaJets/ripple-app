@@ -426,7 +426,8 @@ export default function OwnerClassAnalytics() {
     if (!tenantId || !cur) return;
     const blocker = payRateBlocker('', amount, kind, cur);
     if (blocker) { setWriteErr(blocker); return; }
-    const parsed = parseRate(amount);
+    // The gym's own currency, and the guard above already refused a null one.
+    const parsed = parseRate(amount, cur);
     setBusy(trainerId);
     try {
       const own = pay?.get(trainerId) ?? null;

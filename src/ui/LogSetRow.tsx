@@ -41,6 +41,7 @@ import { sp, radius, hairline, type as ty } from '../theme/scale';
 import type { Theme } from '../theme/tokens';
 import { readLift, type WeightUnit } from '../lib/units';
 import { readHold } from '../lib/timedSets';
+import { hitSlopFor } from '../lib/a11y';
 
 /** What one logged set says. `value` is reps, or SECONDS when `timed`. */
 export interface LoggedSet {
@@ -166,6 +167,12 @@ export function SetKindChip({ t, on, onToggle, label, onLabel, a11yHint }: {
       accessibilityState={{ checked: on }}
       accessibilityLabel={label}
       accessibilityHint={a11yHint}
+      // 18pt box plus 6 top and bottom is 30 — fourteen short of MIN_TARGET,
+      // on the two controls that decide whether the first box is reps or
+      // SECONDS and whether the load is the bar or what was added to the body.
+      // A mis-tap here changes what a stored set means. `hitSlopFor` is the
+      // helper this file already had in the tree for exactly this.
+      hitSlop={hitSlopFor(30)}
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm, paddingVertical: 6 }}>
       <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: hairline, borderColor: on ? t.brand : t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
         {on ? <Icon name="check" size={12} color={t.brandInk} /> : null}

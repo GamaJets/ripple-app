@@ -13,7 +13,7 @@ import Svg, { Rect, Line, Circle } from 'react-native-svg';
 import { useTheme } from './components';
 import { sp, radius, hairline, type as ty, numeric, value } from '../theme/scale';
 import {
-  type HrSample, hrStats, zoneBands, timeInZones, zoneOf, zoneColor, maxHr,
+  type HrSample, hrStats, zoneBands, timeInZones, zoneOf, zoneColor, maxHr, hrScaleNote,
   ZONE_NOS, zoneName, zoneKey, emptyZoneSeconds, zoneSecondsTotal,
   type ZoneNo, type ZoneSeconds,
 } from '../lib/hr';
@@ -171,6 +171,20 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
           are too close together to carry meaning alone — see src/lib/hr.ts. */}
       <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
         <ZoneBoard seconds={tiz} current={peakZone} />
+        {/* ── whose scale this is ────────────────────────────────────────
+            `hrScaleNote` was written for exactly this and its own header says
+            "every screen that prints a zone prints it". The tree had one
+            caller. Every band drawn above is `220 − age`, and with no date of
+            birth on the profile that age is an assumed thirty — so a
+            fifty-five-year-old read a full coloured scale about twenty-five bpm
+            out, presented as their own.
+
+            It lives on the CHART rather than on each screen, so a screen cannot
+            forget it: this component is what draws the bands. Null when the age
+            is real, which is most people. */}
+        {hrScaleNote(age) ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{hrScaleNote(age)}</Text>
+        ) : null}
       </View>
     </View>
   );

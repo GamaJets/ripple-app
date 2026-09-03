@@ -40,6 +40,7 @@ import { expiryLine } from '../../src/lib/packExpiry';
 import { isoToday } from '../../src/lib/dayPlan';
 import { useAuth } from '../../src/ui/auth';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
+import { fmtFullDay } from '../../src/lib/format';
 import {
   fetchMySubscriptions, myCoachId, subscribeToPackage, cancelSubscription, resumeSubscription,
   openSubscriptionPortal, pkgMoney, pkgPriceLine, statusLabel, isLive, type ClientSubscription,
@@ -53,6 +54,13 @@ export default function ClientPackages() {
   // purchases is the one sentence here that must never be guessed.
   const [rows, setRows] = useState<Purchase[] | null>(null);
   const [failed, setFailed] = useState(false);
+  // The SUBSCRIPTIONS read, which had no failure state of its own. `if (s)
+  // setSubs(s)` dropped a refusal silently, so the cached copy stayed on screen
+  // and was drawn as fact — "Active · renews 14 March" to a member whose card
+  // failed last week, with `past_due` invisible for exactly as long as the read
+  // kept failing. This file's own header promises the renewal date is "never
+  // printed unless Stripe stated one".
+  const [subsFailed, setSubsFailed] = useState(false);
   // The same distinction again, for the thing that charges again next month.
   const [subs, setSubs] = useState<ClientSubscription[] | null>(null);
   const [offers, setOffers] = useState<TrainerPackage[] | null>(null);
@@ -138,6 +146,7 @@ export default function ClientPackages() {
     if (p) setRows(p);
     setFailed(p === null);
     if (s) setSubs(s);
+    setSubsFailed(s === null);
     setCoachId(c.coachId); setCoachErr(c.error);
     // What the coach currently sells — null means the read failed, which is not
     // "your coach sells nothing".
@@ -244,14 +253,25 @@ export default function ClientPackages() {
     const r = p.billing_interval ? await subscribeToPackage(p.id, typed) : await buyPackage(p.id, typed);
     setBusy(null);
     if (!r.ok) { Alert.alert('Could not start checkout', r.error || 'Try again in a moment.'); return; }
-    // Cleared only once the payment page has actually opened, so a client whose
-    // checkout was refused still has what they typed in front of them.
+    // Cleared only once the payment page has actually opened. `ok` used to mean
+    // "a URL came back", not "a browser opened" — `openUrl` in
+    // src/lib/connect.ts swallowed the failure — so a member whose browser
+    // never opened was told nothing, lost the code they had typed, and was left
+    // waiting for a checkout that had not started. `buyPackage` now answers on
+    // the open itself.
+    //
+    // The subscription arm still answers the old way: `subscribeToPackage`
+    // lives in src/lib/subscriptions.ts, which another lane owns today. The
+    // same two lines there would close it.
     setCodeFor(null);
     setCode('');
   };
 
   const stop = (s: ClientSubscription) => {
-    const ends = s.current_period_end ? new Date(s.current_period_end).toLocaleDateString() : null;
+    // Guarded and localised. `fmtFullDay` returns a dash for a timestamp that
+    // does not parse, where this printed the literal words "Invalid Date"
+    // into a sentence about money.
+    const ends = s.current_period_end ? fmtFullDay(s.current_period_end) : null;
     Alert.alert('Cancel this subscription?',
       ends
         ? `You keep it until ${ends} — you have already paid for this period — and you will not be charged again.`
@@ -325,6 +345,15 @@ export default function ClientPackages() {
 
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} /> : (
           <>
+            {/* ── how old this screen is, before any of it is read ──────────
+                This banner was a hundred lines down, below the subscriptions
+                section, the billing section and a rule, and its own comment
+                argued that it belongs above the list "because a member checking
+                how many sessions are left on a pack is about to plan around the
+                number". The number is the hero, three lines below this. The
+                cache horizon is a WEEK, so "4" could be seven days old, and a
+                member books four sessions and finds two of them uncovered. */}
+            {cachedAt && (rows ?? []).length ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{cachedAtLine(cachedAt)}</Flag> : null}
             {/* The one figure on this screen somebody plans their week around.
                 Shown only when the history was actually read: `remaining` is
                 null for a refused read, and a hero reading "0" would tell a
@@ -372,6 +401,15 @@ export default function ClientPackages() {
                   We couldn't read your subscriptions. This is not a statement that you have none — if you
                   are subscribed to your coach you still are, and you should not subscribe again from here.
                 </Flag>
+              ) : subsFailed ? (
+                // Rows on screen AND a failed read: this is the cached copy,
+                // and the state and the date on it are whatever was true when
+                // it was written. A card that failed since would not show here.
+                <Flag tone={t.warn}>
+                  These are the subscriptions this phone last read, and they could not be checked just now — so
+                  the state and the date on each one are not confirmed as current. A payment that failed since
+                  would not be shown here.
+                </Flag>
               ) : liveSubs.length === 0 ? (
                 <Text style={{ ...ty.label, color: t.ink3 }}>You have no recurring subscription. Anything your coach sells monthly appears below.</Text>
               ) : null}
@@ -396,9 +434,14 @@ export default function ClientPackages() {
                     <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
                       {statusLabel(s.status)}
                       {/* No date rather than a date we do not have. A renewal
-                          day is the thing somebody plans around. */}
-                      {s.current_period_end
-                        ? ` · ${s.cancel_at_period_end ? 'ends' : 'renews'} ${new Date(s.current_period_end).toLocaleDateString()}`
+                          day is the thing somebody plans around — and a date
+                          off an unconfirmed copy is one this screen cannot
+                          stand behind, so under a failed read it is withheld
+                          exactly as a missing one is. */}
+                      {subsFailed
+                        ? ' · not confirmed just now'
+                        : s.current_period_end
+                        ? ` · ${s.cancel_at_period_end ? 'ends' : 'renews'} ${fmtFullDay(s.current_period_end)}`
                         : ' · renewal date not known'}
                     </Text>
                   </View>
@@ -468,10 +511,6 @@ export default function ClientPackages() {
 
             <Rule />
 
-            {/* What is below came off this phone. Said above the list, because
-                a member checking how many sessions are left on a pack is about
-                to plan around the number. */}
-            {cachedAt && (rows ?? []).length ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{cachedAtLine(cachedAt)}</Flag> : null}
             {failed && !(rows ?? []).length ? (
               <View style={{ alignItems: 'center', paddingVertical: sp.huge }}>
                 <Icon name="trophy" size={30} color={t.ink3} />
@@ -553,11 +592,11 @@ export default function ClientPackages() {
                             ) : null}
                           </>
                         ) : (
-                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Active since {new Date(r.created_at).toLocaleDateString()}</Text>
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>Active since {fmtFullDay(r.created_at)}</Text>
                         )}
                         {line ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>
-                            Bought {new Date(r.created_at).toLocaleDateString()}
+                            Bought {fmtFullDay(r.created_at)}
                             {/* Which pack the next booking actually comes off.
                                 `redeem_pack_session` draws from the oldest with
                                 room, so this is a statement about what the

@@ -97,6 +97,21 @@ interface Value {
    *  client had been measured. */
   weightKg: number | null; bodyFatPct: number | null; muscleKg: number | null;
   setWeightKg: (v: number) => void; setBodyFat: (v: number) => void;
+  /**
+   * Record a weight AND wait for the server to confirm it.
+   *
+   * `setWeightKg` is local state plus the debounced push six hundred
+   * milliseconds later, whose only outcome is `saveFailed` — which the weekly
+   * check-in never read, so it printed "your weight has been updated" over a
+   * write nobody had asked the server about. That figure drives the macro
+   * target, the goal projection, the meal plan's seed and the coach's console,
+   * and it was the one write on that screen with no confirmation at all.
+   *
+   * Resolves true only on a row the server said it changed. False means the
+   * figure is on this phone and nowhere else — and under Supabase the local
+   * cache is cleared at the next launch, so false is not "it will go up later".
+   */
+  saveWeightNow: (kg: number) => Promise<boolean>;
   scans: ScanRec[];
   /** Resolves true only once the scan row is on the server. False means the
    *  scan is on this phone for this session and will be gone at relaunch — the
@@ -598,6 +613,44 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; sub.subscription.unsubscribe(); };
   }, [readTick]);
 
+  /**
+   * The weight, written and confirmed, rather than typed and hoped for.
+   *
+   * The local state moves first — the screens the member is looking at are
+   * about to be right either way — and then the row is updated with
+   * `count: 'exact'`, because an UPDATE that matched no rows is not an error in
+   * PostgREST and this codebase has shipped that mistake four times. The
+   * debounced push runs afterwards with the same values and is idempotent.
+   *
+   * No queue: `manual_weight_kg` is a single column that a later check-in
+   * overwrites, and a stale weight replayed after a newer one would move the
+   * member's macro target backwards. The caller says "on this phone only"
+   * instead, which is the truth.
+   */
+  const saveWeightNow = useCallback(async (kg: number): Promise<boolean> => {
+    const at = new Date().toISOString();
+    setManualWeight(kg);
+    setManualAt(at);
+    if (!USE_SUPABASE || !sbUid) return false;
+    try {
+      const { error, count } = await supabase
+        .from('clients')
+        .update({ manual_weight_kg: kg, manual_at: at }, { count: 'exact' })
+        .eq('id', sbUid);
+      if (error) { reportError('clientData.saveWeightNow', error); return false; }
+      // `null` means the count did not come back, which is not evidence of
+      // failure — the same reading the debounced push takes of it.
+      if (count === 0) {
+        reportError('clientData.saveWeightNow', new Error('update matched no rows'));
+        return false;
+      }
+      return true;
+    } catch (e) {
+      reportError('clientData.saveWeightNow', e);
+      return false;
+    }
+  }, [sbUid]);
+
   const sorted = useMemo(() => {
     const byDay: Record<string, ScanRec> = {};
     for (const s of scans) byDay[s.takenAt.slice(0, 10)] = s; // one InBody scan per day, latest added wins
@@ -630,6 +683,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     stepGoal, setStepGoal, sleepGoalHours, setSleepGoalHours, waterGoalGlasses, setWaterGoalGlasses,
     weightKg, bodyFatPct, muscleKg: latest ? latest.skeletalMuscleKg : null,
     setWeightKg: (v) => { setManualWeight(v); setManualAt(new Date().toISOString()); }, setBodyFat: (v) => { setManualBodyFat(v); setManualAt(new Date().toISOString()); },
+    saveWeightNow,
     scans: sorted,
     // A scan is the single most consequential thing a client records: it moves
     // weight, body fat, muscle, every chart, and the macro targets they eat to.

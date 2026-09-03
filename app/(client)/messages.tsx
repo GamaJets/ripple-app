@@ -447,8 +447,29 @@ export default function Messages() {
               // action sends; both land here, and both do what the hint says.
               <Pressable key={m.id} disabled={mine}
                 onLongPress={() => { setReportNote(''); setReportFor({ open: true, messageId: m.id.startsWith('local-') ? null : m.id }); }}
+                // ── the label is the MESSAGE ────────────────────────────
+                //
+                // It was 'Report this message'. `Pressable` is accessible by
+                // default, so the whole subtree — the attachment, the words the
+                // coach wrote and the time — collapsed into one element
+                // announcing that label and nothing else. VoiceOver read every
+                // incoming bubble as "Report this message, button" while the
+                // member's own bubbles, which are not pressable, read fine: a
+                // blind member could hear everything they had said and not one
+                // word from their coach.
+                //
+                // The report action is still reachable and is still announced —
+                // it is what the HINT and the two accessibility actions below
+                // are for, which is where an action belongs. A label names the
+                // thing; a hint says what happens if you act on it.
                 accessibilityRole={mine ? undefined : 'button'}
-                accessibilityLabel={mine ? undefined : 'Report this message'}
+                accessibilityLabel={mine ? undefined : [
+                  m.attachment.state === 'ok' ? `${attachmentNoun(m.attachment.attachment.kind)} from your coach` : null,
+                  m.attachment.state === 'unreadable' ? 'an attachment this app cannot show' : null,
+                  m.local ? `${attachmentNoun(m.local.kind)} from your coach` : null,
+                  m.body || null,
+                  receipt.line(m, fmt(m.createdAt)),
+                ].filter(Boolean).join('. ')}
                 accessibilityHint={mine ? undefined : 'Opens the report options for this message'}
                 accessibilityActions={mine ? undefined : [
                   { name: 'activate', label: 'Report this message' },

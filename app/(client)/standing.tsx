@@ -55,7 +55,12 @@ import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } fro
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
 import { useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
 import {
-  cancelOptions, seriesLabel, seriesOccurrencesIn, RECURRING_CREDIT_NOTE, SERIES_HORIZON_DAYS,
+  // `memberSeriesLabel`, not `seriesLabel`. The second is English and 12-hour
+  // by construction — "Every Tuesday at 7:00 am" to a member in Milan, printed
+  // directly above "Next Tue 09:00", which this screen already renders through
+  // the app's own locale formatters. The hour is unchanged: it is the series'
+  // own wall clock either way, and only the writing of it moves.
+  cancelOptions, memberSeriesLabel as seriesLabel, seriesOccurrencesIn, RECURRING_CREDIT_NOTE, SERIES_HORIZON_DAYS,
   type CancelOption, type RecurringSeries,
 } from '../../src/lib/recurring';
 import {

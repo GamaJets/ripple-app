@@ -253,9 +253,11 @@ export default function TrainerAnalytics() {
    * `fetchMyCurrency` applies the precedence rule written out in
    * src/lib/currencySource.ts: the gym on `profiles.tenant_id` is the
    * authority, and the coach's own column applies if and only if there is no
-   * gym. `myTenantCurrency` is deliberately left alone rather than widened —
-   * its own comment names this file as the debt, and widening it would change
-   * what its remaining callers are told without any of them saying so.
+   * gym. `myTenantCurrency` was deliberately left alone rather than widened,
+   * because widening it would have changed what its callers were told without
+   * any of them saying so. This file was the last of the three its own comment
+   * named as the debt, so once this moved it had no caller left and was
+   * deleted — see the tombstone in src/lib/subscriptions.ts.
    *
    * Null while the first read is in flight, which is why `curGap` reads
    * 'reading' rather than any of the six real gaps until it lands.

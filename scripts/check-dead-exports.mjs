@@ -173,7 +173,7 @@ const KNOWN = new Map([
   ['src/lib/connect.ts', { count: 1, fix: 'packageCurrencies reads which currencies a coach has priced packages in. Nothing asks. It is the check a coach\'s Connect payout screen needs before offering a currency.' }],
   ['src/lib/endCoaching.ts', { count: 1, fix: 'fetchEndRecord loads the permanent record of an ended coaching relationship. The end-coaching flow writes it and no screen reads it back.' }],
   ['src/lib/gymSessions.ts', { count: 1, fix: 'fetchAwaitingOutcome lists sessions whose outcome nobody recorded. Nothing surfaces the list, so the backlog it exists to show is invisible.' }],
-  ['src/lib/spotify.ts', { count: 3, fix: 'spotifyPlaylistTracks, spotifyDevices and spotifyTransfer. Playback is wired; choosing a device and moving playback to it is not, so a member with two speakers cannot pick one.' }],
+  ['src/lib/spotify.ts', { count: 1, fix: 'spotifyPlaylistTracks — the track list of a playlist the member already owns. The screen builds its own list from a search; nothing reads back what is in a saved playlist. (spotifyDevices and spotifyTransfer came off this list when app/(client)/music.tsx grew the device picker.)' }],
   ['src/lib/trainerSessions.ts', { count: 1, fix: 'markMyOutcome records a coach\'s own outcome for a session. The coach Sessions screen is where it belongs; that file is another lane\'s today.' }],
 
   // ── the console and the shared UI kit ───────────────────────────────────

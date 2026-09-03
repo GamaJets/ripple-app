@@ -16,10 +16,11 @@
 import {
   DOW_NAMES, RECURRING_CLASH_NOTE, RECURRING_CREDIT_NOTE, RECURRING_END_RULE,
   SERIES_HORIZON_DAYS, cancelOptions, clashLine, clockLabel, createdLine,
-  occurrenceDetail, seriesDates, seriesDetail, seriesLabel, shapeSeries,
+  occurrenceDetail, seriesDates, seriesDetail, seriesLabel, memberSeriesLabel, shapeSeries,
   seriesOccurrencesIn, zonedSlot,
   type RawSeries,
 } from './recurring';
+import { fmtClock, weekdayName } from './format';
 import type { CancellationPolicy } from './booking';
 
 const errors: string[] = [];
@@ -248,6 +249,21 @@ eq(clockLabel(18, 45), '6:45 pm', 'quarter to seven in the evening');
 eq(clockLabel(0, 0), '12:00 am', 'midnight is twelve, not zero');
 eq(clockLabel(12, 30), '12:30 pm', 'and half past noon is pm');
 eq(seriesLabel({ dow: 2, hour: 7, minute: 0 }), 'Every Tuesday at 7:00 am', 'the whole arrangement in one line');
+
+// The member's version of the same line, which reads in THEIR language and
+// clock. Asserted structurally rather than against an English literal: the
+// whole point is that the words come from the reader's locale, so pinning
+// "Tuesday" here would pin the defect.
+{
+  const m = memberSeriesLabel({ dow: 2, hour: 7, minute: 0 });
+  ok(m.includes(weekdayName(2)), 'it names the day the way the reader writes it');
+  ok(m.includes(fmtClock(7, 0)), 'and the time the way the reader writes it');
+  // The hour is the SERIES' wall clock and is never converted into the
+  // reader's zone — that is what makes `fmtClock`'s numeric signature the right
+  // one to build this from.
+  ok(memberSeriesLabel({ dow: 2, hour: 18, minute: 45 }).includes(fmtClock(18, 45)),
+    'quarter to seven in the evening is still quarter to seven in the evening');
+}
 eq(DOW_NAMES[0], 'Sunday', 'Sunday-first, matching Date.getDay() and extract(dow)');
 eq(DOW_NAMES.length, 7, 'seven days');
 

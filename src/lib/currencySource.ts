@@ -27,7 +27,7 @@
 //
 // ── A failed read is not "unset", and that is most of this file ───────────
 //
-// `myTenantCurrency()` returns `{ currency: null, error }` on a refused read,
+// The gym read returns `{ currency: null, error }` on a refused read,
 // and reading the null before the error is precisely how "your gym has not set
 // a currency" came to be said to coaches whose read had timed out (see
 // src/lib/currencyGap.ts, which exists for that bug). The same trap is now
@@ -53,9 +53,9 @@ export type CurrencyFrom = 'gym' | 'own';
  * The gym half of the answer, already fetched.
  *
  * `hasGym` is `profiles.tenant_id is not null` — the column the tenant
- * provider and `myTenantCurrency()` both resolve, and deliberately NOT
- * `trainers.tenant_id`, which part 711 leaves pointing at a gym a coach has
- * left.
+ * provider resolves, and the one the now-deleted `myTenantCurrency()` resolved
+ * before it. Deliberately NOT `trainers.tenant_id`, which part 711 leaves
+ * pointing at a gym a coach has left.
  *
  * `failed` covers the profile read AND the tenant read. Either one failing
  * means the gym is UNKNOWN, which is not the same as absent and must not be

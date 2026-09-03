@@ -143,7 +143,33 @@ export interface Purchase { id: string; client_id: string | null; trainer_id: st
    *  is a different sentence on each model. */
   stripe_account_id?: string | null }
 
-const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
+/**
+ * Hand a URL to the browser, and say whether it went.
+ *
+ * It used to swallow the failure — `try { await Linking.openURL(url); } catch {}`
+ * — and every caller below then returned `{ ok: true }`, which was a statement
+ * about having RECEIVED a URL rather than about having opened one. So a member
+ * tapped Buy, no browser opened, the screen reported success, and
+ * app/(client)/packages.tsx cleared the discount code they had typed on the
+ * strength of it — while the only sentence left on screen told them a purchase
+ * "shows up here once Stripe confirms it, which can take a moment". They sat
+ * waiting for a checkout that was never started.
+ *
+ * `Linking.openURL` rejects when no handler can take the URL, and it also
+ * resolves `false` on some platforms rather than throwing. Both are failures
+ * here and both come back as false.
+ */
+const openUrl = async (url?: string | null): Promise<boolean> => {
+  if (!url) return false;
+  try {
+    const r = await Linking.openURL(url);
+    return r !== false;
+  } catch { return false; }
+};
+
+/** What a member is told when the URL was issued and nothing opened. Their
+ *  money has not moved: the checkout was never reached. */
+const BROWSER_DID_NOT_OPEN = 'Your browser did not open, so nothing has been started and nothing has been charged. Try again in a moment.';
 
 /**
  * Start / resume Stripe Connect onboarding for the signed-in trainer.
@@ -168,7 +194,7 @@ export async function startTrainerOnboarding(): Promise<{ ok: boolean; error?: s
   try {
     const { data, error } = await supabase.functions.invoke('connect-onboard', { body: { refresh_url: `${WEB_ORIGIN}/connect-refresh`, return_url: `${WEB_ORIGIN}/connect-return` } });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: BROWSER_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not start onboarding.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -464,7 +490,7 @@ export async function buyPackage(packageId: string, code?: string): Promise<{ ok
     const promo = String(code ?? '').trim();
     const { data, error } = await supabase.functions.invoke('connect-checkout', { body: { package_id: packageId, success_url: appLink('purchase/success'), cancel_url: appLink('purchase/cancel'), ...(promo ? { promo_code: promo } : {}) } });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: BROWSER_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not start checkout.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -495,7 +521,7 @@ export async function openPurchasePortal(purchaseId: string): Promise<{ ok: bool
       body: { action: 'purchase_portal', purchase_id: purchaseId, return_url: appLink('packages') },
     });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: BROWSER_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not open billing.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }

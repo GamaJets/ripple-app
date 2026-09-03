@@ -11,7 +11,7 @@
 // reads behind a currency can come up empty for four different reasons:
 //
 //   · they have not finished — nothing is known yet;
-//   · a read was refused or the wire dropped — `myTenantCurrency` returns an
+//   · a read was refused or the wire dropped — the reader returns an
 //     `error`, `fetchInvoiceCurrency` returns `status: 'error'`;
 //   · part of the read answered and part did not — `fetchInvoiceCurrency`
 //     returns 'partial' when one of its two halves failed and the other had
@@ -41,8 +41,10 @@ export type CurrencyGap =
   | 'unset';
 
 /**
- * The gap behind a `myTenantCurrency()` answer — `{ currency, error }` — plus
- * whether the call has come back at all yet.
+ * The gap behind a `{ currency, error }` answer, plus whether the call has
+ * come back at all yet. That shape came from `myTenantCurrency()`, which has
+ * since been deleted; `resolveMyCurrency` in src/lib/currencySource.ts answers
+ * in the same two fields, so the reasoning below is unchanged by its going.
  *
  * Returns null when a currency IS available, which is the caller's cue that
  * there is no sentence to print.
@@ -53,8 +55,8 @@ export function currencyGapOf(
   if (input.currency) return null;
   if (input.loading) return 'reading';
   // The error is checked before the null currency, not after. Both are present
-  // on a failed read — `myTenantCurrency` returns `{ currency: null, error }` —
-  // and reading the null first is exactly how the failure became "not set".
+  // on a failed read — the reader returns `{ currency: null, error }` — and
+  // reading the null first is exactly how the failure became "not set".
   return input.error ? 'unreadable' : 'unset';
 }
 

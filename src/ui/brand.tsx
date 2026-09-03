@@ -40,6 +40,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VARIANT, VARIANT_LABEL } from '../lib/variant';
+import { supabase } from '../lib/supabase';
+import { USE_SUPABASE } from '../lib/config';
 
 interface BrandValue {
   appName: string;
@@ -83,6 +85,45 @@ export function BrandProvider({ children }: { children: ReactNode }) {
     setAppNameState(v);
     AsyncStorage.setItem(KEY, v).catch(() => {});
   };
+
+  // ── the member's own gym, adopted for the member ────────────────────────
+  //
+  // `adoptGymName` existed and its only callers were on app/(owner)/brand.tsx,
+  // a screen no member opens. So every member of every white-label gym read the
+  // BUILD's name — on the full-screen barcode they hold up at the turnstile,
+  // and in the three-letter prefix of the member number derived from it
+  // (`memberPrefix`, src/lib/membership.ts). "Repple ID REP-4417", on the two
+  // screens a member actually shows to staff.
+  //
+  // `my_gym_name()` (supabase/parts/962) answers only about the caller and only
+  // when their tenant is somebody's GYM — a personal workspace named "Tim's
+  // space" returns null, because renaming the app after the member would be
+  // worse than the defect. Anything else — the function not applied yet, no
+  // session, a refusal, no answer — leaves the cached name exactly as it was,
+  // which is what `adoptGymName` already does with a blank.
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let cancelled = false;
+    const ask = async () => {
+      try {
+        const { data, error } = await supabase.rpc('my_gym_name');
+        // no-error-ok: this is a name, not a fact anything is computed from.
+        // A gym that could not be read keeps whatever this device last knew.
+        if (cancelled || error) return;
+        const n = typeof data === 'string' ? data : null;
+        if (n) adoptGymName(n);
+      } catch { /* same reason */ }
+    };
+    void ask();
+    // Signing in is when the answer first becomes available: the provider mounts
+    // on the welcome screen, before there is a session to ask about.
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (session?.user) void ask();
+    });
+    return () => { cancelled = true; sub?.subscription?.unsubscribe?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return <Ctx.Provider value={{ appName, adoptGymName, setAppName }}>{children}</Ctx.Provider>;
 }
 

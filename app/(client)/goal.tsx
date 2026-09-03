@@ -32,6 +32,7 @@ import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightToKg, weightDeltaIn, kgToLb, readNumber, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { useGoalTracker, type GoalSaved } from '../../src/ui/goalTracker';
+import { fmtFullDay } from '../../src/lib/format';
 // Whether a row is still on this phone. The queue was built for goals set with
 // no signal and this screen was never told about it: the waiting row was drawn
 // exactly like a stored one, could not be removed or ticked off, and both
@@ -51,8 +52,12 @@ const KIND_TAB: { kind: GoalKind; label: string }[] = [
 
 const DATE_CHIPS: [string, number | null][] = [['4 wks', 28], ['8 wks', 56], ['12 wks', 84], ['No date', null]];
 
-const shortDate = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+// `appLocale()`, not `undefined` — the resolver in src/lib/locale.ts is what
+// every date in this app is written through, and `undefined` asks the device
+// instead, which is a different answer on a phone whose region and language
+// disagree. The year is back too: "12 Mar" on a goal set for next March is a
+// date somebody reads as this year.
+const shortDate = (iso: string) => fmtFullDay(iso);
 
 /** True for the two goal kinds whose numbers are kilograms on the record. */
 const weightKind = (k: MeasuredKind) => k !== 'bodyfat';

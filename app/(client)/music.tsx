@@ -31,7 +31,8 @@ import { useTheme } from '../../src/ui/components';
 import { generatePlaylist, spotifyQuerySeeds, CURATED_POOL_SIZE, type Service, type GenParams, type Playlist } from '../../src/lib/music';
 import {
   connectSpotify, spotifyStatus, spotifyDisconnect, createSpotifyPlaylist, spotifySearchTracks,
-  spotifyMyPlaylists, spotifyPlay, SpotifyError, type PlaylistRef,
+  spotifyMyPlaylists, spotifyPlay, spotifyDevices, spotifyTransfer, SpotifyError,
+  type PlaylistRef, type SpotifyDevice,
 } from '../../src/lib/spotify';
 import { playlistLine, playlistSavedLine } from '../../src/lib/spotifyPlayback';
 import { reportError } from '../../src/lib/reportError';
@@ -163,12 +164,70 @@ export default function Music() {
  const anyConnected = conn.spotify;
  const openInSpotify = (q: string) => { Linking.openURL('https://open.spotify.com/search/' + encodeURIComponent(q)).catch(() => Alert.alert('Open Spotify', 'Install the Spotify app, then search "' + q + '".')); };
 
+ /**
+  * ── "No Spotify device is playing" was a dead end ────────────────────────
+  *
+  * Every play path on this screen ended at that sentence: leave this app, start
+  * a track somewhere else, come back. `spotifyDevices` and `spotifyTransfer`
+  * have been in src/lib/spotify.ts the whole time — the second one's own
+  * comment says it exists "so 'no active device' is recoverable in-app" — and
+  * nothing called either. So a Premium member with a phone, a laptop and a
+  * speaker all signed in was told to go away.
+  *
+  * `recoverNoDevice` is that recovery, and it is only ever reached from the
+  * failure Spotify itself classified: a 404 NO_ACTIVE_DEVICE. Anything else
+  * keeps the message it already had.
+  *
+  * The list is the account's OWN devices as Spotify reports them, so nothing is
+  * invented; an empty list is a real answer and says so rather than looping
+  * back to the same alert.
+  */
+ const recoverNoDevice = async (title: string, retry: () => Promise<void>) => {
+   let devices: SpotifyDevice[] = [];
+   try { devices = await spotifyDevices(); }
+   catch (e) { Alert.alert(title, spotifyMessage(e, 'Your Spotify devices could not be read.')); return; }
+   const usable = devices.filter((d): d is SpotifyDevice & { id: string } => !!d.id);
+   if (!usable.length) {
+     Alert.alert(
+       title,
+       'Spotify is not reporting any device for your account — not even this phone. Open the Spotify app once so it registers, then try again.',
+     );
+     return;
+   }
+   Alert.alert(
+     'Play it where?',
+     'Spotify plays on a device rather than inside this app. Pick one and it starts there.',
+     [
+       ...usable.slice(0, 4).map((d) => ({
+         text: d.name + (d.type ? ` · ${d.type.toLowerCase()}` : ''),
+         onPress: async () => {
+           try {
+             await spotifyTransfer(d.id, true);
+             await retry();
+           } catch (e) {
+             // The transfer or the retry. Either way nothing is playing, and
+             // saying "playing on your laptop" over a refusal is the failure
+             // this whole screen keeps being fixed for.
+             Alert.alert(title, spotifyMessage(e, `Spotify would not start playback on ${d.name}.`));
+           }
+         },
+       })),
+       { text: 'Cancel', style: 'cancel' as const },
+     ],
+   );
+ };
+
  /** Play a whole playlist on the account's active device, or fall back to
   *  opening it. A refused command says why rather than doing nothing. */
  const playPlaylist = async (p: PlaylistRef) => {
    if (!p.uri) { if (p.url) Linking.openURL(p.url).catch(() => {}); return; }
    try { await spotifyPlay({ contextUri: p.uri }); }
    catch (e) {
+     // The one failure this app can actually fix, fixed rather than reported.
+     if (e instanceof SpotifyError && e.kind === 'no_device') {
+       await recoverNoDevice(p.name, async () => { await spotifyPlay({ contextUri: p.uri as string }); });
+       return;
+     }
      Alert.alert(p.name, spotifyMessage(e, 'Spotify refused that.'), p.url
        ? [{ text: 'Open in Spotify', onPress: () => Linking.openURL(p.url as string).catch(() => {}) }, { text: 'Done' }]
        : [{ text: 'Done' }]);
@@ -355,7 +414,13 @@ export default function Music() {
    // Without them all we can honestly do is open a search for track one.
    if (uris.length && conn.spotify && !needsReconnect) {
      try { await spotifyPlay({ uris }); return; }
-     catch (e) { Alert.alert('Spotify', spotifyMessage(e, 'Spotify refused that.')); return; }
+     catch (e) {
+       if (e instanceof SpotifyError && e.kind === 'no_device') {
+         await recoverNoDevice('Spotify', async () => { await spotifyPlay({ uris }); });
+         return;
+       }
+       Alert.alert('Spotify', spotifyMessage(e, 'Spotify refused that.')); return;
+     }
    }
    if (pl.tracks[0]) openInSpotify(`${pl.tracks[0].title} ${pl.tracks[0].artist}`);
  }} />

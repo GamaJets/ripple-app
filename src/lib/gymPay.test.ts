@@ -107,13 +107,46 @@ eq(payCurrency([rate({ currency: null })], 'GBP'), 'GBP',
 /* ── a rate, as somebody types it ──────────────────────────────────────────── */
 
 {
-  const cents = (s: string) => { const r = parseRate(s); return r.kind === 'rate' ? r.cents : r.kind; };
+  const cents = (s: string, c = 'GBP') => { const r = parseRate(s, c); return r.kind === 'rate' ? r.cents : r.kind; };
   eq(cents('45'), 4500, 'whole units in, minor units out');
   eq(cents('52.50'), 5250, 'and the halves survive');
   eq(cents(''), 'clear', 'an empty field CLEARS — this coach is on the gym’s standard fee');
   eq(cents('0'), 0, 'a typed zero is a value: the gym pays this coach nothing per session, deliberately');
   eq(cents('-5'), 'bad', 'a negative rate is refused — a deduction is an adjustment line, not a rate');
-  eq(cents('4,500'), 450000, 'a thousands comma is stripped rather than truncating the figure');
+
+  // ── the assertion that pinned the bug ────────────────────────────────────
+  //
+  // This read `eq(cents('4,500'), 450000, 'a thousands comma is stripped
+  // rather than truncating the figure')`, and it was true: the parser stripped
+  // every comma before looking at the number.
+  //
+  // It is right for a British typist and catastrophic for a European one. The
+  // same rule turns `52,50` — how most of Europe writes fifty-two fifty — into
+  // `5250`, and the hundred then makes it 525,000 minor units. A front desk
+  // setting a coach's rate to fifty-two fifty set it to five thousand two
+  // hundred and fifty, on the console AND on the owner's phone, silently.
+  //
+  // Neither reading may be picked on the typist's behalf, so both are refused.
+  // Being asked costs a keystroke; guessing costs somebody's wages.
+  // `4,500` is refused: three digits after a separator cannot be a two-place
+  // fraction, so this is a thousands comma and its reading is genuinely
+  // ambiguous — four thousand five hundred here, four and a half in Frankfurt.
+  eq(cents('4,500'), 'bad', 'a thousands separator is refused rather than guessed at');
+  // `52,50` is NOT ambiguous and is not refused. Two digits after a single
+  // comma can only be a decimal comma — nobody writes a thousands separator two
+  // digits from the end — so it reads as fifty-two fifty, which is what the
+  // person typing it meant. The old parser stripped the comma and made it
+  // 525,000; refusing it outright would have been the other overcorrection.
+  eq(cents('52,50'), 5250, 'the European decimal comma is read, not stripped and not refused');
+
+  // And the hundred, which was wrong on its own terms for a third of the
+  // currencies this product supports.
+  eq(cents('5000', 'JPY'), 5000, 'a Tokyo gym paying ¥5,000 an hour records ¥5,000, not ¥500,000');
+  eq(cents('5000.50', 'JPY'), 'bad', 'the yen has no smaller unit, so there is nothing after the point');
+  eq(cents('52.500', 'KWD'), 52500, 'the dinar is thousandths — 52.500 is 52,500 fils');
+  eq(cents('52.50', 'KWD'), 52500, 'and a short fraction is padded to the right place, not read as hundredths');
+  eq(cents('45', null as unknown as string), 'bad',
+    'and with no currency a rate is just a number — refused, because this is what somebody is paid');
 }
 
 eq(payRateBlocker('45', '', '', 'GBP'), null, 'a session rate alone is fine');

@@ -115,7 +115,7 @@ import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zone
 // 44pt is the minimum tap target — the number and the reasoning live in one
 // place, and the controls added here take it from there rather than from a
 // literal that can drift.
-import { MIN_TARGET } from '../../src/lib/a11y';
+import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { ZoneNow, ZoneBoard } from '../../src/ui/ZoneBoard';
 import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
@@ -1758,7 +1758,27 @@ export default function Train() {
                               </Text>
                             </View>
                           ))}
-                          <Pressable onPress={() => setLogged((prev) => { const n = { ...prev }; delete n[_id]; return n; })} hitSlop={6} style={{ paddingHorizontal: 4 }}>
+                          {/* ── the one control here that threw work away ────
+                              A 27pt tap with no role, no label and no
+                              confirmation, discarding every set typed against
+                              this movement — beside a sibling control (Remove,
+                              above) that asks first and says what it discards.
+                              It now has all three: a target that clears
+                              MIN_TARGET, a name a screen reader can read, and
+                              the same question its sibling asks. */}
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Clear the sets you logged for ${nameOf(e)}`}
+                            hitSlop={hitSlopFor(27)}
+                            onPress={() => Alert.alert(
+                              'Clear these sets?',
+                              `The ${(logged[_id] || []).length} set${(logged[_id] || []).length === 1 ? '' : 's'} you have typed against ${nameOf(e)} today are discarded. Nothing else on your plan changes.`,
+                              [
+                                { text: 'Keep them', style: 'cancel' },
+                                { text: 'Clear', style: 'destructive', onPress: () => { setLogged((prev) => { const n = { ...prev }; delete n[_id]; return n; }); tapLight(); } },
+                              ],
+                            )}
+                            style={{ paddingHorizontal: 4 }}>
                             <Text style={{ ...ty.caption, color: t.ink3 }}>clear</Text>
                           </Pressable>
                         </View>

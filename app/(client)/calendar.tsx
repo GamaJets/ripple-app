@@ -93,7 +93,7 @@ import { appLocale } from '../../src/lib/locale';
 // the words move: the Sunday-first order is this app's and every grid below
 // is built to it. See src/lib/calendarNames.ts.
 import { monthNamesLong, weekdayNamesNarrow, weekdayNamesShort } from '../../src/lib/calendarNames';
-import { fmtAxisDay, fmtTime, monthNamesShort } from '../../src/lib/format';
+import { fmtAxisDay, fmtFullDay, fmtTime, monthNamesShort } from '../../src/lib/format';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 // Which week of the block a date belongs to. See src/lib/clientBlock.ts.
 import { useClientWeek } from '../../src/ui/clientWeek';
@@ -1354,7 +1354,7 @@ export default function Calendar() {
                           {c.amount == null ? fig(null) : feeAmountLine(c.amount, c.currency)}
                         </Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                          {new Date(c.createdAt).toLocaleDateString()}{c.waivedAt ? ' · your coach waived this — nothing to pay' : ' · outstanding with your coach'}
+                          {fmtFullDay(c.createdAt)}{c.waivedAt ? ' · your coach waived this — nothing to pay' : ' · outstanding with your coach'}
                         </Text>
                       </View>
                     </View>

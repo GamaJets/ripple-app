@@ -30,6 +30,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { fmtFullDay } from '../../src/lib/format';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, kgToLb, plain, convertedNote, readNumber } from '../../src/lib/units';
 import { useCheckIns } from '../../src/ui/checkins';
@@ -120,7 +121,13 @@ export default function CheckIn() {
     // range check above has already established there is a number here.
     const kg = weightToKg(weight, wu);
     if (kg == null) return;
-    cd.setWeightKg(kg);
+    // Written and CONFIRMED, not typed and hoped for. `setWeightKg` is local
+    // state plus a debounced push whose only outcome is `saveFailed` six
+    // hundred milliseconds later, and this screen never read it — so it said
+    // "your weight has been updated" over a write nobody had asked the server
+    // about. That figure drives the macro target, the goal projection, the meal
+    // plan's seed and the coach's console.
+    const weightStored = await cd.saveWeightNow(kg);
     // `sendCheckIn` says which of three things happened, and they need three
     // different sentences. The result used to be thrown away entirely, so "your
     // coach can see this week's check-in" was printed whether or not anybody
@@ -136,7 +143,8 @@ export default function CheckIn() {
     if (out === 'unsent') {
       Alert.alert(
         'Saved on this phone',
-        'No connection, so your coach has not seen this yet — nothing is lost. The whole check-in, including your note, is saved here and goes up on its own the next time the app has signal.',
+        'No connection, so your coach has not seen this yet — nothing is lost. The whole check-in, including your note, is saved here and goes up on its own the next time the app has signal.'
+        + (weightStored ? '' : ' Your profile weight, which your targets are worked out from, is not in that queue — record it on Body once you have signal.'),
         [{ text: 'Done', onPress: () => router.back() }],
       );
       return;
@@ -149,7 +157,13 @@ export default function CheckIn() {
       );
       return;
     }
-    Alert.alert('Check-in sent', 'Your coach can see this week\'s check-in and your weight has been updated.', [{ text: 'Done', onPress: () => router.back() }]);
+    Alert.alert(
+      'Check-in sent',
+      weightStored
+        ? 'Your coach can see this week\'s check-in and your weight has been updated.'
+        : 'Your coach can see this week\'s check-in, including the weight on it. Your profile weight — the one your targets and your goal are worked out from — could not be updated just now, so record it again on Body when you have signal.',
+      [{ text: 'Done', onPress: () => router.back() }],
+    );
   };
 
   return (
@@ -226,7 +240,7 @@ export default function CheckIn() {
                   means by an unconfirmed non-empty answer. */}
               <SectionHead
                 title="Last Check-in"
-                note={isPending(ci.latest.id) ? 'not sent yet' : ci.status === 'error' ? 'not checked' : new Date(ci.latest.at).toLocaleDateString()}
+                note={isPending(ci.latest.id) ? 'not sent yet' : ci.status === 'error' ? 'not checked' : fmtFullDay(ci.latest.at)}
               />
               {/* The stored kilograms read back in the client's unit. The two
                   ratings beside it are scores out of five and are not a
