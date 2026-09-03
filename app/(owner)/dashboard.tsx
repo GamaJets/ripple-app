@@ -303,10 +303,21 @@ export default function OwnerOverview() {
               outstanding. */}
           <SetUp items={setup} onGo={(r) => router.push(r as never)} />
 
+          {/* The noun was pluralised and the verb was not, so a gym with one
+              client under a flagged trainer read "1 client ARE with them". On a
+              small gym's dashboard that count is the commonest case, not an
+              edge.
+
+              The trainer count moves off `> 1` and onto the `=== 1` form the
+              rest of this file and the owner app use. It cannot currently
+              render zero — the card is behind `atRiskCount > 0` on the line
+              below — but `> 1` says "0 trainer" the day that guard moves, and
+              two adjacent lines disagreeing about how to count is what produced
+              the verb bug in the first place. */}
           {roll.atRiskCount > 0 ? (
             <Notice tone={t.warn} kicker="Needs a look"
-              title={`${roll.atRiskCount} trainer${roll.atRiskCount > 1 ? 's' : ''} flagged`}
-              note={`${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'} are with them — review the most urgent.`}>
+              title={`${roll.atRiskCount} trainer${roll.atRiskCount === 1 ? '' : 's'} flagged`}
+              note={`${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'} ${roll.atRiskClients === 1 ? 'is' : 'are'} with them — review the most urgent.`}>
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Review" wide
                   onPress={() => { const first = ranked.find((r) => r.h.risk === 'high' || r.h.risk === 'watch'); if (first) setSel(first.tr); }} />

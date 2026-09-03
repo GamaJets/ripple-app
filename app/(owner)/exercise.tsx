@@ -215,7 +215,10 @@ export default function OwnerExercise() {
               <>
                 <Rule />
                 <Section>
-                  <SectionHead title="How to Do It" note={`${detail.instructions.length} steps`} />
+                  {/* Guarded by `detail.instructions.length` directly above, so
+                      the count is at least one — and a one-step movement (a
+                      hold, a carry, a stretch) read "1 steps". */}
+                  <SectionHead title="How to Do It" note={`${detail.instructions.length} step${detail.instructions.length === 1 ? '' : 's'}`} />
                   {detail.instructions.map((step, n) => (
                     <View key={n} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
                       <Text style={{ ...ty.label, fontWeight: '700', color: t.ink3, minWidth: 18 }}>{n + 1}</Text>

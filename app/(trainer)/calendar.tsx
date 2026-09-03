@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Alert, Modal } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -358,7 +359,28 @@ export default function TrainerSchedule() {
   // The other side of this booking happens on somebody else's phone. Re-read on
   // focus so what is on screen is the diary as it stands, not as it stood at
   // launch — including a slot that has just been taken.
-  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+  // ── the focus refresh that would not stop ─────────────────────────────
+  //
+  // This was `useFocusEffect(useCallback(() => { refresh(); }, [refresh]))`,
+  // and on the live edge logs it read the diary roughly twice a second for as
+  // long as Schedule was the focused tab — 782 responses in five idle minutes
+  // from one handset, measured. The lap: `refresh()` hydrates, `setSessions`
+  // takes a new array, `SessionsProvider` re-renders, its context value is an
+  // object literal (src/ui/sessions.tsx:754) so `refresh` is a new function,
+  // this `useCallback` changes identity, the effect re-runs, `refresh()`.
+  //
+  // `useRefreshOnFocus` exists for exactly this and its header argues the whole
+  // case: the refresh is held in a ref, the callback handed to
+  // `useFocusEffect` never changes, and the hook runs on FOCUS and on nothing
+  // else — which is all its name ever promised. The latest `refresh` is still
+  // the one that runs, because the ref is written every render.
+  //
+  // This is the defensive half. The root cause is the unmemoised context value
+  // in src/ui/sessions.tsx, which is read by app/(client)/** as well and is not
+  // this lane's file to change; the same loop is live at
+  // app/(client)/calendar.tsx:290 and app/(client)/standing.tsx:160 until it is
+  // fixed there.
+  useRefreshOnFocus(refresh);
 
   const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
   /* ── what each of them is due to train ──────────────────────────────────
@@ -409,7 +431,14 @@ export default function TrainerSchedule() {
   const reloadPolicy = lcPolicy.reload;
   // The fee was recorded by the CLIENT's cancellation, on their phone, and the
   // waitlist moved with it. Neither shows up here without asking again.
-  useFocusEffect(useCallback(() => { reloadFees(); }, [reloadFees]));
+  // `useRefreshOnFocus` for the same reason as the diary re-read above:
+  // `reloadFees` comes out of the same object-literal context value in
+  // src/ui/sessions.tsx, so its identity changes on every render of that
+  // provider and a dependency array on it is an unbounded read loop waiting
+  // for the provider to change state. Skipping the FIRST focus is correct
+  // here — `useLateCancelCharges` loads itself on mount, so the old shape was
+  // buying a duplicate read on the way in.
+  useRefreshOnFocus(reloadFees);
   const { tenant } = useTenant();
   /* ── what a checked-in session is filed as being worth ───────────────────
    *
@@ -705,7 +734,10 @@ export default function TrainerSchedule() {
   // leave is not one — so the arrangement a coach is looking at may have been
   // ended on the client's phone since this screen loaded. Re-read on focus, the
   // same reason the calendar and the fees are.
-  useFocusEffect(useCallback(() => { reloadSeries(); }, [reloadSeries]));
+  // Same swap, same argument. `useRecurringSeries` (src/ui/availability.ts)
+  // also loads itself on mount, so nothing is lost by not firing on the first
+  // focus.
+  useRefreshOnFocus(reloadSeries);
 
   /* ── pull to refresh ─────────────────────────────────────────────────────
    *

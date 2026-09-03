@@ -263,6 +263,27 @@ export default function Close() {
     { everyMs: 2 * 60_000 },
   );
 
+  /**
+   * The instant every judgement on this sheet is made against.
+   *
+   * `readAt` and not `Date.now()`, and the difference is the whole point. This
+   * console has no router — the rail is a plain `<a href>` — so a month-close
+   * tab left open on a desk is one document that lives for days. A `Date.now()`
+   * read inside the memo below is pinned to the render that first produced it:
+   * the memo's dependencies are the rows and the month, and neither of them
+   * moves when midnight does. So "today" stayed at the day the tab was opened,
+   * and `owed.overdue`, `overdueCents` and both of the same on `arrears` went on
+   * being counted against a day that had already passed — on the one screen an
+   * owner signs a month off from.
+   *
+   * The read instant is the honest one to judge against as well as the live one:
+   * the figures on this page are of that read, and `useFetched` moves it every
+   * two minutes, on every return to the tab, and whenever somebody presses
+   * "Read again". `?? Date.now()` covers the render before the first read has
+   * landed, where there are no rows to judge yet anyway.
+   */
+  const nowMs = readAt ?? Date.now();
+
   useEffect(() => {
     let live = true;
     (async () => {
@@ -390,10 +411,17 @@ export default function Close() {
       // `?? undefined` rather than `?? isoDay(...)`: with no zone, letting
       // `buildClose` fall back is byte-identical to what a zone-less gym gets
       // today, and the fallback is argued in one place rather than two.
-      today: gymDay(Date.now(), zone) ?? undefined,
+      //
+      // `nowMs` and not `Date.now()`: this memo re-runs on its dependencies,
+      // none of which is a clock, so a literal read here froze the gym's day at
+      // the render that first built the sheet. `now` goes with it — it is what
+      // `monthEnded` and the blockers are judged on, so a month that ended while
+      // the tab sat open would otherwise still be reported as still running.
+      today: gymDay(nowMs, zone) ?? undefined,
+      now: nowMs,
       fmt: (c) => money(c, currency) ?? '—',
     });
-  }, [rec, w, policy, feeCents, currency, zone]);
+  }, [rec, w, policy, feeCents, currency, zone, nowMs]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -499,6 +527,7 @@ export default function Close() {
       ) : (
         <CloseView
           c={close} rec={rec} currency={currency} gymCcy={gymCcy} zone={zone} feeRead={feeRead} sessionFee={sessionFee} feeCents={feeCents}
+          nowMs={nowMs}
           gymName={gymName} monthKey={key} tenantId={me.tenantId!} me={me}
           closes={closes} closesErr={closesErr}
           costs={costCheck} costsReason={costsThisMonth.reason ?? costsBefore.reason}
@@ -511,9 +540,14 @@ export default function Close() {
 
 /* ── the close itself ──────────────────────────────────────────────────────── */
 
-function CloseView({ c, rec, currency, gymCcy, zone, feeRead, sessionFee, feeCents, gymName, monthKey, tenantId, me, closes, closesErr, costs, costsReason, onChange }: {
+function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, sessionFee, feeCents, gymName, monthKey, tenantId, me, closes, closesErr, costs, costsReason, onChange }: {
   c: MonthClose;
   rec: CloseRecord;
+  /** The instant this sheet's figures were read, and therefore the one every
+   *  "is this late / is this still unmarked" question below is asked at. One
+   *  instant for the whole sheet: the sections used to each read their own
+   *  clock, which is how a total and the rows under it came to disagree. */
+  nowMs: number;
   /** Which of this gym's regular suppliers are not in the month yet, and how
    *  the two reads behind that judgement came back. Never a figure: nothing
    *  here is subtracted from anything on this screen. */
@@ -637,9 +671,9 @@ function CloseView({ c, rec, currency, gymCcy, zone, feeRead, sessionFee, feeCen
           their own rows agree on, and null where they agree on nothing — which
           each of those sections already has a sentence for. */}
       <Income c={c} rec={rec} currency={currency} />
-      <Owed c={c} rec={rec} currency={owedCcy} zone={zone} />
+      <Owed c={c} rec={rec} currency={owedCcy} zone={zone} nowMs={nowMs} />
       <Reconciliation c={c} rec={rec} />
-      <Payroll c={c} rec={rec} currency={gymCcy} zone={zone} sessionFee={sessionFee} feeCents={feeCents} />
+      <Payroll c={c} rec={rec} currency={gymCcy} zone={zone} nowMs={nowMs} sessionFee={sessionFee} feeCents={feeCents} />
       <Passes c={c} rec={rec} currency={passesCcy} />
     </>
   );
@@ -1166,8 +1200,8 @@ function Income({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
 
 /* ── what is still owed ────────────────────────────────────────────────────── */
 
-function Owed({ c, rec, currency, zone }: {
-  c: MonthClose; rec: CloseRecord; currency: TenantCurrency; zone: string | null;
+function Owed({ c, rec, currency, zone, nowMs }: {
+  c: MonthClose; rec: CloseRecord; currency: TenantCurrency; zone: string | null; nowMs: number;
 }) {
   // The GYM's today, not UTC's. This was `new Date().toISOString().slice(0, 10)`
   // — the UTC calendar date — which for a gym east of Greenwich turns over hours
@@ -1185,7 +1219,13 @@ function Owed({ c, rec, currency, zone }: {
   // screen, two calendars, disagreeing for the hours between two midnights —
   // which is the whole defect this line was written to end, arriving by the
   // other door. The two fallbacks are now the same expression.
-  const today = gymDay(Date.now(), zone) ?? isoDay(new Date());
+  //
+  // And both now read the same INSTANT as well as the same calendar: `nowMs` is
+  // when this screen last read the gym, which is what `buildClose` above is also
+  // handed. A bare `Date.now()` here was fresh only because this line is not
+  // memoised — the tile above it was not, and one screen agreeing with itself
+  // only for as long as nobody re-rendered is not agreement.
+  const today = gymDay(nowMs, zone) ?? isoDay(new Date(nowMs));
   // Both null at a gym that has not set a currency, and the paragraph below
   // states the invoice counts rather than a dash when they are.
   const outstanding = c.arrears ? money(c.arrears.outstandingCents, currency) : null;
@@ -1300,15 +1340,21 @@ const RECON_LABEL: Record<string, string> = {
 
 /* ── what is unmarked, and therefore blocking payroll ──────────────────────── */
 
-function Payroll({ c, rec, currency, zone, sessionFee, feeCents }: {
+function Payroll({ c, rec, currency, zone, nowMs, sessionFee, feeCents }: {
   c: MonthClose; rec: CloseRecord; currency: TenantCurrency; zone: string | null;
-  sessionFee: number | null; feeCents: number | null;
+  nowMs: number; sessionFee: number | null; feeCents: number | null;
 }) {
+  // `isAwaitingOutcome(s, nowMs)`, with `nowMs` in the dependency list. The
+  // second argument defaults to `Date.now()`, so with only the rows and the
+  // month in the deps this list answered "which sessions had finished without an
+  // outcome" as of the moment the sheet was first drawn. A session that ended
+  // an hour later never appeared in it — the UNDER-counting direction, on the
+  // table whose whole job is to name what is blocking a pay run.
   const unmarked = useMemo(
     () => (rec.sessions.state === 'ready' ? rec.sessions.rows : [])
       .filter((s) => inWindow(s.startsAt, c))
-      .filter((s) => isAwaitingOutcome(s)),
-    [rec.sessions, c],
+      .filter((s) => isAwaitingOutcome(s, nowMs)),
+    [rec.sessions, c, nowMs],
   );
 
   // Null when the gym has not set a currency — see the paragraph below, which

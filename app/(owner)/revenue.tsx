@@ -463,9 +463,14 @@ export default function OwnerRevenue() {
 
         {/* ── revenue at risk ────────────────────────────────────────────── */}
         <Section>
+          {/* The noun agreed with the count and the verb did not: one client
+              under a flagged trainer read "1 client ARE with them". The same
+              sentence is on the owner dashboard and is fixed there too — they
+              are two renders of one fact and must not start disagreeing about
+              how to say it. */}
           {roll.atRiskCount > 0 ? (
             <Notice tone={t.warn} kicker="Needs a look" title={`${roll.atRiskCount} trainer${roll.atRiskCount === 1 ? '' : 's'} flagged`}
-              note={`${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'} are with them.`}>
+              note={`${roll.atRiskClients} client${roll.atRiskClients === 1 ? '' : 's'} ${roll.atRiskClients === 1 ? 'is' : 'are'} with them.`}>
               <View style={{ marginTop: sp.lg }}>
                 <Cta label="Review Trainers" wide onPress={() => router.push('/(owner)/trainers')} />
               </View>

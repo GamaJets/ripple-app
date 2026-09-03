@@ -13,6 +13,7 @@
 // it would do before it does anything.
 
 import { parseSheet, mapColumns, type Sheet } from './csv';
+import { currencyDecimals } from './coachMoney';
 import type { CoachedMode } from './types';
 
 /* ── values ────────────────────────────────────────────────────────────────── */
@@ -24,26 +25,95 @@ export type Parsed<T> =
   | { ok: true; value: T }
   | { ok: false; reason: string };
 
-const MONEY_STRIP = /[^\d.,\-()]/g;
+/** A minus sign as a keyboard writes it and as a spreadsheet writes it. Excel
+ *  and most European ledgers emit U+2212 for a negative figure. */
+const MINUS = /[-−]/;
 
 /**
- * Parse a money column into integer minor units.
+ * The sentence a row gets when nobody has said which money the file is in.
  *
- * Handles both conventions — "1,234.56" and "1.234,56" — by taking whichever
- * separator appears last as the decimal point. A lone separator followed by
- * exactly three digits is read as a thousands separator, because "1,234" in a
- * price column is a thousand-something, not one-point-two-three-four.
- *
- * Anything with more than two decimal places is refused rather than rounded:
- * a column of four-decimal figures is a unit price or an exchange rate, and
- * rounding it silently turns a data-shape problem into a money problem.
+ * Written once because it is the answer to three different questions — a
+ * payment amount, a plan price, and `parseMoneyCents` called on its own — and
+ * all three have the same fix, which is at the import screen and not in the
+ * spreadsheet.
  */
-export function parseMoneyCents(raw: string): Parsed<number> {
+const NO_CURRENCY =
+  'the currency is not known, so this figure cannot be read into minor units — '
+  + 'set the gym’s currency, or give the file a currency column';
+
+/**
+ * Parse a money column into integer minor units, in the currency it is in.
+ *
+ * ── Why the currency is an argument and not an assumption ─────────────────
+ *
+ * This function used to be two decimal places, flat, both ways. It refused a
+ * perfectly ordinary Kuwaiti figure — "12.340" came back as "has 3 decimal
+ * places; money takes at most 2" — and it read a Japanese "50000" as FIVE
+ * MILLION YEN, because it multiplied by a hundred whatever the money was. That
+ * value went into `gym_payments.amount_cents` and into
+ * `membership_plans.price_cents`: the one import a gym does once, at setup,
+ * from a spreadsheet nobody opens again. A hundredfold error there is not a
+ * rendering fault that the next release corrects — it is the permanent record
+ * of what members paid, and the sheet it disagrees with is in somebody's
+ * Downloads folder.
+ *
+ * Repple is white-labelled. There is no default currency anywhere in it and
+ * there is therefore no default number of decimal places either, so with no
+ * currency this REFUSES rather than assuming two. `currencyDecimals` in
+ * src/lib/coachMoney.ts is the one place that answers the question, and it
+ * answers null — not 2 — when nobody has said which money it is.
+ *
+ * The caller always has it: studio-web/app/import/page.tsx reads
+ * `tenants.currency` and already refuses the whole import for a gym that has
+ * not set one, and a plans sheet may carry its own currency column, which
+ * outranks the gym's.
+ *
+ * ── The conversion is done on the digits ──────────────────────────────────
+ *
+ * "12.50" in a two-place currency becomes the integer 1250 by padding the
+ * fraction, never by `12.5 * 100`, which is a floating-point multiplication
+ * whose result has to be rounded back. Same arithmetic as `minorFromDecimal`
+ * and `readMinorAmount` next door, and for the same reason: this is a ledger.
+ *
+ * ── What it refuses, and what it now accepts ──────────────────────────────
+ *
+ * Both separator conventions still work — "1,234.56" and "1.234,56" — by
+ * taking whichever separator appears last as the decimal point.
+ *
+ * More decimal places than the money has is refused rather than rounded, with
+ * one exception that loses nothing: trailing NOUGHTS. A system that writes
+ * every figure to two places emits "1234.00" for a yen amount, and reading
+ * that as 1234 yen is exact. "1.2345" in sterling is refused as it always was,
+ * and so is "500.50" in yen — a currency with no minor unit has nothing after
+ * the point, and a file that has something there is very likely not in the
+ * currency the gym thinks it is.
+ *
+ * A TRAILING minus is now read as a minus. SAP, DATEV and most German exports
+ * write a credit as "50.00-", and reading that as +50.00 turns a refund into
+ * income on the way in — which `previewPayments` exists to refuse. A minus
+ * anywhere else in the figure is refused outright rather than stripped.
+ */
+export function parseMoneyCents(raw: string, currency?: string | null): Parsed<number> {
+  const dp = currencyDecimals(currency);
+  if (dp == null) return { ok: false, reason: NO_CURRENCY };
+  const cur = String(currency ?? '').trim().toUpperCase();
+
   const t = raw.trim();
   if (t === '') return { ok: false, reason: 'empty' };
 
-  const negative = /^\(.*\)$/.test(t) || t.trimStart().startsWith('-');
-  let s = t.replace(MONEY_STRIP, '').replace(/[()]/g, '').replace(/-/g, '');
+  // Accounting parentheses, a leading minus and a trailing minus all mean the
+  // same thing, and are all read before anything is stripped — see the header
+  // on the trailing one.
+  const parens = /^\(.*\)$/.test(t);
+  let body = (parens ? t.slice(1, -1) : t).trim();
+  const negative = parens || MINUS.test(body[0] ?? '') || MINUS.test(body[body.length - 1] ?? '');
+  body = body.replace(/^[-−]\s*/, '').replace(/\s*[-−]$/, '');
+  if (MINUS.test(body)) {
+    return { ok: false, reason: `"${raw}" has a minus sign inside the figure` };
+  }
+
+  // Whatever is left may be a currency symbol, a currency code or spacing.
+  const s = body.replace(/[^\d.,]/g, '');
   if (s === '') return { ok: false, reason: `"${raw}" has no digits` };
 
   const lastDot = s.lastIndexOf('.');
@@ -55,8 +125,36 @@ export function parseMoneyCents(raw: string): Parsed<number> {
   } else if (lastDot >= 0 || lastComma >= 0) {
     const at = Math.max(lastDot, lastComma);
     const after = s.length - at - 1;
-    // Three digits after a single separator: thousands, not decimals.
-    decimalAt = after === 3 ? -1 : at;
+    // A separator that appears more than once is a grouping character and
+    // nothing else: "1,234,567" cannot be a decimal point twice.
+    const lone = s.indexOf(s[at]) === at;
+    if (after !== 3 || !lone) {
+      decimalAt = at;
+    } else if (dp !== 3) {
+      // Three digits after a single separator: thousands, not decimals. "1,234"
+      // in a two-place price column is a thousand-something, and a yen has no
+      // decimal point available to it at all.
+      decimalAt = -1;
+    } else if (s[at] === '.') {
+      // A THREE-place currency, where three digits after a point is the exact
+      // shape of a correctly written amount and the exact shape `minorToDecimal`
+      // in src/lib/gymExport.ts writes, so a file exported from Repple
+      // re-imports. A grouped thousand in such a file is written either with
+      // its decimal part too — "1,250.000", which took the branch above — or
+      // with more than one group, which the `lone` test caught.
+      decimalAt = at;
+    } else {
+      // A lone COMMA before three digits in a three-place currency is the one
+      // genuinely 50/50 case left: "1,250" is a thousand two hundred and fifty
+      // dinars to an English writer and one and a quarter to a German one, and
+      // the two readings are a thousand apart. This module's governing rule is
+      // that an ambiguous value is refused with a reason rather than guessed —
+      // the same rule `parseDate` applies to 03/04/2026.
+      return {
+        ok: false,
+        reason: `"${raw}" could be ${cur} 1,250 or ${cur} 1.250 — write the amount with all ${dp} decimal places`,
+      };
+    }
   }
 
   let whole: string;
@@ -64,8 +162,20 @@ export function parseMoneyCents(raw: string): Parsed<number> {
   if (decimalAt >= 0) {
     whole = s.slice(0, decimalAt);
     frac = s.slice(decimalAt + 1);
-    if (frac.length > 2) {
-      return { ok: false, reason: `"${raw}" has ${frac.length} decimal places; money takes at most 2` };
+    if (frac.length > dp) {
+      const extra = frac.slice(dp);
+      if (/[^0]/.test(extra)) {
+        return {
+          ok: false,
+          reason: dp === 0
+            ? `"${raw}" has ${frac.length} decimal place${frac.length === 1 ? '' : 's'}; ${cur} has no smaller unit`
+            : `"${raw}" has ${frac.length} decimal places; ${cur} has ${dp}`,
+        };
+      }
+      // Trailing noughts beyond the places this money has lose nothing:
+      // "1234.00" is 1234 yen exactly, and a system that writes every figure to
+      // two places is not stating a fraction a yen does not have.
+      frac = frac.slice(0, dp);
     }
   } else {
     whole = s;
@@ -77,9 +187,14 @@ export function parseMoneyCents(raw: string): Parsed<number> {
   }
   if (whole === '' && frac === '') return { ok: false, reason: `"${raw}" is not a number` };
 
-  const cents = Number(whole || '0') * 100 + Number((frac + '00').slice(0, 2));
-  if (!Number.isFinite(cents)) return { ok: false, reason: `"${raw}" is not a number` };
-  return { ok: true, value: negative ? -cents : cents };
+  // The digits, with the fraction padded out to the places the money has. No
+  // float is multiplied at any point.
+  const digits = (whole || '0') + frac.padEnd(dp, '0');
+  const minorUnits = Number(digits);
+  if (digits.length > 15 || !Number.isSafeInteger(minorUnits)) {
+    return { ok: false, reason: `"${raw}" is larger than any amount this can work with` };
+  }
+  return { ok: true, value: negative ? -minorUnits : minorUnits };
 }
 
 const ISO = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
@@ -232,6 +347,17 @@ export interface ImportPreview<T> {
   /** Header columns that matched nothing — reported, never silently dropped. */
   unmatchedColumns: string[];
   dateOrder: DateOrder | 'ambiguous' | 'unknown';
+  /**
+   * The currency the money columns in this file were read in, or null.
+   *
+   * Stated rather than left to the caller's memory, because the figure and its
+   * unit have to travel together: `amountCents` read as GBP and written as AED
+   * is the currency bug this product has already had twice, and a preview that
+   * could not say which money it had just parsed would be the third. Null on a
+   * preview with no money in it at all, and on one that was given no currency —
+   * where every money row is refused rather than assumed into two places.
+   */
+  currency: string | null;
   rows: RowResult<T>[];
   ready: T[];
   rejected: RowResult<T>[];

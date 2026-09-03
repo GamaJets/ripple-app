@@ -498,6 +498,12 @@ export default function CoachEarnings() {
     return load(me.tenantId, me.id, period, () => generation.current !== mine);
   });
 
+  /** When this month was read, and therefore the instant "has this session
+   *  finished yet" is asked at. `readAt` and not `Date.now()`: a memo keyed on
+   *  the rows never re-runs because time passed, so a literal clock read inside
+   *  one is pinned to the render that first produced it. */
+  const nowMs = readAt ?? Date.now();
+
   /**
    * The month, kept current and dated.
    *

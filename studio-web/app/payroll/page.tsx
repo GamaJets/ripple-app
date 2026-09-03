@@ -437,6 +437,13 @@ export default function Payroll() {
     return load(me.tenantId, period, zone, () => generation.current !== mine);
   });
 
+  /** When these sessions were read, and therefore the instant "has this one
+   *  finished yet" is asked at. `readAt` rather than `Date.now()`: this console
+   *  has no router, so a payroll tab is a document that lives for days, and a
+   *  clock read inside a memo keyed on the rows never moves again. Pressing
+   *  "Read again" moves it, which is exactly when the answer should change. */
+  const nowMs = readAt ?? Date.now();
+
   // The period is a dependency on purpose: changing the month is a fresh read,
   // not a filter over rows already in hand. Filtering would have shown August's
   // sessions under September's heading until something else triggered a load —
@@ -488,8 +495,15 @@ export default function Payroll() {
     // `null` and not `fallbackCents`: the fallback has already been applied by
     // `withResolvedRates` above. Passing it again would be harmless today and
     // is exactly how the three functions came to disagree the first time.
-    () => priced && payrollByTrainer(priced, policy, null),
-    [priced, policy],
+    // …and `nowMs` fourth. `payrollByTrainer` defaults its `now` to
+    // `Date.now()`, and the only things in this dependency list are the rows and
+    // the policy — neither of which moves when time does. So `unmarked` counted
+    // the sessions that had finished without an outcome as of the moment this
+    // tab was opened, and a session that ended since was silently not flagged.
+    // On a screen somebody pays people from, that is the under-counting
+    // direction: the run looks final when it is not.
+    () => priced && payrollByTrainer(priced, policy, null, nowMs),
+    [priced, policy, nowMs],
   );
   const total = useMemo(() => payrollTotal(lines ?? []), [lines]);
 

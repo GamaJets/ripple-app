@@ -54950,6 +54950,19 @@ end $$;
 --      whose notification arrives at 03:17 is a coach who turns notifications
 --      off."
 --
+-- ── where "03:17" came from, which is the tell ───────────────────────────
+--
+-- All four headers name the same hypothetical time, 03:17, and it is not
+-- hypothetical: `materialise-session-series` (part 135) is scheduled
+-- '17 3 * * *'. Part 202 took the shape of a REAL small-hours job as its
+-- example of what not to do, moved the hour to 7 and kept the odd minute, and
+-- the three parts after it copied the reasoning across.
+--
+-- The example was the wrong one to reason from. Part 135's job writes no
+-- notification at all — `grep 'insert into public.notifications'` over that
+-- file returns nothing — so 03:17 UTC has never woken anybody, and the
+-- comparison that felt like it settled the question could not have.
+--
 -- Every one of those sentences is true about the number and false about the
 -- world. 07:12 UTC is 03:12 in New York and 00:12 in Los Angeles. The hour that
 -- four separate parts chose in order not to arrive at 03:17 arrives, for every

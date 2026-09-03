@@ -79,9 +79,10 @@
 // last, not who is owed an answer, and the sentence under it says so.
 import { useCallback, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { View, Text, ScrollView, Pressable, Image, ActivityIndicator, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Notice, Ghost, PartialRead } from '../../src/ui/kit';
@@ -254,7 +255,15 @@ export default function Messages() {
   // So a coach who opens a thread, does not scroll to the bottom of it and
   // comes back finds the badge still up, which is now the truth rather than a
   // stale count.
-  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+  // `useRefreshOnFocus`, not `useFocusEffect(useCallback(…, [refresh]))`. Same
+  // shape and same failure as app/(trainer)/calendar.tsx — a provider that
+  // publishes its context value as an object literal hands back a new
+  // `refresh` on every render, the dependency changes, the effect re-runs, and
+  // the screen reads in a loop for as long as it is focused. The hook holds
+  // the function in a ref so identity cannot re-arm it. See its header in
+  // src/ui/refreshOnFocus.ts, and the note on the same line in calendar.tsx
+  // for the measurement.
+  useRefreshOnFocus(refresh);
   // The same read focus runs. Threads are written by the OTHER side — a
   // client replying is the only thing that changes this list — so a coach
   // sitting on this screen waiting for an answer had no way to ask for it.

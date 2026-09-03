@@ -45,7 +45,7 @@
 // high up — and is not worth writing "where have you been?" to somebody on the
 // strength of, because the rows that would have disproved their silence are
 // exactly the ones that did not come back. `actionable` is that gate.
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
 import {
@@ -154,8 +154,35 @@ export function useClientDrift(
   const actionable = (id: string): boolean =>
     !!coverage && !coverage.truncated && !coverage.notAsked.has(id);
 
-  const bands = summariseDrift(
-    drift ? subjects.map((c) => drift[c.id]).filter((d): d is Drift => !!d) : null,
+  /**
+   * ── why this is memoised, when the arithmetic is cheap ──────────────────
+   *
+   * `summariseDrift` returns an OBJECT, and this line ran on every render, so
+   * every render handed the caller a new one. `app/(trainer)/dashboard.tsx`
+   * puts it straight into a dependency array — `bookState` at :1067 is
+   * `useMemo(…, [… bands, driftRead])` — so `bookState` was new every render
+   * too, and the effect below it fired `promptBookAlerts()` every render: an
+   * AsyncStorage read per render on the coach's home tab, for as long as the
+   * tab is open.
+   *
+   * Found while tracing a request storm on the Clients tab (782 responses in
+   * five idle minutes, off the live edge logs). This is not the storm — the
+   * dominant loop is the unmemoised context value in src/ui/sessions.tsx,
+   * which is shared with the client app and is not this lane's to change — but
+   * it is the same defect one layer down, in a file only the coach app reads.
+   *
+   * Keyed on `key`, not on `subjects`. `key` is the subject ids joined into a
+   * string, and `subjects` is a fresh array on every render of every caller;
+   * depending on the array would memoise nothing. That is the same trade the
+   * effect above already makes, for the same reason and with the same
+   * eslint-disable.
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const bands = useMemo(
+    () => summariseDrift(
+      drift ? subjects.map((c) => drift[c.id]).filter((d): d is Drift => !!d) : null,
+    ),
+    [drift, key],
   );
 
   const note: string | null =

@@ -409,7 +409,7 @@ export default function OwnerRota() {
               ? 'Reading this week’s shifts, classes and one-to-ones.'
               : cov?.blocker
                 ? 'An empty rota is not an uncovered gym. These stay blank until shifts are entered, rather than reporting a confident zero.'
-                : `${cov!.demandHours} hour${cov!.demandHours === 1 ? '' : 's'} this week have a class or a one-to-one booked in them.`}
+                : `${cov!.demandHours} hour${cov!.demandHours === 1 ? '' : 's'} this week ${cov!.demandHours === 1 ? 'has' : 'have'} a class or a one-to-one booked in ${cov!.demandHours === 1 ? 'it' : 'them'}.`}
           </Text>
         </Section>
 
