@@ -107,6 +107,34 @@ export function isZone(zone: string | null | undefined): boolean {
   // then silently an hour out for five months, which is the exact failure part
   // 710 refuses. An offset is not a place.
   if (/^[+\-]/.test(z)) return false;
+  // ── and refused for the same reason one step further on ──────────────────
+  //
+  // `Intl` accepts bare abbreviations too. EST, MST, HST, CET, EST5EDT and
+  // PST8PDT are all real IANA *backward* entries, so
+  // `new Intl.DateTimeFormat(undefined, { timeZone: 'EST' })` constructs
+  // happily — and this function returned true for it while `parseGymZone`'s
+  // refusal message said in so many words "not an abbreviation such as GMT or
+  // PST", and this comment block said "False for … an abbreviation".
+  //
+  // The reason it matters is the reason the offset above is refused, and it is
+  // the same failure: those legacy entries are FIXED OFFSET. A New York gym
+  // whose owner types EST observes no daylight saving, so every day boundary
+  // and every hour label in the console is an hour out from mid-March to early
+  // November — silently, while the screen asserts the gym has a timezone.
+  //
+  // The test is a '/'. Every zone that names a PLACE has a region in it, which
+  // is the same rule `deviceZone` in src/ui/availability.ts already applies and
+  // for the same stated reason. It is deliberately stricter than "is this
+  // dangerous": it also turns away the deprecated single-word aliases that
+  // behave correctly — Japan, Israel, Singapore, Poland — because each of those
+  // is a link to a slashed name the owner can type instead, and a rule with a
+  // list of exceptions is a rule somebody adds EST to later.
+  //
+  // UTC is the one exception, and it is an argued one: gymZone.test.ts has held
+  // `isZone('UTC')` since it was written, on the grounds that UTC is the wrong
+  // DEFAULT rather than an invalid value. Part 710 refuses to default a gym to
+  // it; it does not refuse an owner who means it.
+  if (!z.includes('/') && z.toUpperCase() !== 'UTC') return false;
   try {
     // The constructor is what validates; the formatter is discarded.
     new Intl.DateTimeFormat(undefined, { timeZone: z });

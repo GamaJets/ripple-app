@@ -39,6 +39,44 @@ const KIRITIMATI = 'Pacific/Kiritimati';
 ok(isZone(LONDON), 'an IANA name is a zone');
 ok(isZone(DUBAI), 'and so is one east of Greenwich');
 ok(isZone('UTC'), 'UTC is a zone — it is the wrong DEFAULT, not an invalid value');
+// ── the abbreviations, which Intl accepts and this must not ────────────────
+//
+// `new Intl.DateTimeFormat(undefined, { timeZone: 'EST' })` CONSTRUCTS on a
+// current runtime, because EST, MST, HST, CET, EST5EDT and PST8PDT are real
+// IANA *backward* entries. `isZone` returned true for all of them while
+// `parseGymZone`'s refusal message said "not an abbreviation such as GMT or
+// PST" and `isZone`'s own comment said "False for … an abbreviation".
+//
+// They are FIXED OFFSET. A New York gym stored as 'EST' observes no daylight
+// saving, so every day boundary and every hour label in the console is an hour
+// out from mid-March to early November — silently, with the screen asserting
+// the gym has a timezone. That is the failure part 710 and this file's header
+// both say an offset must never be allowed to cause; an abbreviation caused it
+// by another door.
+ok(!isZone('EST'), 'EST is a fixed-offset backward entry, not a place — and would be an hour out for eight months of the year');
+ok(!isZone('PST'), 'and so is PST');
+ok(!isZone('MST'), 'and MST');
+ok(!isZone('HST'), 'and HST');
+ok(!isZone('CET'), 'and CET');
+ok(!isZone('GMT'), 'GMT names an offset, not a place');
+ok(!isZone('EST5EDT'), 'EST5EDT keeps daylight saving and is still not a place — one rule, no list of exceptions');
+ok(!isZone('PST8PDT'), 'nor is PST8PDT');
+// Deliberately stricter than "is it dangerous". These behave correctly and are
+// still refused, because each is a deprecated link to a slashed name the owner
+// can type instead — and a rule with a list of exceptions is a rule somebody
+// adds EST to later.
+ok(!isZone('Japan'), 'a single-word alias is refused even when it behaves — Asia/Tokyo is the name');
+ok(!isZone('Israel'), 'and so is Israel — Asia/Jerusalem is the name');
+ok(isZone('America/New_York'), 'the name that actually keeps daylight saving is accepted');
+ok(isZone('America/Indiana/Indianapolis'), 'and a three-segment name is still a name');
+
+// And the message says the thing that is now true of the code.
+{
+  const bad = parseGymZone('EST');
+  eq(bad.kind, 'bad', 'parseGymZone refuses an abbreviation, as its own message promised');
+  ok(bad.kind === 'bad' && /abbreviation/i.test(bad.reason), 'and the reason names it');
+}
+
 ok(!isZone(''), 'an empty string is not a zone');
 ok(!isZone(null), 'and neither is nothing at all');
 ok(!isZone('Europe/Londn'), 'a typo is refused rather than resolved to something near it');

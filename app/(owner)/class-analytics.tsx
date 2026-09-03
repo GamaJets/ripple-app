@@ -36,7 +36,7 @@
 // (`src/theme/scale`): eleven bordered boxes became hairline-separated sections,
 // payroll became the screen's one hero figure, and the Georgia serif header and
 // the 12.5/11.5px font sizes are gone.
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -62,6 +62,7 @@ import { monthWindow, monthKeyOf } from '../../src/lib/monthEnd';
 import { Fetched } from '../../src/ui/fetched';
 import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { readState, hasRows, staleNote } from '../../src/lib/staleRead';
 
 type Range = 'week' | 'month' | 'season';
 const RANGES: [Range, string][] = [['week', 'This week'], ['month', 'This month'], ['season', 'Season']];
@@ -221,6 +222,17 @@ export default function OwnerClassAnalytics() {
   // in. Null says "not known yet"; [] stays reserved for a range that really
   // held nothing.
   const [rows, setRows] = useState<ClassSummaryRow[] | null>(null);
+  /** Which range the rows in hand are FOR. Without it the effect below cannot
+   *  tell a refresh of the range on screen from a switch to a different one,
+   *  and it has to clear for the second.
+   *
+   *  A ref rather than state deliberately: in the dependency array it would
+   *  re-enter the effect after every successful read and fire a second query
+   *  for the same range, and nothing on screen is derived from it. */
+  const rowsRange = useRef<Range | null>(null);
+  /** Whether the most recent attempt failed. Paired with `rows`, this is the
+   *  four-state read in src/lib/staleRead.ts. */
+  const [readFailed, setReadFailed] = useState(false);
   /** What the gym pays each coach to teach, from `gym_trainer_pay`. Null is a
    *  read that failed or has not returned — NOT a gym that pays nobody, which
    *  is why every figure below it goes to a dash rather than to zero. */
@@ -245,18 +257,26 @@ export default function OwnerClassAnalytics() {
   useEffect(() => {
     let on = true;
     const { from, to } = rangeBounds(range);
-    // Cleared first: without this the previous range's rows stayed on screen
-    // while the new range loaded, so a payroll total for the season sat under
-    // the heading "This week" — a number an owner might pay against.
-    setRows(null);
+    // Cleared ONLY when the range changed. Without any clearing, the previous
+    // range's rows stayed on screen while the new range loaded, so a payroll
+    // total for the season sat under the heading "This week" — a number an
+    // owner might pay against.
+    //
+    // Clearing unconditionally was the other half of that mistake and arrived
+    // with pull-to-refresh: the gesture re-runs this effect on the SAME range,
+    // so pulling down emptied a correct payroll table, and a pull that failed
+    // left it empty. `rowsRange` is what separates the two.
+    if (rowsRange.current !== range) { setRows(null); rowsRange.current = null; setReadFailed(false); }
     setReading(true);
     classSummary(from, to)
       // The stamp moves on a read that LANDED. A refused one leaves it where it
       // was, because what is on screen is still the earlier read's.
-      .then((r) => { if (on) { setRows(r); setAttendanceAt(Date.now()); } })
+      .then((r) => { if (on) { setRows(r); rowsRange.current = range; setReadFailed(false); setAttendanceAt(Date.now()); } })
       // A bare .then left a rejection unhandled and the screen showing whatever
-      // it had. There is nothing to show after a failed read, so say so.
-      .catch((e) => { reportError('classAnalytics.summary', e); if (on) setRows(null); })
+      // it had, silently. The rows are now kept and LABELLED instead: a refresh
+      // fails for reasons that say nothing about the register, and a coach's
+      // payroll table should not vanish because the phone went into a lift.
+      .catch((e) => { reportError('classAnalytics.summary', e); if (on) setReadFailed(true); })
       .finally(() => { if (on) setReading(false); });
     return () => { on = false; };
   }, [range, tick]);
@@ -297,7 +317,10 @@ export default function OwnerClassAnalytics() {
   const refreshAll = useCallback(() => { setTick((n) => n + 1); setPayTick((n) => n + 1); }, []);
   const pull = usePullToRefresh(refreshAll);
 
-  const loaded = rows !== null;
+  // Two facts — what is held, and whether the last attempt landed — and the
+  // four states they make. src/lib/staleRead.ts.
+  const readSt = readState(rows, readFailed);
+  const loaded = hasRows(readSt);
   const list = rows ?? [];
   /**
    * What one class is worth to the coach who taught it, in minor units, or null
@@ -517,12 +540,31 @@ export default function OwnerClassAnalytics() {
           ))}
         </View>
 
-        {!loaded ? (
+        {/* A failed refresh over rows that DID land no longer reaches this
+            branch — those rows are kept and flagged below. What is left here is
+            a range nothing has ever been read for, and the two reasons for that
+            are now separate sentences rather than one that covers both. */}
+        {/* One caveat for the whole screen: the hero, the fill rates and the
+            payroll column are all derived from this one read. `warn`, not
+            `crit` — the rows are real and complete, and only the attempt to
+            confirm them failed. */}
+        {readSt === 'stale' ? (
+          <Flag tone={t.warn} style={{ marginTop: sp.md }}>{staleNote('register')}</Flag>
+        ) : null}
+
+        {readSt === 'failed' ? (
+          <Section>
+            <Text style={{ ...ty.head, color: t.ink }}>This range could not be read.</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+              That is a read that did not come back, not a range with no classes. Nobody&rsquo;s
+              attendance has been lost and no payroll line has changed. Pull down to try again.
+            </Text>
+          </Section>
+        ) : !loaded ? (
           <Section>
             <Text style={{ ...ty.head, color: t.ink }}>Reading the register…</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              Attendance and payroll stay blank until this range has actually been read. If it
-              stays blank, that is a read that did not come back — not a range with no classes.
+              Attendance and payroll stay blank until this range has actually been read.
             </Text>
           </Section>
         ) : list.length === 0 ? (
