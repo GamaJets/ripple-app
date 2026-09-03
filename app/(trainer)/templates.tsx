@@ -45,6 +45,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
+import { DateSheet } from '../../src/ui/DateSheet';
+import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
@@ -110,6 +112,11 @@ export default function Templates() {
    * the field.
    */
   const [startsOn, setStartsOn] = useState('');
+  // Opens the month sheet. Rendered as a SIBLING of the assign modal below,
+  // never inside it: two native <Modal>s nested on Android is the fight
+  // src/ui/WhatsNew.tsx documents at length, and the loser is invisible while
+  // still taking taps.
+  const [startPick, setStartPick] = useState(false);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [assignBusy, setAssignBusy] = useState(false);
   const [delFailed, setDelFailed] = useState<string | null>(null);
@@ -401,6 +408,66 @@ export default function Templates() {
                 {roster.length === 0 && rosterStatus === 'ready' ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>No clients yet — add or invite a client first.</Text>
                 ) : null}
+                {/* ── moved above the roster ───────────────────────────────
+                    Same move as the builder, for the same reason: when a block
+                    starts is a property of the assignment, not of whichever
+                    name is ticked, and a date control that FOLLOWS a scrolling
+                    list of people reads as though it belongs to the last one
+                    on it — and on a phone is met only after every decision it
+                    belongs to. */}
+                {/* ── the day the block begins ──────────────────────────────
+                    Only on a block, because on a one-week programme there is no
+                    week for a date to count to and the field would be a control
+                    that changes nothing a coach can see.
+
+                    It does NOT hold the programme back. `CLIENT_STARTS_NOW` is
+                    printed under it saying so, for the reason the builder gives
+                    at length: a coach who believes the date is enforced, and
+                    assigns a block "starting Monday" on a Thursday, has replaced
+                    their client's Friday session while believing they did not. */}
+                {isBlock(assignTpl.program) ? (
+                  <View style={{ marginTop: sp.lg }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>
+                      Starts on · {weekCount(assignTpl.program)} week block
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
+                      <View style={{
+                        flex: 1, flexDirection: 'row', alignItems: 'center',
+                        backgroundColor: t.surface2, borderRadius: radius.sm,
+                      }}>
+                        <TextInput value={startsOn} onChangeText={setStartsOn}
+                          placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
+                          autoCapitalize="none" autoCorrect={false}
+                          accessibilityLabel="The day this block begins, as year, month and day. You can type it, or use the calendar button beside it."
+                          style={{ ...ty.body, color: t.ink, flex: 1, paddingHorizontal: 12, paddingVertical: 9 }} />
+                        <Pressable onPress={() => setStartPick(true)}
+                          hitSlop={hitSlopFor(MIN_TARGET)}
+                          accessibilityRole="button"
+                          accessibilityLabel={startsOn ? 'Pick the start day from a calendar. Currently ' + startsOn : 'Pick the start day from a calendar'}
+                          style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="calendar" size={18} color={t.ink2} />
+                        </Pressable>
+                      </View>
+                      {startsOn ? <Ghost label="Clear" onPress={() => setStartsOn('')} /> : null}
+                    </View>
+                    {/* Refused rather than corrected, and said while they type. A
+                        date this app cannot read is not stored at all — a stored
+                        value that will not parse puts every screen reading it
+                        into "unreadable" for ever. */}
+                    {startsOn && !isStartDate(startsOn) ? (
+                      <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
+                        Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
+                        programme goes out with no start date rather than one nothing can read back.
+                      </Flag>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                        {CLIENT_STARTS_NOW} Without one, everybody you tick stays on week one of this
+                        block until you set a date.
+                      </Text>
+                    )}
+                  </View>
+                ) : null}
+
                 {roster.map((c, i) => {
                   const on = !!picked[c.id];
                   // Only sayable off a whole read. Under any other status the
@@ -458,50 +525,6 @@ export default function Templates() {
                     no list — so it is withheld and says which of the two it is.
                     Individual ticks stay available throughout: a tick is a claim
                     about one person the coach can see and read. */}
-                {/* ── the day the block begins ──────────────────────────────
-                    Only on a block, because on a one-week programme there is no
-                    week for a date to count to and the field would be a control
-                    that changes nothing a coach can see.
-
-                    It does NOT hold the programme back. `CLIENT_STARTS_NOW` is
-                    printed under it saying so, for the reason the builder gives
-                    at length: a coach who believes the date is enforced, and
-                    assigns a block "starting Monday" on a Thursday, has replaced
-                    their client's Friday session while believing they did not. */}
-                {isBlock(assignTpl.program) ? (
-                  <View style={{ marginTop: sp.lg }}>
-                    <Text style={{ ...ty.micro, color: t.ink3 }}>
-                      Starts on · {weekCount(assignTpl.program)} week block
-                    </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
-                      <TextInput value={startsOn} onChangeText={setStartsOn}
-                        placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
-                        autoCapitalize="none" autoCorrect={false}
-                        accessibilityLabel="The day this block begins, as year, month and day"
-                        style={{
-                          ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
-                          paddingHorizontal: 12, paddingVertical: 9, flex: 1,
-                        }} />
-                      {startsOn ? <Ghost label="Clear" onPress={() => setStartsOn('')} /> : null}
-                    </View>
-                    {/* Refused rather than corrected, and said while they type. A
-                        date this app cannot read is not stored at all — a stored
-                        value that will not parse puts every screen reading it
-                        into "unreadable" for ever. */}
-                    {startsOn && !isStartDate(startsOn) ? (
-                      <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
-                        Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
-                        programme goes out with no start date rather than one nothing can read back.
-                      </Flag>
-                    ) : (
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
-                        {CLIENT_STARTS_NOW} Without one, everybody you tick stays on week one of this
-                        block until you set a date.
-                      </Text>
-                    )}
-                  </View>
-                ) : null}
-
                 {selAll.note ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{selAll.note}</Text>
                 ) : null}
@@ -549,6 +572,15 @@ export default function Templates() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <DateSheet
+        visible={startPick}
+        value={startsOn}
+        heading="Starts On"
+        note="The day this block begins. Leave it unset to start now."
+        onCancel={() => setStartPick(false)}
+        onPick={(iso) => { setStartsOn(iso); setStartPick(false); }}
+      />
     </SafeAreaView>
   );
 }

@@ -37,7 +37,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from './components';
 import { Icon } from './Icon';
 import { Cta } from './kit';
-import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty } from '../theme/scale';
 import {
   CURRENT_RELEASE, RELEASES, MY_AUDIENCE, isVersion, releasesFor, unseenReleases,
   firstRunReleases, type Release,
@@ -152,7 +152,7 @@ export function WhatsNewSheet({ visible, force, releases, onClose }: {
   if (!visible) return null;
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+    <View style={[StyleSheet.absoluteFill, elevation.overlay]} pointerEvents="box-none">
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
         {/* News, not a gate: the backdrop dismisses it, and so does the phone's
             own back gesture via onRequestClose. */}

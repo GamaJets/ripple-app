@@ -45,6 +45,24 @@ export const elevation = {
     shadowColor: '#000', shadowOpacity: 0.55, shadowRadius: 30,
     shadowOffset: { width: 0, height: 10 }, elevation: 12,
   },
+  /**
+   * For a full-screen overlay drawn as an ordinary sibling rather than a
+   * <Modal> — the shape src/ui/WhatsNew.tsx uses and argues for.
+   *
+   * It carries no shadow, only a stacking order, and it exists because iOS and
+   * Android disagree about what "on top" means. iOS stacks siblings by tree
+   * order, so an overlay rendered last draws last and looks correct. Android
+   * stacks by ELEVATION first, and anything drawn with `e2` sits at 12 — so a
+   * card or a sheet inside the screen underneath painted straight over the top
+   * of an overlay that had none, and the coach was left looking at the screen
+   * they had just been reading with What's New somewhere behind it.
+   *
+   * 24 rather than 13: it must beat `e2` and anything a screen composes on top
+   * of it, and there is nothing above this in the app. `zIndex` is set with it
+   * so the two platforms are told the same thing in the two vocabularies they
+   * each understand, rather than one of them being left to infer it.
+   */
+  overlay: { elevation: 24, zIndex: 1000 },
 } as const;
 
 /* ── Dynamic Type ───────────────────────────────────────────────────────────
