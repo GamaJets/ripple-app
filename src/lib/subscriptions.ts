@@ -133,22 +133,25 @@ const openUrl = async (url?: string | null) => { if (url) { try { await Linking.
  * `src/ui/coachSetup.ts` still ask this question and still get the gym's
  * answer; moving them is a separate, visible edit.
  */
-export async function myTenantCurrency(): Promise<{ currency: string | null; error: string | null }> {
-  try {
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth?.user?.id;
-    if (!uid) return { currency: null, error: 'Not signed in.' };
-    const { data: prof, error: profErr } = await supabase.from('profiles').select('tenant_id').eq('id', uid).maybeSingle();
-    if (profErr) { reportError('subscriptions.myTenantCurrency.profile', profErr); return { currency: null, error: profErr.message }; }
-    const tid = (prof as { tenant_id: string | null } | null)?.tenant_id ?? null;
-    // No gym is not a failure, and it is not a currency either.
-    if (!tid) return { currency: null, error: null };
-    const { data, error } = await supabase.from('tenants').select('currency').eq('id', tid).maybeSingle();
-    if (error) { reportError('subscriptions.myTenantCurrency.tenant', error); return { currency: null, error: error.message }; }
-    const c = (data as { currency: string | null } | null)?.currency ?? null;
-    return { currency: c ? c.toUpperCase() : null, error: null };
-  } catch (e) { return { currency: null, error: (e as Error).message }; }
-}
+// ── myTenantCurrency() lived here, and is gone ────────────────────────────
+//
+// It answered "what does this coach's GYM charge in", and for as long as that
+// was the only place a currency could live it was the whole answer. Part 940
+// gave a coach with no gym a currency of their own, and `resolveMyCurrency` in
+// src/lib/currencySource.ts is now the read that puts the two in order — the
+// gym first, always, and the coach's own ONLY when there is provably no gym.
+//
+// Its own doc comment used to end by naming `assistant.tsx`, `analytics.tsx`
+// and `src/ui/coachSetup.ts` as callers it had deliberately not moved. All
+// three have moved, and it was left with no caller outside its own test — which
+// `check:dead-exports` then failed on, correctly.
+//
+// Deleted rather than marked `unused-ok:`, because there was no reason to keep
+// it that survived being written down: an unwired function whose every remaining
+// mention is a comment explaining what replaced it is not a spare part, it is a
+// second answer waiting for somebody to call it. The name is left here so the
+// comments in currencySource.ts and currencyGap.ts that still cite it by name
+// have something to point at.
 
 /**
  * The coach the signed-in client is linked to, so they can be shown what that

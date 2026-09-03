@@ -21,7 +21,7 @@ import { useTheme } from '../../src/ui/components';
 import {
   buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryFromWeek, planWeek, slotsFor,
   planGaps, mealAllergens, allergenGapNote, allergenLabel,
-  DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal,
+  DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen,
 } from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -484,13 +484,40 @@ export default function Nutrition() {
     (coachPlanCurrent ? planDayOverride(coachPlan!, d) : null);
   const week = useMemo(() => planWeek(input, coachWeekDay), [input, coachPlanCurrent, coachPlan]);
   const groc = useMemo(() => groceryFromWeek(week), [week]);
+  // ── the exclusions that could not be honoured, computed once ────────────
+  //
+  // It used to be computed inside the Today arm and rendered only there, so
+  // switching to This Week took the warning off the screen while leaving the
+  // meals it was about — and the grocery sheet below, which is built from that
+  // same week and is the artefact somebody actually shops from, never carried
+  // it at all.
+  const gapNote = useMemo(
+    () => allergenGapNote(planGaps(diet, slotsFor(c.mealsPerDay), c.avoid)),
+    [diet, c.mealsPerDay, c.avoid],
+  );
+  // Which of the excluded things are actually in the week the list is built
+  // from. `gapNote` says the filter could not be honoured; this says what ended
+  // up in the shopping. Both go on the sheet.
+  const weekAllergens = useMemo(() => {
+    const found = new Set<Allergen>();
+    for (const day of week) for (const m of day) for (const a of mealAllergens(m, c.avoid)) found.add(a);
+    return [...found];
+  }, [week, c.avoid]);
   const grocCount = DEPTS.reduce((a, d) => a + (groc.byDept[d]?.length ?? 0), 0);
   const grocKeys = DEPTS.flatMap((d) => (groc.byDept[d] || []).map((it) => d + '|' + it.item));
   const grocChecked = grocKeys.filter((k) => checked[k]).length;
   const toggleGroc = (k: string) => setChecked((prev) => { const n = { ...prev, [k]: !prev[k] }; AsyncStorage.setItem('repple.grocery.checked', JSON.stringify(n)); return n; });
   const shareGrocery = async () => {
-    const lines: string[] = ['Grocery List', ''];
-    let html = '<h2>Grocery List</h2>';
+    // The warning travels with the file. A list shared to a phone's notes app
+    // or printed is read where none of this screen's flags exist.
+    const warn = [
+      gapNote,
+      weekAllergens.length
+        ? `Meals in this week contain ${weekAllergens.map(allergenLabel).join(' and ')}, which you asked to avoid. Check each item before you buy.`
+        : null,
+    ].filter(Boolean) as string[];
+    const lines: string[] = ['Grocery List', ...(warn.length ? ['', ...warn] : []), ''];
+    let html = '<h2>Grocery List</h2>' + warn.map((w) => `<p><strong>${w}</strong></p>`).join('');
     DEPTS.filter((d) => groc.byDept[d]?.length).forEach((d) => {
       lines.push(d.toUpperCase());
       html += '<h3>' + d + '</h3><ul>';
@@ -897,19 +924,24 @@ export default function Nutrition() {
             })}
           </View>
 
+          {/* An exclusion the engine could not honour, said before the plan
+              rather than buried in it. `poolFilter` falls back to the
+              UNFILTERED pool whenever the exclusions empty a required component
+              list, and nothing on screen told anybody — so somebody who ticked
+              Dairy got a plan with dairy in it, drawn and priced and shopped
+              for. See src/lib/meals.ts.
+
+              ABOVE the Today/This Week switch, not inside the Today arm. It was
+              inside it, so switching to the week made the warning disappear
+              while the meals it was about stayed — and the week is what the
+              shopping list is built from. */}
+          {gapNote ? (
+            <View style={{ marginBottom: sp.md }}>
+              <Flag tone={t.crit}>{gapNote}</Flag>
+            </View>
+          ) : null}
           {view === 'today' ? (
             <>
-              {/* An exclusion the engine could not honour, said before the
-                  plan rather than buried in it. `poolFilter` fell back to the
-                  UNFILTERED pool whenever an allergen emptied a required
-                  component list, and nothing on screen told anybody — so
-                  somebody who ticked Dairy got a plan with dairy in it, drawn
-                  and priced and shopped for. See src/lib/meals.ts. */}
-              {allergenGapNote(planGaps(diet, slotsFor(c.mealsPerDay), c.avoid)) ? (
-                <View style={{ marginBottom: sp.md }}>
-                  <Flag tone={t.crit}>{allergenGapNote(planGaps(diet, slotsFor(c.mealsPerDay), c.avoid))}</Flag>
-                </View>
-              ) : null}
               <SectionHead title={`Today's plan · ${plan.length} meals`} note={`${tot.K.toLocaleString()} kcal`} />
               {/* Meals per day. This drives slotsFor() — 3 gives breakfast/lunch/dinner,
                   4 adds a snack, 5 splits into two snacks — so changing it rebuilds the
@@ -973,16 +1005,29 @@ export default function Nutrition() {
                   <Text style={{ ...ty.micro, color: t.ink3 }}>{WEEKD[d]}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{wp.tot.K.toLocaleString()} kcal</Text>
                 </View>
-                {wp.plan.map((m) => (
+                {wp.plan.map((m) => {
+                  // The same per-row mark the Today list carries. This arm drew
+                  // slot, name and kcal and nothing else, so a dish containing
+                  // the thing the member excluded was unmarked on the tab they
+                  // plan and shop from.
+                  const inIt = mealAllergens(m, c.avoid);
+                  return (
                   <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button" accessibilityLabel={m.n}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>{m.slot}</Text>
                       <Text style={{ ...ty.body, color: t.ink, marginTop: 1 }} numberOfLines={1}>{m.n}</Text>
+                      {inIt.length ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>Contains {inIt.map(allergenLabel).join(' and ')}</Text>
+                        </View>
+                      ) : null}
                     </View>
                     <Text style={{ ...value(15), color: t.ink2 }}>{m.K}</Text>
                   </Pressable>
-                ))}
+                  );
+                })}
               </View>
             ))
           )}
@@ -1160,6 +1205,17 @@ export default function Nutrition() {
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>Grocery List</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>This week · {DIET_LABEL[diet]} · sorted by aisle</Text>
+            {/* The list is built from the week, and the week can contain the
+                thing the member excluded — `poolFilter` falls back to the
+                unfiltered pool rather than leaving a slot empty. This sheet
+                carried no mark of that anywhere, and it is the artefact
+                somebody actually shops from. */}
+            {gapNote ? <Flag tone={t.crit} style={{ marginBottom: sp.md }}>{gapNote}</Flag> : null}
+            {weekAllergens.length ? (
+              <Flag tone={t.crit} style={{ marginBottom: sp.md }}>
+                Meals in this week contain {weekAllergens.map(allergenLabel).join(' and ')}, which you asked to avoid — so this list has ingredients for them in it. Check each item before you buy.
+              </Flag>
+            ) : null}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xl }}>
               <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: t.surface3, overflow: 'hidden' }}>
                 <View style={{ width: `${(grocCount ? Math.round((grocChecked / grocCount) * 100) : 0)}%`, height: 3, borderRadius: 2, backgroundColor: t.brand }} />

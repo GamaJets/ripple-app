@@ -23,7 +23,7 @@ import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import {
   fetchEquipment, addEquipment, setStatus, recordService,
-  fetchLog, addLogEntry, logBlocker, LOG_KINDS, LOG_LABEL,
+  fetchLog, addLogEntry, logBlocker, logCost, LOG_KINDS, LOG_LABEL,
   type LogEntry, type LogKind,
   nextServiceDue, serviceState, usableUnits, outOfServiceUnits,
   capacityFor, concurrentKitDemand, summariseRegister, needsAttention,
@@ -339,7 +339,13 @@ function History({ rows, kit, unread, today, ccy, tenantId, me, onChange }: {
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (blocker) { setMsg(blocker); return; }
-    const clean = cost.trim().replace(/[,\s]/g, '');
+    // Read once, by the same reader the blocker used, and not re-derived here.
+    // This line was `cost.trim().replace(/[,\s]/g, '')` followed by
+    // `Math.round(Number(clean) * 100)`, so `12,50` became 1250 and was written
+    // as 125,000 minor units — with `logBlocker` testing the same stripped
+    // string and agreeing. Two readers over one box is how that happened.
+    const money = logCost(cost, ccy);
+    if (!money.ok) { setMsg(money.reason); return; }
     setBusy(true); setMsg(null);
     try {
       await addLogEntry(supabase, tenantId, {
@@ -352,8 +358,8 @@ function History({ rows, kit, unread, today, ccy, tenantId, me, onChange }: {
         happenedOn: on,
         performedBy: by,
         findings,
-        costCents: clean ? Math.round(Number(clean) * 100) : null,
-        currency: clean ? ccy : null,
+        costCents: money.minorUnits,
+        currency: money.minorUnits == null ? null : ccy,
         recordedBy: me.id,
       });
       setFindings(''); setBy(''); setCost('');
@@ -747,6 +753,16 @@ function Register({ rows, unread, today, onChange }: {
   /** Which machine is being taken out, waiting for a reason. */
   const [pulling, setPulling] = useState<Equipment | null>(null);
   const [why, setWhy] = useState('');
+  /**
+   * The machine somebody has asked to retire, waiting for them to mean it.
+   *
+   * Retiring was one click while "Take out" — the milder, reversible one right
+   * beside it — demanded a typed reason. So the destructive control was the
+   * cheaper of the two, and it is the one that silently changes what this
+   * screen says the gym can seat: a retired item leaves `usableUnits`, and the
+   * class-capacity check below reads that figure.
+   */
+  const [retiring, setRetiring] = useState<Equipment | null>(null);
 
   const move = async (e: Equipment, status: EquipmentStatus, reason?: string) => {
     setMsg(null);
@@ -812,7 +828,21 @@ function Register({ rows, unread, today, onChange }: {
                 : <button style={linkBtn} onClick={() => { setMsg(null); setPulling(e); setWhy(''); }}>Take out</button>)
             : <button style={linkBtn} onClick={() => move(e, 'in_service')}>Put back</button>}
           {e.status !== 'retired'
-            ? <button style={linkBtn} onClick={() => move(e, 'retired')}>Retire</button>
+            ? (retiring?.id === e.id
+                ? (
+                  <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'normal' }}>
+                    <span style={{ fontSize: 12, color: 'var(--ink2)', maxWidth: '34ch' }}>
+                      Retire {e.name}? It leaves every capacity figure on this screen,
+                      including the class check below.
+                    </span>
+                    <button style={{ ...linkBtn, color: 'var(--crit)' }}
+                            onClick={() => { setRetiring(null); void move(e, 'retired'); }}>
+                      Retire it
+                    </button>
+                    <button style={{ ...linkBtn, color: 'var(--ink3)' }} onClick={() => setRetiring(null)}>Cancel</button>
+                  </span>
+                )
+                : <button style={linkBtn} onClick={() => { setMsg(null); setPulling(null); setRetiring(e); }}>Retire</button>)
             : null}
         </span>
       ) },

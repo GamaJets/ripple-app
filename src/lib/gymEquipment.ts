@@ -16,6 +16,10 @@
 
 import { assertWrote } from './wroteRows';
 import { readAll } from './rowCap';
+// One reader for a typed money box, which asks the currency how many decimal
+// places it has and refuses `12,50` rather than guessing which side of the
+// Channel typed it. /costs reads its own box through the same function.
+import { readMinorAmount, type TypedAmount } from './coachMoney';
 
 type Queryable = { from: (table: string) => any };
 
@@ -586,6 +590,42 @@ export interface LogEntry {
   createdAt: string;
 }
 
+/**
+ * The cost box read once, by the reader the blocker and the write both use.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * The screen stripped commas and spaces out of the box — `cost.trim()
+ * .replace(/[,\s]/g, '')` — and then multiplied by a hardcoded hundred, and
+ * `logBlocker` tested the SAME stripped string against `/^\d+(\.\d{1,2})?$/`.
+ * So a front desk in Europe typing `12,50` for a repair produced `1250`, which
+ * passed the guard cleanly and was written as 125,000 minor units: a
+ * hundredfold overstatement in the gym's maintenance and incident record,
+ * entered by a receptionist doing nothing unusual, with the only check on the
+ * screen agreeing with it.
+ *
+ * The hundred was the second half of the same bug. A yen has no minor unit and
+ * a Kuwaiti dinar has a thousand of them, so ×100 is wrong in both directions
+ * before any comma is typed.
+ *
+ * `readMinorAmount` refuses the ambiguity instead of resolving it: in a
+ * two-place currency `12,50` is either twelve and a half or one thousand two
+ * hundred and fifty depending on where the person typing it grew up, and
+ * neither reading may be chosen on their behalf. It also asks the currency how
+ * many places it has. /costs reads its own money box through the same function.
+ *
+ * ONE reader, called by the blocker and by the write, because two readers over
+ * one box is exactly how the screen came to agree with a figure it was about to
+ * get wrong.
+ */
+export function logCost(cost: string, currency: string | null): TypedAmount | { ok: true; minorUnits: null } {
+  if (!cost.trim()) return { ok: true, minorUnits: null };
+  if (!currency) {
+    return { ok: false, reason: 'This gym has not set its currency, so a cost cannot say what money it is in. Record the entry without one, or set the currency first.' };
+  }
+  return readMinorAmount(cost, currency);
+}
+
 /** Why an entry cannot be recorded, or null when it can. */
 export function logBlocker(
   kind: LogKind, equipmentId: string | null, findings: string, cost: string, currency: string | null,
@@ -596,14 +636,8 @@ export function logBlocker(
   if (kind === 'incident' && !findings.trim()) {
     return 'An incident with no account of it is not a record of anything. Write what happened while it is fresh.';
   }
-  if (cost.trim()) {
-    if (!/^\d+(\.\d{1,2})?$/.test(cost.trim().replace(/[,\s]/g, ''))) {
-      return 'Enter the cost as a number — 240, or 87.50. Leave it empty where there was none to record.';
-    }
-    if (!currency) {
-      return 'This gym has not set its currency, so a cost cannot say what money it is in. Record the entry without one, or set the currency first.';
-    }
-  }
+  const money = logCost(cost, currency);
+  if (!money.ok) return money.reason;
   return null;
 }
 

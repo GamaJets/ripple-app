@@ -38,6 +38,7 @@ const SMALL = new Map([
   ['setKcal', 'a setState function, not a figure'],
   ['setKcalIn', 'a setState function, not a figure'],
   ['kcalNote', 'a sentence built elsewhere, already formatted'],
+  ['dayVolumeNote', 'a sentence from tonnageNote in src/lib/bodyweightSets.ts — it carries a count of sets, never a tonnage'],
   ['totalPct', 'a percentage'],
   ['sessions_total', 'the size of a session pack — 5, 10, 20'],
   ['CYCLE_KCAL', 'the fixed carb-cycling step, a constant under 300'],

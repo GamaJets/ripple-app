@@ -43,6 +43,10 @@
 // honest half is built here; `segmentCsv` hands the rest to whatever the gym
 // already uses to send email, rather than pretending.
 
+// One CSV writer for the whole product. `toCsv` carries the BOM and the CRLF
+// endings that decide whether a non-ASCII member name survives being opened.
+import { toCsv } from './gymExport';
+
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args?: any) => any };
 
 /* ── who is in a segment ───────────────────────────────────────────────────── */
@@ -162,27 +166,36 @@ export function buildSegments(
  * with the law rather than with its members. A CSV hands the list to whatever
  * already has them.
  *
- * Fields are quoted and internal quotes doubled, so a member called
- * O'Brien, Jr. does not silently split into two columns.
+ * ── written by `toCsv`, having been written by hand ───────────────────────
+ *
+ * This had its own `cell()` and joined its lines with `'\n'`, and it emitted no
+ * byte-order mark. Both omissions have the same victim: Excel opens a
+ * BOM-less UTF-8 file in the machine's legacy code page, so a gym in the Gulf
+ * downloads its own call list and `Ahmed Al-Naïm` arrives as mojibake — in the
+ * NAME column, on the list somebody is about to ring people from.
+ *
+ * `toCsv` in src/lib/gymExport.ts does the BOM and the CRLF endings and says
+ * why in as many words, and /export advertises it as the correct writer. The
+ * roster segment beside the desk is the download an owner actually uses and it
+ * used a different one. There is now one writer.
  */
 export function segmentCsv(seg: Segment, contactFor?: (memberId: string) => { email: string | null; phone: string | null }): string {
-  const cell = (v: string | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const head = ['Member id', 'Name', 'Membership', 'Days since last visit', 'Email', 'Phone'];
-  const lines = [head.map(cell).join(',')];
-  for (const m of seg.members) {
-    const c = contactFor?.(m.memberId) ?? { email: null, phone: null };
-    lines.push([
-      cell(m.memberId),
-      cell(m.name),
-      cell(m.status),
-      // Empty, not 0: a member the door log has never seen has no interval, and
-      // 0 in this column reads as "came in today" to whoever opens the file.
-      cell(m.lastSeenDays == null ? '' : String(m.lastSeenDays)),
-      cell(c.email),
-      cell(c.phone),
-    ].join(','));
-  }
-  return lines.join('\n');
+  return toCsv(
+    ['Member id', 'Name', 'Membership', 'Days since last visit', 'Email', 'Phone'],
+    seg.members.map((m) => {
+      const c = contactFor?.(m.memberId) ?? { email: null, phone: null };
+      return [
+        m.memberId,
+        m.name,
+        m.status,
+        // Empty, not 0: a member the door log has never seen has no interval, and
+        // 0 in this column reads as "came in today" to whoever opens the file.
+        m.lastSeenDays == null ? '' : String(m.lastSeenDays),
+        c.email,
+        c.phone,
+      ];
+    }),
+  );
 }
 
 /* ── sending ───────────────────────────────────────────────────────────────── */

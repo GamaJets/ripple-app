@@ -8,7 +8,7 @@
 // the button that onboards a second Stripe account under it. These assertions
 // pin the two things that must never be true again: a failed read is not an
 // absent account, and onboarding is not offered from a stage we could not read.
-import { payoutStage, canOnboard, payoutKnown, type PayoutAccount, type PayoutStage } from './payoutAccount';
+import { payoutStage, canOnboard, type PayoutAccount, type PayoutStage } from './payoutAccount';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -55,20 +55,18 @@ ok(!canOnboard('unreadable'), 'a read we could not make must NOT offer onboardin
 ok(!canOnboard('loading'), 'a read still in flight must NOT offer onboarding');
 ok(!canOnboard('active'), 'a coach already taking money is not offered onboarding');
 
-/* ── who may be told anything at all ───────────────────────────────────── */
+/* ── the invariant, over every stage there is ──────────────────────────── */
 
-ok(payoutKnown('none') && payoutKnown('started') && payoutKnown('active'),
-  'every stage we actually read may be described');
-ok(!payoutKnown('loading') && !payoutKnown('unreadable'),
-  'neither unknown stage may be described');
-
-// Every stage is covered by exactly one of the two gates or by neither, and no
-// stage is both onboardable and unknown — a combination that would put the
-// button back under the failed read.
+// Onboarding is offered ONLY from a stage the account was actually read in.
+// Written as a sweep rather than as three more `ok`s so that a sixth stage
+// added later cannot quietly default into the onboardable set — which is
+// exactly how 'unreadable' ended up under the button in the first place.
 const ALL: PayoutStage[] = ['loading', 'unreadable', 'none', 'started', 'active'];
+const READ: PayoutStage[] = ['none', 'started', 'active'];
 for (const s of ALL) {
-  ok(!(canOnboard(s) && !payoutKnown(s)), `${s} is not both onboardable and unknown`);
+  ok(!canOnboard(s) || READ.includes(s), `${s} may only offer onboarding if it was read`);
 }
+eq(ALL.filter(canOnboard).join(','), 'none,started', 'and exactly two stages do');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('payoutAccount.test.ts — all assertions passed');

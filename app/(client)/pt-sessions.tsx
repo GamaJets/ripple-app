@@ -350,10 +350,38 @@ export default function PtSessions() {
               first 1,000" to a member with eleven sessions on the screen, which
               reads as a truncation of the eleven. */}
           {sessionStatus === 'partial' ? <PartialRead what="delivered sessions" shown={mine.length} /> : null}
-          {pending.map((s) => (
+          {pending.map((s) => {
+            // WHAT THE COACH RECORDED, on the card that asks the member to
+            // approve it. This screen is headed "Sessions your trainer has
+            // delivered" and `pending` is sorted by the member's own verdict
+            // alone — so a session the coach marked as a NO-SHOW sat here,
+            // under that heading, with a primary "Approve Session" button and
+            // nothing anywhere saying what the record said. Approving is what
+            // releases the fee.
+            //
+            // The same file computes exactly this forty lines below for the
+            // history list. It is the same function, on the card where the
+            // decision is actually made.
+            const rec = pastVerdict(s);
+            return (
             <Card key={s.id} style={{ marginBottom: sp.md }}>
               <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{fmt(s.startsAt)}</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.durationMin} min personal training session</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: stateTone(t, rec.state) }} />
+                <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+                  Your trainer recorded this as {PAST_STATE_LABEL[rec.state]}{rec.at ? ` on ${fmt(rec.at)}` : ''}.
+                </Text>
+              </View>
+              {/* An hour the coach's own record says the member missed, with a
+                  primary button under it that confirms and pays for it. The
+                  button stays — the member may well have been there, and this
+                  is the screen where they say so — but never silently. */}
+              {rec.state !== 'delivered' && rec.state !== 'unmarked' ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                  {PAST_STATE_NOTE[rec.state]} Approving it confirms the session and releases the fee for it. If that is not what happened, dispute it below.
+                </Flag>
+              ) : null}
               <TextInput value={note[s.id] || ''} onChangeText={(v) => setNote((p) => ({ ...p, [s.id]: v }))}
                 placeholder="Add a comment for your trainer (optional)…" placeholderTextColor={t.ink3}
                 editable={busy !== s.id} multiline
@@ -374,7 +402,8 @@ export default function PtSessions() {
                 </View>
               ) : null}
             </Card>
-          ))}
+            );
+          })}
           {/* "Nothing to approve right now" is a claim about the coach's
               record, not about this screen, and only a whole read may make it. */}
           {pending.length === 0 ? (

@@ -777,7 +777,15 @@ function TheList({ invites, readErr, gymName, tenantId, onChange }: {
       ) : (
         <DataTable
           rows={shown} columns={cols} rowKey={(i) => i.id}
-          empty="Nobody has been invited yet. Everyone on the roster arrives through one of these."
+          // The filtered case has its own sentence. `shown` is what survived
+          // the search box, so typing a name that does not match printed
+          // "Nobody has been invited yet" — and this page's own banner warns
+          // that believing that is how a gym sends its whole batch of
+          // invitations twice. The search box is exactly how somebody would
+          // check before doing it.
+          empty={q.trim()
+            ? `Nothing here matches “${q.trim()}”. That is this search box, not an empty gym — clear it before concluding nobody has been invited.`
+            : 'Nobody has been invited yet. Everyone on the roster arrives through one of these.'}
         />
       )}
     </Section>

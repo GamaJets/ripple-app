@@ -52,7 +52,6 @@ import { monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, 
 import { buildPassConversion, hostsOf, intervalOf, coversDate, daysBetween, dateOf, attributionSentence, suppressionSentence, CAUSAL_CAVEAT, MONEY_NOTE, type PassConversionRecord } from './passConversion';
 import type { TrainingSession } from './types';
 import { assessDrift, rankClients, sortByDrift, summariseDrift, compareDrift, DRIFT_RANK, DRIFT_LABEL, DEFAULT_WINDOWS, type ActivityEvent, type DriftInput, isQueryableId } from './clientDrift';
-import { atRiskClient, noRecordOf } from './trainerMock';
 import { csvCell, csvRow, toCsv, minorToDecimal, isoDatePart, slug, buildGymExport, exportBlocker, incompleteWarning, EXPORT_PARTS, EXPORT_FILE, type GymExportInput, type PassType } from './gymExport';
 import {
   monthWindow, monthKeyOf, recentMonths, monthEnded, inMonth, dayInMonth, sliceMonth,
@@ -2347,12 +2346,12 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(D(noData).reason.includes('Nothing recorded') && D(noData).reason.includes('40 days'), 'the reason says what is missing and for how long');
   ok(D(noData).kinds.length === 0, 'no check-ins, no logs, no visits, no sessions');
 
-  // The older boolean version of this idea, which returned FALSE for a client
-  // it had never seen a data point from. Pinned so it cannot regress.
-  ok(noRecordOf({ adherence: null, lastActive: 'no activity yet' }) === true, 'a client with nothing recorded is recognised as such');
-  ok(atRiskClient({ adherence: null, lastActive: 'no activity yet' }) === true,
-    'a client with NO record does not read as fine — absence of evidence is not evidence of health');
-  ok(atRiskClient({ adherence: 92, lastActive: '1d' }) === false, 'and a healthy, recently-active client still reads as fine');
+  // The older boolean version of this idea — `atRiskClient` / `noRecordOf` /
+  // `staleDays` in trainerMock.ts — is gone, and its tombstone in that file
+  // says why. It returned FALSE for a client it had never seen a data point
+  // from, was fixed by folding "no record" into "at risk", and that fix then
+  // flagged every hand-added client for ever because a boolean cannot say
+  // "unknown". `idle` is what says it, and it is pinned three lines above this.
 
   // ── no invented figures ──
   ok(D(noData).baselinePerWeek === null, 'a rate over an unobserved baseline is null, not 0');

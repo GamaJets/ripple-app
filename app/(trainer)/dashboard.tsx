@@ -26,6 +26,7 @@
 // screen renders one person's data as another's.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { num } from '../../src/lib/format';
 import {
   DELIVERED_WINDOW_DAYS, MARK_WINDOW_DAYS, awaitingOutcome, deliveredBetween, fetchMySessions, windowStart,
@@ -33,10 +34,11 @@ import {
 import type { PtSession } from '../../src/lib/gymSessions';
 import { useAuth } from '../../src/ui/auth';
 import {
-  assessDrift, readClientActivity, compareDrift, summariseDrift, bandTitle, bandNote,
+  compareDrift, bandTitle, bandNote,
   DRIFT_LABEL, DEFAULT_WINDOWS, localDayKey, type Drift,
 } from '../../src/lib/clientDrift';
 import { useTenant } from '../../src/ui/tenant';
+import { useClientDrift } from '../../src/ui/clientDrift';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Share, Switch, type ViewStyle, type TextStyle } from 'react-native';
@@ -56,7 +58,6 @@ import { NotificationBell } from '../../src/ui/notifications';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
-import { atRiskClient } from '../../src/lib/trainerMock';
 import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
 import { type RosterClient } from '../../src/lib/trainerMock';
 import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode } from '../../src/lib/types';
@@ -446,103 +447,30 @@ export default function TrainerClients() {
   //   driftErr !== null           → the read failed. Say so, and say the list
   //                                 is in its ordinary order — never let a
   //                                 failed read look like "nobody is drifting".
-  const [drift, setDrift] = useState<Record<string, Drift> | null>(null);
-  const [driftErr, setDriftErr] = useState<string | null>(null);
   /**
-   * The two things the events map cannot say, and which decide what may be
-   * ACTED on.
+   * The read itself, and the three-plus-one states it produces, now live in
+   * src/ui/clientDrift.ts. Every line of it came from here — this screen was
+   * the only one that had moved off `atRiskClient`, and the two that had not
+   * (analytics.tsx and assistant.tsx) could not move without either copying a
+   * hundred lines out of this file or sharing them. Two definitions of "at
+   * risk" was the bug; three implementations of the good one would have been
+   * the next one.
    *
-   * This effect called `fetchClientActivity`, which is the thin wrapper that
-   * returns `byClient` alone — and an empty array in that map means three
-   * different things: asked and silent, never asked, or cut off at PostgREST's
-   * row ceiling with this client's events on the far side of it.
-   * src/lib/clientDrift.ts says so in as many words and offers
-   * `readClientActivity` for exactly this reason: ORDERING a list can live with
-   * the ambiguity, acting on it cannot, and drift here drives the suggested
-   * check-ins and the nudge the coach sends off them. "Where have you been" to
-   * somebody who trained yesterday looks, to the one client who was paying
-   * attention, like the coach who was not.
-   *
-   * Null until the read lands. `notAsked` names the ids with no Repple account
-   * behind them; `truncated` is true when any of the four reads hit its
-   * ceiling, and it disqualifies EVERY client's silence rather than some — the
-   * page is ordered by nothing in particular, so which client lost rows is
-   * unknowable. Same reasoning as src/ui/nudges.ts, which already reads this way.
+   * The names below are kept so the four hundred lines that read them do not
+   * move: `drift` is the map (null until read, an empty map IS an answer),
+   * `driftErr` is a failure and never an absence, `driftRead` is what the read
+   * could not cover, `driftActionable` gates ACTING on a verdict as opposed to
+   * ordering by it, and `driftActingNote` says out loud why a short list of
+   * names is not a clean book.
    */
-  const [driftRead, setDriftRead] = useState<{ notAsked: Set<string>; truncated: boolean } | null>(null);
-  const rosterKey = roster.map((c) => c.id).join(',');
-  useEffect(() => {
-    const ids = rosterKey ? rosterKey.split(',') : [];
-    let live = true;
-    setDriftErr(null);
-    if (!ids.length) { setDrift({}); setDriftRead({ notAsked: new Set(), truncated: false }); return; }
-    setDrift(null); setDriftRead(null);
-    (async () => {
-      try {
-        const act = await readClientActivity(supabase, ids, {
-          days: DEFAULT_WINDOWS.historyDays,
-          tenantId: tenant?.id ?? null,
-        });
-        const events = act.byClient;
-        if (!live) return;
-        setDriftRead({ notAsked: new Set(act.notAsked), truncated: act.truncated });
-        const map: Record<string, Drift> = {};
-        // `since` is the client's join date, and passing it changes two things.
-        // A client added yesterday and a client silent for eight weeks both
-        // have no recent activity, so without it they were indistinguishable —
-        // both UNKNOWN, both told "nothing recorded in the last 56 days", which
-        // is a strange thing to say about somebody who joined on Tuesday. It
-        // also clamps the drift baseline to the period they were actually on
-        // the book, so a real fall is not diluted by weeks they did not exist
-        // for. It comes from coach_clients.created_at or the coaching
-        // relationship; null where genuinely unknown, never guessed.
-        const joinedOf: Record<string, string | null> = {};
-        for (const c of roster) joinedOf[c.id] = c.joinedAt ?? null;
-        for (const id of ids) {
-          map[id] = assessDrift({ clientId: id, events: events[id] ?? [], since: joinedOf[id] ?? null });
-        }
-        setDrift(map);
-      } catch (e: any) {
-        if (!live) return;
-        reportError('dashboard.clientDrift', e);
-        setDrift(null);
-        setDriftRead(null);
-        setDriftErr(e?.message || 'Could not read the training record.');
-      }
-    })();
-    return () => { live = false; };
-  }, [rosterKey, tenant?.id, readNonce]);
-  const driftFor = (c: RosterClient): Drift | null => (drift ? drift[c.id] ?? null : null);
-  /**
-   * Whether this client's drift verdict may be ACTED on, as opposed to merely
-   * ordered by.
-   *
-   * The distinction src/lib/clientDrift.ts draws and this screen was not
-   * keeping. A verdict off a truncated read, or off a client the database was
-   * never asked about, is still worth putting near the top of a list — the
-   * worst case is a name too high up. It is not worth writing "how is your week
-   * going?" to somebody on the strength of, because the rows that would have
-   * disproved their silence are exactly the ones that did not come back.
-   *
-   * False while the read is still in flight, for the same reason: the suggested
-   * check-ins fall back to the roster's own columns until it lands.
-   */
-  const driftActionable = (c: RosterClient): boolean =>
-    !!driftRead && !driftRead.truncated && !driftRead.notAsked.has(c.id);
-  /** Why the suggested check-ins are not built on the training record, or null
-   *  when they are. Said out loud, because a short list of names is otherwise
-   *  indistinguishable from a book with nothing wrong in it. */
-  const driftActingNote: string | null =
-    driftErr
-      ? 'Their training records could not be read, so nothing below is based on who has stopped training — only on what your roster rows already say.'
-      : !driftRead
-        ? null
-        : driftRead.truncated
-          ? 'More activity is on record than one request returns, so nobody\'s silence can be proved from it. Nothing below is based on who has stopped training — a nudge sent on a short read reaches somebody who trained yesterday.'
-          : driftRead.notAsked.size
-            ? `${driftRead.notAsked.size} of these were added by hand and have no Repple account, so there is no training record to judge them by and none of them appears here on one.`
-            : null;
-  const bands = summariseDrift(drift ? roster.map((c) => drift[c.id]).filter((d): d is Drift => !!d) : null);
+  const _drift = useClientDrift(roster, tenant?.id ?? null, readNonce);
+  const drift = _drift.drift;
+  const driftErr = _drift.error;
+  const driftRead = _drift.coverage;
+  const driftFor = (c: RosterClient): Drift | null => _drift.driftFor(c.id);
+  const driftActionable = (c: RosterClient): boolean => _drift.actionable(c.id);
+  const driftActingNote: string | null = _drift.note;
+  const bands = _drift.bands;
 
   const { name: coachName, reload: reloadProfile } = useMyTrainerProfile();
   // `status` as well as the two functions, for the reason the notes provider
@@ -1093,11 +1021,19 @@ export default function TrainerClients() {
   const unread = isWhole(rosterStatus)
     ? (roster.some((c) => c.unread == null) ? null : roster.reduce((a, c) => a + (c.unread ?? 0), 0))
     : null;
-  // The legacy signal, kept only for the render where the drift read has not
-  // landed. It cannot see the client this whole feature is about: with
-  // `adherence: null` and `lastActive: 'no activity yet'` both of its clauses
-  // are false, so a client nobody has heard from reads as not at risk.
-  const atRisk = roster.filter(atRiskClient).length;
+  /** Clients whose own adherence figure is below target — the one signal on a
+   *  roster row that is evidence ABOUT the person rather than the absence of it.
+   *
+   *  This was `roster.filter(atRiskClient)`, kept "only for the render where
+   *  the drift read has not landed". Two of that function's three clauses are
+   *  not evidence: `staleDays` regexes a number out of the display string
+   *  `ago()` writes for a human to read, and `noRecordOf` is true whenever
+   *  there is no figure and no date — which is true, permanently, of every
+   *  client a coach added by hand (`adherence: null, lastActive: 'added by
+   *  you'`, src/ui/roster.tsx). Those two clauses are now gone from this file
+   *  and from the app; what is left is the figure the client submitted. */
+  const lowAdherence = (c: RosterClient): boolean => c.adherence != null && c.adherence < 80;
+  const belowTarget = roster.filter(lowAdherence).length;
   /** Drifting plus unknown — the number a coach actually has to act on. Null
    *  until the record has been read, so it renders as an em-dash rather than as
    *  zero.
@@ -1139,7 +1075,7 @@ export default function TrainerClients() {
     ...(bands
       ? [{ key: 'drifting', label: 'Drifting', n: segN(bands.drifting) },
          { key: 'nodata', label: 'Nothing Recorded', n: segN(bands.unknown) }]
-      : [{ key: 'atrisk', label: 'At-risk', n: segN(atRisk) }]),
+      : [{ key: 'below', label: 'Below Target', n: segN(belowTarget) }]),
     // ── who is waiting on a reply ─────────────────────────────────────────
     // R6. This row already draws "3 unread" on it and the segment list could
     // not filter to it, so a coach with forty clients had recency-only ordering
@@ -1163,7 +1099,7 @@ export default function TrainerClients() {
     seg === 'all' ? true
     : seg === 'drifting' ? driftFor(c)?.status === 'at_risk'
     : seg === 'nodata' ? driftFor(c)?.status === 'idle'
-    : seg === 'atrisk' ? atRiskClient(c)
+    : seg === 'below' ? lowAdherence(c)
     // A row whose unread count could not be read is NOT in this list. The
     // segment is a queue a coach works through, and a client who may or may not
     // have written is not something to answer — the chip's own dash says the
@@ -1229,7 +1165,24 @@ export default function TrainerClients() {
     // "nothing recorded in 56 days" out of rows that were never seen.
     const acting = driftActionable(c);
     if (acting && d && (d.status === 'at_risk' || d.status === 'idle')) return d.reason;
-    if ((!d || !acting) && atRiskClient(c)) return (c.adherence != null && c.adherence < 80) ? 'Adherence ' + c.adherence + '% — below target' : 'Inactive ' + c.lastActive + ' — check in';
+    // Where the record cannot be acted on, the fallback is the ONE clause that
+    // is evidence about this person — a low adherence figure they submitted.
+    //
+    // It used to be `atRiskClient(c)`, whose other two clauses are
+    // `staleDays(c.lastActive) >= 2` — a regex over the display string `ago()`
+    // writes for a human to read — and `noRecordOf(c)`, which is true when
+    // there is no figure and no date at all. Every client a coach added BY HAND
+    // is built with `adherence: null, lastActive: 'added by you'`
+    // (src/ui/roster.tsx), so every one of them matched `noRecordOf`
+    // permanently and came back here as "Inactive added by you — check in".
+    //
+    // A coach with twenty cash clients had twenty entries in this list that
+    // could never clear, whatever they did about any of them, and learns inside
+    // a week to read past all of them — including the one that is real. The
+    // absence of a record is not a reason to ring somebody; it is the reason
+    // `idle` exists in src/lib/clientDrift.ts, and that band is raised here
+    // only when the read behind it actually covered them.
+    if ((!d || !acting) && c.adherence != null && c.adherence < 80) return 'Adherence ' + c.adherence + '% — below target';
     if (c.unread != null && c.unread > 0) return c.unread + ' unread message' + (c.unread > 1 ? 's' : '');
     return null;
   };
@@ -1324,7 +1277,7 @@ export default function TrainerClients() {
   const segStatus: LoadStatus =
     seg === 'drifting' || seg === 'nodata'
       ? (driftErr ? 'error' : drift ? 'ready' : 'loading')
-      : seg === 'all' || seg === 'atrisk' || (COACHED_MODES as readonly string[]).includes(seg)
+      : seg === 'all' || seg === 'below' || (COACHED_MODES as readonly string[]).includes(seg)
         ? 'ready'
         : tagStatus;
   // Reads as the object of a sentence, because it is one: the guard writes
@@ -1596,7 +1549,7 @@ export default function TrainerClients() {
    * decides the shape of this: a refresh that moved some of them would leave
    * the roster count and the drift assessment describing different books, and
    * a coach reading "3 going quiet" out of 11 when it was measured against 9. */
-  const pull = usePullToRefresh(useCallback(() => {
+  const reloadEverything = useCallback(() => {
     setReadNonce((n) => n + 1);
     return Promise.all([
       refreshRoster(), Promise.resolve(refreshTenant()), reloadProfile(),
@@ -1608,7 +1561,27 @@ export default function TrainerClients() {
     ]);
   }, [refreshRoster, refreshTenant, reloadProfile, reloadFeedback, reloadNutri, reloadNotes,
       reloadNotices, reloadInvites, reloadTrainerInvites, reloadTags, reloadTemplates,
-      reloadPrograms, channels]));
+      reloadPrograms, channels]);
+  const pull = usePullToRefresh(reloadEverything);
+
+  /* ── and the same fourteen when the coach comes back ─────────────────────
+   *
+   * `readNonce` was bumped by the gesture above and by nothing else, and this
+   * file had no `useFocusEffect` at all — so this screen read once, on mount,
+   * for the life of the app. It is the coach's HOME tab: they leave it to do
+   * the thing it told them to do and return to it immediately afterwards.
+   *
+   * Mark four sessions, come back, and "4 need an outcome" was still on the
+   * card — so the coach marks them again. Log a session from the client screen,
+   * come back, and What They've Actually Done had not heard of it. `promptBookAlerts`
+   * then fires off that same stale state, which is the version of this that
+   * reaches a client.
+   *
+   * This is the identical defect that stopped a coach accepting a coaching
+   * request — `src/ui/CoachRequests.tsx` reading once on mount — and it is
+   * fixed the same way. The first focus is skipped because the mount reads are
+   * already running; see src/ui/refreshOnFocus.ts. */
+  useRefreshOnFocus(reloadEverything);
 
   const studio = (coachName || 'Your Studio').replace('Coach ', '');
   const G = layout.gutter;
@@ -2226,10 +2199,16 @@ export default function TrainerClients() {
                 </View>
               </View>
 
-              {((c.unread != null && c.unread > 0) || showDrift || (!d && atRiskClient(c)) || (c.injuries && c.injuries.length)) ? (
+              {((c.unread != null && c.unread > 0) || showDrift || (!d && lowAdherence(c)) || (c.injuries && c.injuries.length)) ? (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md, marginTop: sp.sm, marginStart: 38 + sp.md }}>
                   {showDrift ? <Flag t={t} tone={driftTone(t, d!)} text={DRIFT_LABEL[d!.status]} /> : null}
-                  {!d && atRiskClient(c) ? <Flag t={t} tone={t.warn} text="Needs a check-in" /> : null}
+                  {/* Only where a figure they submitted says so. This was
+                      `atRiskClient(c)`, true of every hand-added client for
+                      ever — so a coach with twenty cash clients opened their
+                      home screen to twenty amber flags that could never clear,
+                      and learned inside a week to read past all of them,
+                      including the one that was real. */}
+                  {!d && lowAdherence(c) ? <Flag t={t} tone={t.warn} text="Below target" /> : null}
                   {c.unread != null && c.unread > 0 ? <Flag t={t} tone={t.brand} text={`${c.unread} unread`} /> : null}
                   {c.injuries && c.injuries.length ? <Flag t={t} tone={t.s3} text={c.injuries.some((x) => x.isNew) ? 'New injury' : 'Injury'} /> : null}
                 </View>

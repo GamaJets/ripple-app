@@ -312,7 +312,7 @@ export default function Close() {
         <Banner tone="crit">{key} is not a month this console can open.</Banner>
       ) : (
         <CloseView
-          c={close} rec={rec} currency={currency} feeRead={feeRead} sessionFee={sessionFee} feeCents={feeCents}
+          c={close} rec={rec} currency={currency} gymCcy={gymCcy} feeRead={feeRead} sessionFee={sessionFee} feeCents={feeCents}
           gymName={gymName} monthKey={key} tenantId={me.tenantId!} me={me}
           closes={closes} closesErr={closesErr}
           onChange={() => { if (me.tenantId && w) load(me.tenantId, w); }}
@@ -324,10 +324,15 @@ export default function Close() {
 
 /* ── the close itself ──────────────────────────────────────────────────────── */
 
-function CloseView({ c, rec, currency, feeRead, sessionFee, feeCents, gymName, monthKey, tenantId, me, closes, closesErr, onChange }: {
+function CloseView({ c, rec, currency, gymCcy, feeRead, sessionFee, feeCents, gymName, monthKey, tenantId, me, closes, closesErr, onChange }: {
   c: MonthClose;
   rec: CloseRecord;
+  /** What the PAYMENTS agree on. Only figures the payments produced may wear
+   *  it — see `currencyOf`. */
   currency: TenantCurrency;
+  /** `tenants.currency`. What the gym's own standing figures are denominated
+   *  in: the session fee, and therefore payroll. */
+  gymCcy: TenantCurrency;
   feeRead: 'ok' | 'failed';
   sessionFee: number | null;
   /** The same fee in MINOR units, or null when it cannot be stated in them.
@@ -343,6 +348,11 @@ function CloseView({ c, rec, currency, feeRead, sessionFee, feeCents, gymName, m
   onChange: () => void;
 }) {
   const m = (cents: number | null | undefined) => money(cents, currency);
+
+  // What the INVOICES agree on, and what the PASSES agree on. Null when a set
+  // disagrees with itself, which is not a currency and must not borrow one.
+  const owedCcy = rec.invoices.state === 'ready' ? agreedCurrency(rec.invoices.rows) : null;
+  const passesCcy = rec.passes.state === 'ready' ? agreedCurrency(rec.passes.rows) : null;
 
   return (
     <>
@@ -414,11 +424,24 @@ function CloseView({ c, rec, currency, feeRead, sessionFee, feeCents, gymName, m
         />
       </div>
 
+      {/* ── one figure, one currency, and it is the one that produced it ──
+          Every section below used to be handed `currency`, which `currencyOf`
+          derives from the PAYMENTS rows. So a gym whose August card takings all
+          happened to be in AED printed its GBP payroll, its GBP rates and its
+          GBP arrears as dirhams — on the sheet that goes to an accountant,
+          three inches above an invoice table rendering each row honestly with
+          `money(i.amountCents, i.currency)`.
+
+          Income keeps it, because Income IS the payments. Payroll takes the
+          gym's own, because it comes from `sessions.rate_cents` and
+          `tenants.session_fee` and from nothing else. Owed and Passes take what
+          their own rows agree on, and null where they agree on nothing — which
+          each of those sections already has a sentence for. */}
       <Income c={c} rec={rec} currency={currency} />
-      <Owed c={c} rec={rec} currency={currency} />
+      <Owed c={c} rec={rec} currency={owedCcy} />
       <Reconciliation c={c} rec={rec} />
-      <Payroll c={c} rec={rec} currency={currency} sessionFee={sessionFee} feeCents={feeCents} />
-      <Passes c={c} rec={rec} currency={currency} />
+      <Payroll c={c} rec={rec} currency={gymCcy} sessionFee={sessionFee} feeCents={feeCents} />
+      <Passes c={c} rec={rec} currency={passesCcy} />
     </>
   );
 }
@@ -980,9 +1003,12 @@ function Payroll({ c, rec, currency, sessionFee, feeCents }: {
         ? <span style={{ color: 'var(--crit)' }}>{l.unmarked}</span>
         : <span className="dash">0</span> },
     { key: 'cents', header: 'Pay', value: (l) => l.cents, numeric: true,
+      // Three silences, not two. `money()` returns null where the currency is
+      // unknown, and this cell rendered that as an EMPTY cell — a blank in the
+      // Pay column of a payroll table reads as nothing owed.
       render: (l) => l.cents == null
         ? <span className="dash">no rate</span>
-        : <>{money(l.cents, currency)}</> },
+        : money(l.cents, currency) ?? <span className="dash">no currency set</span> },
   ];
 
   const sessionCols: Column<PtSession>[] = [
@@ -994,7 +1020,7 @@ function Payroll({ c, rec, currency, sessionFee, feeCents }: {
     { key: 'rate', header: 'Rate held', value: (s) => s.rateCents, numeric: true,
       render: (s) => s.rateCents == null
         ? <span className="dash">not snapshotted</span>
-        : <>{money(s.rateCents, currency)}</> },
+        : money(s.rateCents, currency) ?? <span className="dash">no currency set</span> },
   ];
 
   return (

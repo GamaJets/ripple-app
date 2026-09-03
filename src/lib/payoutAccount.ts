@@ -84,12 +84,3 @@ export function payoutStage(acct: PayoutAccount | null | undefined, read: LoadSt
  * account under the same coach.
  */
 export const canOnboard = (s: PayoutStage): boolean => s === 'none' || s === 'started';
-
-/**
- * May a claim about whether this coach can take money be printed at all?
- *
- * False for both stages where the answer is unknown, so a screen can gate one
- * sentence on it rather than repeating the two-way check.
- */
-export const payoutKnown = (s: PayoutStage): boolean =>
-  s === 'none' || s === 'started' || s === 'active';

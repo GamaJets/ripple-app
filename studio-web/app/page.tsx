@@ -11,6 +11,7 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { PasswordField } from '@/components/PasswordField';
+import { Banner as SharedBanner } from '@/components/Banner';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
 import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
@@ -655,22 +656,25 @@ function Kpi({ label, value, text, note }: {
   );
 }
 
-function Notice({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
+// ── the eighth banner, and why a grep did not find it ───────────────────
+//
+// A sweep moved six console pages off their own local `function Banner` onto
+// the shared one in studio-web/components/Banner.tsx, which carries
+// role="alert"/aria-live so a refusal is not a silence for a screen reader.
+// This one is called `Notice`, so `grep 'function Banner'` never listed it —
+// on the first screen an owner opens every morning, carrying the roster
+// failure, the five-read hub failure, the multi-site notice and the payroll
+// blocker.
+//
+// `live` defaults on here, unlike `SharedBanner`: everything this renders is a
+// read that failed or a figure that is missing, which is exactly what a screen
+// reader has to be told about. The caller passes `live={false}` for anything an
+// Announce region on the same page is already reading out.
+function Notice({ children, tone, live = true }: { children: React.ReactNode; tone?: 'crit'; live?: boolean }) {
   return (
-    <div
-      style={{
-        margin: '18px 0 0',
-        padding: '13px 15px',
-        borderRadius: 0,
-        background: 'var(--surface)',
-        border: '1px solid var(--ring)',
-        borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-        color: 'var(--ink2)',
-        maxWidth: '72ch',
-      }}
-    >
+    <SharedBanner tone={tone} live={live} style={{ margin: '18px 0 0', maxWidth: '72ch' }}>
       {children}
-    </div>
+    </SharedBanner>
   );
 }
 

@@ -39,6 +39,7 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { readTenant } from '@/lib/currency';
+import { noGymNote } from '@lib/gymLink';
 import { readAll } from '@lib/rowCap';
 import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 
@@ -154,6 +155,11 @@ export default function Deletions() {
       const who = await loadMe();
       if (!live) return;
       setMe(who);
+      // An account with no gym never ran `load()`, so `queue` stayed null with
+      // `queueWhy` null and `unread` resolved to 'loading' — a statutory
+      // thirty-day queue rendering a spinner for ever, with nothing on screen
+      // to distinguish a slow database from an account that was never linked.
+      // The render below now stops before the spinner and says which it is.
       if (!who?.tenantId) return;
       const t = await readTenant(supabase, who.tenantId);
       if (!live) return;
@@ -186,6 +192,17 @@ export default function Deletions() {
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
           Erasing somebody permanently is the owner&rsquo;s decision, and the database says the same
           thing independently.
+        </p>
+      </Shell>
+    );
+  }
+
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymErr} current="/deletions">
+        <h1>Erasure queue</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('erasure requests')}
         </p>
       </Shell>
     );

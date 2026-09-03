@@ -36,7 +36,9 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { useAuthRevision } from './authRevision';
-import { myTenantCurrency } from '../lib/subscriptions';
+import { fetchMyCurrency } from '../lib/myCurrency';
+import { currencyStepDone } from '../lib/currencyStep';
+import type { MyCurrency } from '../lib/currencySource';
 import type { LoadStatus } from './loadStatus';
 import type { CoachSetupFacts } from '../lib/coachFirstRun';
 
@@ -101,11 +103,17 @@ export function useCoachSetup(): CoachSetupRead {
     if (!uid) { setFacts(UNKNOWN_SETUP); setStatus('ready'); return; }
 
     const settled = await Promise.allSettled([
-      // 1 · the currency. `myTenantCurrency` already returns the two answers
-      //     apart — a code, or a null WITH the error that caused it — which is
-      //     the whole reason src/lib/currencyGap.ts exists. A null currency with
-      //     no error is genuinely unset; with an error it is unknown.
-      myTenantCurrency(),
+      // 1 · the currency. `fetchMyCurrency` and NOT `myTenantCurrency`, which
+      //     asks about a gym: since part 940 a coach with no gym has a currency
+      //     of their own on `trainers.currency`, and the gym-only read answered
+      //     "not set" for them whatever they had chosen — so this step could
+      //     never tick for an independent coach, however many times they went
+      //     to Settings and set one. The resolver applies the precedence rule
+      //     (gym first, always; the coach's own column only when there is
+      //     provably no gym) and names WHICH of six things is missing, which is
+      //     what lets a failed read stay a dash instead of becoming a nag. See
+      //     src/lib/currencyStep.ts.
+      fetchMyCurrency(),
       // 2 · the rate, AND how they coach. Two facts, one row, one read: both
       //     live on `trainers` and asking twice would let the same row answer
       //     one question and fail the other. `session_fee` is nullable and 0 is
@@ -144,7 +152,7 @@ export function useCoachSetup(): CoachSetupRead {
     const val = <T,>(i: number): T | null =>
       settled[i].status === 'fulfilled' ? ((settled[i] as PromiseFulfilledResult<T>).value) : null;
 
-    const cur = val<{ currency: string | null; error: string | null }>(0);
+    const cur = val<MyCurrency>(0);
     const rateRow = val<{ data: any; error: any }>(1);
     const linked = val<boolean | null>(2);
     const written = val<boolean | null>(3);
@@ -165,7 +173,7 @@ export function useCoachSetup(): CoachSetupRead {
       // back. Reading the data before the error is exactly how a refusal
       // becomes a nag to answer a question they already answered.
       mode: rateRow == null || rateRow.error ? null : (rateRow.data?.delivery_mode ?? null) != null,
-      currency: cur == null ? null : cur.currency ? true : cur.error ? null : false,
+      currency: currencyStepDone(cur),
       rate: rateRow == null || rateRow.error ? null : (rateRow.data?.session_fee ?? null) != null,
       client,
       availability: val<boolean | null>(4),

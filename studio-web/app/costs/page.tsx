@@ -578,6 +578,12 @@ function Handoff({ w, gymName, rows, read, byCategory }: {
   w: MonthWindow; gymName: string | null; rows: GymCost[];
   read: Read<GymCost>; byCategory: GymCostPot[];
 }) {
+  // `Unread` has three values and only one is null. Both gates below tested
+  // `=== 'failed'`, so a read still IN FLIGHT fell through to `rows` and wrote
+  // a CSV headed "COSTS RECORDED IN THE MONTH" with nothing under it — filed,
+  // that is indistinguishable from a month in which the gym spent nothing.
+  const loading = read.state === 'loading';
+
   const download = () => {
     const parts: string[] = [];
     const head = (t: string) => `\n${t}\n`;
@@ -586,8 +592,10 @@ function Handoff({ w, gymName, rows, read, byCategory }: {
     parts.push('Dated by the day the money went out. Nothing here is netted against what the gym took, and no figure in this file is a tax figure.\n');
 
     parts.push(head('COSTS RECORDED IN THE MONTH'));
-    parts.push(read.state === 'failed'
-      ? `NOT EXPORTED — the recorded costs could not be read${read.why ? `: ${read.why}` : ''}. This is unknown, not nil.\n`
+    parts.push(read.state !== null
+      ? (read.state === 'loading'
+          ? 'NOT EXPORTED — the recorded costs had not finished loading when this file was made. Export the month again. This is unknown, not nil.\n'
+          : `NOT EXPORTED — the recorded costs could not be read${read.why ? `: ${read.why}` : ''}. This is unknown, not nil.\n`)
       : toCsv(
           ['Paid on', 'What for', 'Paid to', 'Category', 'Amount (minor units)', 'Currency', 'Note'],
           rows.map((c) => [
@@ -597,8 +605,10 @@ function Handoff({ w, gymName, rows, read, byCategory }: {
           false));
 
     parts.push(head('BY CATEGORY AND CURRENCY'));
-    parts.push(read.state === 'failed'
-      ? 'NOT EXPORTED — the recorded costs could not be read, so there is no split.\n'
+    parts.push(read.state !== null
+      ? (read.state === 'loading'
+          ? 'NOT EXPORTED — the recorded costs had not finished loading, so there is no split. Export the month again.\n'
+          : 'NOT EXPORTED — the recorded costs could not be read, so there is no split.\n')
       : toCsv(
           ['Category', 'Currency', 'Lines', 'Amount (minor units)'],
           byCategory.flatMap((p) => p.taken.pots.map((pot) => [
@@ -611,7 +621,9 @@ function Handoff({ w, gymName, rows, read, byCategory }: {
 
   return (
     <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '18px 0 20px' }}>
-      <button onClick={download} style={primaryBtn}>Export this month (CSV)</button>
+      <button onClick={download} style={{ ...primaryBtn, opacity: loading ? 0.5 : 1 }} disabled={loading}>
+        {loading ? 'Still reading the month…' : 'Export this month (CSV)'}
+      </button>
       <span style={{ fontSize: 12, color: 'var(--ink3)', maxWidth: '62ch' }}>
         Amounts are exported in minor units with their currency beside them, so nothing in the file
         depends on a spreadsheet guessing how many decimal places a currency has.

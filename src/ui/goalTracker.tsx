@@ -59,6 +59,20 @@ import { useRecordOutboxHandlers } from './recordOutbox';
 const LEGACY_KEY = 'repple.goalTarget';
 const MIGRATED_KEY = 'repple.goalTarget.migrated';
 
+/**
+ * What happened to a goal somebody set.
+ *
+ * Three answers rather than two, because the screen has three things to say.
+ * `true` used to cover both "the server has it" and "this phone is holding it",
+ * so app/(client)/goal.tsx said nothing at all about the second — the queued
+ * row was drawn exactly like a stored one, and then `removeGoal` and
+ * `setAchieved` both refused it (correctly: no server has ever seen that id)
+ * and the screen blamed the member's connection for a goal that had simply not
+ * been sent yet. Every other queued write in this app says "Saved on this
+ * phone"; this is what lets this one say it too.
+ */
+export type GoalSaved = 'stored' | 'queued' | false;
+
 interface GoalValue {
   goals: GoalTarget[];
   /** Under 'error' an empty list means the goals could not be read, NOT that
@@ -86,8 +100,8 @@ interface GoalValue {
    *
    * False is what it has always been: nothing was written and nothing was kept.
    */
-  setMeasuredGoal: (kind: MeasuredKind, value: number, targetDateISO: string | null) => Promise<boolean>;
-  addCustomGoal: (title: string, targetDateISO: string | null) => Promise<boolean>;
+  setMeasuredGoal: (kind: MeasuredKind, value: number, targetDateISO: string | null) => Promise<GoalSaved>;
+  addCustomGoal: (title: string, targetDateISO: string | null) => Promise<GoalSaved>;
   /** Refuses a goal that has not reached the server yet — see the note on the
    *  implementation. */
   removeGoal: (id: string) => Promise<boolean>;
@@ -238,7 +252,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
    */
   const queueGoal = async (
     kind: GoalKind, value: number | null, title: string | null, date: string | null,
-  ): Promise<boolean> => {
+  ): Promise<GoalSaved> => {
     if (!outbox) return false;
     const { result, id } = await outbox.enqueue('goal', { kind, value, title, targetDate: date });
     if (result !== 'queued' || !id) return false;
@@ -260,10 +274,10 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
         createdAtISO: new Date().toISOString(),
       },
     ]));
-    return true;
+    return 'queued';
   };
 
-  const setMeasuredGoal = async (kind: MeasuredKind, value: number, targetDateISO: string | null): Promise<boolean> => {
+  const setMeasuredGoal = async (kind: MeasuredKind, value: number, targetDateISO: string | null): Promise<GoalSaved> => {
     // No backend, or nobody signed in. There is no outbox to key by either, so
     // this is the same refusal it has always been rather than a queue.
     if (!USE_SUPABASE || !uid) return false;
@@ -289,7 +303,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
         const out = classifyWrite(error as any, data ? 1 : 0);
         if (out === 'stored' && data) {
           setGoals((p) => sortGoals(p.map((g) => (g.id === existing.id ? rowToGoal(data as unknown as Row) : g))));
-          return true;
+          return 'stored';
         }
         reportError('goalTracker.update', error);
         return out === 'refused' ? false : queueGoal(kind, value, null, date);
@@ -300,7 +314,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
       const out = classifyWrite(error as any, data ? 1 : 0);
       if (out === 'stored' && data) {
         setGoals((p) => sortGoals([...p, rowToGoal(data as unknown as Row)]));
-        return true;
+        return 'stored';
       }
       reportError('goalTracker.insert', error);
       return out === 'refused' ? false : queueGoal(kind, value, null, date);
@@ -312,7 +326,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addCustomGoal = async (title: string, targetDateISO: string | null): Promise<boolean> => {
+  const addCustomGoal = async (title: string, targetDateISO: string | null): Promise<GoalSaved> => {
     if (!USE_SUPABASE || !uid) return false;
     const t = title.trim();
     if (!t) return false;
@@ -324,7 +338,7 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
       const out = classifyWrite(error as any, data ? 1 : 0);
       if (out === 'stored' && data) {
         setGoals((p) => sortGoals([...p, rowToGoal(data as unknown as Row)]));
-        return true;
+        return 'stored';
       }
       reportError('goalTracker.addCustom', error);
       return out === 'refused' ? false : queueGoal('custom', null, t, date);

@@ -75,9 +75,10 @@
 // src/lib/clientRecord.ts, and `handAdded` in src/lib/trainerMock.ts.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useGlucose } from '../../src/ui/glucoseData';
 import type { Theme } from '../../src/theme/tokens';
@@ -262,7 +263,15 @@ export default function ClientScreen() {
   // as long as this screen was open — see the note in client-training.tsx,
   // which avoided it, and the ref-backed wrappers in src/ui/roster.tsx, which
   // now guarantee `refresh` keeps one identity for the life of the provider.
-  useFocusEffect(useCallback(() => { void r.refresh(); }, [r.refresh]));
+  // NOTE: this was the ONLY thing this screen refreshed on focus, and it is the
+  // roster — the name at the top and the drift band. The thirteen effects that
+  // read what has actually happened to this person all hang off `readNonce`,
+  // which was bumped by pull-to-refresh and by nothing else. So a coach who
+  // logged a session from this screen and came back found the name refreshed
+  // and What They've Actually Done unchanged. The whole set now re-reads on
+  // focus, at `useRefreshOnFocus` further down where every reload it needs is
+  // in scope; the roster is one of the five it asks for, which is why this
+  // line is not also still here.
 
   const ap = useAssignedPrograms();
   /* ── the nonce every read on this screen hangs off ──────────────────────
@@ -1218,13 +1227,28 @@ export default function ClientScreen() {
    * the briefing at the top of this screen is composed ACROSS them — a
    * sentence about somebody's silence built from a fresh contact log and a
    * stale activity read is a sentence about nobody. */
-  const pull = usePullToRefresh(useCallback(() => {
+  const reloadEverything = useCallback(() => {
     setReadNonce((n) => n + 1);
     return Promise.all([
       r.refresh(), Promise.resolve(ap.reload()), Promise.resolve(refreshTenant()),
       gl.refresh(), Promise.resolve(ci.reload()),
     ]);
-  }, [r, ap, refreshTenant, gl, ci]));
+  }, [r, ap, refreshTenant, gl, ci]);
+  const pull = usePullToRefresh(reloadEverything);
+
+  /* ── and the same set when the coach comes back ─────────────────────────
+   *
+   * Every screen a coach reaches FROM here writes something this screen is
+   * about: logging a session, marking an outcome, writing a checklist, filing
+   * a contact. They came back to the same page they left. `readNonce` had no
+   * trigger but the gesture above, so the briefing at the top of this screen —
+   * composed across thirteen reads — went on describing the person as they were
+   * when the app started.
+   *
+   * The first focus is skipped: the mount effects are already reading, and
+   * doubling thirteen queries on the way in is the cost this hook exists to
+   * avoid. See src/ui/refreshOnFocus.ts. */
+  useRefreshOnFocus(reloadEverything);
 
   /* ── the briefing ───────────────────────────────────────────────────────
    *

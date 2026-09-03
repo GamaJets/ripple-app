@@ -251,6 +251,24 @@ export default function Settings() {
   const tenantId = me.tenantId;
   const state: Unread = gym !== null ? null : readErr ? 'failed' : 'loading';
 
+  /**
+   * The sentence a field prints when its value is absent BECAUSE THE READ
+   * FAILED, rather than because nobody has set it.
+   *
+   * Every note below branched on `gym?.currency`, `gym?.timezone` and the rest,
+   * and `gym` is null when the tenant read was refused — so a gym that set its
+   * currency months ago was told "Not set", by name, with instructions to go
+   * and set it. src/lib/gymZone.ts:475 states the cost of exactly that: an
+   * instruction to change a setting, printed over a failed read, sends an owner
+   * to change something that is already correct.
+   *
+   * The banner above says the record would not load. This makes each field say
+   * it too, because the field is what somebody is looking at.
+   */
+  const unread = (what: string): string | null => state === 'failed'
+    ? `Not shown — the gym’s record could not be read, so this console does not know what ${what} is. That is not the same as it being unset, and saving now would replace whatever is stored with a blank.`
+    : null;
+
   // Checked as the owner types, so a refusal arrives beside the field rather
   // than after the save. Each is null when the field is fine.
   const nameCheck = parseGymName(name);
@@ -329,9 +347,11 @@ export default function Settings() {
         <form onSubmit={save} style={{ maxWidth: 620, marginTop: 20 }}>
           <Field
             label="Gym name"
+            htmlFor="gym-name"
             note="What every owner, coach and member sees this gym called, on every device."
           >
             <input
+              id="gym-name"
               value={name} onChange={(e) => setName(e.target.value)}
               placeholder="What the gym is called"
               disabled={state === 'failed'}
@@ -345,7 +365,8 @@ export default function Settings() {
             note={
               gym?.currency
                 ? 'The three-letter ISO code this gym charges in. Every plan, pass and payment written from here is denominated in it.'
-                : `Not set — ${NO_CURRENCY_NOTE}. Until it is, a plan cannot be priced, a payment cannot be recorded and a price book cannot be imported: nothing in this console will guess at what money a figure is in.`
+                : unread('this gym’s currency')
+                  ?? `Not set — ${NO_CURRENCY_NOTE}. Until it is, a plan cannot be priced, a payment cannot be recorded and a price book cannot be imported: nothing in this console will guess at what money a figure is in.`
             }
           >
             <input
@@ -377,13 +398,16 @@ export default function Settings() {
 
           <Field
             label="Session fee"
+            htmlFor="session-fee"
             note={
               gym?.currency
                 ? `What one delivered personal-training session is worth, in ${gym.currency}. Payroll, value per client and every "at your session fee" figure multiply by it.`
-                : 'What one delivered personal-training session is worth. It has no currency of its own — it is in whatever the gym charges in — so the figures built on it stay withheld until the currency above is set.'
+                : unread('this gym’s session fee')
+                  ?? 'What one delivered personal-training session is worth. It has no currency of its own — it is in whatever the gym charges in — so the figures built on it stay withheld until the currency above is set.'
             }
           >
             <input
+              id="session-fee"
               value={fee} onChange={(e) => setFee(e.target.value)}
               placeholder="Leave empty if you have not set one"
               inputMode="decimal"
@@ -404,7 +428,8 @@ export default function Settings() {
                 // change on hydration — a wrong answer about zones, printed by
                 // the timezone field, which is the one place it would be least
                 // forgivable.
-                : `Not set — so every date and hour in this console is your own device’s${
+                : unread('this gym’s timezone')
+                  ?? `Not set — so every date and hour in this console is your own device’s${
                     tick != null && readerZone() ? `, which is ${readerZone()}` : ''
                   }. That is invisible and it is usually close enough to look right: it goes wrong for a colleague reading from somewhere else, and it goes wrong for everybody in the hours either side of midnight.`
             }
@@ -491,7 +516,8 @@ export default function Settings() {
             note={
               gym?.brandColor
                 ? 'The accent this console and the gym’s apps are drawn in — every link, button, focus ring and active nav pill. It is the gym’s, not one person’s: changing it changes what every owner, coach and member sees, on every device.'
-                : 'Not set — this gym has not chosen a colour, so every surface draws its own. Set one and this console, the owner app and the coach app all follow it. Clear it again to go back.'
+                : unread('this gym’s brand colour')
+                  ?? 'Not set — this gym has not chosen a colour, so every surface draws its own. Set one and this console, the owner app and the coach app all follow it. Clear it again to go back.'
             }
           >
             <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -803,15 +829,27 @@ const primaryBtn = {
   padding: '9px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
 } as const;
 
-function Field({ label, note, children }: {
-  label: string; note: string; children: React.ReactNode;
+/**
+ * One setting, its caption and its explanation.
+ *
+ * `htmlFor` makes the caption a real `<label>` rather than a `<div>` that looks
+ * like one. It was a div with nothing associating it, so Gym name and Session
+ * fee announced nothing at all — while Currency, Timezone and Brand colour each
+ * carried an `aria-label` and were fine. Two of the five settings on this
+ * screen were unreachable by name, and one of them is what every payroll
+ * figure in the product multiplies by.
+ */
+function Field({ label, note, htmlFor, children }: {
+  label: string; note: string; htmlFor?: string; children: React.ReactNode;
 }) {
   return (
     <section style={{
       border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)',
       padding: '14px 16px', marginBottom: 14,
     }}>
-      <div className="micro">{label}</div>
+      {htmlFor
+        ? <label className="micro" htmlFor={htmlFor} style={{ display: 'block' }}>{label}</label>
+        : <div className="micro">{label}</div>}
       <div style={{ margin: '9px 0 8px' }}>{children}</div>
       <p style={{ margin: 0, color: 'var(--ink3)', fontSize: 12, maxWidth: '64ch' }}>{note}</p>
     </section>

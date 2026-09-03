@@ -16,6 +16,7 @@ import { useTheme } from '../../src/ui/components';
 // screen read no status at all: a class the gym had cancelled kept its spaces
 // count and its Book button, and members turned up to it.
 import { classFillState, isCancelled, classesThatRan } from '../../src/lib/gymSchedule';
+import { classCancelBody } from '../../src/lib/classCancel';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
@@ -133,7 +134,12 @@ export default function Classes() {
         [{ text: 'OK' }],
       );
     };
-    Alert.alert('Cancel booking?', `${c.title} · ${c.branch} · ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}`, [
+    // What cancelling costs, or rather that this app cannot say. The PT path
+    // states a notice period, a fee and a currency, and says so plainly when
+    // the policy could not be read; this path — the one the gym actually bills
+    // — said nothing at all, and silence reads as free. See
+    // src/lib/classCancel.ts for why no notice window is invented here.
+    Alert.alert('Cancel booking?', classCancelBody(`${c.title} · ${c.branch} · ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}`, c.startsAt), [
       { text: 'Keep it', style: 'cancel' },
       { text: 'Cancel booking', style: 'destructive', onPress: () => { void doCancel(); } },
     ]);

@@ -627,6 +627,23 @@ function Settle({ owed, unread, settling, onSettle, method, onMethod, ccy }: {
   onMethod: (m: SettlementMethod) => void;
   ccy: TenantCurrency;
 }) {
+  /**
+   * The coach whose month is about to be settled, waiting for somebody to say
+   * the amount out loud.
+   *
+   * "Mark as paid" wrote a permanent `payroll_settlements` row on a single
+   * click, stamping those session ids so they can never join another run — and
+   * nothing between the click and the write named the trainer, the amount or
+   * the method, and there is no reversal anywhere on this page. /payroll has
+   * one (`reverseSettlement`, `reversalReasonBlocker`); this screen does not,
+   * and it is the one a busy owner clicks down a list on.
+   *
+   * So the irreversible button now states what it is about to do, by name and
+   * by figure, before it does it. That is the least a screen with no undo owes
+   * the person using it.
+   */
+  const [confirming, setConfirming] = useState<string | null>(null);
+
   return (
     <Section
       title="Outstanding"
@@ -696,18 +713,49 @@ function Settle({ owed, unread, settling, onSettle, method, onMethod, ccy }: {
               ? <span className="dash">—</span>
               : (amount(t.cents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>)}
           </div>
-          <button
-            disabled={!!t.blocker || settling === t.trainerId}
-            onClick={() => onSettle(t)}
-            style={{
-              background: t.blocker ? 'var(--surface2)' : 'var(--brand)',
-              color: t.blocker ? 'var(--ink3)' : 'var(--brand-ink)',
-              border: 'none', borderRadius: 0, padding: '8px 14px', fontSize: 13,
-              fontWeight: 600, cursor: t.blocker ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
-            }}
-          >
-            {settling === t.trainerId ? 'Recording…' : 'Mark as paid'}
-          </button>
+          {confirming === t.trainerId ? (
+            <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <span style={{ fontSize: 12.5, color: 'var(--ink2)', maxWidth: '46ch' }}>
+                Record {amount(t.cents, ccy) ?? 'an amount that cannot be stated'} paid to{' '}
+                <strong style={{ color: 'var(--ink)' }}>{t.name ?? 'this coach'}</strong> by {method},
+                against {t.rows.length} session{t.rows.length === 1 ? '' : 's'}? Those sessions are
+                stamped for good and nothing on this screen can undo it.
+              </span>
+              <button
+                disabled={settling === t.trainerId}
+                onClick={() => { setConfirming(null); onSettle(t); }}
+                style={{
+                  background: 'var(--brand)', color: 'var(--brand-ink)', border: 'none',
+                  borderRadius: 0, padding: '8px 14px', fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer', whiteSpace: 'nowrap',
+                }}
+              >
+                {settling === t.trainerId ? 'Recording…' : 'Record it'}
+              </button>
+              <button
+                onClick={() => setConfirming(null)}
+                style={{
+                  background: 'transparent', color: 'var(--ink3)', border: '1px solid var(--ring)',
+                  borderRadius: 0, padding: '8px 12px', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
+                }}
+              >
+                Not yet
+              </button>
+            </div>
+          ) : (
+            <button
+              disabled={!!t.blocker || settling === t.trainerId}
+              onClick={() => setConfirming(t.trainerId)}
+              style={{
+                background: t.blocker ? 'var(--surface2)' : 'var(--brand)',
+                color: t.blocker ? 'var(--ink3)' : 'var(--brand-ink)',
+                border: 'none', borderRadius: 0, padding: '8px 14px', fontSize: 13,
+                fontWeight: 600, cursor: t.blocker ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap',
+              }}
+            >
+              {settling === t.trainerId ? 'Recording…' : 'Mark as paid'}
+            </button>
+          )}
         </div>
           ))}
         </>

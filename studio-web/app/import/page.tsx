@@ -36,6 +36,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
+import { Banner as SharedBanner, Announce } from '@/components/Banner';
 import {
   previewMembers, previewPayments, previewPlans, describePreview,
   type ImportPreview, type MemberRow, type PaymentRow, type PlanRow,
@@ -588,7 +589,15 @@ export default function ImportPage() {
           ))}
           {/* A price book has no dates in it, so there is no convention to pick. */}
           {kind === 'plans' ? null : (
-            <select value={order} onChange={(e) => setOrder(e.target.value as DateOrder | '')} style={field}>
+            <select
+              value={order} onChange={(e) => setOrder(e.target.value as DateOrder | '')}
+              // Its only hint of purpose was the text of the default option,
+              // which a screen reader reads as the VALUE rather than as the
+              // label — so the control that decides whether 03/04 is March or
+              // April announced nothing about what it is for.
+              aria-label="How dates in the pasted text are ordered"
+              style={field}
+            >
               <option value="">Work out the date order</option>
               <option value="dmy">Dates are day/month/year</option>
               <option value="mdy">Dates are month/day/year</option>
@@ -597,7 +606,17 @@ export default function ImportPage() {
           )}
         </div>
         <div style={{ padding: '0 14px 14px' }}>
+          {/* A real <label>, associated by id. The box a gym pastes its entire
+              roster into carried a placeholder and nothing else — and a
+              placeholder is not a label: it is announced as a value, and it
+              disappears the moment anybody types. This is the control that
+              decides how a whole gym's roster is parsed, on the screen where
+              getting it wrong writes rows. */}
+          <label htmlFor="paste" className="micro" style={{ display: 'block', marginBottom: 5 }}>
+            Paste {kind === 'plans' ? 'the price book' : kind === 'members' ? 'the roster' : `the ${kind}`}, one per line
+          </label>
           <textarea
+            id="paste"
             value={text}
             onChange={(e) => { setText(e.target.value); setDone(null); setFailed([]); }}
             placeholder={PLACEHOLDERS[kind]}
@@ -1101,12 +1120,29 @@ const OUTCOME_COLOUR: Record<Outcome, string> = {
   none: '#ef8080',
 };
 
+/**
+ * The ONLY confirmation after a bulk money write, and it was silent.
+ *
+ * This renders sentences like "Partly imported: 12 payment(s) recorded and 8
+ * refused" into a bare `<span>`, so a member of staff pressed Import, heard
+ * nothing, and read a partial failure as success — on a forty-payment write
+ * into the gym's ledger.
+ *
+ * `<Announce>` rather than a role on the span, because the span is not there
+ * until there is something to say, and a node inserted at the same instant as
+ * its text is not reliably announced. The region is mounted whether or not
+ * `done` is set; only the text changes. See studio-web/components/Banner.tsx.
+ */
 function Result({ done }: { done: { text: string; outcome: Outcome } | null }) {
-  if (!done) return null;
   return (
-    <span style={{ fontSize: 13, color: OUTCOME_COLOUR[done.outcome], flex: 1, minWidth: 220 }}>
-      {done.text}
-    </span>
+    <>
+      <Announce say={done?.text ?? null} tone={done && done.outcome !== 'all' ? 'crit' : undefined} />
+      {done ? (
+        <span style={{ fontSize: 13, color: OUTCOME_COLOUR[done.outcome], flex: 1, minWidth: 220 }}>
+          {done.text}
+        </span>
+      ) : null}
+    </>
   );
 }
 
@@ -1126,16 +1162,18 @@ function Failures({ failed }: { failed: { line: number; why: string }[] }) {
   );
 }
 
+// Named `Note`, so the sweep that moved six console pages onto the shared
+// banner — which greps for `function Banner` — never listed it either. This is
+// the screen where a bulk money write reports what it did.
 function Note({ tone, children }: { tone: 'warn' | 'info'; children: React.ReactNode }) {
   return (
-    <p style={{
-      border: '1px solid var(--ring)',
-      borderLeft: `3px solid ${tone === 'warn' ? '#f0c04e' : 'var(--brand)'}`,
-      borderRadius: 0, background: 'var(--surface)', padding: '14px 16px', fontSize: 13,
-      lineHeight: 1.55, color: 'var(--ink2)', margin: '0 0 22px',
-    }}>
+    <SharedBanner
+      tone={tone === 'warn' ? 'warn' : undefined}
+      live={false}
+      style={{ margin: '0 0 22px', lineHeight: 1.55 }}
+    >
       {children}
-    </p>
+    </SharedBanner>
   );
 }
 

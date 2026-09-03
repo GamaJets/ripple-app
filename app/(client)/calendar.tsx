@@ -336,8 +336,24 @@ export default function Calendar() {
   const [planType, setPlanType] = useState<PlannedDayType>('training');
   const [planNote, setPlanNote] = useState('');
   const [planBusy, setPlanBusy] = useState(false);
-  const mine = sessions.filter((s) => s.clientId === cd.id && s.status === 'booked');
-  const open = sessions.filter((s) => s.status === 'available');
+  // ── bounded in time, because every figure below answers "what have I got
+  //    coming" ────────────────────────────────────────────────────────────
+  //
+  // Neither list was. The hero read "Booked with Your Coach — 34 sessions"
+  // counting last year, "Open Slots" counted slots that could no longer be
+  // booked, and Add to Calendar wrote every session the member had ever had
+  // into their real diary — where, unlike everything else in this app, nothing
+  // here can ever take them out again.
+  //
+  // The same hour of grace the sibling screen uses (app/(client)/bookings.tsx)
+  // and the coach-side helper in src/lib/booking.ts: a session that started
+  // fifty minutes ago is one you are in, not one that has gone.
+  const UPCOMING_FROM = Date.now() - 3600_000;
+  const upcoming = (s: { startsAt: string }) => Date.parse(s.startsAt) > UPCOMING_FROM;
+  // The grid below still draws every booked session at any date, through
+  // `visible`; it is the FIGURES and the export that are bounded.
+  const mine = sessions.filter((s) => s.clientId === cd.id && s.status === 'booked' && upcoming(s));
+  const open = sessions.filter((s) => s.status === 'available' && upcoming(s));
 
   // Days visible to the client: their booked sessions + any open slots.
   const visible = sessions.filter((s) => s.status === 'available' || (s.status === 'booked' && s.clientId === cd.id));
@@ -784,8 +800,8 @@ export default function Calendar() {
               : !sessionsCountable
                 ? 'Only part of your calendar loaded, so it cannot be counted. The days below show what did come back.'
                 : open.length > 0
-                  ? `${open.length} open slot${open.length === 1 ? '' : 's'} — tap a day to book`
-                  : 'No open slots yet — your coach adds them here'}
+                  ? `Still to come. ${open.length} open slot${open.length === 1 ? '' : 's'} — tap a day to book`
+                  : 'Still to come. No open slots yet — your coach adds them here'}
         />
 
         <Rule />
@@ -853,6 +869,9 @@ export default function Calendar() {
                   // than a dash somebody finds under next Tuesday.
                   const title = coachName ? `Training with ${coachName}` : 'Personal training';
                   const calName = coachName ? `${BRAND.label} — ${coachName}` : `${BRAND.label} — Personal training`;
+                  // `mine`, which is bounded to what is still to come. It was
+                  // the whole history: last March's sessions went permanently
+                  // into the member's own diary.
                   const evts = mine.map((s) => ({ start: s.startsAt, durationMin: s.durationMin, title }));
                   await shareIcs(buildIcs(evts, calName), 'repple-sessions.ics', 'Add sessions to your calendar');
                 }} />

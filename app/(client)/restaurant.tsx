@@ -18,6 +18,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useFoodLog } from '../../src/ui/foodLog';
+// The exclusions the member set. This screen had no client-data surface at
+// all — `useFoodLog()` was the whole of it — so an app-wide "no shellfish"
+// governed the meal planner and nothing else, and this screen offered prawns
+// with a plus button beside them.
+import { useClientData } from '../../src/ui/clientData';
+import { dishAllergens, dishAllergenMark, DISH_MARK_CAVEAT } from '../../src/lib/foodAllergens';
+import { Flag } from '../../src/ui/kit';
 import { CUISINES, PORTIONS, searchDishes, estimateDish, type Dish } from '../../src/lib/restaurant';
 import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
@@ -26,6 +33,7 @@ export default function Restaurant() {
   const t = useTheme();
   const router = useRouter();
   const fl = useFoodLog();
+  const cd = useClientData();
   const [q, setQ] = useState('');
   const [cuisine, setCuisine] = useState<string | null>(null);
   const [sel, setSel] = useState<Dish | null>(null);
@@ -95,20 +103,36 @@ export default function Restaurant() {
 
         <Section>
           <SectionHead title={cuisine || 'All Dishes'} note={`${results.length} dish${results.length === 1 ? '' : 'es'}`} />
-          {results.map((d, i) => (
+          {/* The standing sentence, above the rows. Marks with no caveat read
+              the wrong way round: an allergic member takes an unmarked row as
+              cleared, and nothing here has cleared anything. */}
+          {cd.avoid.length ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{DISH_MARK_CAVEAT}</Flag> : null}
+          {results.map((d, i) => {
+            const inIt = dishAllergens(d.name, cd.avoid);
+            const mark = dishAllergenMark(inIt);
+            return (
             <View key={d.id}>
               {i > 0 ? <Rule /> : null}
-              <Pressable onPress={() => { setSel(d); setPortion(1); }} accessibilityRole="button" accessibilityLabel={d.name}
+              <Pressable onPress={() => { setSel(d); setPortion(1); }} accessibilityRole="button"
+                accessibilityLabel={mark ? `${d.name}. ${mark}` : d.name}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{d.name}</Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{d.cuisine} · P{d.protein} C{d.carbs} F{d.fat}</Text>
+                  {/* The mark carries the tone; the words carry the meaning. */}
+                  {mark ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                      <Text style={{ ...ty.caption, color: t.ink2 }}>{mark}</Text>
+                    </View>
+                  ) : null}
                 </View>
                 <Text style={{ ...value(18), color: t.ink }}>{num(d.kcal)}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3 }}>kcal</Text>
               </Pressable>
             </View>
-          ))}
+            );
+          })}
           {results.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
               <Icon name="search" size={26} color={t.ink3} />
@@ -127,6 +151,13 @@ export default function Restaurant() {
             <>
               <Text style={{ ...ty.micro, color: t.ink3 }}>{sel.cuisine} · portion estimate</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 4, marginBottom: sp.lg }}>{sel.name}</Text>
+              {/* On the sheet with the Add button on it, not only in the list.
+                  This is the moment the dish goes into the member's day. */}
+              {dishAllergenMark(dishAllergens(sel.name, cd.avoid)) ? (
+                <Flag tone={t.crit} style={{ marginBottom: sp.lg }}>
+                  {dishAllergenMark(dishAllergens(sel.name, cd.avoid))} — one of the things you asked to avoid. {DISH_MARK_CAVEAT}
+                </Flag>
+              ) : null}
               <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Portion</Text>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.xl }}>
                 {PORTIONS.map((p) => { const on = portion === p.mult; return (

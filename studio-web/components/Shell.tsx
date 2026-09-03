@@ -401,8 +401,15 @@ export function Shell({
           <div className="mono" style={{ fontSize: 10, color: 'var(--ink2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {who}
           </div>
+          {/* Three states, and the rail had two.
+              `me.roleUnknown` exists in studio-web/lib/supabase.ts precisely so
+              a REFUSED profile read is not reported as an account without a
+              role, and every page body already uses it — the Overview prints
+              "We could not read your account… which is not the same as you not
+              having access." This line, on every screen, said "no role"
+              underneath it. */}
           <div className="mono" style={{ fontSize: 9.5, color: 'var(--ink3)', textTransform: 'lowercase', marginTop: 2 }}>
-            {role ?? 'no role'}
+            {role ?? (me.roleUnknown ? 'role not read' : 'no role')}
           </div>
           <button
             onClick={() => supabase.auth.signOut().then(() => location.reload())}

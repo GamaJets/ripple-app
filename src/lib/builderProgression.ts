@@ -55,7 +55,7 @@
 // which is the branch above.
 import type { LoadStatus } from '../ui/loadStatus';
 import type { WorkoutEntry } from './mockData';
-import { lastSetsFor, suggestForExercise } from './progression';
+import { suggestForExercise } from './progression';
 import type { WeightUnit } from './units';
 
 export interface ProgressionInput {
@@ -127,10 +127,26 @@ export function progressionOffer(i: ProgressionInput): ProgressionOffer {
   // movement. They had. A coach writing next week's programme was reading an
   // accusation of absence about somebody who did the work on Tuesday.
   //
-  // `lastSetsFor` is the same reader `suggestNextWeight` is given its sets by,
-  // so the two cannot come to disagree about whether anything was logged.
-  const last = lastSetsFor(i.log, i.exercise);
-  if (last && last.length) {
+  // ── and it came to disagree anyway ───────────────────────────────────────
+  //
+  // This used to read `lastSetsFor`, on the stated grounds that it is the same
+  // reader `suggestNextWeight` is given its sets by, "so the two cannot come to
+  // disagree about whether anything was logged". That stopped being true when
+  // `lastSetsFor` gained a `liftedSets` filter so a session of planks would not
+  // recommend a heavier plank — a correct change, which made it return
+  // undefined for exactly the sessions THIS branch exists to recognise.
+  //
+  // The result was the original defect, restored: a client who did press-ups on
+  // Tuesday was reported to their coach as never having logged the movement.
+  //
+  // So the question is asked directly, and it is a different question from the
+  // one `suggestNextWeight` asks. That one wants sets it can read a LOAD from;
+  // this one wants to know whether the person did the movement at all. Sharing
+  // a reader between two different questions is what broke it.
+  const loggedAtAll = i.log.some(
+    (e) => e.exercise === i.exercise && Array.isArray(e.sets) && e.sets.length > 0,
+  );
+  if (loggedAtAll) {
     return {
       kind: 'gap',
       note: 'They have logged this movement with no weight on it, so there is no load of theirs to build from. That is bodyweight work they did, not a movement they have never done.',

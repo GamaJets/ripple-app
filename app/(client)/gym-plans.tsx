@@ -148,6 +148,10 @@ export default function GymPlans() {
   // screen says three different things.
   const sell = factStatus === 'ready' ? gymCanSell(facts) : null;
   const canSell = sell?.ok === true;
+  // Whether this screen knows what the member is already on. Every offer below
+  // is relative to that, so under anything but a whole read the offers are
+  // sentences rather than buttons.
+  const membershipKnown = mStatus === 'ready';
 
   const waiting = useMemo(() => orders.filter(orderIsLive), [orders]);
   const overall = worstStatus(factStatus, planStatus, passStatus, orderStatus);
@@ -241,7 +245,13 @@ export default function GymPlans() {
           ) : null}
 
           {(planStatus === 'error' ? [] : plans).map((p, i) => {
-            const offer = offerFor(p, mStatus === 'ready' ? primary : null, mStatus === 'ready' ? standing : null, today);
+            // `offerFor` reads a null current membership as "there is none",
+            // which is the right reading of a member who has none and the wrong
+            // reading of a read that failed — and under a failed read it
+            // answered "Buy This Plan · runs from today" for a member with a
+            // running membership, from a start date this screen had just told
+            // them it could not compute. Ten lines up it says so out loud.
+            const offer = offerFor(p, membershipKnown ? primary : null, membershipKnown ? standing : null, today);
             const key = `plan:${p.id}`;
             return (
               <View key={p.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -250,7 +260,17 @@ export default function GymPlans() {
                   <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{planPrice(p)}</Text>
                 </View>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{offer.note}</Text>
-                {offer.label && canSell ? (
+                {/* No transaction on an unknown membership. Everywhere else in
+                    this file an unread fact withholds the CLAIM; this was the
+                    one place it was allowed to start a payment. */}
+                {offer.label && canSell && !membershipKnown ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {mStatus === 'loading'
+                      ? 'Reading your membership before this can be offered.'
+                      : 'Buying is not offered until your membership can be read — starting a second term over one that is still running is not something this screen can undo. Pull down to try again.'}
+                  </Text>
+                ) : null}
+                {offer.label && canSell && membershipKnown ? (
                   <View style={{ marginTop: sp.md }}>
                     <Cta label={busy === key ? 'Opening…' : offer.label} wide disabled={busy === key}
                       onPress={() => buy(key, {

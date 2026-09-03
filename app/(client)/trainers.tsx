@@ -76,7 +76,7 @@ import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, type CoachedMode
 // screen and the photo-sharing screen can never disagree about whether somebody
 // is your coach.
 import { fetchMyCoach, type CoachRef } from '../../src/lib/photoShare';
-import { endCoaching, leaveCoachPrompt, leaveOutcome, coachLabel } from '../../src/lib/endCoaching';
+import { endCoaching, leaveCoachPrompt, leaveOutcome, coachLabel, replaceCoachNote } from '../../src/lib/endCoaching';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { fetchCredentials, fetchRatingSummaries, fetchReviews, todayKey } from '../../src/ui/reviews';
 import {
@@ -672,6 +672,26 @@ export default function FindTrainer() {
     }
   }, []);
 
+  /**
+   * The tap. Asks first when there is a coach to lose.
+   *
+   * The Flag above the buttons says what accepting would do; this is the
+   * confirmation, because reading a warning and acting on it are different
+   * things and the consequence here is somebody's coaching relationship. With
+   * no coach — the ordinary case — it goes straight through, unchanged.
+   */
+  const askToRequest = (c: Coach, m: CoachedMode) => {
+    if (!coach || coach.id === c.id) { void request(c, m); return; }
+    Alert.alert(
+      `Ask ${c.name} instead of ${coachLabel(coach.name)}?`,
+      replaceCoachNote(coach.name, c.name),
+      [
+        { text: 'Keep my coach', style: 'cancel' },
+        { text: `Ask ${c.name}`, onPress: () => { void request(c, m); } },
+      ],
+    );
+  };
+
   // Reviews for the open profile. Reset to 'loading' the moment the sheet
   // changes coach, so the previous coach's reviews can never sit under a new
   // name for the length of a round trip.
@@ -1210,13 +1230,29 @@ export default function FindTrainer() {
                     We couldn’t check your existing requests, so we can’t tell whether you’ve already asked {sel.name}. Sending again won’t create a second request.
                   </Text>
                 ) : null}
+                {/* You already have a coach, and accepting ends them.
+                    `link_coaching` (part 155) ends every other active
+                    relationship — "one person has one coach in this product" —
+                    so these three buttons were one accept away from removing
+                    the coach whose name is drawn at the top of this same
+                    screen, and said nothing about it. */}
+                {coach && coach.id !== sel.id ? (
+                  <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{replaceCoachNote(coach.name, sel.name)}</Flag>
+                ) : null}
+                {/* And when we could not read who coaches them, that is not
+                    evidence that nobody does. */}
+                {coachStatus === 'error' ? (
+                  <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                    We couldn’t check who coaches you. If somebody does, asking {sel.name} would replace them once they accept.
+                  </Flag>
+                ) : null}
                 {/* Three buttons, each with the line that says what it changes.
                     "Hybrid" is a word until it is spelled out, and the same is
                     true of the two that were already here — a client picking
                     between them had nothing to pick on. */}
                 {COACHED_MODES.map((m) => (
                   <View key={m} style={{ marginBottom: sp.md }}>
-                    <Cta label={`Request ${COACHED_MODE_SHORT[m].toLowerCase()} coaching`} wide onPress={() => request(sel, m)} />
+                    <Cta label={`Request ${COACHED_MODE_SHORT[m].toLowerCase()} coaching`} wide onPress={() => askToRequest(sel, m)} />
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 5, textAlign: 'center' }}>{COACHING_MODE_NOTE[m]}</Text>
                   </View>
                 ))}

@@ -67,7 +67,8 @@ import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { useRoster } from '../../src/ui/roster';
 import { useSessions } from '../../src/ui/sessions';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
-import { atRiskClient } from '../../src/lib/trainerMock';
+import { useClientDrift } from '../../src/ui/clientDrift';
+import { useTenant } from '../../src/ui/tenant';
 import { fetchMyCurrency } from '../../src/lib/myCurrency';
 import { type MyCurrency } from '../../src/lib/currencySource';
 import { currencyForModel } from '../../src/lib/currencyForModel';
@@ -120,6 +121,17 @@ export default function TrainerAssistant() {
   const figureStatus = worstStatus(rosterStatus, sessionsStatus);
   const figuresWhole = isWhole(figureStatus);
 
+  // Who has actually stopped, on the one definition of it — the same read the
+  // Clients screen and Analytics make, through src/ui/clientDrift.ts. The gym
+  // is passed because the door log is tenant-scoped and is not read without it.
+  const { tenant } = useTenant();
+  // Bumped by the gesture below. The drift read re-runs on its own when the
+  // roster's ids change, and a pull-to-refresh usually changes none of them —
+  // so without this the coach could refresh everything on the screen except the
+  // one read the prose is actually about.
+  const [driftNonce, setDriftNonce] = useState(0);
+  const drift = useClientDrift(roster, tenant?.id ?? null, driftNonce);
+
   /**
    * What this coach is priced in, through the one resolver.
    *
@@ -157,7 +169,7 @@ export default function TrainerAssistant() {
    * screen is the only thing that writes it, and there is no other copy of it
    * for a refresh to go and find. */
   const pull = usePullToRefresh(useCallback(
-    () => Promise.all([refreshRoster(), refreshSessions(), reloadProfile(), loadCurrency()]),
+    () => { setDriftNonce((n) => n + 1); return Promise.all([refreshRoster(), refreshSessions(), reloadProfile(), loadCurrency()]); },
     [refreshRoster, refreshSessions, reloadProfile, loadCurrency],
   ));
 
@@ -233,7 +245,22 @@ export default function TrainerAssistant() {
       currency: currencyForModel(cur),
       clients,
       avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet',
-      atRiskClients: figuresWhole ? roster.filter(atRiskClient).length : null,
+      // Was `roster.filter(atRiskClient).length`. `atRiskClient` is
+      // src/lib/trainerMock.ts — `adherence < 80 || staleDays(lastActive) >= 2`
+      // — where `staleDays` recovers a number by regexing a DISPLAY STRING
+      // ("3d ago", written by `ago()` in src/ui/roster.tsx for a human to
+      // read). Its own comment says src/lib/clientDrift.ts models this properly
+      // and is what the Clients screen ranks on. So this screen was writing
+      // prose about the coach's book off a definition the coach's own client
+      // list does not use, and the two numbers disagreed.
+      //
+      // Null, not a count, whenever the training record is not established.
+      // The system prompt already tells the model to say it was not given a
+      // figure rather than guess; a zero here would have it write that nobody
+      // is drifting.
+      atRiskClients: figuresWhole && drift.drift && !drift.error
+        ? roster.filter((c) => { const d = drift.driftFor(c.id); return d?.status === 'at_risk' || d?.status === 'idle'; }).length
+        : null,
       onTrack: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 85).length : null,
       watch: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length : null,
       atRiskLow: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence < 70).length : null,

@@ -59,7 +59,7 @@ import {
 import { toCsv } from '@lib/gymExport';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { saveText } from '@/lib/save';
-import { Banner } from '@/components/Banner';
+import { Banner, Announce } from '@/components/Banner';
 
 /** How far back the picker offers. Thirteen so last year's same month is there. */
 const MONTHS_OFFERED = 13;
@@ -1305,6 +1305,9 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
   payments: GymPayment[]; settled: Settled[];
   raised: Invoice[]; outstanding: Invoice[]; books: Books;
 }) {
+  const loading = books.payments.state === 'loading' || books.settled.state === 'loading'
+    || books.costs.state === 'loading' || books.invoices.state === 'loading';
+
   const download = () => {
     const parts: string[] = [];
     const head = (title: string) => `\n${title}\n`;
@@ -1319,8 +1322,8 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
     ));
 
     parts.push(head('MONEY IN — payments recorded in the month'));
-    parts.push(books.payments.state === 'failed'
-      ? unreadable('the payments taken', books.payments.why)
+    parts.push(books.payments.state !== null
+      ? unreadable('the payments taken', books.payments.state, books.payments.why)
       : toCsv(
           ['Taken at', 'Member', 'Amount (minor units)', 'Currency', 'Method', 'Kind', 'Note'],
           payments.map((p) => [
@@ -1330,8 +1333,8 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
           false));
 
     parts.push(head('MONEY OUT — payroll settled in the month'));
-    parts.push(books.settled.state === 'failed'
-      ? unreadable('the payroll settlements', books.settled.why)
+    parts.push(books.settled.state !== null
+      ? unreadable('the payroll settlements', books.settled.state, books.settled.why)
       : toCsv(
           ['Settled at', 'Trainer', 'Period from', 'Period to', 'Amount (minor units)', 'Currency', 'Sessions', 'Method'],
           settled.map((r) => [
@@ -1341,8 +1344,8 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
           false));
 
     parts.push(head('MONEY OUT — costs recorded in the month'));
-    parts.push(books.costs.state === 'failed'
-      ? unreadable('the recorded costs', books.costs.why)
+    parts.push(books.costs.state !== null
+      ? unreadable('the recorded costs', books.costs.state, books.costs.why)
       : toCsv(
           ['Paid on', 'What for', 'Paid to', 'Category', 'Amount (minor units)', 'Currency', 'Note'],
           (books.costs.rows ?? []).map((c) => [
@@ -1352,8 +1355,8 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
           false));
 
     parts.push(head(`INVOICES RAISED IN ${w.label.toUpperCase()}`));
-    parts.push(books.invoices.state === 'failed'
-      ? unreadable('the invoice register', books.invoices.why)
+    parts.push(books.invoices.state !== null
+      ? unreadable('the invoice register', books.invoices.state, books.invoices.why)
       : toCsv(
           ['Number', 'Issued', 'Due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status', 'Note'],
           raised.map((i) => [
@@ -1363,8 +1366,8 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
           false));
 
     parts.push(head(`OUTSTANDING AS AT ${asAt}`));
-    parts.push(books.invoices.state === 'failed'
-      ? unreadable('the invoice register', books.invoices.why)
+    parts.push(books.invoices.state !== null
+      ? unreadable('the invoice register', books.invoices.state, books.invoices.why)
       : toCsv(
           ['Number', 'Issued', 'Due', 'Days past due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status'],
           outstanding.map((i) => [
@@ -1382,22 +1385,39 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
 
   return (
     <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 20px' }}>
-      <button onClick={download} style={primaryBtn}>Export this month (CSV)</button>
+      {/* Disabled while any slice is still in flight. The refusal travels in
+          the file either way, but a button that cannot produce a whole month
+          should not look like one that can. */}
+      <button onClick={download} style={{ ...primaryBtn, opacity: loading ? 0.5 : 1 }} disabled={loading}>
+        {loading ? 'Still reading the month…' : 'Export this month (CSV)'}
+      </button>
       <button onClick={() => window.print()} style={{ ...primaryBtn, background: 'transparent', color: 'var(--ink2)', border: '1px solid var(--ring)' }}>
         Print / save as PDF
       </button>
       <span style={{ fontSize: 12, color: 'var(--ink3)', maxWidth: '58ch' }}>
-        Both take what is on this page. A section whose read failed is exported as the sentence
-        saying so, never as an empty section &mdash; an empty one in a file somebody keeps is
-        indistinguishable, forever, from a month in which nothing happened.
+        Both take what is on this page. A section whose read failed &mdash; or had not
+        finished &mdash; is exported as the sentence saying so, never as an empty section:
+        an empty one in a file somebody keeps is indistinguishable, forever, from a month
+        in which nothing happened.
       </span>
     </div>
   );
 }
 
-/** The line a failed read exports as. Not an empty section. */
-function unreadable(what: string, why: string | null): string {
-  return `NOT EXPORTED — ${what} could not be read${why ? `: ${why}` : ''}. This is unknown, not nil.\n`;
+/**
+ * The line a read that has not landed exports as. Not an empty section.
+ *
+ * Two states, because `Unread` has three values and only one of them is null.
+ * Every one of these gates tested `=== 'failed'`, so a slice still IN FLIGHT
+ * fell through to its rows and exported an empty section — and a CSV headed
+ * "MONEY IN — payments recorded in the month" with nothing under it, filed, is
+ * indistinguishable from a month in which the gym banked nothing. The header on
+ * this Handoff already promised the opposite behaviour.
+ */
+function unreadable(what: string, state: 'loading' | 'failed', why: string | null): string {
+  return state === 'loading'
+    ? `NOT EXPORTED — ${what} had not finished loading when this file was made. Export the month again. This is unknown, not nil.\n`
+    : `NOT EXPORTED — ${what} could not be read${why ? `: ${why}` : ''}. This is unknown, not nil.\n`;
 }
 
 /** A filename fragment from the gym's name. Falls back rather than producing a
@@ -1854,6 +1874,15 @@ function Reconcile({ books, w, inMonthPayments, tenantId, me, onChange }: {
       title="What does not reconcile"
       sub="The two lists an accountant came for. Neither is a finding — each row is a question with a name on it."
     >
+      {/* Mounted for as long as this section is on screen, so a later refusal
+          is a CHANGE to an existing region rather than a node inserted at the
+          same instant as its text — which no screen reader reliably announces.
+          `markErr` says "That match was NOT recorded… The payment and the
+          invoice are still unlinked", and it lived in a plain <div>: a member
+          of staff pressed the button, heard nothing, and read the refusal as
+          success on a reconciliation. /staff has used `<Announce>` for this
+          since it was written. */}
+      <Announce say={markErr} tone="crit" />
       {!bothRead ? (
         <div style={{ padding: 14, color: 'var(--ink2)', fontSize: 13.5 }}>
           {books.invoices.state === 'loading' || books.payments.state === 'loading'

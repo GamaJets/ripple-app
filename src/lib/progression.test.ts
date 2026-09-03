@@ -184,6 +184,39 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(a === b, `${msg} — got 
   eq(priorBest1RM(log, 'Front Squat'), 0, 'and is per movement, not shared');
 }
 
+/* ── a hold is not a lift ────────────────────────────────────────────────── */
+//
+// A 45-second plank under a 10 kg plate is `[45, 10]` with `timed[0]` true —
+// seconds in the reps slot. Every rule in this module reads that slot as
+// repetitions, so before this the board said the member had cleared 45 reps on
+// every top set and told them to add 2.5 kg and reset to eight. Of a plank.
+// Every session.
+
+{
+  const log: WorkoutEntry[] = [
+    { t: '2026-08-30T10:00:00.000Z', exercise: 'Plank', sets: [[45, 10], [40, 10]], timed: [true, true] },
+  ];
+  const tips = suggestProgression(log, 'kg');
+  eq(tips.length, 0, 'a session of holds produces no load target at all');
+  eq(priorBest1RM(log, 'Plank'), 0,
+    'and no estimated 1RM — Epley over seconds is arithmetic on a stopwatch, and it silently outranked every real set on that movement for ever');
+  eq(suggestForExercise(log, 'Plank', '8-12', 2.5, 'kg'), null,
+    'and nothing to suggest for next time');
+}
+
+{
+  // The same movement done both ways in one session: the holds come out, the
+  // lifted sets stay, and the answer is about the sets that were lifted.
+  const log: WorkoutEntry[] = [
+    { t: '2026-08-30T10:00:00.000Z', exercise: 'Farmer Carry', sets: [[30, 24], [12, 20], [12, 20]], timed: [true, false, false] },
+  ];
+  const tip = suggestProgression(log, 'kg').find((x) => x.exercise === 'Farmer Carry');
+  ok(!!tip, 'the lifted sets still produce a target');
+  eq(tip!.lastWeight, 20, 'and the hold’s heavier load is not read as the top working weight');
+  ok(priorBest1RM(log, 'Farmer Carry') === Math.max(0, Math.round(20 * (1 + 12 / 30))),
+    'the record is computed from the repeated sets only');
+}
+
 if (errors.length) {
   console.error(`progression.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);
   for (const e of errors) console.error('  · ' + e);

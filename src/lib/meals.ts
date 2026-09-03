@@ -131,6 +131,29 @@ export function poolGaps(diet: Diet, slot: Slot, avoid: Allergen[] = []): Allerg
     });
     if (empties) out.push(a);
   }
+  // ── the exclusions that only fail TOGETHER ──────────────────────────────
+  //
+  // The loop above asks each allergen ALONE, and `poolFilter` filters against
+  // the whole list AT ONCE. Those are different questions, and the gap between
+  // them is silent: dairy alone may leave a pool with something in it, gluten
+  // alone may too, and dairy-and-gluten together may empty it. `poolFilter`
+  // then falls back to the UNFILTERED pool — the fallback whose entire
+  // justification, twenty lines up, is that the plan is "drawn with a warning
+  // on it rather than as though nothing were wrong" — while this function
+  // returned nothing to warn with. The member got a plan that had quietly
+  // ignored their filter, with no banner anywhere.
+  //
+  // So the same question `poolFilter` actually asks is asked here: does the
+  // whole exclusion list empty a required pool? When it does, every exclusion
+  // still standing is named — none of them can be singled out as the culprit,
+  // because it is the combination, and the member needs to know the filter was
+  // not honoured rather than which half to blame.
+  const combinedEmpties = pools.some((pool) => {
+    const forThisDiet = forDiet(pool, diet);
+    if (!forThisDiet.length) return false;
+    return !forThisDiet.some((cp) => !componentAllergens(cp).some((a) => avoid.includes(a)));
+  });
+  if (combinedEmpties) for (const a of avoid) if (!out.includes(a)) out.push(a);
   return out;
 }
 
@@ -360,9 +383,25 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
   }
   const sum = (k: 'k' | 'p' | 'c' | 'f') => parts.reduce((a, p) => a + (p?.[k] ?? 0), 0);
   const ing = parts.flatMap((p) => p?.ing ?? []);
+  // ── a dimension with nothing in it ──────────────────────────────────────
+  //
+  // `parts[i]` is null when a component pool is empty for this diet, and every
+  // branch below reads `.n` straight off the tuple — so the whole nutrition
+  // screen threw a TypeError out of render. It is reachable: `diet` is a plain
+  // text column cast to a five-member union, and a row holding anything else
+  // (an older vocabulary, an import, a typo) has no pools at all. That ingress
+  // is closed by `readDiet` in src/lib/types.ts; this is the second lock, and
+  // it is the one that matters, because a crash inside render takes the tab bar
+  // with it.
+  //
+  // An empty component contributes no name, no icon, no macros and no
+  // ingredients — which is exactly what a dimension with nothing in it means —
+  // and the sentences below are written to close up around a blank.
+  const EMPTY: Comp = { n: '', k: 0, p: 0, c: 0, f: 0, ing: [], d: [] };
+  const at = (i: number): Comp => parts[i] ?? EMPTY;
   let n: string, ico: string, steps: string[];
   if (slot === 'Breakfast') {
-    const [base, top, boost, style] = parts as Comp[];
+    const [base, top, boost, style] = [at(0), at(1), at(2), at(3)];
     n = `${cap(top.n)} ${base.n}${boost.n ? ' ' + boost.n : ''}${style.n ? ' — ' + style.n : ''}`;
     ico = base.ico ?? '🍽️';
     steps = [
@@ -371,7 +410,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
       `Finish${style.n ? ` — ${style.n}` : ' with a pinch of cinnamon or sea salt to taste'}, then serve.`,
     ];
   } else if (slot === 'Snack') {
-    const [a, b, prep] = parts as Comp[];
+    const [a, b, prep] = [at(0), at(1), at(2)];
     n = `${cap(a.n)} & ${b.n}${prep.n ? ' (' + prep.n + ')' : ''}`;
     ico = a.ico ?? '🍎';
     steps = [
@@ -379,7 +418,7 @@ export function mealAt(diet: Diet, slot: Slot, idx: number, avoid: Allergen[] = 
       `Add the ${b.n} alongside${prep.n ? ` — ideal ${prep.n}` : ''}, then enjoy.`,
     ];
   } else {
-    const [pr, cb, vg, fl] = parts as Comp[];
+    const [pr, cb, vg, fl] = [at(0), at(1), at(2), at(3)];
     n = `${fl.n} ${pr.n} with ${cb.n} & ${vg.n}`;
     ico = pr.ico ?? '🍽️';
     const cookTime = /salmon|fish|cod|prawn/i.test(pr.n) ? ' (about 3–4 min per side)' : /chicken|turkey|beef|steak/i.test(pr.n) ? ' (about 5–7 min per side)' : ' until cooked through';

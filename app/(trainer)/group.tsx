@@ -47,6 +47,7 @@
 // sentence, not a smaller one.
 import { useCallback, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -96,11 +97,19 @@ export default function Groups() {
   // fails independently and an empty answer from any of them is a wrong
   // answer rather than a gap — a fan-out sized by a partial read assigns over
   // people it never saw.
-  const pull = usePullToRefresh(useCallback(() => Promise.all([
+  const reloadEverything = useCallback(() => Promise.all([
     Promise.resolve(refreshGroups()), refreshRoster(),
     Promise.resolve(reloadPrograms()), Promise.resolve(reloadTemplates()),
     acks.refresh(),
-  ]), [refreshGroups, refreshRoster, reloadPrograms, reloadTemplates, acks]));
+  ]), [refreshGroups, refreshRoster, reloadPrograms, reloadTemplates, acks]);
+  const pull = usePullToRefresh(reloadEverything);
+  // And on the way back in. This screen is registered `href: null` inside
+  // <Tabs>, so it mounts once and its five reads ran once — a coach who sent a
+  // programme to a group, opened somebody's copy in the builder to check it,
+  // and came back was shown the versions as they stood before they sent it.
+  // "on version 2 of this programme" about a person who is now on version 3 is
+  // the sentence that gets acted on. See src/ui/refreshOnFocus.ts.
+  useRefreshOnFocus(reloadEverything);
 
   const [newName, setNewName] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);

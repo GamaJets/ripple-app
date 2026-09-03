@@ -62,6 +62,7 @@ import {
 } from '../../src/lib/floorQueue';
 import { countRegister, registerArc, registerLine } from '../../src/lib/classRegister';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 
 export default function ClassCheckin() {
   const t = useTheme();
@@ -213,10 +214,24 @@ export default function ClassCheckin() {
    * when they want the screen to be right about the room should not leave them
    * on it. `flush` is the same call the "Send" button makes and it is safe to
    * repeat — an empty queue sends nothing. */
-  const pull = usePullToRefresh(useCallback(
+  const reloadEverything = useCallback(
     () => Promise.all([loadRoster(), loadRate(), flushQueue()]),
     [loadRoster, loadRate, flushQueue],
-  ));
+  );
+  const pull = usePullToRefresh(reloadEverything);
+  /* ── and on the way back in ──────────────────────────────────────────────
+   *
+   * The register was read ONCE, on mount, while the room was still filling —
+   * and this screen is registered `href: null` inside <Tabs>, so it stays
+   * mounted between classes. A coach who opened it, stepped away to take a
+   * payment, and came back was taking a register written before three people
+   * booked and one dropped. Members book and cancel on their own phones right
+   * up to the door; nothing else on this screen goes and looks.
+   *
+   * The queued check-ins flush with it, exactly as they do on the gesture: the
+   * ticks a trainer is PAID on are sitting on this handset, and coming back to
+   * the screen is as good a moment to send them as pulling it. */
+  useRefreshOnFocus(reloadEverything);
 
   // Whether there is a roster to count at all. Without this the two counts
   // below are computed over `[]` and come out as 0 — and the hero then prints a

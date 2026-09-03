@@ -316,10 +316,27 @@ const mem = (id: string, status: string, lastSeenDays: number | null): SegmentMe
   const seg = buildSegments([mem('a', 'active', null), mem('b', 'active', 30)], { doorLogLive: true })
     .find((s) => s.id === 'active')!;
   const csv = segmentCsv(seg, () => ({ email: 'x@y.z', phone: null }));
-  const lines = csv.split('\n');
+
+  // ── the writer changed, and these assertions changed with it ────────────
+  //
+  // `segmentCsv` had its own quoting and joined with '\n', emitting no
+  // byte-order mark — so Excel opened this file in the machine's legacy code
+  // page and a Gulf gym's call list arrived with half its names as mojibake.
+  // It now goes through `toCsv`, the writer /export advertises, which writes a
+  // BOM, CRLF endings and a trailing newline, and quotes a field only where a
+  // delimiter, a quote or edge whitespace makes it necessary.
+  //
+  // So the shape asserted below is the shape of the file Excel opens, and the
+  // three assertions that failed were each pinning a property of the broken
+  // writer rather than a property of a correct CSV.
+  ok(csv.startsWith('\uFEFF'),
+    'a byte-order mark, which is what makes Ahmed Al-Naïm a name rather than mojibake in the tool a gym opens this with');
+  ok(csv.includes('\r\n'), 'and CRLF endings, for the same reader');
+  const lines = csv.replace(/^\uFEFF/, '').replace(/\r\n$/, '').split('\r\n');
   eq(lines.length, 3, 'a header and one line per member');
-  ok(csv.includes(',"",'), 'a member the door log has never seen has an EMPTY interval, not 0 — 0 reads as "came in today"');
-  ok(csv.includes('"30"'), 'and one it has seen carries the real interval');
+  eq(lines[1].split(',')[3], '',
+    'a member the door log has never seen has an EMPTY interval, not 0 — 0 reads as "came in today"');
+  eq(lines[2].split(',')[3], '30', 'and one it has seen carries the real interval');
 
   const quoted = segmentCsv({
     ...seg, members: [mem('O"Brien', 'active', 1)],

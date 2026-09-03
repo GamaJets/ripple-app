@@ -285,6 +285,7 @@
     "src/lib/gymLink.test.ts",
     "src/lib/gymWindow.test.ts",
     "src/lib/passUndo.test.ts",
+    "src/lib/gymPaidTotal.test.ts",
     "src/lib/gymPaperwork.test.ts",
     "src/lib/gymSigning.test.ts",
     "src/lib/gymDocAccess.test.ts",
@@ -319,6 +320,10 @@
     "src/lib/avatarImage.test.ts",
     "src/lib/inbodyVision.ts",
     "src/lib/inbodyVision.test.ts",
+    "src/lib/classCancel.ts",
+    "src/lib/classCancel.test.ts",
+    "src/lib/foodAllergens.ts",
+    "src/lib/foodAllergens.test.ts",
     "src/lib/coachChat.test.ts",
     "src/lib/recordQueue.test.ts",
     "src/lib/exportWindow.ts",
@@ -364,6 +369,7 @@
     "src/lib/staleRead.test.ts",
     "src/lib/routeSubject.test.ts",
     "src/lib/payoutAccount.test.ts",
-    "src/lib/currencyForModel.test.ts"
+    "src/lib/currencyForModel.test.ts",
+    "src/lib/currencyStep.test.ts"
   ]
 }

@@ -13,8 +13,10 @@
 // stopped flagging butter would be a far worse bug than the one being fixed.
 import {
   ALLERGENS, allergenGapNote, mealAllergens, planGaps, poolGaps,
-  type Allergen,
+  catalogSize, mealAt,
+  type Allergen, type Slot,
 } from './meals';
+import { readDiet, type Diet } from './types';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -82,6 +84,74 @@ eq(allergenGapNote(planGaps('vegan', ['Breakfast', 'Lunch', 'Dinner', 'Snack'], 
 const note = allergenGapNote(['dairy']);
 ok(!!note && note.includes('dairy'), 'a real gap still names the allergen');
 ok(!!note && /check every dish/i.test(note), 'and still tells them to check');
+
+/* ── exclusions that only fail TOGETHER ──────────────────────────────────── */
+//
+// `poolFilter` filters against the whole exclusion list at once and falls back
+// to the UNFILTERED pool when that empties one. `poolGaps` asked each allergen
+// ALONE. So a pair that empties a pool only in combination — dairy alone leaves
+// something, gluten alone leaves something, dairy and gluten together leave
+// nothing — produced a plan built from the very components the member excluded,
+// with `allergenGapNote` returning null and no banner anywhere.
+//
+// The invariant, asserted over every diet, every slot and every subset of the
+// six exclusions: if a generated meal contains something the member excluded,
+// the member is TOLD. Not "which allergen" — that is a judgement — but that the
+// filter was not honoured. A silent plan with dairy in it is the failure.
+
+{
+  const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
+  const SLOTS: Slot[] = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+  const ids = ALLERGENS.map((a) => a.id);
+  let silent = 0;
+  let checked = 0;
+  // Every non-empty subset of the six.
+  for (let mask = 1; mask < (1 << ids.length); mask++) {
+    const avoid = ids.filter((_, i) => (mask & (1 << i)) !== 0);
+    for (const diet of DIETS) {
+      for (const slot of SLOTS) {
+        const size = catalogSize(diet, slot, avoid);
+        const gaps = poolGaps(diet, slot, avoid);
+        // A sample across the catalogue rather than all of it: the pools are a
+        // mixed radix, so the first few indices already cross every dimension
+        // that can carry an excluded component.
+        for (let i = 0; i < Math.min(size, 12); i++) {
+          checked++;
+          const meal = mealAt(diet, slot, i, avoid);
+          const inIt = mealAllergens(meal, avoid);
+          if (inIt.length && gaps.length === 0) silent++;
+        }
+      }
+    }
+  }
+  ok(checked > 0, 'the sweep actually generated meals');
+  eq(silent, 0,
+    'no generated meal contains an excluded allergen while the member is told nothing — the combination case used to be exactly this');
+}
+
+
+/* ── a diet the union does not have ──────────────────────────────────────── */
+//
+// `clients.diet` is a text column and `Diet` is a five-member union, and
+// src/ui/clientData.tsx used to cast one to the other. A row holding anything
+// else left every component pool empty, and `mealAt` assembled the meal by
+// reading `.n` off those pools — a TypeError out of render, taking the whole
+// nutrition screen with it. `readDiet` closes the ingress; this asserts the
+// second lock, because a crash inside render is worse than any wrong meal.
+
+{
+  eq(readDiet('balanced'), 'meat', 'an unrecognised diet reads as the column’s own default');
+  eq(readDiet('vegan'), 'vegan', 'and a real one is untouched');
+  eq(readDiet(null), 'meat', 'as is a null');
+  let threw = false;
+  try {
+    // Cast deliberately: this is the shape of a row that has been in the
+    // database, not a shape the type system allows.
+    const meal = mealAt('balanced' as Diet, 'Breakfast', 0, []);
+    ok(typeof meal.n === 'string', 'a meal is still produced');
+  } catch { threw = true; }
+  ok(!threw, 'and nothing throws out of the meal builder for a diet with no components');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('mealAllergens: ok');

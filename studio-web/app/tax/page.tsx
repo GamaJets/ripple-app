@@ -526,6 +526,10 @@ function Handoff({ p, gymName, books, raised, profile, profileState, moving }: {
   p: TaxPeriod; gymName: string | null; books: Books; raised: GymInvoiceRow[];
   profile: GymTaxProfile; profileState: 'loading' | 'ready' | 'error'; moving: string | null;
 }) {
+  const loading = books.payments.state === 'loading'
+    || books.invoices.state === 'loading'
+    || books.costs.state === 'loading';
+
   const download = () => {
     const parts: string[] = [];
     const head = (t: string) => `\n${t}\n`;
@@ -541,8 +545,14 @@ function Handoff({ p, gymName, books, raised, profile, profileState, moving }: {
       : `Registered: ${profile.registered === true ? 'yes, as stated by the gym' : profile.registered === false ? 'no, as stated by the gym' : 'nobody has said'}. Registration number: ${profile.registration ?? 'none stated'} (held as typed, never checked).\n`);
 
     parts.push(head('TAKEN — payments recorded in the period, gross'));
-    parts.push(books.payments.state === 'failed'
-      ? unreadable('the payments taken', books.payments.why)
+    // `!== null` and not `=== 'failed'`. `Unread` has THREE values, and the
+    // third is 'loading' — a slice still in flight fell through to
+    // `(rows ?? [])`, so pressing Export a second too early wrote a CSV headed
+    // "TAKEN — payments recorded in the period" with nothing under it. Filed in
+    // an accountant's folder, that is indistinguishable from a quarter in which
+    // the gym took nothing.
+    parts.push(books.payments.state !== null
+      ? unreadable('the payments taken', books.payments.state, books.payments.why)
       : toCsv(
           ['Taken at', 'Member', 'Amount (minor units)', 'Currency', 'Method', 'Kind', 'Note'],
           (books.payments.rows ?? []).map((r) => [
@@ -552,16 +562,16 @@ function Handoff({ p, gymName, books, raised, profile, profileState, moving }: {
           false));
 
     parts.push(head('BILLED — invoices dated in the period'));
-    parts.push(books.invoices.state === 'failed'
-      ? unreadable('the invoice register', books.invoices.why)
+    parts.push(books.invoices.state !== null
+      ? unreadable('the invoice register', books.invoices.state, books.invoices.why)
       : toCsv(
           ['Number', 'Issued', 'Due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status'],
           raised.map((i) => [i.number, i.issuedOn, i.dueOn, i.memberName, i.amountCents, i.currency, i.status]),
           false));
 
     parts.push(head('PAID OUT — costs recorded in the period'));
-    parts.push(books.costs.state === 'failed'
-      ? unreadable('the recorded costs', books.costs.why)
+    parts.push(books.costs.state !== null
+      ? unreadable('the recorded costs', books.costs.state, books.costs.why)
       : toCsv(
           ['Paid on', 'What for', 'Paid to', 'Category', 'Amount (minor units)', 'Currency', 'Note'],
           (books.costs.rows ?? []).map((c) => [
@@ -577,7 +587,12 @@ function Handoff({ p, gymName, books, raised, profile, profileState, moving }: {
 
   return (
     <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', margin: '0 0 24px' }}>
-      <button onClick={download} style={primaryBtn}>Export this period (CSV)</button>
+      {/* Disabled while any of the three is still in flight. The refusal
+          travels in the file either way, but a button that cannot produce a
+          whole quarter should not look like one that can. */}
+      <button onClick={download} style={{ ...primaryBtn, opacity: loading ? 0.5 : 1 }} disabled={loading}>
+        {loading ? 'Still reading the period…' : 'Export this period (CSV)'}
+      </button>
       <span style={{ fontSize: 12, color: 'var(--ink3)', maxWidth: '62ch' }}>
         The file carries the same refusal this page does, at the top, because a CSV read six
         weeks from now is exactly where a column of takings becomes a box on a return.
@@ -586,9 +601,19 @@ function Handoff({ p, gymName, books, raised, profile, profileState, moving }: {
   );
 }
 
-/** The line a failed read exports as. Not an empty section. */
-function unreadable(what: string, why: string | null): string {
-  return `NOT EXPORTED — ${what} could not be read${why ? `: ${why}` : ''}. This is unknown, not nil.\n`;
+/**
+ * The line a read that has not landed exports as. Not an empty section.
+ *
+ * Two states, because loading and failed are two states and this file is read
+ * six weeks later by somebody who cannot see the screen it came off. "Still
+ * reading" tells them to export it again; "could not be read" tells them to
+ * find out why. An empty section under either heading tells them the gym did
+ * nothing.
+ */
+function unreadable(what: string, state: 'loading' | 'failed', why: string | null): string {
+  return state === 'loading'
+    ? `NOT EXPORTED — ${what} had not finished loading when this file was made. Export the period again. This is unknown, not nil.\n`
+    : `NOT EXPORTED — ${what} could not be read${why ? `: ${why}` : ''}. This is unknown, not nil.\n`;
 }
 
 /** A filename fragment from the gym's name. */

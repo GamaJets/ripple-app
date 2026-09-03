@@ -510,9 +510,21 @@ export default function OwnerOps() {
               ) : (<>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                   <Text style={{ ...ty.label, color: t.ink3 }}>{cur ?? GYM_CURRENCY}</Text>
+                  {/* ── the caveat the one person who cannot see it was missing ──
+                      The label was `Session fee in ${cur ?? GYM_CURRENCY}`, so a
+                      gym that has not set a currency told a screen reader,
+                      flatly, that the box is in dirhams — while the caption
+                      below explained to everybody else that AED is only a
+                      placeholder. The reader who cannot see that caption is the
+                      one told the gym charges in AED, on the field that sets
+                      what every session in the product is priced at.
+                      src/ui/tenant.tsx:106 states the rule: pass the currency
+                      honestly, `?? null`, never `|| GYM_CURRENCY`. */}
                   <TextInput value={feeField} onChangeText={(v) => { setFeeDraft(v); if (feeMsg) setFeeMsg(null); }}
                     placeholder="Not set" placeholderTextColor={t.ink3} keyboardType="decimal-pad"
-                    accessibilityLabel={`Session fee in ${cur ?? GYM_CURRENCY}`}
+                    accessibilityLabel={cur
+                      ? `Session fee in ${cur}`
+                      : `Session fee. Your gym has not said what it charges in, so this field is only labelled ${GYM_CURRENCY} as a placeholder — set your currency below first.`}
                     style={{ ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1 }} />
                 </View>
                 {/* ── the currency, ALWAYS offered ────────────────────────

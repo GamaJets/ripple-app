@@ -65,7 +65,7 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
-import { type LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
 import type { WorkoutEntry } from '../../src/lib/mockData';
@@ -734,11 +734,26 @@ export default function ClientTraining() {
 
             <Section>
               <SectionHead title="Client" />
-              {r.roster.length === 0 && r.status !== 'error' ? (
+              {/* Three sentences, and there was one. `r.status !== 'error'` let
+                  'loading' AND 'partial' fall into "Nobody is on your book yet",
+                  so that sentence flashed on every single open of this screen,
+                  for every coach, however full their book — and it is the exact
+                  sentence app/(trainer)/log-session.tsx names in its own header
+                  as the one that makes a coach put the phone away: "a coach
+                  standing on a gym floor being shown 'you have no clients'".
+                  app/(trainer)/builder.tsx handles the identical condition
+                  correctly and this screen sits beside it.
+
+                  'partial' gets the list and no claim about it: the rows are
+                  real and may be picked from, and `isWhole` is what says the
+                  set is not the book. */}
+              {r.roster.length === 0 && r.status === 'loading' ? (
+                <Text style={{ ...ty.body, color: t.ink3 }}>Reading your roster…</Text>
+              ) : r.roster.length === 0 && isWhole(r.status) ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>
                   Nobody is on your book yet, so there is no training to look at.
                 </Text>
-              ) : (
+              ) : r.roster.length === 0 ? null : (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                   {r.roster.map((c) => (
                     <Pressable key={c.id} onPress={() => setPicked(c.id === picked ? null : c.id)}

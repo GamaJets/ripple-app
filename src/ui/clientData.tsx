@@ -32,7 +32,7 @@ import type { ScanMetrics } from '../lib/inbodyMetrics';
 import { manualBeatsScan } from '../lib/bodyFigures';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import { readCoachingMode, type CoachingMode, type Goal, type Diet } from '../lib/types';
+import { readCoachingMode, readDiet, type CoachingMode, type Goal, type Diet } from '../lib/types';
 import type { Allergen } from '../lib/meals';
 import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
@@ -248,7 +248,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof p.heightCm === 'number') setHeightCm(p.heightCm);
           if (typeof p.goal === 'string') setGoal(p.goal);
           setCoachingMode(readCoachingMode(p.coachingMode));
-          if (typeof p.diet === 'string') setDiet(p.diet);
+          if (typeof p.diet === 'string') setDiet(readDiet(p.diet));
           if (Array.isArray(p.avoid)) setAvoid(p.avoid);
           if (Array.isArray(p.injuries)) setInjuries(p.injuries);
           if (Array.isArray(p.focusAreas)) setFocusAreas(p.focusAreas);
@@ -352,7 +352,11 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof r.dob === 'string' && r.dob) setDob(r.dob);
           if (r.height_cm != null && !Number.isNaN(Number(r.height_cm))) setHeightCm(Number(r.height_cm));
           if (typeof r.goal === 'string' && r.goal) setGoal(r.goal as Goal);
-          if (typeof r.diet === 'string' && r.diet) setDiet(r.diet as Diet);
+          // `readDiet`, not `as Diet`. The column is plain text; the union is
+          // five values; and a value outside it reaches `mealAt`, whose pools
+          // for an unknown diet are empty and which then reads `.n` off null —
+          // a TypeError out of render that takes the whole nutrition screen.
+          if (typeof r.diet === 'string' && r.diet) setDiet(readDiet(r.diet));
           if (Array.isArray(r.avoid)) setAvoid(r.avoid);
           // Reconcile the server's two-value answer with the four-value one
           // the client actually gave (MODE_KEY above). The device is read

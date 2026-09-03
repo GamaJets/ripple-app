@@ -43,10 +43,13 @@ import {
 } from '@lib/staffRoles';
 import {
   fetchShifts, fetchDemand, addShift, updateShift, setShiftStatus, deleteShift,
-  shiftFromHours, shiftBlocker, rotaCost, summariseRota, shiftHours, isLive,
+  shiftFromHours, shiftBlocker, shiftRate, rotaCost, summariseRota, shiftHours, isLive,
   weekStartOf, weekWindow, weekDays, shiftWeek,
   type DemandBlock, type Shift, type ShiftRole,
 } from '@lib/gymRota';
+// Minor units → the major-unit string a person types, through the currency's
+// own number of decimal places rather than a hardcoded hundred.
+import { majorFromMinor } from '@lib/coachMoney';
 import { money } from '@lib/gymRecord';
 import { readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
@@ -1104,16 +1107,22 @@ function Rota({ tenantId, trainers, ccy, zone }: {
   const canPrice = !!ccy;
 
   const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role);
-  const cents = rate.trim() === '' ? null : Math.round((parseFloat(rate) || 0) * 100);
-  const blocker = (who || rate)
-    ? shiftBlocker({
-        trainerId: who,
-        startsAt: draft?.startsAt ?? null,
-        endsAt: draft?.endsAt ?? null,
-        rateCents: cents,
-        currency: cents == null ? null : ccy,
-      })
-    : null;
+  // Read by `shiftRate`, not by `parseFloat(rate) || 0`. That expression turned
+  // "1,234" into 1 and "abc" into 0, and the Costs column drew that 0.00
+  // exactly like a shift genuinely covered for free — so there was nothing on
+  // the screen separating a typo from a policy.
+  const typedRate = shiftRate(rate, ccy);
+  const cents = typedRate.ok ? typedRate.minorUnits : null;
+  const blocker = !typedRate.ok ? typedRate.reason
+    : (who || rate)
+      ? shiftBlocker({
+          trainerId: who,
+          startsAt: draft?.startsAt ?? null,
+          endsAt: draft?.endsAt ?? null,
+          rateCents: cents,
+          currency: cents == null ? null : ccy,
+        })
+      : null;
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1394,7 +1403,11 @@ function EditShift({ shift, ccy, zone, onClose }: {
   const [endsAt, setEndsAt] = useState(local(shift.endsAt));
   const [role, setRole] = useState<ShiftRole>(shift.role);
   const [note, setNote] = useState(shift.note ?? '');
-  const [rate, setRate] = useState(shift.rateCents == null ? '' : String(shift.rateCents / 100));
+  // `majorFromMinor`, not `/ 100`. The stored figure is minor units and the box
+  // is major ones, and the factor between them is a question for the currency —
+  // a yen shift rate divided by a hundred opens the edit form showing a
+  // hundredth of what the gym agreed, and saving it writes that back.
+  const [rate, setRate] = useState(majorFromMinor(shift.rateCents, shift.currency ?? ccy));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<Said>(null);
 
@@ -1402,8 +1415,10 @@ function EditShift({ shift, ccy, zone, onClose }: {
   // one currency must not be silently re-denominated because the gym has since
   // changed its setting. The gym's is only the default for a shift with none.
   const cur = shift.currency ?? ccy;
-  const cents = rate.trim() === '' ? null : Math.round((parseFloat(rate) || 0) * 100);
-  const blocker = shiftBlocker({
+  // Same reader as the add form, and for the same reason.
+  const typedRate = shiftRate(rate, cur);
+  const cents = typedRate.ok ? typedRate.minorUnits : null;
+  const blocker = !typedRate.ok ? typedRate.reason : shiftBlocker({
     trainerId: shift.trainerId,
     startsAt: startsAt ? instant(startsAt) : null,
     endsAt: endsAt ? instant(endsAt) : null,

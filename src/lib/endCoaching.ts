@@ -75,6 +75,36 @@ export function coachLabel(coachName: string | null | undefined): string {
 }
 
 /**
+ * What asking a SECOND coach does to the first, said before it is asked.
+ *
+ * `link_coaching` (supabase/parts/155) ends every other active relationship and
+ * rewrites `clients.trainer_id`: "one person has one coach in this product".
+ * So a member browsing the directory while already coached is one accept away
+ * from losing the coach they have — and the Find a Trainer screen offered three
+ * "Request coaching" buttons gated only on whether they had already asked THIS
+ * coach, with the name of their current one drawn at the top of the same
+ * screen and mentioned in none of it. The app is the only party that can see
+ * the conflict.
+ *
+ * What it must NOT say: that anything is cancelled or refunded. Nothing here
+ * touches a booked session or any money, and `leaveCoachPrompt` already words
+ * that fact — this repeats it rather than inventing a second version.
+ */
+export function replaceCoachNote(
+  currentName: string | null | undefined,
+  newName: string | null | undefined,
+): string {
+  const now = coachLabel(currentName);
+  const next = coachLabel(newName);
+  return (
+    `${now} coaches you now, and this app gives one person one coach. If ${next} accepts, `
+    + `${now} stops coaching you and stops seeing your training, and your thread with them closes.\n\n`
+    + `Sessions you have already booked with ${now} are not cancelled by this, and anything you have `
+    + `agreed to pay them is between you and them. Nothing changes until ${next} accepts.`
+  );
+}
+
+/**
  * The confirmation. Three paragraphs, in the order a person needs them:
  * what stops, what does not stop, and what it costs to change their mind.
  *

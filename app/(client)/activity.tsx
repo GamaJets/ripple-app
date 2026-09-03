@@ -88,7 +88,13 @@ export default function Activity() {
   const pull = usePullToRefresh(useCallback(() => {
     reloadLog(); reloadCheckins(); void refreshSessions(); cd.reload();
   }, [reloadLog, reloadCheckins, refreshSessions, cd.reload]));
-  const feedStatus = worstStatus(logStatus, checkinStatus, sessionStatus);
+  // Four reads feed this screen, and the fourth was not in the status. The
+  // scans read is what prices a bodyweight PR (`bwHistory` below), so when it
+  // failed every pull-up and dip quietly stopped being a record — the feed
+  // printed "Logged Pull-ups" where "New PR — Pull-ups" belonged, counted
+  // itself complete, and said nothing. A read that changes what the list says
+  // belongs in the status the list reports.
+  const feedStatus = worstStatus(logStatus, checkinStatus, sessionStatus, cd.scansStatus);
   // Only a whole log can say that a set was a personal record, for the same
   // reason SessionRunner and the manual-log path in workouts.tsx both check it:
   // `isNewPR` compares against the rest of the log, and a log that is a prefix
@@ -170,7 +176,7 @@ export default function Activity() {
               kicker="Activity"
               title={feedStatus === 'error' ? 'We couldn’t read everything' : 'Not everything fits in one read'}
               note={feedStatus === 'error'
-                ? 'Your training, check-ins and bookings are read from three places and at least one of them did not answer. What is listed below is real; what is missing is missing from this screen, not from your record.'
+                ? 'Your training, check-ins, bookings and body scans are read from four places and at least one of them did not answer. What is listed below is real; what is missing is missing from this screen, not from your record. If it was the scans, a pull-up or a dip cannot be priced against your own weight, so it is listed as logged rather than as a record.'
                 : 'You have more on record than this screen can read in one go. What is listed below is your most recent, and the rest is on your log rather than gone.'}
             />
           ) : null}

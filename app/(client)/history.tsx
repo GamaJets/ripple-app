@@ -93,6 +93,7 @@ import {
 } from '../../src/lib/longView';
 import { tonnageNote } from '../../src/lib/bodyweightSets';
 import { useClientData } from '../../src/ui/clientData';
+import { isWhole } from '../../src/ui/loadStatus';
 import { ExerciseHistoryPanel } from '../../src/ui/ExerciseHistory';
 // Volume by muscle group — the first question anybody asks of a training
 // history and the one nothing in this app could answer. See
@@ -258,6 +259,11 @@ export default function History() {
   // the morning somebody steps on a scale. See src/lib/bodyweightSets.ts.
   const cd = useClientData();
   const { weightSeries } = cd;
+  // And whether that read answered. An empty `weightSeries` under a failed
+  // scans read is indistinguishable from a member who has never been weighed —
+  // so the lifetime tonnage silently under-reports and `tonnageNote` tells
+  // somebody with two years of weigh-ins to "add your weight and they count".
+  const bodyKnown = isWhole(cd.scansStatus);
 
   // Read through a ref so the fetch is not re-created (and re-run) every time
   // the shared log changes underneath the screen.
@@ -459,7 +465,18 @@ export default function History() {
       note={whole ? historyNote(log) : 'More than this page can add up in one read — see above.'}
     />
     {unitNote ? <Text style={{ ...ty.caption, color: t.ink3 }}>{unitNote}</Text> : null}
-    {whole && lifeNote ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{lifeNote}</Text> : null}
+    {/* The note blames the member's record when the fault is this read: it
+        says "your own weight is not recorded for the day you did them". Only
+        say that when we actually know it. */}
+    {whole && lifeNote ? (
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+        {bodyKnown
+          ? lifeNote
+          : cd.scansStatus === 'loading'
+          ? 'Some bodyweight sets are not in this total yet — your weight history is still being read.'
+          : 'Some bodyweight sets are not in this total because your weight history could not be read just now. That is this screen rather than a gap in your record, and nothing has been lost.'}
+      </Text>
+    ) : null}
 
     <Rule />
 

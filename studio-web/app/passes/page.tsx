@@ -37,6 +37,7 @@ import { fetchPassVisits } from '@lib/passVisits';
 import { fetchPasses } from '@lib/gymPasses';
 import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+import { toCsv } from '@lib/gymExport';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
 import { Banner } from '@/components/Banner';
 import {
@@ -637,17 +638,21 @@ function CallList({ c, rec, contacts, contactsErr }: {
       render: (h) => h.firstUsedOn ?? <span className="dash">no door record</span> },
   ];
 
+  // Written by `toCsv`, having been a third hand-rolled writer with the same
+  // two omissions as the roster segment: no byte-order mark and `'\n'` endings.
+  // Excel opens a BOM-less UTF-8 file in the machine's legacy code page, so
+  // this call list — the thing this whole page exists to produce — arrived at a
+  // Gulf gym with half its names unreadable. /export advertises the correct
+  // writer; there is now one of it.
   const csv = () => {
-    const cell = (v: string | null | undefined) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const lines = [['Member id', 'Name', 'Passes', 'Used', 'Last pass', 'Phone', 'Email'].map(cell).join(',')];
-    for (const h of shown) {
-      const rc = contacts?.get(h.holderId) ?? null;
-      lines.push([
-        cell(h.holderId), cell(h.name), cell(String(h.passes)), cell(String(h.redeemed)),
-        cell(h.lastPassOn), cell(rc?.phone), cell(rc?.email),
-      ].join(','));
-    }
-    const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' }));
+    const text = toCsv(
+      ['Member id', 'Name', 'Passes', 'Used', 'Last pass', 'Phone', 'Email'],
+      shown.map((h) => {
+        const rc = contacts?.get(h.holderId) ?? null;
+        return [h.holderId, h.name, h.passes, h.redeemed, h.lastPassOn, rc?.phone, rc?.email];
+      }),
+    );
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
     a.download = `pass-holders-who-did-not-join-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -687,7 +692,15 @@ function CallList({ c, rec, contacts, contactsErr }: {
       </div>
       {note ? <p style={{ margin: 0, padding: '0 14px 8px', fontSize: 12.5, color: 'var(--ink3)' }}>{note}</p> : null}
 
-      <DataTable rows={shown} columns={cols} rowKey={(h) => h.holderId} empty="Nobody to call." />
+      {/* `shown` is post-search, so "Nobody to call." over a query that matched
+          nothing was a statement about the gym made out of what somebody typed
+          — on the call list this whole page exists to produce. */}
+      <DataTable
+        rows={shown} columns={cols} rowKey={(h) => h.holderId}
+        empty={q.trim()
+          ? `Nothing in this list matches “${q.trim()}”. Clear the search before concluding there is nobody to call.`
+          : 'Nobody to call.'}
+      />
     </Section>
   );
 }

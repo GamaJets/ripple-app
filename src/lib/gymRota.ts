@@ -39,6 +39,10 @@
 import { assertWhole, capLimit } from './rowCap';
 import { assertWrote } from './wroteRows';
 import { startOfWeek } from './weekStart';
+// One reader for a typed money box: it asks the currency how many decimal
+// places it has, and refuses `1,234` rather than guessing which reading was
+// meant. The same function /costs and the equipment log read their boxes with.
+import { readMinorAmount } from './coachMoney';
 
 type Queryable = { from: (table: string) => any };
 
@@ -704,6 +708,40 @@ export function shiftBlocker(s: {
     return 'A currency with no amount is a setting pretending to be a cost. Give it a figure or clear the currency.';
   }
   return null;
+}
+
+/**
+ * What somebody typed in a shift's rate box, in minor units — or why it is not
+ * an amount. An EMPTY box is a real answer and means no rate, which is a shift
+ * genuinely covered for free.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * The rota screen read its box as
+ * `rate.trim() === '' ? null : Math.round((parseFloat(rate) || 0) * 100)`, in
+ * two places. `parseFloat('1,234')` is 1 and `parseFloat('abc') || 0` is 0, and
+ * `shiftBlocker` only ever rejected a NEGATIVE rate — so a mistyped amount was
+ * saved as one, or as nothing, and the Costs column then drew that 0.00
+ * identically to a shift the gym had genuinely covered for free. Nothing on the
+ * screen separated the typo from the policy.
+ *
+ * The hundred was the other half. A yen has no minor unit and a Kuwaiti dinar
+ * has a thousand of them, so the factor is a question for the currency.
+ *
+ * `readMinorAmount` refuses rather than resolving: in a two-place currency
+ * `1,234` is either one thousand two hundred and thirty-four or one and a bit,
+ * depending on where the person typing it grew up, and neither reading may be
+ * picked on their behalf. Compare `parseRate` in src/lib/gymPay.ts, which
+ * already refuses an unparseable amount by name.
+ */
+export function shiftRate(
+  rate: string, currency: string | null,
+): { ok: true; minorUnits: number | null } | { ok: false; reason: string } {
+  if (!rate.trim()) return { ok: true, minorUnits: null };
+  if (!(currency ?? '').trim()) {
+    return { ok: false, reason: 'Say what money that is in. An amount with no currency is read in whatever the reader happens to be thinking in — and this product has no default currency.' };
+  }
+  return readMinorAmount(rate, currency);
 }
 
 /**

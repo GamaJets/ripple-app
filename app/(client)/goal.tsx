@@ -31,7 +31,12 @@ import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightToKg, weightDeltaIn, kgToLb, readNumber, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
-import { useGoalTracker } from '../../src/ui/goalTracker';
+import { useGoalTracker, type GoalSaved } from '../../src/ui/goalTracker';
+// Whether a row is still on this phone. The queue was built for goals set with
+// no signal and this screen was never told about it: the waiting row was drawn
+// exactly like a stored one, could not be removed or ticked off, and both
+// refusals blamed the member's connection.
+import { isPending } from '../../src/lib/wellnessSync';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   progressOf, projectionOf, goalLabel, isMeasured, isOverdue, sortGoals,
@@ -167,7 +172,7 @@ export default function Goal() {
     if (saving) return;
     const targetDateISO = days == null ? null : new Date(Date.now() + days * 86400000).toISOString();
     setSaving(true);
-    let ok = false;
+    let ok: GoalSaved = false;
     if (kind === 'custom') {
       if (!title.trim()) { setSaving(false); Alert.alert('Say what the goal is', 'Type what you’re working toward.'); return; }
       ok = await g.addCustomGoal(title, targetDateISO);
@@ -199,9 +204,28 @@ export default function Goal() {
       return;
     }
     setAmount(''); setTitle('');
+    if (ok === 'queued') {
+      // Deliberately not `keptOnPhoneNote`, whose promise ends "it won't show
+      // up here until it has" — true of a message, false of this: the goal is
+      // in the list below already. Same reasoning as the queued scan on
+      // app/(client)/scans.tsx.
+      Alert.alert(
+        'Saved on this phone',
+        'Your goal is saved on this phone and has not reached your record yet — it goes up on its own next time you have signal. It is in your list in the meantime, and until it has gone up it can’t be removed or marked done.',
+      );
+    }
   };
 
   const confirmRemove = (x: GoalTarget) => {
+    // A goal no server has seen. `removeGoal` refuses it — correctly, the id is
+    // this device's — and the screen used to blame the connection for it.
+    if (isPending(x.id)) {
+      Alert.alert(
+        'Not sent yet',
+        'This goal is still saved on this phone and has not gone up, so there is nothing to remove yet. It goes up on its own next time you have signal, and you can remove it then. Setting a new goal for the same thing replaces it.',
+      );
+      return;
+    }
     Alert.alert('Remove this goal?', goalLabel(x), [
       { text: 'Keep it', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
@@ -211,6 +235,13 @@ export default function Goal() {
   };
 
   const toggleAchieved = async (x: GoalTarget) => {
+    if (isPending(x.id)) {
+      Alert.alert(
+        'Not sent yet',
+        'This goal is still saved on this phone and has not gone up, so it can’t be marked done yet. It goes up on its own next time you have signal.',
+      );
+      return;
+    }
     if (!(await g.setAchieved(x.id, !x.achievedAtISO))) {
       Alert.alert('Not saved', 'That change was not stored, so it will be back as it was.');
     }
@@ -294,6 +325,10 @@ export default function Goal() {
                 const prog = measured ? progressOf(x, series) : null;
                 const unit = measured ? goalUnit(x.kind as MeasuredKind, wu) : '';
                 const overdue = isOverdue(x, Date.now());
+                // On this phone and not yet on the record. Said on the row,
+                // because the two controls beside it will refuse until it has
+                // gone up and a refusal with no reason reads as a fault.
+                const waiting = isPending(x.id);
                 return (
                   <View key={x.id} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.sm }}>
@@ -314,6 +349,11 @@ export default function Goal() {
                                 : 'No target date'}
                           </Text>
                         </View>
+                        {waiting ? (
+                          <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>
+                            Saved on this phone — not sent yet. It goes up on its own when you have signal.
+                          </Text>
+                        ) : null}
                         {/* What the readings can and cannot say about this goal. */}
                         {measured ? (
                           <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>

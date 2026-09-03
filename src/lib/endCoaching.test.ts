@@ -15,7 +15,7 @@
 // package.json, and a header claiming a suite does not run tells the next reader
 // that nothing is watching this file.
 import {
-  coachLabel, leaveCoachPrompt, leaveOutcome, endCoachingErrorMessage,
+  coachLabel, leaveCoachPrompt, leaveOutcome, endCoachingErrorMessage, replaceCoachNote,
   departureTally, departureLine, END_REASON_LABEL,
   END_REASONS, CLIENT_END_REASONS, CLIENT_END_REASON_LABEL, CLIENT_END_REASON_NOTE,
   CLIENT_END_EXPLAINER, clientEndConfirmBody, clientEndOutcomeLine,
@@ -228,6 +228,25 @@ const lost = clientEndOutcomeLine(true, true, false);
 ok(/could not be recorded/i.test(lost), 'a reason that did not save says so');
 ok(/ending itself did happen/i.test(lost), 'and does not leave the member wondering whether they left');
 ok(!/passed on to them/i.test(lost), 'and never claims the coach was told');
+
+/* ── asking a second coach ───────────────────────────────────────────────── */
+//
+// `link_coaching` ends every other active relationship, so a member browsing
+// the directory while already coached is one accept away from losing the coach
+// they have. The screen offered three buttons and said none of this.
+
+{
+  const note = replaceCoachNote('Dana Ruiz', 'Sam Okafor');
+  ok(note.includes('Dana Ruiz') && note.includes('Sam Okafor'), 'both coaches are named');
+  ok(/stops coaching you/.test(note), 'and what happens to the first one is stated, not implied');
+  ok(/not cancelled/.test(note), 'a booked session is not claimed to be cancelled by this');
+  ok(/Nothing changes until/.test(note), 'and nothing is described as having happened yet');
+  ok(!/refund|charged|fee/i.test(note), 'no claim is made about money this app does not move');
+
+  const anon = replaceCoachNote(null, '   ');
+  ok(!/null|undefined/.test(anon), 'an unread name leaves no hole');
+  ok((anon.match(/your coach/g) || []).length >= 2, 'both fall back to a description rather than a blank');
+}
 
 if (errors.length) {
   console.error(`endCoaching: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);

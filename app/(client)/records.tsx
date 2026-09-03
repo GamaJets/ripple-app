@@ -19,6 +19,7 @@ import { est1RMIn, liftLabel, convertedNote } from '../../src/lib/units';
 import { personalRecords } from '../../src/lib/streaks';
 import { repRecords, bodyweightSetLabel } from '../../src/lib/bodyweightSets';
 import { useClientData } from '../../src/ui/clientData';
+import { isWhole } from '../../src/ui/loadStatus';
 import { Rule, Section, SectionHead, Hero, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 
@@ -47,7 +48,15 @@ export default function Records() {
  // that did not exist then. Empty when nobody has ever been scanned or typed a
  // weight, and then a bodyweight set has no load and belongs on the reps board
  // below rather than being given an invented body here.
+ // ── and whether that read answered ─────────────────────────────────────
+ //
+ // A failed scans read leaves `weightSeries` EMPTY, which is indistinguishable
+ // from never having been weighed — so every pull-up and dip falls off the
+ // estimated-1RM board and the sentence at the bottom of this screen tells a
+ // member with two years of weigh-ins to go and start recording their weight.
+ // `scansStatus` is the difference and this screen never asked it.
  const { weightSeries } = cd;
+ const bodyKnown = isWhole(cd.scansStatus);
  // Ranked in the kilograms the board is stored in, and only then read out. The
  // order would come out the same either way today, but an estimate rounded to
  // the whole pound can tie two lifts that are a kilogram apart, and a board
@@ -116,6 +125,24 @@ export default function Records() {
       failed over rows already in memory rendered the whole board — hero, count,
       ranked list — with no banner and no retry anywhere on the screen. A stale
       PR board is the one thing this screen must never present as current. */}
+  {/* The OTHER read this board depends on. Every bodyweight record here is
+      priced from the scan history, so a failed scans read silently takes every
+      pull-up and dip off the estimated-max board — and says nothing, because
+      every notice on this screen was gated on the training log alone. */}
+  {!bodyKnown && cd.scansStatus !== 'loading' ? (<>
+   <Rule />
+   <Section>
+    <Notice tone={t.warn} kicker="Records" title="We couldn’t read your weight history"
+     note={cd.scansStatus === 'partial'
+      ? 'You have more scans on record than this screen can read at once, so a bodyweight set may be priced against an older weigh-in than the one that applied. Your barbell records are unaffected.'
+      : 'Pull-ups, dips and press-ups are priced against what you weighed on the day, and that history did not load — so they are not on the estimated-max board below. They are not gone, and nothing has been reset.'}>
+     <View style={{ marginTop: sp.lg }}>
+      <Cta label="Try Again" wide onPress={() => cd.reload()} />
+     </View>
+    </Notice>
+   </Section>
+  </>) : null}
+
   {logStatus === 'error' ? (<>
    <Rule />
    <Section>
@@ -242,7 +269,11 @@ export default function Records() {
       </View>
      ))}
      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-      Ranked by reps in a single set. Record your weight on Body and these join the board above with an estimated max too.
+      {bodyKnown
+       ? 'Ranked by reps in a single set. Record your weight on Body and these join the board above with an estimated max too.'
+       : cd.scansStatus === 'loading'
+        ? 'Ranked by reps in a single set. Still reading your weight history — these join the board above with an estimated max once it lands.'
+        : 'Ranked by reps in a single set. Your weight history could not be read, so these cannot be priced against your own bodyweight just now — that is this screen, not a gap in your record. Pull down to try again.'}
      </Text>
     </Section>
    </>) : null}

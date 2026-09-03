@@ -39,6 +39,10 @@ import { searchProducts, type OffProduct } from '../../src/lib/openfoodfacts';
 import { searchCommonFoods } from '../../src/lib/foods';
 import { searchDishes } from '../../src/lib/restaurant';
 import { mergeFoodResults } from '../../src/lib/foodSearch';
+// The member's own exclusions, on the search they open four times a day. The
+// setting governed the meal planner and nothing else — this list offered every
+// result unmarked, with a plus button beside it.
+import { dishAllergens, dishAllergenMark, SEARCH_MARK_CAVEAT } from '../../src/lib/foodAllergens';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 // One sheet asks how much of it you ate, for every way in. Until now a search
 // row logged straight through and the barcode sheet logged whatever basis Open
@@ -790,24 +794,39 @@ export default function FoodLog() {
  Nothing found. Try the brand name, scan the barcode, or describe it below.
  </Text>
  ) : null}
- {results.map((r, i) => (
+ {/* Above the rows, and only when the member has excluded something. A mark
+     with no caveat reads the wrong way round: an unmarked result is one
+     nothing has checked, not one that has been cleared. */}
+ {cd.avoid.length && results.length ? (
+ <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.sm }}>{SEARCH_MARK_CAVEAT}</Text>
+ ) : null}
+ {results.map((r, i) => {
+ const mark = dishAllergenMark(dishAllergens(r.name, cd.avoid));
+ return (
  <View key={r.key}>
  {i > 0 ? <Rule /> : null}
  {/* The sheet, not a straight write. A row logged on one tap recorded one
      portion of whatever basis the source used, so half a packet and two
      packets were the same entry — see src/ui/LogFoodSheet.tsx. */}
  <Pressable onPress={() => { setPendingTitle(undefined); setPendingNote(null); setPendingPhoto(null); setPendingVia('search'); setPending({ name: r.name, kcal: r.kcal, protein: r.protein, carbs: r.carbs, fat: r.fat, basis: r.basis }); }}
- accessibilityRole="button" accessibilityLabel={`Log ${r.name} — ${r.label}`} accessibilityHint="Opens a sheet to say how much of it you had"
+ accessibilityRole="button" accessibilityLabel={mark ? `Log ${r.name} — ${r.label}. ${mark}` : `Log ${r.name} — ${r.label}`} accessibilityHint="Opens a sheet to say how much of it you had"
  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.body, color: t.ink }} numberOfLines={2}>{r.name}</Text>
  <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{r.label}</Text>
+ {mark ? (
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+ <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+ <Text style={{ ...ty.caption, color: t.ink2 }}>{mark}</Text>
+ </View>
+ ) : null}
  </View>
  <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{num(r.kcal)} kcal</Text>
  <Icon name="plus" size={16} color={t.brand} />
  </Pressable>
  </View>
- ))}
+ );
+ })}
  </Section>
 
  <Rule />

@@ -533,12 +533,18 @@ function Agreements({ agreements, signatures, members, tenantId, me, onChange }:
         />
       ) : null}
 
-      {agreements.state === 'loading' ? <Loading /> : (
-        <DataTable
-          rows={live} columns={cols} rowKey={(a) => a.id}
-          empty="This gym publishes nothing for anybody to sign. Nothing on this screen can then say who has agreed to what, because there is nothing to agree to."
-        />
-      )}
+      {agreements.state === 'loading' ? <Loading />
+        : agreements.state === 'failed' ? (
+          <Unread
+            why={agreements.why} what="what this gym publishes for signing"
+            cost="an owner asked for their waiver must not be told the gym publishes nothing over a query that errored"
+          />
+        ) : (
+          <DataTable
+            rows={live} columns={cols} rowKey={(a) => a.id}
+            empty="This gym publishes nothing for anybody to sign. Nothing on this screen can then say who has agreed to what, because there is nothing to agree to."
+          />
+        )}
 
       {retired.length ? (
         <div style={{ padding: '11px 14px', borderTop: '1px solid var(--ring)' }}>
@@ -953,12 +959,18 @@ function Documents({ documents, members, ccy, tenantId, me, onChange }: {
         <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e', maxWidth: '74ch' }}>{blocker}</p>
       ) : null}
 
-      {documents.state === 'loading' ? <Loading /> : (
-        <DataTable
-          rows={documents.rows ?? []} columns={cols} rowKey={(d) => d.id}
-          empty="Nothing is on file. Until this wave there was nowhere in the product to put a document at all, so an empty list here is expected rather than alarming — the first insurance certificate is the one worth adding."
-        />
-      )}
+      {documents.state === 'loading' ? <Loading />
+        : documents.state === 'failed' ? (
+          <Unread
+            why={documents.why} what="the filing cabinet"
+            cost="&ldquo;nothing is on file&rdquo; over a failed read is the sentence that stops somebody looking for the insurance certificate they need"
+          />
+        ) : (
+          <DataTable
+            rows={documents.rows ?? []} columns={cols} rowKey={(d) => d.id}
+            empty="Nothing is on file. Until this wave there was nowhere in the product to put a document at all, so an empty list here is expected rather than alarming — the first insurance certificate is the one worth adding."
+          />
+        )}
     </Section>
   );
 }
@@ -1019,7 +1031,12 @@ function Feed({ feed }: { feed: Read<Activity> }) {
           </select>
         </div>
       ) : null}
-      {feed.state === 'loading' ? <Loading /> : (
+      {feed.state === 'failed' ? (
+        <Unread
+          why={feed.why} what="the activity log"
+          cost="telling an owner nothing has been recorded, and to go and check their database triggers, over a query that errored sends them to fix something that is not broken"
+        />
+      ) : feed.state === 'loading' ? <Loading /> : (
         <DataTable
           rows={rows} columns={cols} rowKey={(e) => e.id}
           empty={`Nothing has been recorded in ${FEED_DAYS} days. On a gym that is being used, that is a database whose triggers have not been applied rather than a quiet quarter.`}
@@ -1136,4 +1153,27 @@ function Banner({ children, tone }: { children: React.ReactNode; tone?: BannerTo
 
 function Loading() {
   return <div style={{ padding: '26px 20px', color: 'var(--ink3)' }}>Loading…</div>;
+}
+
+/**
+ * A read that has not landed, said as which of the two it is.
+ *
+ * Three sections on this screen were a two-state ternary — `state === 'loading'
+ * ? <Loading /> : <DataTable rows={rows ?? []} empty="…" />` — so a FAILED read
+ * arrived as zero rows and printed the confident empty sentence. On the screen
+ * that decides whether a gym can produce an insurance schedule or a signed
+ * contract, "we hold nothing" and "we could not look" were drawn identically,
+ * and one of them is reassuring.
+ */
+function Unread({ why, what, cost }: { why: string | null; what: string; cost: string }) {
+  return (
+    <div style={{
+      padding: '16px 14px', margin: 14, borderRadius: 0,
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--crit)',
+      background: 'var(--surface2)', color: 'var(--ink2)', fontSize: 13, maxWidth: '78ch',
+    }}>
+      Could not read {what}. This section is <strong style={{ color: 'var(--ink)' }}>unknown</strong>,
+      not empty &mdash; {cost}.{why ? <> The read said: {why}</> : null}
+    </div>
+  );
 }

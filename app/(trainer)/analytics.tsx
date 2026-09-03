@@ -34,9 +34,9 @@ import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Sp
 import { isWhole, worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
-import { atRiskClient } from '../../src/lib/trainerMock';
 import { STATUS_LABEL } from '../../src/lib/status';
 import { useRoster } from '../../src/ui/roster';
+import { type RosterClient } from '../../src/lib/trainerMock';
 import { DistBar } from '../../src/ui/charts';
 import { askAboutMyBusiness } from '../../src/lib/coach';
 import { useCoachingSpans } from '../../src/ui/coachCohorts';
@@ -49,7 +49,9 @@ import {
   monthLabel as monthLabelOf, type AnalyticsReads,
 } from '../../src/lib/analyticsExport';
 import { shareTextFile, fileShareBlocker } from '../../src/lib/exportShare';
-import { localDayKey } from '../../src/lib/clientDrift';
+import { localDayKey, bandNote, DRIFT_LABEL } from '../../src/lib/clientDrift';
+import { useClientDrift } from '../../src/ui/clientDrift';
+import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 import { useTrainerGoals, goalPct } from '../../src/ui/trainerGoals';
 import { goalsEmptyLine, parseGoal, goalText } from '../../src/lib/coachPrefs';
@@ -100,9 +102,43 @@ export default function TrainerAnalytics() {
   // digest — is only as sound as the worse of them.
   const figureStatus = worstStatus(rosterStatus, sessionsStatus);
   const figuresWhole = isWhole(figureStatus);
-  // The people are real even when the set is short, so they may be listed. It
-  // is the count of them that may not be quoted.
-  const atRisk = roster.filter(atRiskClient);
+  /* ── who is drifting, on the app's ONE definition of it ─────────────────
+   *
+   * This screen ranked and counted on `atRiskClient` from src/lib/trainerMock.ts
+   * — `adherence < 80 || staleDays(lastActive) >= 2 || noRecordOf` — where
+   * `staleDays` recovers a number by running a regex over a DISPLAY STRING.
+   * `ago()` in src/ui/roster.tsx writes "3d ago" for a human to read and that
+   * function parsed the 3 back out of it. Its own comment says
+   * src/lib/clientDrift.ts "models this properly with a distinct UNKNOWN band
+   * and is what the Clients screen ranks on — this function remains for the
+   * screens that have not moved to it yet."
+   *
+   * So the Clients screen and this one answered "who needs a call" differently,
+   * and a coach comparing the two was looking at two different books. This is
+   * that screen moving. `useClientDrift` is the same read the dashboard makes,
+   * lifted into src/ui/clientDrift.ts so there is one of it rather than three.
+   *
+   * NULL, not [], when it is not established — the roster read was short, the
+   * training record has not landed, or it failed. Every consumer below treats
+   * null as "we cannot say", because an empty list here renders as "everyone is
+   * on track", which is the one sentence on this screen that stops a coach
+   * looking.
+   */
+  const { tenant } = useTenant();
+  // Bumped by the pull below. The drift read re-runs on its own when the
+  // roster's ids change, and a refresh usually changes none of them — so
+  // without this the coach could refresh every figure on the screen except the
+  // one the at-risk card tells them to act on.
+  const [driftNonce, setDriftNonce] = useState(0);
+  const dr = useClientDrift(roster, tenant?.id ?? null, driftNonce);
+  const atRisk: RosterClient[] | null =
+    rosterWhole && dr.drift && !dr.error
+      // 'at_risk' is a break in their own pattern; 'idle' is the UNKNOWN band —
+      // nothing on record at all — and it is in here for the reason
+      // clientDrift.ts gives: a client nobody has heard from is the client this
+      // whole feature is about, and the old signal could not see them.
+      ? roster.filter((c) => { const d = dr.driftFor(c.id); return d?.status === 'at_risk' || d?.status === 'idle'; })
+      : null;
   const clients = rosterWhole ? roster.length : null;
 
   /* ── what actually happened this month ──────────────────────────────────
@@ -185,12 +221,16 @@ export default function TrainerAnalytics() {
   // decides which clients count. Short either one and this understates the
   // money at risk, which is the one direction that makes the card safe to
   // ignore.
-  const _atRiskIds = useMemo(() => new Set(atRisk.map((c) => c.id)), [atRisk]);
+  const _atRiskIds = useMemo(() => new Set((atRisk ?? []).map((c) => c.id)), [atRisk]);
   const atRiskMonth = useMemo(
     () => sessionMonthFor(sessions, _atRiskIds, figureStatus, monthFrom, monthTo),
     [sessions, _atRiskIds, figureStatus, monthFrom, monthTo],
   );
-  const atRiskRevenue = deliveredValue(atRiskMonth, sessionFee);
+  // And null the whole way through when we do not know WHO is at risk. An empty
+  // id set sums to zero, and "~0/mo at risk" is the same reassuring lie as
+  // "everyone is on track" — computed here out of a training record that had
+  // not come back rather than out of a book with nothing wrong in it.
+  const atRiskRevenue = atRisk === null ? null : deliveredValue(atRiskMonth, sessionFee);
   // Every money figure on this screen is the coach's own session rate times a
   // count, and every one of them printed a dollar sign. Repple is
   // white-labelled and its live gyms are priced in AED, so the whole screen has
@@ -387,7 +427,11 @@ export default function TrainerAnalytics() {
       currency: currencyForModel(cur),
       clients,
       avgAdherence: avgAdh != null ? avgAdh + '%' : 'no check-ins yet',
-      atRiskClients: atRisk.length,
+      // Null rather than a number when the training record did not come back.
+      // The system prompt tells the model to say it was not given a figure
+      // rather than guess at one; a zero here would have it write a paragraph
+      // about a book where nobody is drifting.
+      atRiskClients: atRisk === null ? null : atRisk.length,
       onTrack, watch, atRiskLow: riskCount,
       howTheyCoach: sessionsLead ? 'in person, or both in person and remotely' : 'entirely online',
     };
@@ -471,10 +515,13 @@ export default function TrainerAnalytics() {
    * status plumbing above exists to prevent — so the gesture asks for all of
    * them, and the worst status still governs what is stated. */
   const pull = usePullToRefresh(useCallback(
-    () => Promise.all([
-      refreshRoster(), refreshSessions(), loadTakings(), loadCurrency(),
-      Promise.resolve(reloadSpans()), Promise.resolve(reloadGoals()),
-    ]),
+    () => {
+      setDriftNonce((n) => n + 1);
+      return Promise.all([
+        refreshRoster(), refreshSessions(), loadTakings(), loadCurrency(),
+        Promise.resolve(reloadSpans()), Promise.resolve(reloadGoals()),
+      ]);
+    },
     [refreshRoster, refreshSessions, loadTakings, loadCurrency, reloadSpans, reloadGoals],
   ));
 
@@ -739,7 +786,7 @@ export default function TrainerAnalytics() {
         </Section>
 
         {/* ── at-risk revenue: the one thing to act on ────────────────────── */}
-        {atRisk.length > 0 ? (<>
+        {atRisk && atRisk.length > 0 ? (<>
           <Rule />
           <Section>
             <Card tone={t.warn}>
@@ -758,11 +805,15 @@ export default function TrainerAnalytics() {
                   </Text>
                   {/* "N clients slipping" is a count of the whole book, and off
                       a short roster it is a count of whoever happened to load —
-                      which reads as reassuringly small. Said as "at least" when
-                      the set is not whole, because that is the only claim the
-                      rows on this screen support. */}
+                      which reads as reassuringly small. The card no longer
+                      renders at all unless the roster came back whole AND the
+                      training record behind the verdict landed (`atRisk` is
+                      null otherwise), which is a stricter bargain than the "at
+                      least" hedge it replaces: this card is an instruction to
+                      go and ring people, and a hedged instruction is still an
+                      instruction. */}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                    {rosterWhole ? '' : 'At least '}{atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping — check in before they churn.
+                    {atRisk.length} client{atRisk.length > 1 ? 's' : ''} slipping — check in before they churn.
                     {atRiskRevenue == null
                       ? (sessionFee == null
                           ? ' Set a session rate in your profile to see what that is worth.'
@@ -985,27 +1036,46 @@ export default function TrainerAnalytics() {
 
         {/* ── at-risk clients ────────────────────────────────────────────── */}
         <Section>
-          <SectionHead title="At-risk Clients" note="Low adherence or inactive 2+ days" />
-          {/* "Everyone is on track" is a claim about every client the coach
-              has, and an unread roster is not a clean one. */}
-          {atRisk.length === 0 && rosterWhole ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>Everyone is on track.</Text>
-          ) : atRisk.length === 0 ? (
+          {/* The note said "Low adherence or inactive 2+ days", which was an
+              accurate description of `atRiskClient` and of nothing else in the
+              app. What is measured now is each client against their OWN
+              baseline over 56 days, plus the band for a client there is nothing
+              on record about — see src/lib/clientDrift.ts, and the Clients
+              screen, which has always said it this way. */}
+          <SectionHead title="At-risk Clients" note={`${bandNote('at_risk')} Plus anyone there is nothing on record for.`} />
+          {/* Four renders, and the first three are the ones that were missing.
+              "Everyone is on track" is a claim about every client the coach
+              has: it may be made only over a whole roster AND a training record
+              that came back. Before, an unread record produced an empty filter
+              and that sentence. */}
+          {dr.error ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {rosterStatus === 'loading'
-                ? 'Reading your roster…'
-                : 'Nobody at risk is listed, but your roster did not come back whole — this is not a clean bill of health for your book.'}
+              Their training records could not be read, so who is drifting is unknown. This is not a clean bill of health for your book.
             </Text>
+          ) : atRisk === null ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {rosterStatus === 'loading' || dr.drift === null
+                ? 'Reading who has stopped training…'
+                : 'Your roster did not come back whole, so who is drifting cannot be worked out — this is not a clean bill of health for your book.'}
+            </Text>
+          ) : atRisk.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>Everyone is holding their own pattern.</Text>
           ) : atRisk.map((c, i) => (
             <View key={c.id} style={{
               flexDirection: 'row', alignItems: 'center', paddingVertical: sp.md,
               borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
             }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, marginEnd: sp.md, backgroundColor: (c.adherence != null && c.adherence < 82) ? t.crit : t.warn }} />
+              {/* The dot, the label and the line under the name all used to be
+                  re-derived here from `adherence` and from `lastActive`, which
+                  is a display string. They are the verdict's own now, so this
+                  row cannot say something different from the band it was put
+                  in. `idle` is drawn in the quieter tone on purpose: it is not
+                  a judgement about the client, it is the absence of one. */}
+              <View style={{ width: 6, height: 6, borderRadius: 3, marginEnd: sp.md, backgroundColor: dr.driftFor(c.id)?.status === 'at_risk' ? t.crit : t.warn }} />
               <View style={{ flex: 1 }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{c.name}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                  {(c.adherence != null && c.adherence < 82) ? `Low adherence · ${c.adherence}%` : 'Inactive'} · last active {c.lastActive}
+                  {DRIFT_LABEL[dr.driftFor(c.id)!.status]} · {dr.driftFor(c.id)!.reason}
                 </Text>
               </View>
             </View>

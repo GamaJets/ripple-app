@@ -59,7 +59,7 @@ import type { WorkoutSample } from '../../src/lib/wearables/types';
 import { suggestForExercise, priorBest1RM } from '../../src/lib/progression';
 import { announcePersonalBest } from '../../src/lib/prNotifyStore';
 import { est1RM } from '../../src/lib/streaks';
-import { bodyweightAtKg, bodyweightSetLabel, type BodyweightHistory } from '../../src/lib/bodyweightSets';
+import { bodyweightAtKg, bodyweightSetLabel, tonnage, tonnageNote, type BodyweightHistory } from '../../src/lib/bodyweightSets';
 // A hold is a set whose first number is seconds. The programme builder writes
 // '45 sec' planks and '30 sec/side' side planks, so the prescription is read
 // here to decide which box this screen opens with — see src/lib/timedSets.ts.
@@ -688,9 +688,29 @@ export default function Train() {
   // calendar dots, the day list and the day's totals all have to agree on which
   // day an entry belongs to, and three copies of the arithmetic is how they
   // stop agreeing. See src/lib/entryEdit.ts.
+  // Whether the marks below are a statement about the member's training or
+  // about this screen's luck with a read. `workedDates` is built from
+  // `workoutLog`, which is EMPTY under a failed read — so every dot went out,
+  // the day strip's own accessibility label stopped saying "trained", the month
+  // grid emptied, and a member standing in a gym with bad signal concluded
+  // their sessions had been lost and logged them all again.
+  const logKnown = workoutLogStatus === 'ready';
   const workedDates = new Set(workoutLog.map((l) => dayKeyOf(l.t)).filter((k): k is string => k != null));
-  Object.keys(logged).forEach((k) => { if ((logged[k] || []).length) workedDates.add(dstr(dateFor(parseInt(k.split(':')[0], 10)))); });
   if (cardioLog.length) workedDates.add(dstr(today0));
+  // ── typed, and not saved ────────────────────────────────────────────────
+  //
+  // The draft used to be folded into `workedDates` itself, so two sets typed on
+  // Wednesday and never saved gave Wednesday a brand dot on the strip, a filled
+  // circle in the month grid and a place in "N days logged" — under a heading
+  // about the LOG — while tapping that day said "Rest day — no workout logged",
+  // because the panel reads the log alone. The rest of this file is scrupulous
+  // about the line between "on this phone" and "in your log"; this was the one
+  // figure that crossed it.
+  //
+  // The draft is still worth showing: somebody who typed and got called away
+  // needs to find their way back to it. It is shown as its own state.
+  const draftDates = new Set<string>();
+  Object.keys(logged).forEach((k) => { if ((logged[k] || []).length) draftDates.add(dstr(dateFor(parseInt(k.split(':')[0], 10)))); });
   // Today's cardio, read from the saved log so it persists across navigation (not just this mount).
   const todayCardio = workoutLog
     .filter((l) => l.cardio && dayKeyOf(l.t) === dstr(today0))
@@ -733,7 +753,24 @@ export default function Train() {
   const stripEntries = workoutLog.filter((l) => dayKeyOf(l.t) === stripDay);
   const activeCalDay = selCalDay || dstr(today0);
   const dayEntries = workoutLog.filter((l) => dayKeyOf(l.t) === activeCalDay);
-  const dayVolume = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.reduce((x: number, s: number[]) => x + (s[0] || 0) * (s[1] || 0), 0) : 0), 0);
+  // ── the day's volume, priced the way every other total in this app is ────
+  //
+  // This was `reps × load` over every stored set, and it got three different
+  // answers wrong at once. A 45-second plank is `[45, 10]` with `timed[0]`
+  // true, so it read as 450 kg — the exact number src/lib/bodyweightSets.ts
+  // names as the thing that must never happen. An hour of pull-ups is
+  // `[8, 0]` with `bw[0]` true, so it read as nothing at all and the panel
+  // said "Volume 0t" over it. And a total that could price nothing was still
+  // printed as a total rather than as unknown.
+  //
+  // `tonnage` is the one implementation: holds skipped, bodyweight sets priced
+  // against the member's own weight on the day, and the sets it could not price
+  // counted separately so `tonnageNote` can say so out loud. The finish card in
+  // this same file has done it this way for a while; this panel is one modal
+  // away and was still doing it by hand.
+  const dayTonnage = tonnage(dayEntries, cd.weightSeries as BodyweightHistory);
+  const dayVolume = dayTonnage.kg;
+  const dayVolumeNote = tonnageNote(dayTonnage);
   const daySets = dayEntries.reduce((a, l) => a + (l.sets ? l.sets.length : 0), 0);
   // Null, not 0, when nothing in the day carries a measured figure.
   // Strength entries no longer invent one (see `buildEntries`), so a pure
@@ -844,7 +881,16 @@ export default function Train() {
   // reads `exercises[idx].key` and threw a TypeError out of an effect, which is
   // after the render that returns null has committed. That took the whole tab
   // bar down to the error screen, mid session. See src/lib/startGate.ts.
-  const runnableEx = planEx.filter((e) => !isInjHidden(e));
+  //
+  // `customEx` is in it. A movement the member added to today — through "Add an
+  // Exercise You Did", offered on any day with a plan — was on the list on
+  // screen (`planRows` below) and in nothing else: the runner was handed
+  // `planEx` alone and ran straight past it, and on a REST day the gate was
+  // asked about a programme of zero, answered 'rest-day', and took the Start
+  // button away from somebody who had just typed in the three movements they
+  // were about to do. src/lib/startGate.ts says its whole purpose is keeping
+  // the button and the runner asking about the same list; this is that list.
+  const runnableEx = [...planEx, ...customEx].filter((e) => !isInjHidden(e));
 
   // The rows in the order they are rendered, and the group badge for each of
   // them read off THAT order.
@@ -1014,7 +1060,13 @@ export default function Train() {
   // Presentation only: how much of today's plan is already logged, for the hero ring.
   const doneCount = exercises.filter((e) => (logged[uid(e)] || []).length >= setCount(e)).length;
   const heroNote = exercises.length === 0
-    ? 'Rest day — nothing scheduled'
+    // A rest day the member has added movements to is still a rest day in the
+    // programme, and it is no longer a day with nothing on it — the Start
+    // button is now offered for exactly those movements, so the line under it
+    // has to agree.
+    ? (customEx.length > 0
+      ? `Rest day — ${customEx.length} movement${customEx.length === 1 ? '' : 's'} you added`
+      : 'Rest day — nothing scheduled')
     : `~${estMin} min` + (doneCount > 0 ? ` · ${doneCount} of ${exercises.length} done` : '');
   // Whether the session may be started, asked of the list the runner receives
   // rather than of the programme, and what to say when it may not be. A
@@ -1024,7 +1076,9 @@ export default function Train() {
   // behalf.
   const start = startGate({
     isStrength: mode === 'strength',
-    planned: exercises.length,
+    // What was scheduled OR added. A rest day somebody has written three
+    // movements onto is not a day with nothing on it.
+    planned: exercises.length + customEx.length,
     runnable: runnableEx.length,
     removed: removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length,
     injuryHidden: injHidden.filter((u) => !injRevealed.includes(u)).length,
@@ -1344,20 +1398,46 @@ export default function Train() {
         </View>
         <View style={{ flexDirection: 'row', gap: 5, marginTop: sp.sm }}>
           {WEEK.map((d, i) => {
-            const on = i === dayIdx; const today = i === todayIdx && weekOffset === 0; const dnum = dateFor(i).getDate(); const worked = workedDates.has(dstr(dateFor(i)));
+            const on = i === dayIdx; const today = i === todayIdx && weekOffset === 0; const dnum = dateFor(i).getDate();
+            // A day is "trained" only when the log was read whole. Anything a
+            // draft on this phone puts into `workedDates` is still known — it
+            // is on the device — so an unread day is one with nothing local
+            // either, and it is drawn as unknown rather than as a rest day.
+            const worked = workedDates.has(dstr(dateFor(i)));
+            const drafted = !worked && draftDates.has(dstr(dateFor(i)));
+            const unknown = !logKnown && !worked && !drafted;
             return (
               <Pressable key={d} onPress={() => setDayIdx(i)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: on }}
-                accessibilityLabel={`${dateFor(i).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${today ? ', today' : ''}${worked ? ', trained' : ''}`}
+                accessibilityLabel={`${dateFor(i).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${today ? ', today' : ''}${worked ? ', trained' : drafted ? ', typed but not saved' : unknown ? ', not read' : ''}`}
                 style={{ flex: 1, paddingVertical: sp.sm, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.surface2 : 'transparent' }}>
                 <Text style={{ ...ty.micro, letterSpacing: 0.3, color: on ? t.ink : today ? t.ink2 : t.ink3 }}>{d}</Text>
                 <Text style={{ ...value(16), color: on ? t.ink : t.ink2, marginTop: 2 }}>{dnum}</Text>
-                <View style={{ width: 4, height: 4, borderRadius: 2, marginTop: 5, backgroundColor: worked ? t.brand : 'transparent' }} />
+                {/* Four states, and the difference between the first two is the
+                    point: trained (in the log), typed but not saved, not read,
+                    and nothing. Only the first is a filled brand dot. */}
+                <View style={{ width: 4, height: 4, borderRadius: 2, marginTop: 5,
+                  backgroundColor: worked ? t.brand : 'transparent',
+                  borderWidth: drafted || unknown ? 1 : 0, borderColor: drafted ? t.warn : t.ink3 }} />
               </Pressable>
             );
           })}
         </View>
+        {/* The marks above are only as good as the read behind them. A member
+            standing in a gym with no signal sees a week of empty days, which is
+            the same picture as a week they did not train — and this is the
+            screen people open standing in a gym, where the signal is worst. */}
+        {!logKnown ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            {workoutLogStatus === 'loading'
+              ? 'Reading your log — the marks above are not complete yet.'
+              : workoutLogStatus === 'partial'
+              ? 'Your log goes further back than this screen can read in one go, so days with no mark above may still have sessions in them.'
+              : 'Your log could not be read, so a day with no mark above is a day we could not see rather than a day you did not train. Pull down to try again.'}
+          </Text>
+        ) : null}
+
         {/* One tap back, from anywhere. Six taps on an arrow to get home from
             March is the kind of thing people simply do not do. */}
         {weekOffset !== 0 ? (
@@ -2068,6 +2148,22 @@ export default function Train() {
             already saved, so there was nothing to tap. This is that list, on
             the day the strip is on, with both actions on every row.
         */}
+        {/* The section disappeared entirely under a failed read — it is gated
+            on there being entries, and there are never any entries when the
+            read did not answer. So the one part of this screen that would have
+            said "your sessions are still there" was the part that vanished. */}
+        {stripEntries.length === 0 && !logKnown && workoutLogStatus !== 'loading' ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="Already in Your Log" note={prettyDay(stripDay)} />
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              {workoutLogStatus === 'partial'
+                ? 'Your log is longer than this screen can read at once, so anything you saved on this day may not be listed here. Nothing is missing from your log.'
+                : 'Your log could not be read, so this cannot show what you have already saved on this day. Nothing has been lost — pull down to try again.'}
+            </Text>
+          </Section>
+        </>) : null}
+
         {stripEntries.length > 0 ? (<>
           <Rule />
           <Section>
@@ -2266,9 +2362,14 @@ export default function Train() {
               {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
                 const ds = `${calYear}-${pad2(calMonth + 1)}-${pad2(day)}`;
                 const worked = workedDates.has(ds); const isToday = ds === dstr(today0); const isSel = ds === activeCalDay;
+                // Same states as the week strip. A grid of empty circles under a
+                // failed read is a month somebody did not train, and a filled
+                // one over an unsaved draft is a session that does not exist.
+                const draftedDay = !worked && draftDates.has(ds);
+                const unknownDay = !logKnown && !worked && !draftedDay;
                 return (
                   <Pressable key={day} onPress={() => setSelCalDay(ds)} style={{ width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
-                    <View style={{ width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: worked ? t.brand : 'transparent', borderWidth: isSel ? 2 : isToday && !worked ? hairline : 0, borderColor: isSel ? t.ink : t.brand }}>
+                    <View style={{ width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: worked ? t.brand : 'transparent', borderWidth: isSel ? 2 : (isToday && !worked) || unknownDay || draftedDay ? hairline : 0, borderColor: isSel ? t.ink : draftedDay ? t.warn : isToday && !worked ? t.brand : t.ink3 }}>
                       <Text style={{ ...ty.label, ...numeric, fontWeight: worked || isToday ? '600' : '400', color: worked ? t.brandInk : isToday ? t.brand : t.ink2 }}>{day}</Text>
                     </View>
                   </Pressable>
@@ -2322,6 +2423,13 @@ export default function Train() {
                       { label: 'Volume', value: dayVolume ? `${dayHeadline!.figure.toLocaleString()}${dayHeadline!.unit === 't' ? 't' : ''}` : '—', unit: dayHeadline?.unit === 'lb' ? 'lb' : undefined },
                       { label: 'kcal', value: fig(dayKcal) },
                     ]} />
+                    {/* Sets that happened and are not in the figure above,
+                        because nothing recorded what the member weighed on the
+                        day they did them. Said rather than silently dropped —
+                        the same sentence History and the finish card print. */}
+                    {dayVolumeNote ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{dayVolumeNote}</Text>
+                    ) : null}
                     <View style={{ marginTop: sp.lg }}>
                       {dayEntries.map((l, i) => (
                         <View key={i}>
@@ -2380,7 +2488,7 @@ export default function Train() {
                   when the read behind it was not whole, because a count of
                   trained days drawn from a prefix is a smaller life. */}
               <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>
-                Days you trained{workoutLogStatus === 'ready' ? ` · ${workedDates.size} day${workedDates.size === 1 ? '' : 's'} logged` : ''} · tap any day for details
+                Days you trained{workoutLogStatus === 'ready' ? ` · ${workedDates.size} day${workedDates.size === 1 ? '' : 's'} logged` : workoutLogStatus === 'loading' ? ' · still reading' : ' · your log could not be read in full, so a plain day is one we could not see'} · tap any day for details
               </Text>
             </View>
           </ScrollView>

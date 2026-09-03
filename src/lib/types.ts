@@ -92,6 +92,27 @@ export function readCoachingMode(v: unknown, fallback: CoachingMode = 'online'):
   return v === 'online' || v === 'inperson' || v === 'hybrid' || v === 'solo' ? v : fallback;
 }
 
+/**
+ * Tolerant read of a `diet` column.
+ *
+ * `Diet` is a five-member union in this file and a plain `text` column in the
+ * database, and src/ui/clientData.tsx was casting the column straight to the
+ * union: `setDiet(r.diet as Diet)`. A row holding anything else — an older
+ * vocabulary, a value a coach or an import wrote, a typo — then reached
+ * `mealAt` in src/lib/meals.ts, where the component pools for that diet are
+ * EMPTY and the meal is assembled by dereferencing them. The whole nutrition
+ * screen throws a TypeError out of render.
+ *
+ * 'meat' is the fallback because it is the state's own default in that provider
+ * and the widest pool: it excludes nothing the other four exclude, so an
+ * unrecognised value degrades to more choice rather than to a plan built around
+ * a restriction nobody chose. The member's own setting is one tap away and
+ * writing this back is what the next save does.
+ */
+export function readDiet(v: unknown, fallback: Diet = 'meat'): Diet {
+  return v === 'meat' || v === 'vegetarian' || v === 'vegan' || v === 'paleo' || v === 'keto' ? v : fallback;
+}
+
 
 export interface Macros {
   kcal: number;

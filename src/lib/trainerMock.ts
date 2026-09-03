@@ -86,27 +86,39 @@ export interface RosterClient {
 }
 export interface ExVideo { id: string; name: string; group: string; dur: string; uploaded: boolean; url?: string; }
 
-// Shared "at-risk" definition so every trainer screen agrees (adherence low OR
-// inactive 2+ days, OR nothing recorded at all).
+// ── the second definition of "at risk", and where it went ─────────────────
 //
-// THAT LAST CLAUSE IS A BUG FIX, and it is worth knowing why it was missing.
-// A client with no record has `adherence === null`, so the first clause is
-// false; and `lastActive` for them is the string 'no activity yet', from which
-// staleDays parses 0, so the second clause is false too. The function therefore
-// returned FALSE — "this client is fine" — for a client it had never seen a
-// single data point from. Absence of evidence read as evidence of health, on
-// the screen a coach uses to decide who to ring.
+// `atRiskClient`, `staleDays` and `noRecordOf` lived here, and every coach
+// screen ranked on them: `(adherence != null && adherence < 80) ||
+// staleDays(lastActive) >= 2 || noRecordOf(c)`.
 //
-// It cannot express "unknown", being a boolean, so it now errs toward
-// surfacing: a client nothing is known about is returned as needing attention.
-// Over-flagging costs a coach one unnecessary look; under-flagging is how
-// somebody leaves without anyone noticing. src/lib/clientDrift.ts models this
-// properly with a distinct UNKNOWN band and is what the Clients screen ranks on
-// — this function remains for the screens that have not moved to it yet.
-export function staleDays(str: string): number { const m = /([0-9]+)d/.exec(str || ''); return m ? parseInt(m[1], 10) : 0; }
-export function noRecordOf(c: { adherence: number | null; lastActive: string }): boolean {
-  return c.adherence == null && !/[0-9]+d/.test(c.lastActive || '');
-}
-export function atRiskClient(c: { adherence: number | null; lastActive: string }): boolean {
-  return (c.adherence != null && c.adherence < 80) || staleDays(c.lastActive) >= 2 || noRecordOf(c);
-}
+// Two of those three clauses were not evidence about anybody.
+//
+//   `staleDays` recovered a number by running /([0-9]+)d/ over `lastActive` —
+//   which is a DISPLAY STRING. `ago()` in src/ui/roster.tsx writes "3d ago" for
+//   a human to read, and this parsed the 3 back out of it. Reword the caption
+//   and the risk model changes.
+//
+//   `noRecordOf` was true whenever there was no figure and no date. That is the
+//   permanent, unchangeable state of every client a coach adds BY HAND —
+//   `adherence: null, lastActive: 'added by you'` — so the whole cash half of a
+//   working book was flagged "Needs a check-in" for ever. A coach with twenty
+//   of them opened their home screen to twenty amber flags that could never
+//   clear, and learned inside a week to read past all of them, including the
+//   one that was real.
+//
+// That clause was itself a fix for the opposite bug — a client nothing was
+// known about used to read as FINE, absence of evidence as evidence of health
+// — and the reason it could not be fixed properly here is in the sentence this
+// file already carried: a boolean "cannot express unknown".
+//
+// src/lib/clientDrift.ts can. `assessDrift` reads each client's own record over
+// 56 days, compares their recent fortnight against their own baseline, and has
+// a distinct `idle` band for a client there is nothing on record about —
+// separately reporting, through `readClientActivity`, which ids the database
+// could not be asked about at all, so a hand-added client is UNKNOWN rather
+// than at risk. src/ui/clientDrift.ts is the read, shared by the Clients
+// screen, Analytics and the Assistant, which is what makes them agree.
+//
+// Deleted rather than left standing: a second definition that nothing calls is
+// the next screen's shortcut.

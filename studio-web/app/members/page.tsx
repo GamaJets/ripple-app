@@ -42,6 +42,9 @@ import {
   type GymMemberRecord, type MemberRecordPatch,
 } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+// Totals that never cross a currency. /analytics solves the same problem with
+// the same function; this tile used a bare `reduce` and the gym's current code.
+import { paidTotal, paidNote } from '@lib/gymPaidTotal';
 import { wrote, refused, sayText, sayTone, type Said } from '@lib/consoleSay';
 import { isoDate } from '@lib/format';
 import {
@@ -475,17 +478,22 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy, gymRecs, query, onQuer
     },
     {
       key: 'paid', header: 'Paid', value: (d) => d.paidCents ?? null, numeric: true,
-      // `amount`, not `money`. This column sums a member's payments and has no
-      // row currency of its own, so `money()` wrote "AED" over it — while the
-      // payments table inside the same dossier prints each row with its real
-      // currency. One member's money, shown two ways, on one screen.
-      render: (d) => (
-        <Cell
-          state={rec.payments.state}
-          value={amount(d.paidCents, ccy)}
-          empty={d.paidCents != null && !ccy ? NO_CURRENCY_NOTE : 'nothing recorded'}
-        />
-      ),
+      // Grouped by currency before it is totalled, and refusing where that is
+      // more than one. It was `amount(d.paidCents, ccy)` — every payment added
+      // together and labelled with the gym's CURRENT setting — while the
+      // payments table inside the dossier prints each row with the currency it
+      // was actually taken in. One member's money, shown two ways, on one
+      // screen, and the wrong one is the one an owner quotes down the phone.
+      render: (d) => {
+        const t = paidTotal(rec.payments.state, d.payments);
+        return (
+          <Cell
+            state={rec.payments.state}
+            value={t.kind === 'one' ? money(t.minorUnits, t.currency) : null}
+            empty={paidNote(t) ?? 'nothing recorded'}
+          />
+        );
+      },
     },
     {
       key: 'read', header: 'Door vs timetable', value: (d) => {
@@ -574,6 +582,19 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
 
   const broken = brokenParts(rec);
 
+  /**
+   * What this member has paid, per currency.
+   *
+   * `d.paidCents` deliberately goes unused. It is a sum over `p.amountCents`
+   * with no regard to `p.currency`, and a sum across two currencies is not a
+   * total — it is a bigger number with the gym's current three letters stamped
+   * on it. `paidTotal` groups first and refuses second.
+   */
+  const paid = useMemo(
+    () => paidTotal(rec.payments.state, d.payments),
+    [rec.payments.state, d.payments],
+  );
+
   return (
     <section style={{ border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)', marginBottom: 22 }}>
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)', display: 'flex', gap: 10, alignItems: 'baseline' }}>
@@ -598,13 +619,25 @@ function Dossier({ d, rec, active, onClose, ccy, today, gymRec, gymRecsRead, ten
       >
         <Kpi label="Membership" text={d.status ? cap(d.status) : null}
              note={d.planName ?? (rec.memberships.state === 'failed' ? 'not read' : 'no plan attached')} />
-        <Kpi label="Paid, all time" text={amount(d.paidCents, ccy)}
-             note={
-               rec.payments.state === 'failed' ? 'payments not read'
-                 : d.paidCents != null && !ccy ? NO_CURRENCY_NOTE
-                 : d.lastPaidAt ? `last ${new Date(d.lastPaidAt).toLocaleDateString()}`
-                 : 'nothing recorded'
-             } />
+        {/* ── one tile, one currency ─────────────────────────────────────
+            This was `amount(d.paidCents, ccy)`, where `paidCents` is
+            `pays.reduce((a, p) => a + p.amountCents, 0)` — every payment added
+            together with no regard to `p.currency` — and `ccy` is the gym's
+            CURRENT setting. So a gym that has ever changed currency showed one
+            tile reading AED 4,300 over a list of GBP and AED rows, three
+            inches below, each rendered honestly with its own code. This tile
+            is the figure an owner quotes down the phone when a member queries
+            their account.
+
+            `sumTaken` groups on the normalised currency before it totals
+            anything, which is what /analytics already does with the same
+            problem. One pot prints; two pots is not a bigger number and gets
+            the sentence instead. */}
+        <Kpi
+          label="Paid, all time"
+          text={paid.kind === 'one' ? money(paid.minorUnits, paid.currency) ?? null : null}
+          note={paidNote(paid, d.lastPaidAt ? `last ${new Date(d.lastPaidAt).toLocaleDateString()}` : undefined)}
+        />
         <Kpi
           label="Last at the door"
           text={

@@ -649,9 +649,22 @@ export default function Scans() {
     // The meal plan follows your MOST RECENT-dated scan only. A back-dated scan is
     // stored for history/graphs but must not re-tune the plan.
     const curLatestISO = cd.scans.length ? cd.scans[cd.scans.length - 1].takenAt.slice(0, 10) : '';
+    // ── what the OTHER scans say, and whether we heard them ──────────────
+    //
+    // The render path on this screen asks `scansWhole` in nine places and the
+    // write path asked it nowhere. Under a failed scans read `cd.scans` is
+    // empty and `cd.weightKg` is null, which is indistinguishable from never
+    // having been measured — so `curLatestISO` was '', `isNewest` was
+    // unconditionally true, `before` was null, and a member with two years of
+    // scans was congratulated on their first measurements while a back-dated
+    // scan was announced as having re-tuned a plan it had not touched.
+    //
+    // Neither claim is available without the history, so neither is made.
+    const historyKnown = scansWhole;
     const isNewest = !curLatestISO || newISO >= curLatestISO;
-    // Only meaningful when there was a previous body to compare against.
-    const before = (cd.weightKg != null && cd.bodyFatPct != null)
+    // Only meaningful when there was a previous body to compare against — and
+    // only when the read that would have shown one actually answered.
+    const before = (historyKnown && cd.weightKg != null && cd.bodyFatPct != null)
       ? macrosFor({ weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity, goal: cd.goal, diet: cd.diet })
       : null;
     const after = macrosFor({ weightKg: w, bodyFatPct: f, activity: cd.activity, goal: cd.goal, diet: cd.diet });
@@ -714,6 +727,16 @@ export default function Scans() {
       return;
     }
     setImg(null); setWt(''); setBf(''); setSm(''); setScanMx(null); setShowAdd(false);
+    // The history could not be read, so this screen does not know whether this
+    // scan is the newest, the first, or one of two hundred. It says the one
+    // thing it does know: the scan is on the record.
+    if (!historyKnown) {
+      Alert.alert(
+        'Scan saved',
+        'Your scan is on your record. Your other scans could not be read just now, so this screen cannot say whether it is your most recent one or what it changed about your targets — pull down on Progress once you have signal and it will.',
+      );
+      return;
+    }
     if (!isNewest) {
       Alert.alert('Scan saved to history', 'This scan is dated ' + fmt(newISO) + ', earlier than your most recent scan (' + fmt(curLatestISO) + '). It\'s added to your progress tracking and graphs — but your meal plan stays on your most recent scan. Only a newer scan re-tunes your plan.');
       return;
@@ -895,14 +918,43 @@ export default function Scans() {
     } finally { setPhotoBusy(false); }
   };
 
+  /**
+   * ── The question that was never asked ───────────────────────────────────
+   *
+   * One tap on a button labelled "AI Check" did two separate things to a
+   * full-body photograph of the member, and named neither: it filed the picture
+   * permanently as a progress photo in their account, and it sent a copy off
+   * the handset to a language model. Nothing on the button, nothing in the
+   * section copy above it, and nothing in between.
+   *
+   * Both are now said, in the order they happen, before either does — and
+   * saving is separated from reading, because they are genuinely different
+   * decisions and the app was making both on one tap. src/lib/coachShare.ts is
+   * this app's own argument for asking about exactly this kind of thing.
+   */
   const physiqueCheck = async (fromCamera: boolean) => {
+    const keep = await new Promise<'save' | 'read-only' | null>((resolve) => {
+      Alert.alert(
+        'Have a photo read?',
+        'Two things can happen here and they are separate.\n\n'
+        + '· A copy of the photo leaves this phone to be read by an AI, which estimates body fat and picks out areas to work on. It is a guess from a picture, not a measurement, and it is not sent to your coach.\n\n'
+        + '· The photo can also be saved to your account as a progress photo. That is what puts it in the strip below and lets you compare it later. Only you can see it until you send it to your coach yourself.',
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+          { text: 'Read Only', onPress: () => resolve('read-only') },
+          { text: 'Save and Read', onPress: () => resolve('save') },
+        ],
+        { cancelable: true, onDismiss: () => resolve(null) },
+      );
+    });
+    if (!keep) return;
     if (!(await ensureMediaPermission(fromCamera ? 'camera' : 'library', 'add a scan'))) return;
     const res = fromCamera ? await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true }) : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, base64: true });
     if (res.canceled || !res.assets || !res.assets[0]) return;
     const asset = res.assets[0];
-    // The photo you hand the AI is a progress photo. It is saved the same way
-    // as any other, and told the same truth about whether it worked.
-    await savePhoto(asset.uri);
+    // The photo is saved only if they said so. It is told the same truth about
+    // whether that worked as any other progress photo.
+    if (keep === 'save') await savePhoto(asset.uri);
     if (!visionAvailable() || !asset.base64) { Alert.alert('AI not on yet', 'Physique analysis turns on with the AI backend.'); return; }
     setPhys(null); setPhysOpen(true); setPhysBusy(true);
     let pb = asset.base64;
