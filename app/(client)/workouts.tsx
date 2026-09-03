@@ -1619,7 +1619,7 @@ export default function Train() {
                 // the vertical only, exactly as `Cta` does, because horizontal
                 // slop here would reach into the neighbouring chip.
                 <Pressable key={id} onPress={() => { setMode(id); if (isSessionKind(id)) setCtype(SESSION_TYPES[id][0]); }}
-                  accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected: on }}
+                  accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: on }}
                   hitSlop={{ top: hitSlopFor(36), bottom: hitSlopFor(36), left: 0, right: 0 }}
                   style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.surface2 : 'transparent' }}>
                   {/* One line, shrunk to fit. A sixth chip took the widest label
@@ -2466,7 +2466,24 @@ export default function Train() {
                 const draftedDay = !worked && draftDates.has(ds);
                 const unknownDay = !logKnown && !worked && !draftedDay;
                 return (
-                  <Pressable key={day} onPress={() => setSelCalDay(ds)} style={{ width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
+                  // Said, not only drawn — the same sentence the week strip
+                  // above builds, because the comment two lines up is right
+                  // that these are the same four states and the accessibility
+                  // was the half that did not come with them. Trained, typed
+                  // but not saved, not read and nothing are one filled circle,
+                  // one warn-coloured hairline, one grey hairline and no border
+                  // at all; the only text in the cell is the day number, which
+                  // says none of it.
+                  //
+                  // `new Date(calYear, calMonth, day)` and not `new Date(ds)`:
+                  // a bare ISO day parses as UTC midnight and prints the day
+                  // before in every zone west of Greenwich, which on a calendar
+                  // would put the spoken date one off the number beside it.
+                  <Pressable key={day} onPress={() => setSelCalDay(ds)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSel }}
+                    accessibilityLabel={`${new Date(calYear, calMonth, day).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}${isToday ? ', today' : ''}${worked ? ', trained' : draftedDay ? ', typed but not saved' : unknownDay ? ', not read' : ''}`}
+                    style={{ width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
                     <View style={{ width: 34, height: 34, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: worked ? t.brand : 'transparent', borderWidth: isSel ? 2 : (isToday && !worked) || unknownDay || draftedDay ? hairline : 0, borderColor: isSel ? t.ink : draftedDay ? t.warn : isToday && !worked ? t.brand : t.ink3 }}>
                       <Text style={{ ...ty.label, ...numeric, fontWeight: worked || isToday ? '600' : '400', color: worked ? t.brandInk : isToday ? t.brand : t.ink2 }}>{day}</Text>
                     </View>

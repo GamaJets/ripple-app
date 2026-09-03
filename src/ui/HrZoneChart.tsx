@@ -129,7 +129,14 @@ export function HrZoneChart({ samples, zoneSeconds, avgBpm, maxBpm, age, title, 
 
       {hasSeries ? (
         <View onLayout={(e) => setW(Math.max(200, e.nativeEvent.layout.width))}>
-          <Svg width={w} height={height} accessibilityLabel={`Heart-rate chart, low ${stats!.low}, average ${stats!.avg}, high ${stats!.high} bpm`}>
+          {/* `accessible` as well as the label. An <Svg> is a plain view to
+              the accessibility tree and a label on its own does not make it a
+              stop — react-native-svg can also surface its child shapes as
+              separate nodes on Android, which turns one chart into a hundred
+              unnamed ones. Marked as a single element, it is one stop that
+              states the three figures the picture is drawn from. */}
+          <Svg width={w} height={height} accessible
+            accessibilityLabel={`Heart-rate chart, low ${stats!.low}, average ${stats!.avg}, high ${stats!.high} bpm`}>
             {bands.map((b) => {
               const yTop = yOf(Math.min(b.hiBpm, hi));
               const yBot = yOf(Math.max(b.loBpm, lo));

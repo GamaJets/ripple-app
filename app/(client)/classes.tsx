@@ -187,11 +187,11 @@ export default function Classes() {
   // which of five branches they were reading the classes of, on the screen they
   // then walk to a building on the strength of.
   //
-  // Announced as a tab rather than a button for the same reason: `selected` on
-  // an accessibilityRole of 'button' is spoken inconsistently, and this is a
-  // one-of-many choice, which is what a tab is.
+  // Role 'button' with a `selected` state, which is what the day strip in
+  // app/(client)/workouts.tsx already does for the same shape of control. One
+  // spelling of "this is the one that is on", not two.
   const chip = (label: string, active: boolean, onPress: () => void) => (
-    <Pressable key={label} onPress={onPress} accessibilityRole="tab" accessibilityLabel={label}
+    <Pressable key={label} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}
       accessibilityState={{ selected: active }}
       style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, backgroundColor: active ? t.brand : t.surface2 }}>
       <Text style={{ ...ty.label, fontWeight: active ? '600' : '500', color: active ? t.brandInk : t.ink2 }}>{label}</Text>

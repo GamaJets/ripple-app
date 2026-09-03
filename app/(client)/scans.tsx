@@ -2346,7 +2346,8 @@ export default function Scans() {
       </Modal>
 
       <Modal visible={physOpen} transparent animationType="slide" onRequestClose={() => setPhysOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setPhysOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setPhysOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
             <Text style={{ ...ty.title, color: t.ink }}>{physBusy ? 'Analyzing…' : 'AI physique read'}</Text>

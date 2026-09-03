@@ -156,7 +156,7 @@ export function WhatsNewSheet({ visible, force, releases, onClose }: {
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
         {/* News, not a gate: the backdrop dismisses it, and so does the phone's
             own back gesture via onRequestClose. */}
-        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Close" />
+        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{
           backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md,
           paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: sp.xxl, maxHeight: '84%',

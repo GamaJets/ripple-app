@@ -266,7 +266,7 @@ export default function Trends() {
                     // and a member who cannot see the fill was reading numbers
                     // with no subject attached to them.
                     <Pressable key={n} onPress={() => setSel(n)}
-                      accessibilityRole="tab" accessibilityLabel={n} accessibilityState={{ selected: on }}
+                      accessibilityRole="button" accessibilityLabel={n} accessibilityState={{ selected: on }}
                       style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                       <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{n}</Text>
                     </Pressable>

@@ -138,7 +138,7 @@ export function SessionMusicBar() {
           <Text style={{ ...ty.micro, color: t.ink3 }}>Spotify</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: 3 }}>{problem}</Text>
           {!transportDead ? (
-            <Pressable onPress={refresh} accessibilityRole="button" style={{ marginTop: sp.sm }}>
+            <Pressable onPress={refresh} accessibilityRole="button" hitSlop={hitSlopFor(21)} style={{ marginTop: sp.sm }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Try Again</Text>
             </Pressable>
           ) : null}
@@ -153,7 +153,11 @@ export function SessionMusicBar() {
       <View style={shell}>
         <Icon name="play" size={17} color={t.ink3} />
         <Text style={{ ...ty.label, color: t.ink2, flex: 1 }}>Nothing playing. Start a track in Spotify and it appears here.</Text>
-        <Pressable onPress={() => command(() => spotifyPlay())} accessibilityRole="button" accessibilityLabel="Resume Spotify" disabled={busy} accessibilityState={{ disabled: busy }}>
+        {/* A bare label is only as tall as its own line — about 21pt at
+            ty.label — and nothing here gives it padding, so this is a 21pt
+            target on a bar a member taps mid-set. Same arithmetic as the
+            transport below; no layout moves. */}
+        <Pressable onPress={() => command(() => spotifyPlay())} accessibilityRole="button" accessibilityLabel="Resume Spotify" disabled={busy} accessibilityState={{ disabled: busy }} hitSlop={hitSlopFor(21)}>
           <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Resume</Text>
         </Pressable>
       </View>

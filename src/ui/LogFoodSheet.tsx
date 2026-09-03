@@ -33,7 +33,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, TextInput, Modal, Pressable, Image, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { useTheme } from './components';
-import { Field, Flag } from './kit';
+import { Field, Flag, Scrim } from './kit';
 import { sp, radius, elevation, type as ty, numeric } from '../theme/scale';
 import { num } from '../lib/format';
 import {
@@ -117,7 +117,7 @@ export function LogFoodSheet({ food, photoUri, title, note, onLog, onClose }: {
   return (
     <Modal visible={food != null} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
+        <Scrim onPress={onClose} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
             <Text style={{ ...ty.title, color: t.ink }}>{title ?? 'How Much Did You Have?'}</Text>

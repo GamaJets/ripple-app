@@ -42,3 +42,13 @@ play-service-account*.json
 # bulk. A file listing is not the assets, but it is the shape of them, and it
 # has no reason to be in a repository either way.
 .repdb-staging/
+
+# Compiled output must never sit beside its source. A `tsc` run without
+# --outDir drops a .js next to every .ts it reads, and on 4 Sep 2026 one of
+# those was committed: src/lib/offlineQueue.js, a build artifact shadowing the
+# module it was built from. Metro resolves .js before .ts, so a stale one wins
+# silently and the app runs code nobody edited.
+src/**/*.js
+app/**/*.js
+src/**/*.js.map
+app/**/*.js.map

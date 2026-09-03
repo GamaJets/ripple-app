@@ -26,7 +26,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from './components';
 import { Icon } from './Icon';
 import { Ghost } from './kit';
-import { sp, radius, hairline, type as ty } from '../theme/scale';
+import { sp, radius, hairline, type as ty, grown } from '../theme/scale';
 import {
   SCREEN_HELP, dismissedFrom, isDismissed, withDismissed, type ScreenHelpKey,
 } from '../lib/screenHelp';
@@ -101,7 +101,14 @@ export function ScreenHelp({ screen }: { screen: ScreenHelpKey }) {
             // One text node, not two: the term and its explanation are one
             // sentence and wrap as one. Split across two <Text> they hang the
             // explanation under a heading and the row becomes three rows.
-            <Text key={l.term} style={{ ...ty.caption, color: t.ink3, lineHeight: 18 }}>
+            // `grown(18)`, not a raw 18. `ty.caption` already carries a line
+            // height that tracks the reader's text size; pinning one here puts
+            // back the exact defect src/lib/typeScale.ts was written to end —
+            // React Native scales fontSize and never lineHeight, so at 235%
+            // text these are 28pt glyphs laid out in an 18pt line. This card is
+            // the app's own explanation of the screen you are on, so the reader
+            // who turned their text up is the reader it clips.
+            <Text key={l.term} style={{ ...ty.caption, color: t.ink3, lineHeight: grown(18) }}>
               <Text style={{ color: t.ink2, fontWeight: '600' }}>{l.term}</Text>
               {' — '}{l.means}
             </Text>

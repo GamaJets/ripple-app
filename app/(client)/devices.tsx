@@ -1030,7 +1030,8 @@ export default function Devices() {
  </ScrollView>
 
  <Modal visible={detail != null} transparent animationType="slide" onRequestClose={() => setDetail(null)}>
-  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setDetail(null)} />
+  <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setDetail(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
   <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 32 }}>
    {detail ? (
     <>
