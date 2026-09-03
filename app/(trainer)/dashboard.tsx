@@ -887,7 +887,14 @@ export default function TrainerClients() {
   const startParam = useLocalSearchParams<{ start?: string }>().start;
   const startedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!startParam || startedFor.current === startParam) return;
+    // Clearing the param clears the memory of having honoured it. Without
+    // this the ref latched: "Add Your First Client" and "Name a Join Code"
+    // both open the same sheet, so a coach who used the first one and came
+    // back for the second was returned to the tab with nothing open — the
+    // dead end this parameter exists to remove, arriving on the second tap
+    // instead of the first.
+    if (!startParam) { startedFor.current = null; return; }
+    if (startedFor.current === startParam) return;
     startedFor.current = startParam;
     if (startParam === 'invite') void openInvite();
     router.setParams({ start: '' });

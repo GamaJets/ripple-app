@@ -42,6 +42,26 @@ import { Shell } from '@/components/Shell';
 // See studio-web/components/Banner.tsx: the shared banner carries the live
 // region every local copy of this component was missing.
 import { Banner } from '@/components/Banner';
+// ── Why this screen gained a freshness stamp and three others did not ──────
+//
+// Four console routes carried no `<Fetched>`: /settings, /export,
+// /coach/checklists and this one. The three were left off deliberately and the
+// reason given was "forms and job screens, where a stamp is noise and a
+// background re-read would fight the form". That reason is real and specific —
+// `useFetched` re-reads on every `visibilitychange`, unconditionally, so an
+// owner who alt-tabs away from a half-filled settings form and comes back has
+// the read that repopulates it fired underneath them.
+//
+// It does not apply here. This page has no form, no draft, nothing typed and
+// nothing to lose: it is four money tiles and two tables over three reads, and
+// it is the ONE screen in the console whose figures nobody at the gym is
+// watching change — a Repple admin opens it, leaves the tab, and reads
+// yesterday's subscription count off it a day later with nothing on the page
+// saying so. That is precisely the case the stamp was built for, and being
+// rarely opened is an argument for it rather than against.
+//
+// No poll. Nothing here is written while somebody stands at a desk.
+import { Fetched, useFetched } from '@/components/Fetched';
 import {
   isPlatformAdmin, fetchPlatformBook, byPlan, byStatus, sumInvoices, potLabel,
   needsAttention, INVOICE_WINDOW_DAYS,
@@ -79,6 +99,22 @@ export default function Platform() {
   const [admin, setAdmin] = useState<AdminCheck | null>(null);
   const [book, setBook] = useState<PlatformBook | null>(null);
 
+  /**
+   * The book, and when it was last read WHOLE.
+   *
+   * `true` only when all three reads came back. `fetchPlatformBook` keeps each
+   * one's outcome separately and returns null for the ones that failed — see
+   * `pagedOrNull` — and the page already draws a dash and a banner for those.
+   * The stamp must not move for a partial read: the figures still on screen
+   * would be the earlier ones, and re-dating them is the same untruth the
+   * banner beside it is there to prevent.
+   */
+  const { at: readAt, busy: reading, refresh } = useFetched(async () => {
+    const b = await fetchPlatformBook();
+    setBook(b);
+    return b.subscriptions !== null && b.invoices !== null && b.customers !== null;
+  }, { enabled: admin === 'yes' });
+
   useEffect(() => {
     let live = true;
     (async () => {
@@ -93,16 +129,18 @@ export default function Platform() {
       const check = await isPlatformAdmin();
       if (!live) return;
       setAdmin(check);
-      // Only read the book once the answer is yes. Reading it anyway would
-      // work — RLS refuses and returns nothing — and it would put an empty
-      // result on screen that this page then has to explain, when the honest
-      // explanation is the one line above it.
-      if (check !== 'yes') return;
-      const b = await fetchPlatformBook();
-      if (live) setBook(b);
     })();
     return () => { live = false; };
   }, []);
+
+  // The book is read only once the allowlist has answered yes. Reading it
+  // anyway would work — RLS refuses and returns nothing — and it would put an
+  // empty result on screen that this page then has to explain, when the honest
+  // explanation is the one line above it.
+  useEffect(() => {
+    if (admin === 'yes') refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -190,6 +228,10 @@ export default function Platform() {
   return shell(<>
     <h1>Repple</h1>
     <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '72ch' }}>{NOT_GYM_MONEY_NOTE}</p>
+
+    {/* Named as the book rather than as "this screen": the sentence sits above
+        four tiles and two tables and has to say what it is the age OF. */}
+    <Fetched at={readAt} busy={reading} onRefresh={refresh} what="Repple’s book" />
 
     {subs === null || invs === null ? (
       <Banner tone="crit" style={{ maxWidth: '72ch' }}>

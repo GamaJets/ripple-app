@@ -2315,7 +2315,41 @@ export default function TrainerSchedule() {
       { text: 'Cancel session', style: 'destructive', onPress: () => doCancel(s) },
     ]);
   }
+  /**
+   * The confirmation over "Remove" on an open slot AND over "Free This Time
+   * Up" on a blocked period — two different rows that call one function.
+   *
+   * It had ONE sentence, and it was the open-slot one. Seen on an iPhone 17
+   * Pro: blocking Sunday 9am–5pm and then tapping "Free This Time Up" on the
+   * row that reads "Unavailable · nobody can book this" asked
+   *
+   *     Remove open slot?
+   *     9am is currently open. Remove it from your availability?
+   *
+   * — which asserts the opposite of the row the coach is looking at, and calls
+   * lifting a block "removing it from your availability", which is what the
+   * block was the negation of. A coach unblocking a holiday was asked to
+   * confirm a claim they could see was false, one tap from a destructive
+   * button.
+   *
+   * The blocked arm also says the thing only the SQL knows: `block_time` in
+   * supabase/parts/113-block-time-already-blocked.sql DELETES the open slots
+   * inside the block, so unblocking gives back the hours but not the offers.
+   * A coach who frees up a fortnight and finds their clients still cannot book
+   * it has been told nothing, twice.
+   */
   function removeOpen(s: TrainingSession) {
+    if (s.status === 'blocked') {
+      Alert.alert(
+        'Free this time up?',
+        `${timeLabel(s.startsAt)} on ${dateOfLabel(new Date(s.startsAt))} is blocked, so nobody can book it. Freeing it lifts the block.\n\nAny open slots the block withdrew do not come back — put them up again with Generate Open Slots in Weekly Availability.`,
+        [
+          { text: 'Keep it blocked', style: 'cancel' },
+          { text: 'Free it up', style: 'destructive', onPress: () => removeSession(s.id) },
+        ],
+      );
+      return;
+    }
     Alert.alert('Remove open slot?', `${timeLabel(s.startsAt)} is currently open. Remove it from your availability?`, [
       { text: 'Keep', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: () => removeSession(s.id) },
@@ -2653,6 +2687,25 @@ export default function TrainerSchedule() {
                 const isToday = k === todayKey;
                 const hasBooked = daySess.some((s) => s.status === 'booked');
                 const hasOpen = daySess.some((s) => s.status === 'available');
+                /* ── the third state the grid did not have ──────────────────
+                   Seen on an iPhone 17 Pro: this grid drew a dot for 'booked'
+                   and one for 'available' and NOTHING for 'blocked', while the
+                   help card at the top of this same screen says in so many
+                   words that the grid shows "Blocked — time nobody can book
+                   across". It did not.
+
+                   And the direction of the error is the wrong way round.
+                   Blocking a day WITHDRAWS the open slots inside it, so the
+                   grey Open dot went away too: a coach who blocked a
+                   fortnight's holiday came back to a month that looked emptier
+                   than before they blocked it, with nothing anywhere saying
+                   why. The one gesture on this screen that a coach most needs
+                   to see the result of was the one gesture that left no mark.
+
+                   `warn` as a 6pt MARK, which is what the day list below
+                   already uses for a blocked hour — never as text ink, which
+                   is what check:contrast is about. */
+                const hasBlocked = daySess.some((s) => s.status === 'blocked');
                 return (
                   <Pressable key={i} onPress={() => setSelKey(k)} accessibilityRole="button" accessibilityState={{ selected: isSel }}
                     style={{ flex: 1, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -2668,6 +2721,7 @@ export default function TrainerSchedule() {
                     <View style={{ flexDirection: 'row', gap: 3, height: 6, marginTop: 2 }}>
                       {hasBooked && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.brand }} />}
                       {hasOpen && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.ink3 }} />}
+                      {hasBlocked && <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.warn }} />}
                     </View>
                   </Pressable>
                 );
@@ -2683,6 +2737,12 @@ export default function TrainerSchedule() {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.ink3 }} />
               <Text style={{ ...ty.caption, color: t.ink3 }}>Open</Text>
+            </View>
+            {/* Named in the legend as well as drawn, because an unexplained
+                third colour is a worse fault than the missing dot was. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>Blocked</Text>
             </View>
           </View>
 
@@ -2906,7 +2966,18 @@ export default function TrainerSchedule() {
              * bare or inside a Pressable; there is one copy of it either way. */
             const identity = (
               <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>{timeLabel(s.startsAt)} · {s.durationMin} min</Text>
+                {/* A blocked stretch reads as a RANGE, not a minute count.
+                    Seen on an iPhone 17 Pro: blocking Sunday 9am to 5pm drew
+                    "9am · 480 min", which is arithmetically right and is not a
+                    sentence any coach thinks in — the two numbers a coach
+                    holds about a block are when it starts and when it ends. A
+                    session keeps its minutes, because "60 min" is exactly how
+                    a session is sold. */}
+                <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink }}>
+                  {s.status === 'blocked'
+                    ? `${timeLabel(s.startsAt)} — ${timeLabel(new Date(Date.parse(s.startsAt) + s.durationMin * 60_000).toISOString())}`
+                    : `${timeLabel(s.startsAt)} · ${s.durationMin} min`}
+                </Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.status === 'booked' ? slotOf(s.clientId) : s.status === 'blocked' ? 'Unavailable · nobody can book this' : (s.released ? 'Open · re-offered' : 'Open slot')}</Text>
                 {/* A booked hour whose client this screen cannot name. Said
                     in a sentence and not left to an odd-looking label,
@@ -3433,7 +3504,15 @@ export default function TrainerSchedule() {
                 ))}
               </ScrollView>
 
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From</Text>
+              {/* The chosen hour is in the HEADING, in the form this file
+                  already uses at "Time · 9:00am" two sheets down. Seen on an
+                  iPhone 17 Pro: these are horizontal scrollers that always
+                  start at their left end, so at the defaults the selected chip
+                  (7am, 7pm) sat off the right edge and NOTHING visible on the
+                  row said what was selected — a coach read a row of grey chips
+                  and had to scroll sideways twice to find out what they were
+                  about to save. */}
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>From · {avTime(avFrom, avFromMin)}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
                 {HOURS.map((h) => (
                   <Chip key={'af' + h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={avFrom === h}
@@ -3446,7 +3525,7 @@ export default function TrainerSchedule() {
                 ))}
               </ScrollView>
 
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Until</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Until · {avTo === 24 ? hourLabel(24) : avTime(avTo, avToMin)}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm }}>
                 {HOURS.filter((h) => h >= avFrom).concat([24]).map((h) => (
                   <Chip key={'at' + h} t={t} label={hourLabel(h)} on={avTo === h} onPress={() => setAvTo(h)} />
@@ -3585,14 +3664,17 @@ export default function TrainerSchedule() {
               <Chip t={t} label="Part of the day" on={!blkAllDay} onPress={() => setBlkAllDay(false)} />
             </View>
             {!blkAllDay ? (<>
-              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm, marginBottom: sp.sm }}>From</Text>
+              {/* Same correction as the availability sheet above: the chosen
+                  hour goes in the heading, because the scroller starts at 12am
+                  and 9am is off the right edge. */}
+              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm, marginBottom: sp.sm }}>From · {hourLabel(blkFrom)}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
                 {HOURS.map((h) => (
                   <Chip key={'bf' + h} t={t} label={`${h % 12 || 12}${h >= 12 ? 'pm' : 'am'}`} on={blkFrom === h}
                     onPress={() => { setBlkFrom(h); if (blkTo <= h) setBlkTo(Math.min(24, h + 1)); }} />
                 ))}
               </ScrollView>
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Until</Text>
+              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>Until · {hourLabel(blkTo)}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
                 {HOURS.filter((h) => h > blkFrom).concat([24]).map((h) => (
                   <Chip key={'bt' + h} t={t} label={hourLabel(h)} on={blkTo === h} onPress={() => setBlkTo(h)} />

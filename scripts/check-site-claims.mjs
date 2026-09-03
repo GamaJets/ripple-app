@@ -80,6 +80,22 @@
 //                                                        app.json or eas.json
 //   F · The deletion figure   security.html's chart is internally consistent
 //                             and carries a parseable provenance date
+//   G · Hosts the SITE calls  every host a visitor's browser is made to
+//                             contact  vs  privacy.html
+//   H · The CSP               every host from G  vs  web/_headers
+//   I · The catalogue figures the pages agree with each other, the three
+//                             numbers nest, and the count is stamped with the
+//                             date it was taken from the live catalogue
+//   J · Internal links        every same-origin href  vs  the files under web/,
+//                             and every #fragment  vs  the ids on its target
+//   K · The console's size    "thirty pages in five groups" on studio.html
+//                             vs  the NAV array in
+//                             studio-web/components/Shell.tsx
+//   L · The export's parts    the twenty-eight rows on studio.html  vs
+//                             EXPORT_PARTS and EXPORT_LABEL in
+//                             src/lib/gymExport.ts
+//   M · The coach setup list  the nine steps on coach-setup.html  vs
+//                             COACH_SETUP_STEPS in src/lib/coachFirstRun.ts
 //
 // ── what this deliberately does NOT check ─────────────────────────────────
 //
@@ -103,6 +119,18 @@
 //     no set for a gate to compare against. If Fitbit is ever registered, that
 //     table needs a human. Check E will fail on that day and this is the note
 //     that says where else to look.
+//
+//   · THE CATALOGUE COUNTS THEMSELVES (608 / 601 / 489), for exactly the reason
+//     the deletion counts are not checked: they are one query over
+//     `public.exercises` and this gate has no credentials. Check I holds the
+//     three things a hand edit breaks — the pages disagreeing, the figures
+//     failing to nest, and the stamp stopping being a date — and leaves the
+//     values to a person with a psql prompt. The query is in the comment above
+//     the claim on web/client.html.
+//
+//   · WHETHER THE DESCRIPTION OF A CONSOLE PAGE OR AN EXPORT PART IS FAIR.
+//     Checks K and L compare a COUNT and a SET OF NAMES, which are mechanical.
+//     "Is this a fair account of what the Money page does" is not.
 //
 //   · PRICES, DATES OTHER THAN THE ONE IN CHECK F, AND EVERY OTHER SENTENCE ON
 //     THE SITE. Not because they cannot be wrong, but because no file in this
@@ -813,9 +841,403 @@ function checkDeletionFigure() {
   }
 }
 
+/* ── I · the exercise catalogue's three figures ──────────────────────────── */
+//
+// `/client` and `/trainer` both state the size of the exercise catalogue, and
+// they stated 604 while the live table held 608. Not a dangerous number — it
+// UNDER-sells the product — but it is the same defect as every other one this
+// file exists for: a figure on a marketing page that nothing connects to the
+// thing it describes, quietly ageing.
+//
+// It cannot be gated on its VALUE. The counts come from one query over
+// `public.exercises`, this gate runs offline with no credentials, and check F's
+// note above sets out why a gate must not pretend to know a number it cannot
+// read. So the same treatment check F gives the deletion chart:
+//
+//   1. Every page stating the total must state the SAME total. This is the
+//      failure that actually happens — the password minimum was fixed on four
+//      screens and missed on the fifth, and a catalogue figure quoted on two
+//      pages will be updated on one of them.
+//   2. The figures must nest: animated ⊆ illustrated ⊆ total. A hand edit that
+//      moves one and not the others produces "608 movements, 610 illustrated",
+//      which is arithmetic rather than judgement.
+//   3. Somewhere on a page that states them there must be a parseable
+//      "Counted from the live catalogue, <D Month YYYY>" stamp that is not in
+//      the future — the only thing that tells a reader how old the number is.
+//
+// The re-count query is in the comment above the claim on web/client.html.
+
+const CAT_MARKER = /<!--\s*site-claim:\s*catalogue-figures\b[^>]*-->/g;
+
+function checkCatalogueFigures(seen) {
+  const totals = new Map();                      // total → ["page:line", …]
+  for (const page of PAGES) {
+    const raw = read(page);
+    const lines = raw.split('\n');
+    for (const m of [...raw.matchAll(CAT_MARKER)]) {
+      seen.catalogue++;
+      const line = raw.slice(0, m.index).split('\n').length;
+      // The claim is the marked comment's own paragraph: from the marker to the
+      // end of the element it introduces, exactly as check E reads its block.
+      const from = m.index + m[0].length;
+      const end = [...raw.slice(from).matchAll(/<\/(li|p|td|span|div)>/g)][0];
+      const block = text(raw.slice(from, end ? from + end.index : from + 700));
+
+      const total = /catalogue (?:carries|of) (\d+) movements/i.exec(block);
+      if (!total) {
+        note(page, line, 'carries a catalogue-figures marker and states no "catalogue of <N> movements"',
+          'The marker exists so this gate can compare the figure across the pages that state it. A marker above a sentence that no longer states a total compares nothing — move the marker, or delete it with the claim.');
+        continue;
+      }
+      const n = Number(total[1]);
+      totals.set(n, [...(totals.get(n) ?? []), `${page}:${line}`]);
+
+      const illustrated = /(\d+)\s+of\s+them\s+illustrated|(\d+)\s+illustrated/i.exec(block);
+      const animated = /(\d+)\s+of\s+(?:those|them)\s+as\s+a\s+looping\s+animation/i.exec(block);
+      const ill = illustrated ? Number(illustrated[1] ?? illustrated[2]) : null;
+      const anim = animated ? Number(animated[1]) : null;
+      if (ill !== null && ill > n && !excused(lines, line - 1)) {
+        note(page, line, `states ${ill} illustrated movements out of a catalogue of ${n}`,
+          'A subset cannot be larger than the set it is a subset of. One of the two was moved by hand and the other was not.');
+      }
+      if (anim !== null && ill !== null && anim > ill && !excused(lines, line - 1)) {
+        note(page, line, `states ${anim} animated movements out of ${ill} illustrated ones`,
+          'Every animated movement is an illustrated one. These moved apart in a hand edit.');
+      }
+    }
+  }
+  if (seen.catalogue === 0) {
+    fatal.push('no `<!-- site-claim: catalogue-figures -->` marker anywhere under web/, so check I compared nothing.\n'
+      + '      The marker sits directly above each sentence that states the size of the exercise catalogue —\n'
+      + '      web/client.html and web/trainer.html each had one. If the claim has moved, move the marker.\n'
+      + '      If it has been deleted from both pages, delete check I rather than leaving a check that\n'
+      + '      silently inspects nothing.');
+    return;
+  }
+  if (totals.size > 1) {
+    const said = [...totals].map(([n, where]) => `${n} (${where.join(', ')})`).join('; ');
+    note('web/', 1, `the pages disagree about how many movements the catalogue holds: ${said}`,
+      'There is one catalogue. Somebody re-counted it and updated one page. Re-run the query in the comment on web/client.html and move every figure, and the stamp beneath it, together.');
+  }
+  // The stamp, on whichever page carries the full claim.
+  const stamped = PAGES.filter((p) => /Counted from the live catalogue,/.test(read(p)) && CAT_MARKER.test(read(p)));
+  CAT_MARKER.lastIndex = 0;
+  if (stamped.length === 0) {
+    note('web/client.html', 1, 'the catalogue figures carry no "Counted from the live catalogue, <D Month YYYY>" stamp on any page that states them',
+      'These numbers cannot be checked offline, so the date they were taken is the only thing a reader has. It is the part that is gated.');
+  }
+  for (const page of stamped) {
+    const raw = read(page);
+    const m = /Counted from the live catalogue,\s*(\d{1,2} [A-Z][a-z]+ \d{4})/.exec(pageText(raw));
+    const line = raw.slice(0, raw.indexOf('Counted from the live catalogue')).split('\n').length;
+    if (!m) {
+      note(page, line, 'the catalogue stamp is not followed by a readable date',
+        'It must parse as `D Month YYYY`, e.g. "4 September 2026".');
+      continue;
+    }
+    const when = new Date(`${m[1]} UTC`);
+    if (Number.isNaN(when.getTime())) {
+      note(page, line, `the catalogue figures are stamped "${m[1]}", which is not a date`, 'It must parse as `D Month YYYY`.');
+    } else if (when.getTime() > Date.now() + 86400000) {
+      note(page, line, `the catalogue figures are stamped "${m[1]}", which is in the future`,
+        'A count cannot have been taken from a catalogue that has not happened yet.');
+    }
+  }
+}
+
+/* ── J · every internal link resolves ────────────────────────────────────── */
+//
+// The site is served extensionless — `/pricing`, not `/pricing.html` — so a
+// link to a page that does not exist is not a build error, not a 404 anybody
+// sees in review, and not visible in any editor. It is a 404 for a stranger,
+// on the one surface where a stranger is deciding whether to trust this.
+//
+// Nothing checked this. Twenty-two pages carried about six hundred internal
+// links between them and the only thing standing between a typo and a dead
+// link on the pricing page was somebody noticing.
+//
+// The rule: every same-origin href must resolve to a file under web/, and every
+// `#fragment` must be an id that exists on the page it points at. Both halves
+// matter — a footer link to a page that does not exist and an in-page jump to a
+// section somebody renamed fail in exactly the same way for the reader.
+
+function checkLinks(seen) {
+  const exists = new Set();
+  for (const rel of PAGES) {
+    const base = rel.replace(/^web\//, '').replace(/\.html$/, '');
+    exists.add('/' + base);
+    exists.add('/' + base + '.html');
+    if (base === 'index') exists.add('/');
+  }
+  // Everything else served out of web/ that is not a page: images, the badges,
+  // the stylesheet, robots.txt. Read from disk rather than listed, so adding a
+  // file is enough to link to it.
+  (function walkAll(dir, prefix) {
+    let es; try { es = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of es) {
+      if (e.isDirectory()) walkAll(join(dir, e.name), `${prefix}${e.name}/`);
+      else { exists.add(`${prefix}${e.name}`); exists.add(`/${prefix}${e.name}`.replace('//', '/')); }
+    }
+  })(join(ROOT, 'web'), '');
+
+  const idsOf = new Map();                       // page → Set of ids
+  const idsFor = (rel) => {
+    if (!idsOf.has(rel)) {
+      idsOf.set(rel, new Set([...read(rel).matchAll(/\bid="([^"]+)"/g)].map((m) => m[1])));
+    }
+    return idsOf.get(rel);
+  };
+
+  for (const page of PAGES) {
+    const raw = read(page);
+    const lines = raw.split('\n');
+    lines.forEach((line, i) => {
+      if (COMMENT.test(line)) return;
+      for (const m of line.matchAll(/\bhref="([^"]*)"/g)) {
+        const href = m[1];
+        // Off-site, a mail link, a deep link into an app, or an empty anchor:
+        // none of them is a file in this repository.
+        if (/^(?:https?:|mailto:|tel:|data:|[a-z]+:\/\/|repple)/i.test(href)) continue;
+        if (href === '' || href === '#') continue;
+        seen.links++;
+        const [pathPart, frag] = href.split('#');
+        let targetPage = page;
+        if (pathPart) {
+          const clean = pathPart.split('?')[0];
+          // Site-absolute (`/pricing`) or relative to the page's own directory
+          // (`../styles.css` from web/ads/callback.html). Resolving relative
+          // links as though they were absolute is how this check first reported
+          // two working links as broken.
+          const dir = page.replace(/^web\//, '').replace(/[^/]*$/, '');
+          const abs = clean.startsWith('/')
+            ? clean
+            : new URL(clean, `http://x/${dir}`).pathname;
+          if (!exists.has(abs) && !exists.has(clean)) {
+            if (!excused(lines, i)) {
+              note(page, i + 1, `links to ${href}, and nothing under web/ answers to it`,
+                'The site is served without file extensions, so a link to a page that does not exist is a 404 for a visitor and silence for everybody else. Either the file is missing or the path is a typo.');
+            }
+            continue;
+          }
+          const asFile = 'web' + (abs === '/' ? '/index.html' : abs.endsWith('.html') ? abs : abs + '.html');
+          targetPage = PAGES.includes(asFile) ? asFile : null;
+        }
+        // A fragment on a page this gate can read must name an id on it. A
+        // fragment on a non-page target (an image, say) is not a claim.
+        if (frag && targetPage) {
+          if (!idsFor(targetPage).has(frag) && !excused(lines, i)) {
+            note(page, i + 1, `links to ${href}, and ${targetPage} has no id="${frag}"`,
+              'The browser lands at the top of the page instead of at the thing the link named, which reads as a link that does nothing. Either the id was renamed or the anchor was guessed.');
+          }
+        }
+      }
+    });
+  }
+  if (seen.links < 200) {
+    fatal.push(`check J found only ${seen.links} internal links across web/, which cannot be right — the footer alone carries a dozen on every page. The scan has gone blind; refusing to pass.`);
+  }
+}
+
+/* ── K · the size and shape of the Studio console ────────────────────────── */
+//
+// `/studio` and `/how-it-works` described "the seven console pages". The
+// console's own navigation carries thirty that a gym's owner can open, in five
+// groups. Under-claiming by a factor of four is not a lie, but it is the same
+// failure as every other entry here — a sentence about the product written once
+// and never re-read against it — and it is expensive in the opposite direction:
+// a gym owner deciding on the strength of that sentence is being shown a
+// quarter of what they would be buying.
+//
+// The rail is a literal array in one file, so it can be parsed. The count and
+// the group names are what the page states, so they are what is compared.
+//
+// `adminOnly` entries are excluded deliberately: /platform is shown only to an
+// account on an allowlist that is empty on a fresh project, so on every gym's
+// console that link does not exist and a page claiming it would be wrong.
+
+function consoleRail() {
+  const rel = 'studio-web/components/Shell.tsx';
+  if (!existsSync(join(ROOT, rel))) {
+    fatal.push(`${rel} does not exist, so the console's own page list cannot be read and check K has no source of truth. Point it at the new home, or remove check K and the sentence it holds.`);
+    return null;
+  }
+  const src = read(rel);
+  const entries = [];
+  for (const m of src.matchAll(/\{\s*href:\s*'([^']+)'[^}]*?group:\s*'([^']+)'([^}]*)\}/g)) {
+    entries.push({ href: m[1], group: m[2], adminOnly: /adminOnly:\s*true/.test(m[3]) });
+  }
+  if (entries.length < 20) {
+    fatal.push(`${rel} yielded ${entries.length} navigation entries, which cannot be right — the console rail lists about thirty. The shape of that array has changed; re-point the parser in consoleRail() before trusting check K.`);
+    return null;
+  }
+  const visible = entries.filter((e) => !e.adminOnly);
+  return { count: visible.length, groups: [...new Set(visible.map((e) => e.group))] };
+}
+
+const RAIL_MARKER = /<!--\s*site-claim:\s*console-rail\b[^>]*-->/g;
+
+function checkConsoleRail(rail, seen) {
+  if (!rail) return;
+  for (const page of PAGES) {
+    const raw = read(page);
+    const lines = raw.split('\n');
+    for (const m of [...raw.matchAll(RAIL_MARKER)]) {
+      seen.rail++;
+      const line = raw.slice(0, m.index).split('\n').length;
+      const from = m.index + m[0].length;
+      const end = [...raw.slice(from).matchAll(/<\/(p|li|div|td)>/g)][0];
+      const block = text(raw.slice(from, end ? from + end.index : from + 1600));
+      if (excused(lines, line - 1)) continue;
+
+      const stated = new RegExp(`(${NUM}) pages`, 'i').exec(block);
+      if (!stated) {
+        note(page, line, 'carries a console-rail marker and states no page count',
+          `The console's rail lists ${rail.count} pages an owner can open. The marker exists so that number is compared rather than remembered.`);
+      } else if (asNumber(stated[1]) !== rail.count) {
+        note(page, line, `says the console has ${stated[1]} pages`,
+          `studio-web/components/Shell.tsx lists ${rail.count} that a gym's owner can open (${rail.groups.join(', ')}), excluding the platform-admin entry that does not exist on a gym's console. A page was added to the rail and this sentence was not moved with it.`);
+      }
+      const absent = rail.groups.filter((g) => !new RegExp(`\\b${g.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(block));
+      if (absent.length) {
+        note(page, line, `names the console's groups and omits ${absent.join(', ')}`,
+          `The rail's groups are: ${rail.groups.join(', ')}. A group nobody mentions is a part of the console a reader does not know exists.`);
+      }
+    }
+  }
+  if (seen.rail === 0) {
+    fatal.push('no `<!-- site-claim: console-rail -->` marker anywhere under web/, so check K compared nothing.\n'
+      + '      It sits above the sentence on web/studio.html that says how many pages the console has.\n'
+      + '      If that sentence has gone, delete check K with it rather than leaving a check that inspects nothing.');
+  }
+}
+
+/* ── L · the parts of a gym's export ─────────────────────────────────────── */
+//
+// `/studio` now tells a gym owner what leaving looks like, and it does it by
+// listing the twenty-eight parts of the export bundle by name. That is the
+// single most load-bearing table on the page for somebody deciding whether to
+// migrate a business onto this, and it is a list — which is to say it is the
+// exact shape of claim that rots: a part added to `EXPORT_PARTS` and not to the
+// page turns a complete answer into an incomplete one with no visible edit.
+//
+// So the table's first column must be exactly the labels the code prints,
+// no more and no fewer.
+
+function exportParts() {
+  const rel = 'src/lib/gymExport.ts';
+  if (!existsSync(join(ROOT, rel))) {
+    fatal.push(`${rel} does not exist, so the gym export's own list of parts cannot be read. The claim on web/studio.html is ungated; point check L at the new home or remove both.`);
+    return null;
+  }
+  const src = read(rel);
+  const list = /export const EXPORT_PARTS:[^=]*=\s*\[([\s\S]*?)\];/.exec(src);
+  const labels = /export const EXPORT_LABEL:[^=]*=\s*\{([\s\S]*?)\n\};/.exec(src);
+  if (!list || !labels) {
+    fatal.push(`${rel} no longer declares EXPORT_PARTS and EXPORT_LABEL in the shape check L reads. The table on web/studio.html mirrors them, so it is now ungated.`);
+    return null;
+  }
+  const parts = [...list[1].matchAll(/'([a-zA-Z]+)'/g)].map((m) => m[1]);
+  const label = new Map([...labels[1].matchAll(/(\w+):\s*'((?:[^'\\]|\\.)*)'/g)]
+    .map((m) => [m[1], m[2].replace(/\\'/g, "'")]));
+  if (parts.length < 10) {
+    fatal.push(`only ${parts.length} export parts parsed out of ${rel}; the format moved. Refusing to pass on a set this gate does not believe.`);
+    return null;
+  }
+  return parts.map((p) => ({ part: p, label: label.get(p) ?? null }));
+}
+
+const EXPORT_MARKER = /<!--\s*site-claim:\s*export-parts\b[^>]*-->/g;
+
+function checkExportParts(parts, seen) {
+  if (!parts) return;
+  const missingLabel = parts.filter((p) => !p.label).map((p) => p.part);
+  if (missingLabel.length) {
+    fatal.push(`EXPORT_LABEL has no wording for ${missingLabel.join(', ')}, so check L cannot say what web/studio.html should be calling them.`);
+    return;
+  }
+  for (const page of PAGES) {
+    const raw = read(page);
+    const lines = raw.split('\n');
+    for (const m of [...raw.matchAll(EXPORT_MARKER)]) {
+      seen.exportParts++;
+      const line = raw.slice(0, m.index).split('\n').length;
+      if (excused(lines, line - 1)) continue;
+      const from = m.index + m[0].length;
+      const closeAt = raw.indexOf('</tbody>', from);
+      const block = raw.slice(from, closeAt < 0 ? from + 8000 : closeAt);
+      const listed = [...block.matchAll(/<th scope="row">([\s\S]*?)<\/th>/g)]
+        .map((t) => text(t[1]).toLowerCase());
+      const want = parts.map((p) => text(p.label).toLowerCase());
+      const absent = want.filter((w) => !listed.includes(w));
+      const extra = listed.filter((l) => !want.includes(l));
+      if (!absent.length && !extra.length) continue;
+      const why = [];
+      if (absent.length) why.push(`omits ${absent.map((x) => `"${x}"`).join(', ')}`);
+      if (extra.length) why.push(`lists ${extra.map((x) => `"${x}"`).join(', ')}, which the export does not produce`);
+      note(page, line, `the export table ${why.join(' and ')}`,
+        `EXPORT_PARTS in src/lib/gymExport.ts holds ${parts.length} parts and EXPORT_LABEL names each one. A gym owner reads this table to decide whether their record can leave, so a part that is in the bundle and not on the page understates it — and one on the page and not in the bundle promises a file that will not be there.`);
+    }
+  }
+  if (seen.exportParts === 0) {
+    fatal.push('no `<!-- site-claim: export-parts -->` marker anywhere under web/, so check L compared nothing.\n'
+      + '      It sits directly above the <tbody> of the export table on web/studio.html. If that table\n'
+      + '      has gone, delete check L with it rather than leaving a check that inspects nothing.');
+  }
+}
+
+/* ── M · the coach's setup list ──────────────────────────────────────────── */
+//
+// `/coach-setup` publishes the nine-item list Repple Coach opens on, in the
+// app's order, using the app's own titles. That is the whole point of the page:
+// a coach can read what setting up involves before they sign up rather than
+// discovering it one screen at a time. It is worth exactly as much as its
+// agreement with the app, and nothing else on the site would notice if a step
+// were renamed, reordered or removed.
+
+function coachSetupSteps() {
+  const rel = 'src/lib/coachFirstRun.ts';
+  if (!existsSync(join(ROOT, rel))) {
+    fatal.push(`${rel} does not exist, so the coach setup list cannot be read and the whole of web/coach-setup.html is ungated. Point check M at the new home, or take the page down with it.`);
+    return null;
+  }
+  const titles = [...read(rel).matchAll(/^\s*title:\s*'((?:[^'\\]|\\.)*)',/gm)].map((m) => m[1].replace(/\\'/g, "'"));
+  if (titles.length < 5) {
+    fatal.push(`only ${titles.length} setup steps parsed out of ${rel}; the shape of that file has moved. Refusing to pass on a list this gate does not believe.`);
+    return null;
+  }
+  return titles;
+}
+
+const STEPS_MARKER = /<!--\s*site-claim:\s*coach-setup-steps\b[^>]*-->/g;
+
+function checkCoachSteps(titles, seen) {
+  if (!titles) return;
+  for (const page of PAGES) {
+    const raw = read(page);
+    const lines = raw.split('\n');
+    for (const m of [...raw.matchAll(STEPS_MARKER)]) {
+      seen.coachSteps++;
+      const line = raw.slice(0, m.index).split('\n').length;
+      if (excused(lines, line - 1)) continue;
+      const from = m.index + m[0].length;
+      const closeAt = raw.indexOf('</ol>', from);
+      const block = raw.slice(from, closeAt < 0 ? from + 12000 : closeAt);
+      const listed = [...block.matchAll(/<h3>([\s\S]*?)<\/h3>/g)].map((t) => text(t[1]));
+      if (listed.join(' | ') === titles.join(' | ')) continue;
+      note(page, line, `the setup list reads [${listed.join(', ')}]`,
+        `COACH_SETUP_STEPS in src/lib/coachFirstRun.ts is [${titles.join(', ')}], in that order. This page exists to show a coach the app's own list before they sign up; a list that has drifted from it is worse than no list, because it will be believed.`);
+    }
+  }
+  if (seen.coachSteps === 0) {
+    fatal.push('no `<!-- site-claim: coach-setup-steps -->` marker anywhere under web/, so check M compared nothing.\n'
+      + '      It sits directly above the <ol class="steps"> on web/coach-setup.html — the nine items that\n'
+      + '      page exists to publish. If the page has gone, delete check M with it.');
+  }
+}
+
 /* ── run ─────────────────────────────────────────────────────────────────── */
 
-const seen = { count: 0, markers: 0, siteHosts: 0, csp: 0 };
+const seen = { count: 0, markers: 0, siteHosts: 0, csp: 0, catalogue: 0, links: 0, rail: 0, exportParts: 0, coachSteps: 0 };
 if (PASSWORD_MIN !== null && FEE_PCT !== null && TRIAL_DAYS !== null) {
   for (const page of PAGES) {
     const raw = read(page);
@@ -835,6 +1257,11 @@ if (PASSWORD_MIN !== null && FEE_PCT !== null && TRIAL_DAYS !== null) {
   checkCsp(seen);
   checkWearables(connectableVendors(), seen);
   checkDeletionFigure();
+  checkCatalogueFigures(seen);
+  checkLinks(seen);
+  checkConsoleRail(consoleRail(), seen);
+  checkExportParts(exportParts(), seen);
+  checkCoachSteps(coachSetupSteps(), seen);
 }
 
 if (fatal.length) {
@@ -886,4 +1313,8 @@ console.log(`check-site-claims — ok, ${PAGES.length} public pages; password mi
   + `every host contacted from supabase/functions named on privacy.html, `
   + `${seen.siteHosts} host${seen.siteHosts === 1 ? '' : 's'} the site itself contacts, each disclosed and each permitted by the ${seen.csp}-directive CSP, `
   + `${seen.markers} wearables-connect claim${seen.markers === 1 ? '' : 's'} matching the connectable set, `
-  + `deletion chart internally consistent and dated.`);
+  + `deletion chart internally consistent and dated, `
+  + `${seen.catalogue} catalogue-figure claim${seen.catalogue === 1 ? '' : 's'} agreeing with each other and stamped, `
+  + `${seen.links} internal links each resolving to a file and an id, `
+  + `${seen.rail} console-rail claim and ${seen.exportParts} export-parts table matching studio-web, `
+  + `${seen.coachSteps} coach setup list matching the app's own.`);

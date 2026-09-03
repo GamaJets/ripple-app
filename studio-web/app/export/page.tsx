@@ -175,6 +175,33 @@ export default function ExportPage() {
    *  anything on an accountant's bundle is the gym's. */
   const [zone, setZone] = useState<string | null>(null);
   const [reads, setReads] = useState<Reads>(PENDING);
+  /**
+   * When the twenty-eight reads behind this page came back — and why this is
+   * the one screen in the console that deliberately does NOT carry a
+   * `<Fetched>` stamp over it.
+   *
+   * Checked rather than inherited, on 4 September 2026. Three reasons, and the
+   * first is the one that decides it:
+   *
+   *   · The moment is ALREADY on the screen, and in the form that matters.
+   *     `readAt` is what becomes `manifest.exportedAt`, the completeness banner
+   *     prints that instant verbatim, and the README and every filename carry
+   *     it. A `<Fetched>` beside it would be a second sentence about the same
+   *     fact in different words, six inches from the first.
+   *   · `useFetched` re-reads on every `visibilitychange`. Here that is
+   *     twenty-eight queries fired because somebody looked at another tab —
+   *     and it would reset `reads` to PENDING under an owner who is mid-way
+   *     through choosing a member, which is what the header above means by
+   *     reading the record once and narrowing it afterwards.
+   *   · The age of this read cannot go quietly wrong the way a figure on
+   *     /accounting can. A stale read here does not mislabel a number on a
+   *     screen; it produces a bundle whose own manifest states the moment it
+   *     was taken, which is the honest artefact either way.
+   *
+   * What it should NOT become is a stamp with a background refresh. If this
+   * ever gains a "Read again", it belongs beside the download control, wired
+   * to `load` and to nothing automatic.
+   */
   const [readAt, setReadAt] = useState<string | null>(null);
   // The two days somebody typed, held as typed. Blank on both sides is the
   // whole record, which is the default and is a different request from a very

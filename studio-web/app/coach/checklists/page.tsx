@@ -70,6 +70,32 @@ import {
 } from '@lib/adherence';
 import { readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
+// ── The freshness stamp, and the half of it this screen deliberately omits ──
+//
+// This route was one of four in the console with no `<Fetched>`, left off with
+// the rest on the grounds that a stamp is noise on a form and a background
+// re-read would fight it. Checked on 4 September 2026, and the second half of
+// that does not hold here: nothing typed on this page is repopulated by a read
+// — `draft` and `icon` are the coach's own and `loadItems` never touches them —
+// so a re-read would wipe nothing.
+//
+// What a re-read WOULD do is worse and less obvious. Every write on this page
+// is optimistic-after-confirmation: `setItems` is applied from the row the
+// server returned, and the reorder writes two rows in parallel and patches both
+// locally. A read fired by `visibilitychange` in the middle of that lands a
+// server snapshot on top of a half-applied local one, and the coach sees an
+// order that neither browser nor database holds.
+//
+// And the figures below genuinely age: the adherence fractions are the CLIENT'S
+// ticks over 28 days, written from their phone while this tab sits open, which
+// is exactly the "somebody else is writing into this book" case /costs cites
+// for its own stamp.
+//
+// So the stamp is here and `useFetched` is not. `Fetched` is a presentational
+// component — it takes `at`, `busy` and an optional `onRefresh` — and using it
+// on its own gives the coach the age and a deliberate "Read again" with no
+// timer and no visibility hook to race a write.
+import { Fetched, oldestFetch } from '@/components/Fetched';
 
 /** One row of coach_checklist_items, as this screen holds it. */
 interface Item {
@@ -114,6 +140,15 @@ export default function CoachChecklists() {
 
   const [items, setItems] = useState<Item[] | null>(null);
   const [itemsErr, setItemsErr] = useState<string | null>(null);
+  /** ms of the last read of each that came back WHOLE, or null. Of the last
+   *  success, never the last attempt: a refresh that failed leaves the figures
+   *  from the earlier read on screen, and re-dating them would be the same
+   *  untruth one layer up. */
+  const [itemsAt, setItemsAt] = useState<number | null>(null);
+  const [ticksAt, setTicksAt] = useState<number | null>(null);
+  /** A manual re-read is running. Only the manual one — nothing on this screen
+   *  reads on a timer or on coming back to the tab. */
+  const [rereading, setRereading] = useState(false);
 
   const [draft, setDraft] = useState('');
   const [icon, setIcon] = useState('');
@@ -219,6 +254,7 @@ export default function CoachChecklists() {
         'this client’s checklist',
       );
       setItems(rows);
+      setItemsAt(Date.now());
     } catch (e) {
       setItems(null);
       setItemsErr((e as { message?: string } | null)?.message ?? 'The read did not come back.');
@@ -254,6 +290,7 @@ export default function CoachChecklists() {
         'this client’s ticks',
       );
       setTicks({ window: w, rows });
+      setTicksAt(Date.now());
     } catch (e) {
       // Null, never []. An empty tick list reads as "they did none of it",
       // which is the single most damaging thing this screen could say wrongly.
@@ -264,14 +301,35 @@ export default function CoachChecklists() {
 
   useEffect(() => { if (me?.id) void loadClients(me.id); }, [me?.id, loadClients]);
   useEffect(() => {
+    // Cleared before the read, not after it. A stamp left standing from the
+    // PREVIOUS client would date this client's list to a read that was never
+    // made of them — which is the one thing a freshness line must never do.
+    setItemsAt(null);
     if (me?.id && picked) void loadItems(me.id, picked);
     else setItems(null);
   }, [me?.id, picked, loadItems]);
 
   useEffect(() => {
+    setTicksAt(null);
     if (picked) void loadTicks(picked);
     else { setTicks(null); setTicksErr(null); }
   }, [picked, loadTicks]);
+
+  /**
+   * Ask for both again, because the coach pressed the link.
+   *
+   * The two reads are one claim on this screen — `adherence` is only computed
+   * when both landed — so they are refreshed together and the stamp is the age
+   * of the OLDER of them. `oldestFetch` is the console's rule for that, and a
+   * stamp that quoted the newer read would say a screen is four minutes old
+   * while half of it is an hour old.
+   */
+  const reread = useCallback(() => {
+    if (!me?.id || !picked || rereading) return;
+    setRereading(true);
+    void Promise.all([loadItems(me.id, picked), loadTicks(picked)])
+      .finally(() => setRereading(false));
+  }, [me?.id, picked, rereading, loadItems, loadTicks]);
 
   // Only computed when BOTH reads landed. A summary over a full tick list and a
   // short item list would put confident fractions against some of a coach's
@@ -460,6 +518,12 @@ export default function CoachChecklists() {
           <h2 style={{ fontSize: 15 }}>
             {client?.name ?? <span className="dash">Name unavailable</span>}
           </h2>
+
+          {/* One sentence for both reads, aged to the older of them. Named as
+              their list and their ticks rather than "this screen", because the
+              two are the only things on the page a stamp could be about. */}
+          <Fetched at={oldestFetch(itemsAt, ticksAt)} busy={rereading} onRefresh={reread}
+                   what="their list and their ticks" />
 
           {itemsErr ? (
             <p className="dash" style={{ marginTop: 12 }}>

@@ -1,0 +1,66 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Every coach's trial read has returned 403 since the day the column existed.
+--
+-- ── What was seen, and what it actually was ──────────────────────────────
+--
+-- Two lanes on a simulator, minutes apart, found the coach app saying two
+-- different things about one account:
+--
+--     Clients tab   "12 days left in your free trial."
+--     Billing       "When your trial started could not be read, so nothing
+--                    here says how long is left."
+--
+-- The first was an AsyncStorage counter on the handset and is dealt with in
+-- the app (src/ui/trialReading.ts). The second was read as a network blip, or
+-- as a missing row, or as RLS. It is none of those. From this project's own
+-- edge logs, for the signed-in coach, one second apart:
+--
+--     GET /rest/v1/trainers?select=session_fee,delivery_mode&id=eq.<uid>  200
+--     GET /rest/v1/trainers?select=trial_started_at&id=eq.<uid>&limit=1   403
+--
+-- Same row, same session, same policy. `authenticated` holds COLUMN-LEVEL
+-- select on public.trainers — 18 of its 20 columns — and part 191 added
+-- `trial_started_at` without granting it. PostgREST refuses the column, not
+-- the row.
+--
+-- So this is not intermittent and it is not one coach: `fetchAccountTrial`
+-- has answered 'error' for every coach on the platform, every time, since
+-- part 191 shipped, and app/(trainer)/billing.tsx has been telling all of
+-- them that their start date could not be read. The record part 191 was
+-- written to create — the one that has to exist BEFORE billing is switched on
+-- — was write-only from the moment it was created.
+--
+-- ── Why the app could not have found this ────────────────────────────────
+--
+-- It handled the failure correctly, which is exactly why it was invisible.
+-- src/ui/trialAccount.ts checks `.error` first, reports it, and answers
+-- 'error' rather than 'no start date'; src/lib/trialGate.ts prints the note
+-- for an unread account rather than an expired trial. Every layer did the
+-- right thing with a refusal, and the sentence a coach ended up reading was
+-- true. A permission this specific — one column of one table for one role —
+-- is only visible from the grants themselves or from a status code.
+--
+-- ── One grant, and deliberately only one ─────────────────────────────────
+--
+-- SELECT only. `trial_started_at` is immutable by the trigger part 191 added,
+-- and `authenticated` holds update on 13 columns of this table with this not
+-- among them. Leaving it that way keeps the trigger as the SECOND lock rather
+-- than the only one: a coach who could write this column would have exactly
+-- the reset they had in AsyncStorage, through a different door.
+--
+-- Not `grant select on public.trainers to authenticated` either, tempting as
+-- it is. That would replace a per-column grant with a table-wide one and hand
+-- over `join_code` — the other column `authenticated` cannot read, which is
+-- read through an RPC on purpose — in the same statement. A whole-table grant
+-- issued to fix one column is how the next column nobody meant to expose gets
+-- exposed.
+--
+-- ── The one still missing, left alone on purpose ─────────────────────────
+--
+-- `trainers.join_code` is the other of the 20 with no select grant for
+-- `authenticated`. Nothing in the app selects it directly — src/ui/joinCode.ts
+-- goes through the RPC — so it is not broken and granting it here would be a
+-- widening nobody asked for, in a part filed about something else.
+-- ─────────────────────────────────────────────────────────────────────────
+
+grant select (trial_started_at) on public.trainers to authenticated;

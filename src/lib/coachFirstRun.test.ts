@@ -15,17 +15,29 @@
 import {
   COACH_SETUP, coachSetupRows, coachSetupDone, coachSetupLeft, coachSetupUnknown,
   coachSetupNa, coachSetupNext, showCoachSetup, coachSetupHeading, coachSetupNote,
-  stepApplies, NOT_YOUR_SETUP,
+  coachSetupCardLine, stepApplies, NOT_YOUR_SETUP,
   type CoachSetupFacts, type CoachSetupId,
 } from './coachFirstRun';
 
-/** The only screens a setup step may open. Every one of them takes no params
- *  and does the thing its step describes. Written out rather than derived, so
- *  adding a tenth item is a decision somebody has to make here too. */
+declare const process: { exit(code: number): void; exitCode: number };
+// Start failed and reach success, so a throw partway down cannot pass silently.
+process.exitCode = 1;
+
+/** The only screens a setup step may open. Every one of them does the thing
+ *  its step describes. Written out rather than derived, so adding a tenth item
+ *  is a decision somebody has to make here too. */
 const REACHABLE: readonly string[] = [
   '/(trainer)/settings', '/(trainer)/profile', '/(trainer)/dashboard',
   '/(trainer)/calendar', '/(trainer)/payments', '/(trainer)/documents',
 ];
+
+/** The only things a route may ask a screen to open on arrival, and the screen
+ *  that honours each. A step is allowed to name a CONTROL as well as a screen
+ *  — two of them are done in a bottom sheet nothing on the screen names — but
+ *  it is not allowed to invent one: a `?start=` nobody handles lands the coach
+ *  exactly where the bare route did, which is the dead end the parameter was
+ *  added to fix. */
+const START_TARGETS: Record<string, string> = { invite: '/(trainer)/dashboard' };
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -76,10 +88,18 @@ for (const it of COACH_SETUP) {
   // Long enough to be a reason rather than a restatement of the title.
   ok(it.breaks.length > 40, `${it.id} says what actually breaks`);
   ok(!it.note.includes('!') && !it.breaks.includes('!'), `${it.id} does not shout`);
-  // Every route is a coach route and takes NO params — the screen pushes it
-  // bare, and a row that opens a screen needing a clientId is a dead end.
+  // Every route is a coach route, and the only parameter any of them may
+  // carry is `start` — which names a control on the screen it already names.
+  // A row that opens a screen needing a clientId is still a dead end.
   ok(it.route.startsWith('/(trainer)/'), `${it.id} opens a coach screen`);
-  ok(!it.route.includes('?'), `${it.id}'s route carries no parameters`);
+  const [path, query] = it.route.split('?');
+  if (query != null) {
+    const [key, value] = query.split('=');
+    eq(key, 'start', `${it.id} carries no parameter but 'start'`);
+    ok(value in START_TARGETS, `${it.id} names a control something actually opens`);
+    eq(START_TARGETS[value], path, `${it.id}'s control lives on the screen it opens`);
+    ok(!query.includes('&'), `${it.id} carries one parameter, not a query string`);
+  }
   // …and it is one of the screens this list is allowed to send anybody to.
   // src/lib/features.ts is NOT imported to check that: it pulls in the icon
   // component and this suite runs under plain node with no JSX. The route
@@ -87,7 +107,19 @@ for (const it of COACH_SETUP) {
   // what proves each names a screen that exists; what this asserts is the
   // narrower thing a grep cannot — that nobody has quietly pointed a setup step
   // at a screen the coach cannot act on.
-  ok(REACHABLE.includes(it.route), `${it.id} points at one of the screens this list may open`);
+  ok(REACHABLE.includes(path), `${it.id} points at one of the screens this list may open`);
+}
+
+// ── the two steps whose control is not the screen ─────────────────────────
+//
+// Both are completed in one bottom sheet on the Clients tab, behind a button
+// nothing on the checklist mentions. Routed bare, a coach tapping either
+// arrived back on the tab the card is ON, looking at the card that had just
+// sent them. A checklist item that cannot be finished from where it sends the
+// reader is worse than no item, because it teaches them to ignore the card.
+for (const id of ['client', 'code'] as const) {
+  const it = COACH_SETUP.find((x) => x.id === id)!;
+  ok(it.route.includes('?start='), `${id} is done in a sheet, so it names the sheet and not just the screen`);
 }
 
 /* ── a dash is not a cross ──────────────────────────────────────────────── */
@@ -218,5 +250,36 @@ eq(coachSetupNext(unasked)?.id, 'mode' as CoachSetupId,
 eq(coachSetupNext(coachSetupRows({ ...ALL_DONE, mode: null })), null,
   'a coach whose answer could not be read is not told to answer again');
 
+/* ── the card's one line, and the count it used to print bare ───────────── */
+
+// `coachSetupLeft` excludes rows whose read did not answer — the rule that
+// stops a failed read becoming a nag — so the figure UNDERSTATES whenever
+// anything is unread, and the card said nothing about that. `coachSetupHeading`
+// already refuses to print a denominator over a partly-unread list for exactly
+// this reason; the card was the surface that had not learnt it.
+{
+  const clean = coachSetupRows({ ...ALL_DONE, rate: false, package: false });
+  eq(coachSetupUnknown(clean), 0, 'the fixture has nothing unread');
+  eq(coachSetupCardLine(clean), 'Setting up · 2 left', 'a wholly-read list prints the count alone');
+
+  const partly = coachSetupRows({ ...ALL_DONE, rate: false, package: false, stripe: null, document: null });
+  eq(coachSetupLeft(partly), 2, 'the outstanding count is unchanged by two refused reads');
+  eq(coachSetupUnknown(partly), 2, 'and the two are counted as unread');
+  const line = coachSetupCardLine(partly);
+  ok(line.includes('2 left'), 'the card still says what is known to be outstanding');
+  ok(/not checked/.test(line), 'and says the figure is not the whole list');
+  ok(line !== coachSetupCardLine(clean),
+    'so two identical-looking lists that differ by two refused reads do not read identically');
+
+  // Nothing outstanding but something unread. The card stays — `showCoachSetup`
+  // keeps it — and it must not imply a task, because none is known.
+  const onlyUnknown = coachSetupRows({ ...ALL_DONE, stripe: null });
+  ok(showCoachSetup(onlyUnknown), 'an unread row keeps the card on screen');
+  eq(coachSetupLeft(onlyUnknown), 0, 'with nothing known to be outstanding');
+  ok(!/left/.test(coachSetupCardLine(onlyUnknown)), 'so the card claims nothing is left to do');
+  ok(/could not be checked/.test(coachSetupCardLine(onlyUnknown)), 'and says what it actually is');
+}
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('coachFirstRun.test.ts — ok');
+process.exitCode = 0;
