@@ -75,7 +75,7 @@
 // src/lib/clientRecord.ts, and `handAdded` in src/lib/trainerMock.ts.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';

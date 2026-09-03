@@ -40,7 +40,7 @@
 // silently skipped — a bulk assign that quietly dropped somebody would be worse
 // than one that refused, because the coach would believe they had sent it.
 import { useCallback, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, Alert, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, Alert, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';

@@ -303,7 +303,15 @@ export default function ClientPackages() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          200 rather than 40 because the discount code belongs to the LAST package in the list,
+          and the Buy button under it has to come up with the field. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 200 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>

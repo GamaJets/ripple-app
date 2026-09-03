@@ -279,7 +279,16 @@ export default function StatementOfRecord() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          The padding stays at 40: the field sits well above the end of this screen, and the
+          inset iOS adds already gives the focused row the room it needs to rise. Padding it
+          out to a keyboard's height here would only scroll into empty space. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>

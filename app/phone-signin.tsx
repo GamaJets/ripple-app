@@ -10,7 +10,7 @@
 // and no phone on it yet, and somebody abroad without their SIM needs a way in
 // that does not depend on a text arriving.
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter } from 'expo-router';
 import { useTheme } from '../src/ui/components';
@@ -79,94 +79,112 @@ export default function PhoneSignIn() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
       <Stack.Screen options={{ headerShown: false }} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: 40 }}
-          keyboardShouldPersistTaps="handled">
+      {/* ── the keyboard was sitting on the field you were typing into ────
+          This screen wrapped the ScrollView in a `KeyboardAvoidingView` with
+          behavior="padding", which pads the BOTTOM of its own container — and
+          the ScrollView already fills that container, so there was nothing for
+          the padding to push and the focused field never scrolled clear. The
+          same dead wrapper app/(trainer)/log-session.tsx had, and this is the
+          screen where it costs the most: it is the first one a new member sees,
+          and a name field or a code box behind the keyboard is the end of the
+          funnel. The wrapper is REMOVED rather than left beside the working
+          mechanism — two of them fighting is worse than one.
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xxl }}>
-            <Ghost icon="back" onPress={() => (stage === 'code' ? setStage('number') : router.back())} />
-            <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
-          </View>
+          `automaticallyAdjustKeyboardInsets` is what app/(trainer)/dashboard.tsx
+          uses and what works: iOS adds the keyboard height to the scroll insets
+          and brings the focused input above it.
 
-          {stage === 'number' ? (
-            <>
-              <Text style={{ ...ty.title, color: t.ink }}>What’s Your Number?</Text>
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.xl }}>
-                We’ll text you a six-digit code. No password to remember, and nothing to reset.
-              </Text>
+          220 rather than 40 because the last field on the number stage is
+          followed only by the button that submits it, and the code stage puts
+          six boxes and a countdown in the same place — both have to clear the
+          keyboard, not stop under it. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: 220 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive">
 
-              <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Mobile number</Text>
-              <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                <Pressable onPress={() => { setSearch(''); setPickerOpen(true); }}
-                  accessibilityRole="button" accessibilityLabel={`Country: ${countryFor(iso).name}, +${countryFor(iso).dial}`}
-                  style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: sp.md }}>
-                  <Text style={{ fontSize: 19 }}>{flagFor(iso)}</Text>
-                  <Text style={{ ...ty.body, color: t.ink }}>+{countryFor(iso).dial}</Text>
-                </Pressable>
-                <TextInput
-                  value={national}
-                  onChangeText={(v) => { setNational(v); setError(null); }}
-                  keyboardType="phone-pad"
-                  autoComplete="tel"
-                  textContentType="telephoneNumber"
-                  placeholder={nationalPlaceholder(countryFor(iso))}
-                  placeholderTextColor={t.ink3}
-                  accessibilityLabel="Your mobile number"
-                  returnKeyType="go"
-                  onSubmitEditing={send}
-                  style={{ ...field, flex: 1 }}
-                />
-              </View>
-              {/* Shown so somebody can check the number we will actually text,
-                  which is not always the one they typed — a leading zero is a
-                  domestic dialling prefix and comes off. */}
-              {e164 ? (
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 7 }}>We’ll text {e164}</Text>
-              ) : null}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xxl }}>
+          <Ghost icon="back" onPress={() => (stage === 'code' ? setStage('number') : router.back())} />
+          <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
+        </View>
 
-              <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: 6 }}>Your name</Text>
-              <TextInput value={name} onChangeText={setName} placeholder="Only needed the first time"
-                placeholderTextColor={t.ink3} autoCapitalize="words" autoComplete="name"
-                accessibilityLabel="Your name" style={field} />
+        {stage === 'number' ? (
+          <>
+            <Text style={{ ...ty.title, color: t.ink }}>What’s Your Number?</Text>
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 6, marginBottom: sp.xl }}>
+              We’ll text you a six-digit code. No password to remember, and nothing to reset.
+            </Text>
 
-              {error ? (
-                <Card tone={t.warn} style={{ marginTop: sp.lg }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }}>{error}</Text>
-                </Card>
-              ) : null}
-
-              <View style={{ marginTop: sp.xl }}>
-                <Cta label={busy ? 'Sending…' : 'Send Me a Code'} wide disabled={!canSend} onPress={send} />
-              </View>
-
-              <Pressable onPress={() => router.replace('/welcome')} hitSlop={8}
-                style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
-                <Text style={{ ...ty.label, color: t.ink2 }}>Use email and password instead</Text>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 6 }}>Mobile number</Text>
+            <View style={{ flexDirection: 'row', gap: sp.sm }}>
+              <Pressable onPress={() => { setSearch(''); setPickerOpen(true); }}
+                accessibilityRole="button" accessibilityLabel={`Country: ${countryFor(iso).name}, +${countryFor(iso).dial}`}
+                style={{ ...field, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: sp.md }}>
+                <Text style={{ fontSize: 19 }}>{flagFor(iso)}</Text>
+                <Text style={{ ...ty.body, color: t.ink }}>+{countryFor(iso).dial}</Text>
               </Pressable>
-            </>
-          ) : (
-            <OtpCodeEntry
-              title="Enter Your Code"
-              sentTo={sentTo ? maskedForDisplay(sentTo) : 'your phone'}
-              length={OTP_LENGTH}
-              channel="sms"
-              // `sentTo` and not `e164`: the number we actually texted, which is
-              // not always the one still sitting in the field above.
-              onVerify={(submitted) => (sentTo
-                ? auth.verifyPhoneCode(sentTo, submitted, name)
-                : Promise.resolve({ ok: false as const, reason: 'No number to check that code against. Enter your number again.' }))}
-              // The root layout routes on `authed`; replacing avoids leaving a
-              // signed-in person able to swipe back to a sign-in screen.
-              onVerified={() => router.replace('/')}
-              onResend={() => (sentTo
-                ? auth.sendPhoneCode(sentTo)
-                : Promise.resolve({ ok: false as const, reason: 'No number to send to. Enter your number again.' }))}
-              changeLabel="Wrong number? Change it"
-              onChange={() => { setStage('number'); setError(null); }}
-            />
-          )}
-        </ScrollView>
-      </KeyboardAvoidingView>
+              <TextInput
+                value={national}
+                onChangeText={(v) => { setNational(v); setError(null); }}
+                keyboardType="phone-pad"
+                autoComplete="tel"
+                textContentType="telephoneNumber"
+                placeholder={nationalPlaceholder(countryFor(iso))}
+                placeholderTextColor={t.ink3}
+                accessibilityLabel="Your mobile number"
+                returnKeyType="go"
+                onSubmitEditing={send}
+                style={{ ...field, flex: 1 }}
+              />
+            </View>
+            {/* Shown so somebody can check the number we will actually text,
+                which is not always the one they typed — a leading zero is a
+                domestic dialling prefix and comes off. */}
+            {e164 ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 7 }}>We’ll text {e164}</Text>
+            ) : null}
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xl, marginBottom: 6 }}>Your name</Text>
+            <TextInput value={name} onChangeText={setName} placeholder="Only needed the first time"
+              placeholderTextColor={t.ink3} autoCapitalize="words" autoComplete="name"
+              accessibilityLabel="Your name" style={field} />
+
+            {error ? (
+              <Card tone={t.warn} style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.label, color: t.ink2 }}>{error}</Text>
+              </Card>
+            ) : null}
+
+            <View style={{ marginTop: sp.xl }}>
+              <Cta label={busy ? 'Sending…' : 'Send Me a Code'} wide disabled={!canSend} onPress={send} />
+            </View>
+
+            <Pressable onPress={() => router.replace('/welcome')} hitSlop={8}
+              style={{ paddingVertical: sp.lg, alignItems: 'center' }}>
+              <Text style={{ ...ty.label, color: t.ink2 }}>Use email and password instead</Text>
+            </Pressable>
+          </>
+        ) : (
+          <OtpCodeEntry
+            title="Enter Your Code"
+            sentTo={sentTo ? maskedForDisplay(sentTo) : 'your phone'}
+            length={OTP_LENGTH}
+            channel="sms"
+            // `sentTo` and not `e164`: the number we actually texted, which is
+            // not always the one still sitting in the field above.
+            onVerify={(submitted) => (sentTo
+              ? auth.verifyPhoneCode(sentTo, submitted, name)
+              : Promise.resolve({ ok: false as const, reason: 'No number to check that code against. Enter your number again.' }))}
+            // The root layout routes on `authed`; replacing avoids leaving a
+            // signed-in person able to swipe back to a sign-in screen.
+            onVerified={() => router.replace('/')}
+            onResend={() => (sentTo
+              ? auth.sendPhoneCode(sentTo)
+              : Promise.resolve({ ok: false as const, reason: 'No number to send to. Enter your number again.' }))}
+            changeLabel="Wrong number? Change it"
+            onChange={() => { setStage('number'); setError(null); }}
+          />
+        )}
+      </ScrollView>
 
       {/* ── country picker ─────────────────────────────────────────────── */}
       <Modal visible={pickerOpen} transparent animationType="slide" onRequestClose={() => setPickerOpen(false)}>

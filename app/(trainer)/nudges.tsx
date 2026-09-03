@@ -495,7 +495,15 @@ function DraftSheet({ nudge, onClose, onSent }: {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          220 rather than 40 because the message body is what this screen is for, and Send is
+          directly under it. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 220 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={onClose} a11yLabel="Close without sending" />
           <View style={{ flex: 1 }}>

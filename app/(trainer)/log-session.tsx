@@ -547,7 +547,27 @@ export default function LogSession() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" refreshControl={pull}>
+        {/* ── the keyboard was sitting on the field you were typing into ────
+            `KeyboardAvoidingView` with behavior="padding" pads the BOTTOM of
+            its own container — and this ScrollView already fills that
+            container, so there was nothing for the padding to push and the
+            focused row never scrolled clear. A coach entering reps and weight
+            typed into a field they could not see, on the screen where the
+            whole point is checking the number.
+
+            `automaticallyAdjustKeyboardInsets` is what the coach dashboard
+            uses and what actually works here: iOS adds the keyboard height to
+            the scroll insets and brings the focused input above it. The
+            bottom padding goes up with it, so the LAST exercise's sets can
+            still scroll above the keyboard rather than stopping under it —
+            40pt was enough when nothing was ever hidden and is not now. */}
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 260 }}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
+          keyboardDismissMode="interactive"
+          refreshControl={pull}
+        >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg }}>
             <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back"
               style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>

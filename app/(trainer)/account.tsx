@@ -211,8 +211,15 @@ export default function CoachAccount() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
-        keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} refreshControl={pull}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          220 rather than 40 because the password fields are the LAST thing on this screen and
+          the button under them has to come up with them. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 220 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} />

@@ -410,7 +410,15 @@ export default function ClientReport() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" refreshControl={pull}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          220 rather than 40 because the note is the last thing on this screen and the button
+          that sends the report is under it. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 220 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>

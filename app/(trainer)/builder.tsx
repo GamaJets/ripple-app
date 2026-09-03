@@ -736,7 +736,21 @@ export default function Builder() {
   // the coach's own work — so the coach tweaks it and assigns it, over the top
   // of whatever was really there. Blank is the honest state for "we do not
   // know yet", and the Program section says so in words.
-  const hasDraft = !!days.length || !!title.trim() || !!note.trim();
+  //
+  // ── and it has to be the WHOLE block, for the same reason ────────────────
+  //
+  // This read `days`, which is `blockWeeks[weekIdx].days` — ONE week. So a
+  // coach with a finished twelve-week block sitting on an empty week five had
+  // `hasDraft` false, the seed fired, and twelve weeks of programming were
+  // replaced by the selected client's assignment. Silent, total, no undo.
+  //
+  // `blockExercises` sixty lines below is the identical mistake, found and
+  // fixed for the Assign gate, with a comment ending "what decides whether
+  // there is anything to send has to be every week too". This is the second
+  // caller of the same idea and it was left behind — which is the argument for
+  // asking the block rather than the week wherever the question is "is there
+  // work here", not just where somebody happened to look.
+  const hasDraft = blockWeeks.some((w) => w.days.length > 0) || !!title.trim() || !!note.trim();
   /**
    * Whether the builder may fill itself from the selected client, and what to
    * say when it may not. The rule, and the twenty minutes of lost work behind

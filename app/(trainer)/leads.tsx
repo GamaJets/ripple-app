@@ -52,7 +52,7 @@
 // answer: an Instagram handle gets no dial button, because a coach finds out
 // that a tel: link over a handle dials nothing only after they have tapped it.
 import { useCallback, useState, useEffect } from 'react';
-import { View, Text, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, ScrollView, Modal, TextInput, Alert, ActivityIndicator, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';

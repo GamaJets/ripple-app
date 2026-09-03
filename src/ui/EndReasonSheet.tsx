@@ -99,7 +99,18 @@ export function EndReasonSheet({
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
+      {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
+          is what works here — see the ScrollView in app/(trainer)/log-session.tsx for why a
+          KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
+          already fills the container it pads.
+          Despite the name this is a full-screen page inside a `Modal animationType="slide"`, not
+          a bottom sheet, so it takes the page treatment and not the sheet one.
+
+          220 rather than 40 because the note is the last field and the button that records the
+          ending is under it. */}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 220 }}
+        keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
+        keyboardDismissMode="interactive">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon="back" onPress={onCancel} a11yLabel="Close without recording anything" />
           <View style={{ flex: 1 }}>
