@@ -30,6 +30,7 @@ import {
   SpotifyError, spotifyConfigured, type NowPlaying,
 } from '../lib/spotify';
 import { progressLine } from '../lib/spotifyPlayback';
+import { hitSlopFor } from '../lib/a11y';
 import { FORWARD_ICON } from './direction';
 
 /** How often the bar re-reads the player. Spotify's own clients poll at about
@@ -194,6 +195,13 @@ export function SessionMusicBar() {
           onPress={() => command(now.isPlaying ? spotifyPause : () => spotifyPlay())}
           disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button"
           accessibilityLabel={now.isPlaying ? 'Pause' : 'Play'}
+          // 34pt, and the one control on this bar a person reaches for without
+          // looking — mid-set, one-handed, phone propped on a rack. Its two
+          // neighbours already carry 8pt of slop and the row's gap is 12, so
+          // the 5 this adds overlaps each of them by a point; where they meet,
+          // the later sibling wins and that is play/pause, which is the right
+          // way round for the button people are actually aiming at.
+          hitSlop={hitSlopFor(34)}
           style={{ width: 34, height: 34, borderRadius: radius.pill, backgroundColor: t.brand, alignItems: 'center', justifyContent: 'center' }}>
           {busy ? <ActivityIndicator size="small" color={t.brandInk} /> : <Icon name={now.isPlaying ? 'minus' : 'play'} size={16} color={t.brandInk} />}
         </Pressable>

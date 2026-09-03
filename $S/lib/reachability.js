@@ -1,0 +1,329 @@
+"use strict";
+// Whether this phone can reach the backend right now.
+//
+// ── Why there is no NetInfo in here ────────────────────────────────────────
+//
+// The obvious build of this file is `@react-native-community/netinfo`. It is
+// not in package.json, and adding it would have been the wrong call twice
+// over:
+//
+//   1. Its entry point calls `requireNativeModule()`. Any bare import of a
+//      module that does that throws at module evaluation and takes the whole
+//      screen with it — src/ui/nativeModules.ts exists because this app has
+//      been bitten by exactly that, and scripts/check-native.mjs now enforces
+//      it. A connectivity library that kills a screen when it is missing is a
+//      reliability regression sold as a reliability feature.
+//
+//   2. A native dependency cannot ship over the air. Every install would have
+//      to wait for a store release before the app could tell a basement from a
+//      rejection, and the whole point of knowing is to fix the wrong sentence
+//      that is in front of people TODAY.
+//
+// And the third reason is the one that matters even where NetInfo is already
+// installed: it answers the wrong question. NetInfo says whether the radio has
+// an association. It says yes on gym wifi with a captive portal, yes on a
+// hotel network that has stopped forwarding, yes on a 5G bar in a lift shaft
+// with no throughput. The question every caller in this app actually has is
+// "did my request reach OUR server", and the only instrument that answers it
+// is a request to our server.
+//
+// So this file learns from traffic. `src/lib/supabase.ts` hands every single
+// HTTP call the client makes through `observedFetch` below, so one read on one
+// screen updates the answer for the whole app; a probe (src/ui/reachability.tsx)
+// asks on its own when there is no traffic to learn from. No native code, ships
+// over the air, and 'online' means the thing the callers mean by it.
+//
+// ── The distinction this exists to protect ────────────────────────────────
+//
+// src/lib/offlineQueue.ts already draws the line between a write the server
+// REFUSED and a write nobody answered, because those get opposite treatment.
+// This file is the same line drawn one level up, for the sentence a person
+// reads. "Check your connection and try again" is printed on four client
+// screens today for both halves of it, and on the refusal half it is a lie
+// that sends somebody to their router when the server has just told them no.
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.noteUnreachable = exports.noteReached = exports.currentReach = exports.reachState = exports.canAssertEmpty = exports.initialReach = void 0;
+exports.isTransportFailure = isTransportFailure;
+exports.reachAfter = reachAfter;
+exports.probeDelayMs = probeDelayMs;
+exports.retryLine = retryLine;
+exports.offlineBanner = offlineBanner;
+exports.subscribeReach = subscribeReach;
+exports.onReconnect = onReconnect;
+exports.noteThrown = noteThrown;
+exports.resetReach = resetReach;
+exports.observedFetch = observedFetch;
+/**
+ * What we currently believe about reaching the backend.
+ *
+ * 'unknown' is a real and common state, not a placeholder: a cold launch that
+ * has not made a request yet knows nothing, and saying "you are offline" then
+ * would be an invention. Every copy helper here treats it as "do not claim
+ * either way".
+ */
+const requestTimeout_1 = require("./requestTimeout");
+const initialReach = () => ({ reach: 'unknown', since: 0, failures: 0 });
+exports.initialReach = initialReach;
+/**
+ * Is this thrown value a transport failure, or something we caused?
+ *
+ * An AbortError is US: the probe's own timeout, or a screen unmounting mid
+ * read. Counting it as evidence of no signal would put the app into 'offline'
+ * every time somebody navigated away from a slow screen, and 'offline' is the
+ * state that changes what people are told.
+ *
+ * Everything else that throws out of fetch is a transport failure — RN says
+ * "Network request failed", browsers say "Failed to fetch", and neither is
+ * worth pattern-matching when the absence of a response is the whole signal.
+ *
+ * The ONE abort that is not ours-and-therefore-nothing is the ceiling in
+ * src/lib/requestTimeout.ts, and it is checked first, before any of the name
+ * matching below. That request was not cancelled by a person leaving a screen:
+ * it was sent, and the network swallowed it, which is the exact evidence this
+ * file was built to collect. Reading it as a navigation would mean the app
+ * still believed it was online after waiting thirty seconds for nothing —
+ * which is the whole defect that ceiling exists to close, closed at one end
+ * and left open at this one.
+ */
+function isTransportFailure(err) {
+    if (err == null)
+        return false;
+    if ((0, requestTimeout_1.isRequestTimeout)(err))
+        return true;
+    const name = String(err?.name ?? '');
+    if (name === 'AbortError' || name === 'CanceledError')
+        return false;
+    const msg = String(err?.message ?? '');
+    // A DOMException for an aborted request does not always carry the name on
+    // every runtime this app runs on, so the message is checked too.
+    if (/abort/i.test(msg))
+        return false;
+    return true;
+}
+/**
+ * Fold one verdict into the state.
+ *
+ * Asymmetric on purpose, and the asymmetry is the design:
+ *
+ *   · ONE success is enough to say online. If a request came back, the path
+ *     works, and continuing to tell somebody they have no signal while their
+ *     screen is filling with data is the worse error.
+ *
+ *   · ONE failure is enough to say offline. Not three, not a rolling window.
+ *     Every request this app makes goes to one host, so a transport failure is
+ *     not a flaky peer among many — it is the only thing we talk to, refusing
+ *     to answer. The cost of being wrong for a few seconds is a banner; the
+ *     cost of waiting for a quorum is the member typing a message into a dead
+ *     screen and being told it "could not be sent" with no reason.
+ *
+ * `since` only moves when `reach` actually changes, so "offline for 4 minutes"
+ * stays true across the fifteen further failures inside it.
+ */
+function reachAfter(prev, ev, now) {
+    if (ev === 'reached') {
+        return { reach: 'online', since: prev.reach === 'online' ? prev.since : now, failures: 0 };
+    }
+    return {
+        reach: 'offline',
+        since: prev.reach === 'offline' ? prev.since : now,
+        // Capped so a phone left in a drawer overnight does not overflow the
+        // schedule into a number the probe can never come back from.
+        failures: Math.min(prev.failures + 1, 32),
+    };
+}
+/**
+ * How long to wait before probing again, after `failures` consecutive misses.
+ *
+ * Backoff, because the probe runs while the app is in the foreground and a
+ * tight loop on a phone with no signal is a battery complaint and a support
+ * ticket. Capped at a minute: past that the delay stops buying anything and
+ * starts making the app feel dead for a whole minute after the signal returns.
+ *
+ * Zero failures is the steady-state poll and is deliberately long — 30s. When
+ * things are working, traffic is doing this job for free and the probe is only
+ * there to notice a silent drop on an idle screen.
+ */
+function probeDelayMs(failures) {
+    if (failures <= 0)
+        return 30000;
+    const ladder = [2000, 4000, 8000, 15000, 30000];
+    return failures - 1 < ladder.length ? ladder[failures - 1] : 60000;
+}
+/**
+ * The sentence to put in front of somebody whose write did not land.
+ *
+ * This is the whole point of the file. Today four client screens say "Check
+ * your connection and try again" whatever happened, and one of the two things
+ * that happened is the server having read the request and declined it — a full
+ * class, a lapsed membership, a policy. Sending that person to their wifi
+ * settings wastes their time and hides the actual answer.
+ *
+ * Returns a sentence and never null, because every caller here is already
+ * committed to saying something. Sentence case, no value interpolated, so it
+ * is safe to append to any specific first half the caller has written.
+ */
+function retryLine(reach) {
+    if (reach === 'offline')
+        return 'Your phone is not reaching us at the moment, so nothing was sent. Try again once you have signal.';
+    if (reach === 'online')
+        return 'We reached the server and it did not accept that, so nothing has changed. Try again, and let us know if it keeps happening.';
+    return 'Check your connection and try again.';
+}
+/**
+ * The standing banner, or null when there is nothing to say.
+ *
+ * Null for 'unknown' as well as for 'online': a launch that has not made a
+ * request yet must not draw an offline warning, and the app is unusable-looking
+ * enough offline without also being wrong about it.
+ *
+ * Deliberately does NOT promise that anything will be sent later. Whether a
+ * particular write is queued is a fact about that write, and src/lib/outbox.ts
+ * owns saying so. This sentence only states what is true of everything: the app
+ * is running on what it already had.
+ */
+function offlineBanner(reach) {
+    if (reach !== 'offline')
+        return null;
+    return 'No connection. You are seeing what was on this phone the last time it could reach us.';
+}
+/**
+ * Whether a screen may state, as a fact, that a read came back empty.
+ *
+ * The house rule is that an empty list under 'error' means UNKNOWN. This is the
+ * same rule reaching one step further back: when the app cannot reach the
+ * server at all, even a cached list that looks complete is a list from some
+ * earlier moment, and "there are none" is not available as a sentence.
+ */
+const canAssertEmpty = (reach) => reach !== 'offline';
+exports.canAssertEmpty = canAssertEmpty;
+/* ── the store ────────────────────────────────────────────────────────────
+ *
+ * A module singleton rather than React state, for one reason that decides it:
+ * the thing with the best evidence is `src/lib/supabase.ts`'s fetch wrapper,
+ * which is not in a component and cannot be. A hook subscribes to this (see
+ * src/ui/reachability.tsx); nothing subscribes the other way round.
+ */
+let state = (0, exports.initialReach)();
+const listeners = new Set();
+/** What we believe right now. */
+const reachState = () => state;
+exports.reachState = reachState;
+const currentReach = () => state.reach;
+exports.currentReach = currentReach;
+/** Called on every change, including a change of `failures` with the same
+ *  `reach` — the probe schedules off that number. Returns an unsubscribe. */
+function subscribeReach(fn) {
+    listeners.add(fn);
+    return () => { listeners.delete(fn); };
+}
+function apply(next) {
+    if (next.reach === state.reach && next.since === state.since && next.failures === state.failures)
+        return;
+    const wasOnline = state.reach === 'online';
+    state = next;
+    listeners.forEach((fn) => { try {
+        fn(next);
+    }
+    catch { /* one bad listener must not stop the rest */ } });
+    // The reconnect edge, announced separately so the flush does not have to
+    // work it out from a stream of states. Only 'not online' → 'online' counts:
+    // 'unknown' → 'online' on a cold launch is a reconnect for our purposes,
+    // because a queue written by the previous run has been waiting for exactly
+    // this moment.
+    if (!wasOnline && next.reach === 'online') {
+        onlineListeners.forEach((fn) => { try {
+            fn();
+        }
+        catch { /* as above */ } });
+    }
+}
+const onlineListeners = new Set();
+/** Called once each time the app goes from not-reaching to reaching. This is
+ *  the hook src/lib/offlineQueue.ts's flush is wired to. */
+function onReconnect(fn) {
+    onlineListeners.add(fn);
+    return () => { onlineListeners.delete(fn); };
+}
+/** A request came back. Cheap enough to call on every response. */
+const noteReached = (now = Date.now()) => { apply(reachAfter(state, 'reached', now)); };
+exports.noteReached = noteReached;
+/** A request produced no answer. */
+const noteUnreachable = (now = Date.now()) => { apply(reachAfter(state, 'unreachable', now)); };
+exports.noteUnreachable = noteUnreachable;
+/** A thrown value from a request, classified. Anything we aborted ourselves is
+ *  ignored rather than reported as no signal. */
+function noteThrown(err, now = Date.now()) {
+    if (isTransportFailure(err))
+        (0, exports.noteUnreachable)(now);
+}
+/** Back to knowing nothing. For tests, and for a sign-out, where the next
+ *  account's first request should decide this again from scratch. */
+function resetReach() {
+    state = (0, exports.initialReach)();
+    listeners.forEach((fn) => { try {
+        fn(state);
+    }
+    catch { /* ignore */ } });
+}
+/**
+ * `fetch`, with every call reporting what it learnt — and a ceiling on how long
+ * it may learn nothing for.
+ *
+ * Installed once, on the Supabase client itself, so this is not a thing each
+ * provider has to remember to do — and there is no version of the app where
+ * some screens update the answer and some do not.
+ *
+ * The response is returned untouched and errors are re-thrown unchanged: a
+ * caller must not be able to tell this wrapper is there. A 4xx or 5xx is
+ * `noteReached`, deliberately — the server answered, which is the only thing
+ * this file claims to measure. Whether it answered YES is offlineQueue's
+ * question and it has better evidence for it.
+ *
+ * ── The ceiling, and where the evidence is taken ──────────────────────────
+ *
+ * Until src/lib/requestTimeout.ts there was no ceiling at all, and the `catch`
+ * below was unreachable for the failure that matters most: a request nobody
+ * answers does not throw, it simply never settles, so `noteUnreachable` was
+ * never called and the app went on believing it was online with every provider
+ * stuck in 'loading'. Every screen's 'error' copy was correct and could not be
+ * reached. Wrapping the base fetch turns that silence into a throw, and the
+ * throw is labelled so `isTransportFailure` counts it.
+ *
+ * ── Why the verdict is filed per ATTEMPT, before the retry ────────────────
+ *
+ * This is the ordering that makes the read-retry affordable, and it is worth
+ * being explicit about because getting it backwards would undo the fix.
+ *
+ * `noteThrown` runs on EVERY attempt, as it fails, not once at the end. So on a
+ * dead network the first timeout marks the app unreachable at its ceiling — the
+ * banner appears, `canAssertEmpty` goes false, every screen switches to the
+ * sentences it has for this — whether or not a retry is still in flight behind
+ * it. A retry therefore extends how long one READ takes to give up. It never
+ * extends how long the APP takes to stop claiming it is online, which is the
+ * number a person is actually standing in front of.
+ *
+ * Only our own ceiling is retried, and only for the methods
+ * `retryOnTimeout` allows — a GET or a HEAD, never a write, for the reasons
+ * written out there. A caller's own abort is not a timeout, so a screen that
+ * unmounts mid-read is not chased with a second request.
+ */
+function observedFetch(base, deps = {}) {
+    const timed = (0, requestTimeout_1.withRequestTimeout)(base, deps);
+    return async (input, init) => {
+        const attempts = (0, requestTimeout_1.maxAttempts)((0, requestTimeout_1.methodOf)(input, init));
+        for (let n = 1;; n += 1) {
+            try {
+                const res = await timed(input, init);
+                (0, exports.noteReached)();
+                return res;
+            }
+            catch (e) {
+                // Filed here, inside the loop, on purpose. See above.
+                noteThrown(e);
+                if (n < attempts && (0, requestTimeout_1.isRequestTimeout)(e))
+                    continue;
+                throw e;
+            }
+        }
+    };
+}

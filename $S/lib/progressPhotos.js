@@ -1,0 +1,333 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PHOTO_PATH_RE = exports.SIGNED_URL_TTL_S = exports.PHOTO_BUCKET = void 0;
+exports.photoObjectPath = photoObjectPath;
+exports.isOwnPhotoPath = isOwnPhotoPath;
+exports.sortOldestFirst = sortOldestFirst;
+exports.rowToPhoto = rowToPhoto;
+exports.daysApart = daysApart;
+exports.comparePair = comparePair;
+exports.photosNote = photosNote;
+exports.missingFileCount = missingFileCount;
+exports.listProgressPhotos = listProgressPhotos;
+exports.uploadProgressPhoto = uploadProgressPhoto;
+exports.deleteProgressPhoto = deleteProgressPhoto;
+const rowCap_1 = require("./rowCap");
+const wroteRows_1 = require("./wroteRows");
+// Progress photos — the persistence layer that app/(client)/scans.tsx was
+// missing. Until now that screen kept photos in useState: no upload, no
+// bucket, no row, gone at unmount. It said so out loud ("N on screen") because
+// saying "saved" would have been a lie. This file is what makes "saved" true.
+//
+// STORAGE LAYOUT
+//   bucket `photos` (PRIVATE) · object key `<auth.uid()>/<millis>-<token>.jpg`
+//   row    `progress_photos`  · image_path holds that exact key
+//
+// The first path segment is the owner's uid because that is what the storage
+// policies in supabase/parts/45-progress-photos.sql key on:
+// `(storage.foldername(name))[1] = auth.uid()::text`, the same shape as the
+// exercise-videos policies. Get the layout wrong and every upload is refused.
+//
+// The bucket is private, so a photo is read through a SIGNED URL minted by its
+// owner — never getPublicUrl(), which returns a working-looking string for a
+// private object that then 400s.
+//
+// ── THE TWO FAILURES THAT LOSE DATA, AND WHAT WE DO ABOUT THEM ────────────
+//
+// An upload and a row insert are two calls and cannot be one transaction.
+//
+//   Upload ok, insert fails  → a file nobody has the name of. `discardOrphan`
+//     deletes it immediately; if that delete fails too it is handed to the
+//     server queue (`queue_photo_file_purge`), which owns it from then on; if
+//     BOTH fail the path is reported to app_errors so it is at least nameable.
+//     Three chances, and the upload is still reported as failed to the caller.
+//     We never say saved.
+//
+//   Delete: file first, then row. Not the other way round. A failed row delete
+//     leaves a row pointing at a missing file — visible, retryable, and it
+//     renders as a gap rather than a photo. A failed FILE delete after the row
+//     is gone leaves a file nobody can name, which is the unrecoverable one.
+//     If the file delete fails we hand the path to the server queue before
+//     removing the row, and refuse the whole thing if even that fails.
+//
+// ── supabase-js RESOLVES ON A DATABASE ERROR ──────────────────────────────
+// `await supabase.from(...)` gives back { data: null, error } instead of
+// throwing, so a try/catch alone only ever catches the network dying. Every
+// call below checks `.error` explicitly, storage calls included.
+//
+// ── WHY THE CLIENT IS REQUIRED LAZILY ─────────────────────────────────────
+// The pure half of this file (paths, ordering, labels, the compare pair) is
+// covered by src/lib/coverage.test.ts, which runs under plain `node`. A
+// top-level `import { supabase }` would drag in AsyncStorage, which throws
+// "window is not defined" the moment the auth client touches storage — the
+// test process would die on an import, not on a bad assertion. `import type`
+// is erased, and the require() below only runs inside an I/O call, which the
+// tests never make.
+/** The private bucket. Not public — reads are signed, never getPublicUrl(). */
+exports.PHOTO_BUCKET = 'photos';
+/** How long a minted URL stays good. Long enough to scroll a progress view. */
+exports.SIGNED_URL_TTL_S = 60 * 60;
+/**
+ * The object-key shape, mirrored from the guard in 45-progress-photos.sql. The
+ * server refuses to send a purge for a path that does not match this, because
+ * the path goes into a URL unescaped; keeping the two in step is the point.
+ */
+exports.PHOTO_PATH_RE = /^[0-9a-fA-F-]{36}\/[A-Za-z0-9._-]{1,120}$/;
+/* ── pure ─────────────────────────────────────────────────────────────────
+   No I/O, no client, no React. Everything here is covered in coverage.test.ts. */
+/** The object key for a new photo. `uid` first because the storage policies
+ *  read that segment and nothing else. */
+function photoObjectPath(uid, atMs, token) {
+    return `${uid}/${atMs}-${token}.jpg`;
+}
+/** Does this key sit in this person's own folder? The same test the storage
+ *  policies and `queue_photo_file_purge` apply, so a mismatch fails here — in
+ *  a place with a readable message — rather than as a bare 403. */
+function isOwnPhotoPath(path, uid) {
+    if (!exports.PHOTO_PATH_RE.test(path))
+        return false;
+    return path.slice(0, path.indexOf('/')) === uid;
+}
+/** Oldest first. A progress view reads left to right as time, and the report
+ *  built from it has to start at the beginning. */
+function sortOldestFirst(photos) {
+    return [...photos].sort((a, b) => {
+        const d = Date.parse(a.takenAt) - Date.parse(b.takenAt);
+        return d !== 0 ? d : a.id.localeCompare(b.id);
+    });
+}
+function rowToPhoto(row, url) {
+    return {
+        id: row.id,
+        path: row.image_path,
+        takenAt: row.taken_at,
+        url,
+        weightKg: row.weight_kg ?? null,
+        bodyFatPct: row.body_fat_pct ?? null,
+    };
+}
+/** Whole days between two photos, however they are ordered. */
+function daysApart(aISO, bISO) {
+    const a = Date.parse(aISO), b = Date.parse(bISO);
+    if (!Number.isFinite(a) || !Number.isFinite(b))
+        return null;
+    return Math.abs(Math.round((b - a) / 86400000));
+}
+/**
+ * The before/after pair for two selected photos, ordered by when they were
+ * taken rather than by the order they were tapped in.
+ */
+function comparePair(photos, ids) {
+    if (ids.length !== 2)
+        return null;
+    const a = photos.find((p) => p.id === ids[0]);
+    const b = photos.find((p) => p.id === ids[1]);
+    if (!a || !b || a.id === b.id)
+        return null;
+    const aFirst = Date.parse(a.takenAt) <= Date.parse(b.takenAt);
+    const before = aFirst ? a : b;
+    const after = aFirst ? b : a;
+    return { before, after, days: daysApart(before.takenAt, after.takenAt) };
+}
+/**
+ * The header note. This is the label that used to read "N on screen" because
+ * nothing was stored; it can say "saved" now, and only now.
+ *
+ * `null` for not-loaded-yet AND for loaded-and-empty, because in both of those
+ * the BODY of the section carries the difference — a note reading "0 saved"
+ * over a "loading" body would be the two states rendering the same.
+ */
+function photosNote(photos) {
+    if (photos === null || photos.length === 0)
+        return null;
+    return `${photos.length} saved`;
+}
+/** How many of the loaded photos have no image behind them. Never invented:
+ *  `null` when nothing is loaded yet. */
+function missingFileCount(photos) {
+    if (photos === null)
+        return null;
+    return photos.filter((p) => p.url === null).length;
+}
+/** See the header: required, not imported, so the pure half stays testable. */
+function db() {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('./supabase').supabase;
+}
+function report(context, err, extra) {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const m = require('./reportError');
+        m.reportError(context, err, extra);
+    }
+    catch {
+        /* reporting a failure must never itself fail */
+    }
+}
+async function requireUid(sb) {
+    const { data, error } = await sb.auth.getUser();
+    if (error)
+        throw error;
+    const uid = data?.user?.id;
+    if (!uid)
+        throw new Error('Sign in to save progress photos.');
+    return uid;
+}
+function newToken() {
+    return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+}
+/**
+ * A person's photos, oldest first, each with a signed URL.
+ *
+ * Signing is per-object and a single failure does NOT sink the list: that
+ * photo comes back with `url: null` so the screen can show the gap. A row
+ * whose file is missing is the recoverable half of a half-finished delete, and
+ * hiding it would hide the thing that needs fixing.
+ */
+async function listProgressPhotos() {
+    const sb = db();
+    const uid = await requireUid(sb);
+    // Capped, and a truncated read THROWS rather than returning a prefix.
+    //
+    // This was the only read here with no `.limit()`, and the ordering made it
+    // the worst possible shape: ascending, so PostgREST's silent 1000-row ceiling
+    // (see ./rowCap.ts) would have dropped the NEWEST photos — the "after" half
+    // of a before-and-after — and the screens then printed "N saved" and "N of
+    // these have no picture behind them any more" as totals over what was left.
+    //
+    // Descending puts the cut at the far end, and the throw is what rowCap.ts
+    // asks for when the rows feed a figure: both call sites (compare.tsx and
+    // scans.tsx) already catch a thrown read and render "Could not load your
+    // photos just now" rather than an empty gallery, so a truncated read reaches
+    // the member as a stated failure instead of a quiet subtraction from their
+    // own history. `sortOldestFirst` at the end restores the order the screens
+    // draw in, so nothing downstream changes.
+    const { data, error } = await sb
+        .from('progress_photos')
+        .select('id, client_id, taken_at, image_path, weight_kg, body_fat_pct')
+        .eq('client_id', uid)
+        .order('taken_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit((0, rowCap_1.capLimit)());
+    if (error)
+        throw error;
+    const rows = (0, rowCap_1.assertWhole)((data ?? []), 'your progress photos');
+    if (rows.length === 0)
+        return [];
+    const { data: signed, error: signErr } = await sb.storage
+        .from(exports.PHOTO_BUCKET)
+        .createSignedUrls(rows.map((r) => r.image_path), exports.SIGNED_URL_TTL_S);
+    if (signErr)
+        throw signErr;
+    const urlByPath = new Map();
+    for (const s of signed ?? []) {
+        if (!s.error && s.path && s.signedUrl)
+            urlByPath.set(s.path, s.signedUrl);
+    }
+    return sortOldestFirst(rows.map((r) => rowToPhoto(r, urlByPath.get(r.image_path) ?? null)));
+}
+/**
+ * Upload the file, then write the row. If the row fails, the file is an orphan
+ * and this is where it gets dealt with — see the header. The caller is told the
+ * upload failed either way; nothing here reports a half-save as a save.
+ */
+async function uploadProgressPhoto(uri, opts) {
+    const sb = db();
+    const uid = await requireUid(sb);
+    const path = photoObjectPath(uid, Date.now(), newToken());
+    const res = await fetch(uri);
+    if (!res.ok)
+        throw new Error('Could not read that photo from your device.');
+    const bytes = await res.arrayBuffer();
+    if (bytes.byteLength === 0)
+        throw new Error('That photo came back empty.');
+    const { error: upErr } = await sb.storage
+        .from(exports.PHOTO_BUCKET)
+        .upload(path, bytes, { contentType: 'image/jpeg', upsert: false });
+    if (upErr)
+        throw upErr;
+    const { data: row, error: insErr } = await sb
+        .from('progress_photos')
+        .insert({
+        client_id: uid,
+        taken_at: opts?.takenAt ?? new Date().toISOString(),
+        image_path: path,
+        weight_kg: opts?.weightKg ?? null,
+        body_fat_pct: opts?.bodyFatPct ?? null,
+    })
+        .select('id, client_id, taken_at, image_path, weight_kg, body_fat_pct')
+        .single();
+    if (insErr || !row) {
+        await discardOrphan(sb, path, insErr);
+        throw insErr ?? new Error('The photo uploaded but could not be saved.');
+    }
+    const { data: signed, error: signErr } = await sb.storage
+        .from(exports.PHOTO_BUCKET)
+        .createSignedUrl(path, exports.SIGNED_URL_TTL_S);
+    // The photo IS saved at this point. A URL we could not mint is a display
+    // problem, not a save problem, so it is reported and the photo returned with
+    // url: null rather than thrown away.
+    if (signErr)
+        report('progressPhotos.sign', signErr, { path });
+    return rowToPhoto(row, signErr ? null : signed?.signedUrl ?? null);
+}
+/**
+ * A file with no row. Delete it now; failing that, hand it to the server queue
+ * so it dies with the account even if this device never comes back; failing
+ * that, at least put the path somewhere a human can read it.
+ */
+async function discardOrphan(sb, path, cause) {
+    try {
+        const { error: rmErr } = await sb.storage.from(exports.PHOTO_BUCKET).remove([path]);
+        if (!rmErr)
+            return;
+        const { error: qErr } = await sb.rpc('queue_photo_file_purge', { p_path: path });
+        if (!qErr)
+            return;
+        report('progressPhotos.orphan', qErr, { path, removeError: String(rmErr.message), cause: String(cause) });
+    }
+    catch (e) {
+        report('progressPhotos.orphan', e, { path, cause: String(cause) });
+    }
+}
+/**
+ * Delete one photo: the FILE first, then the row. Both, or the caller is told
+ * it did not happen.
+ *
+ * Order matters and is not arbitrary — see the header. If the file will not go,
+ * the path is handed to the server purge queue before the row is removed, so
+ * the bytes are still accounted for; if even that fails we refuse and leave
+ * the photo alone rather than orphan it.
+ *
+ * The AFTER DELETE trigger on `progress_photos` queues the path server-side
+ * regardless, so a file this device thought it deleted is checked again by
+ * something holding a service credential. That is deliberate belt and braces:
+ * the app is not the party we let make the "it is gone" claim.
+ */
+async function deleteProgressPhoto(photo) {
+    const sb = db();
+    const { error: rmErr } = await sb.storage.from(exports.PHOTO_BUCKET).remove([photo.path]);
+    if (rmErr) {
+        const { error: qErr } = await sb.rpc('queue_photo_file_purge', { p_path: photo.path });
+        if (qErr) {
+            report('progressPhotos.delete', rmErr, { path: photo.path, queueError: String(qErr.message) });
+            throw rmErr;
+        }
+    }
+    // COUNTED, and this is the write in this file where a silent zero costs the
+    // most. The storage object is ALREADY gone by the time this runs — that
+    // ordering is deliberate — so a DELETE that matches no row leaves a
+    // `progress_photos` row pointing at nothing: the photo stays in the client's
+    // history as a tile that will never load, and every `progress_photo_shares`
+    // grant hanging off it stays live, because those cascade FROM the row that
+    // was not deleted. The client is told the photograph is gone and their coach
+    // can still open the record of it.
+    //
+    // PostgREST reports that as a 204 with `error: null`, so `if (delErr) throw`
+    // never fired. `{ count: 'exact' }` is the only thing that can tell it from a
+    // delete that landed.
+    const del = await sb.from('progress_photos').delete({ count: 'exact' }).eq('id', photo.id);
+    if (del.error)
+        throw del.error;
+    (0, wroteRows_1.assertWrote)('That photo', del);
+}

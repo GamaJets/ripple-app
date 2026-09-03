@@ -37,7 +37,7 @@ import { num, fmtClock, fmtAxisDay } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
 import { dateParts } from '../../src/lib/localDate';
 import { useMyAttendance, RHYTHM_WEEKS } from '../../src/ui/attendance';
-import { dwellMinutes, type AttendanceEvent, type ClassOutcome } from '../../src/lib/attendance';
+import { dwellMinutes, rhythmWeekLabel, type AttendanceEvent, type ClassOutcome } from '../../src/lib/attendance';
 
 // The weekday used to be this file's own English array — 'Sun' through 'Sat',
 // hand-written beside a date string that was hardcoded to en-GB. Both are the
@@ -227,7 +227,17 @@ export default function Attendance() {
                   // week"; before the first row on record we have no idea.
                   const h = w.covered && busiest > 0 ? Math.max(3, Math.round((w.days / busiest) * 64)) : 3;
                   return (
-                    <View key={w.start} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                    // Grouped and spoken whole, like the visit rows below.
+                    // Every fact this column carries is drawn as a shape — fill
+                    // for days, a dashed outline for a week we know nothing
+                    // about, half opacity for the week that is not over — and
+                    // the number underneath is blank for a covered week with
+                    // none and blank for an uncovered one, so the two are told
+                    // apart by a border style alone. `rhythmWeekLabel` is that
+                    // distinction in words; see its header.
+                    <View key={w.start} accessible accessibilityRole="text"
+                      accessibilityLabel={rhythmWeekLabel(w, shortDay(w.start))}
+                      style={{ flex: 1, alignItems: 'center', gap: 4 }}>
                       <View style={{
                         width: '100%', height: h, borderRadius: radius.sm / 2,
                         backgroundColor: !w.covered ? 'transparent' : w.days ? t.brand : t.surface2,

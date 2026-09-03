@@ -1,0 +1,358 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+// The coach's message list — which clients get a row, what the row says, and
+// what an empty list is allowed to claim.
+// Compile with tsc, run with node.
+//
+// The defects these assertions are aimed at, in the order they would hurt:
+//
+//   1. A COUNT THAT DID NOT COME BACK RENDERED AS ZERO. `Number(null)` is 0,
+//      and supabase-js hands back nulls for a join that produced nothing. A
+//      coach reading "0" on the one screen that exists to say who is waiting
+//      stops looking. supabase/parts/88 was written because the roster had this
+//      exact bug as a hardcoded literal; it must not come back through a cast.
+//
+//   2. AN EMPTY LIST UNDER A FAILED READ SAYING "no conversations yet". Same
+//      class, worse blast radius: the client who wrote that morning is waiting
+//      on a reply their coach has been told does not exist.
+//
+//   3. A PHOTOGRAPH PREVIEWING AS A BLANK LINE. A message whose only content is
+//      an attachment has an empty `body`, so a preview that prints the body
+//      renders a thread with something in it as a thread with nothing in it.
+//
+//   4. THE LIST REORDERING ITSELF ON A FAILURE. Sorting on `unread` would put a
+//      nullable value in the ORDER BY; recency is the only key that is known
+//      whenever a thread is.
+//
+// ── The one-off failure in section 6, and what it actually was ─────────────
+//
+// This file failed once inside a full `npm test`, on three assertions in
+// section 6, and passed on every rerun after it. It is written down here
+// because "it passed on rerun" is not a diagnosis, and because the first two
+// explanations anybody reaches for are both wrong.
+//
+// The reported failure was `got "Aug 21", wanted "21/8"`. Read which side is
+// which, because it is the whole answer. `got` is what `threadWhen` returned:
+// `Aug 21`, the shared renderer, on an en-US machine. `wanted` is what the
+// assertion asked for: `21/8`, which is `${d.getDate()}/${d.getMonth() + 1}` —
+// hand-rolled arithmetic, the form this test asserted BEFORE the change that
+// moved `threadWhen` onto `fmtAxisDay` and rewrote these assertions with it.
+//
+// So the module was the new one and the compiled TEST was the old one. Not a
+// defect in `threadWhen`, whose new form is what ran and is correct.
+//
+// It was not the locale either, and that is checkable rather than assertable:
+// `fmtAxisDay` is `toLocaleDateString(locale, { day: 'numeric', month: 'short' })`
+// and NO locale renders `21/8`. A sweep of ninety-odd finds six that render
+// with no month name at all — lt-LT `08-21`, bg-BG `21.08`, cs-CZ and sk-SK
+// `21. 8.`, fi-FI `21.8.`, pt-PT `21/08` — and the only slashed one of those
+// pads the month. Nothing Intl can produce is `21/8`, so the string did not
+// come from a formatter, and no locale on any machine explains it.
+//
+// It was not the clock. `now` is a parameter and every assertion in section 6
+// passes a fixed one; there is no wall clock in this file to roll over.
+//
+// What it was: `npm test` is `tsc -p tsconfig.test.json && node .tmp/lib/a.test.js && …`
+// — one compile into `.tmp`, then a few hundred separate node processes reading
+// that output back off disk one at a time over several minutes. `.tmp` is a
+// single shared directory, tsc never cleans it (it still holds `.js` for
+// modules whose sources were deleted days ago), and nothing serialises two
+// `tsc` runs against it. A chain that is still walking `.tmp` when the next
+// run's `tsc` overwrites it loads a test compiled from one snapshot of the tree
+// against a module compiled from another — which is exactly the pair of
+// literals above, an old test against a new module.
+//
+// That is a defect in the harness and it is NOT fixed here, because nothing in
+// a test file can defend against being a stale binary. The two fixes that close
+// it are: compile each run into its OWN output directory (`tsc --outDir` per
+// run), or hold a lock across `tsc` plus the chain that follows it. Cleaning
+// `.tmp` first fixes the stale-output half and makes the concurrency half
+// LOUDER — a wiped directory mid-chain is a MODULE_NOT_FOUND rather than a
+// wrong answer — but it does not remove it.
+//
+// ── What IS fixed here ────────────────────────────────────────────────────
+//
+// Chasing the above turned up a real one in this file, of the kind it was
+// wrongly accused of. Section 6 read whatever locale the runner's machine was
+// set to: it asserted the date against `fmtAxisDay` called with the same
+// arguments — an assertion that could only ever agree with itself — and then
+// asserted separately that the result was not a bare `d/m`. On a handset set
+// to Portuguese (Portugal) `fmtAxisDay` returns `21/08`, and that second
+// assertion fails. `LANG=pt_PT.UTF-8 npx tsx src/lib/coachThreads.test.ts`
+// reproduced it every time.
+//
+// So the locale is now LATCHED, the way referralCredit.test.ts and
+// locale.test.ts latch it, and the date is asserted as a literal rather than
+// against the renderer under test. Nothing here reads the machine any more.
+const coachThreads_1 = require("./coachThreads");
+const locale_1 = require("./locale");
+// Section 6 asserts a date in British order — the day first, then the month by
+// name. That is not this app's house style; Repple is white-label and has no
+// house locale. `fmtAxisDay` writes in whatever `appLocale()` holds, which in
+// the app is the handset's, so the same call is "Aug 20" on an American one and
+// "20/08" on a Portuguese one. Stated here for the same reason this file states
+// its clock: a test that reads whatever the runner happens to be set to is a
+// test of the machine. See the header.
+(0, locale_1.setAppLocale)('en-GB');
+const errors = [];
+const ok = (cond, msg) => { if (!cond)
+    errors.push(msg); };
+const eq = (a, b, msg) => ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
+/** A thread with everything defaulted to "nothing came back", so each test
+ *  states only the field it is about. */
+const thread = (over = {}) => ({
+    clientId: 'c1', name: 'Sam Rivera', avatar: null,
+    lastBody: null, lastSender: null, lastKind: null, lastAt: null, unread: null,
+    ...over,
+});
+/* ── 1 · parsing a server row ──────────────────────────────────────────────
+ *
+ * The row arrives from `coach_threads()` through supabase-js, so every field is
+ * `any` and the nulls are real.
+ */
+{
+    const r = (0, coachThreads_1.rowToThread)({
+        client_id: '759c8d25-4d50-4a5c-bdb5-806bcad18ac1',
+        name: '  Sam Rivera  ', avatar: ' https://example.test/a.jpg ',
+        last_body: ' Test test ', last_sender: 'client', last_kind: null,
+        last_at: '2026-08-31T20:13:44.492371+00:00', unread: 3,
+    });
+    eq(r.clientId, '759c8d25-4d50-4a5c-bdb5-806bcad18ac1', 'the thread key is the client id');
+    eq(r.name, 'Sam Rivera', 'a name is trimmed');
+    eq(r.avatar, 'https://example.test/a.jpg', 'an avatar is trimmed');
+    eq(r.lastBody, 'Test test', 'a body is trimmed');
+    eq(r.lastSender, 'client', 'the sender comes through');
+    eq(r.unread, 3, 'a real count comes through');
+}
+// Both halves of the narrowing, stated positively as well as negatively. A
+// narrowing written as `=== 'image' && === 'video'` is never true and would
+// null every attachment in the app, which the negative assertions below cannot
+// see because they only ever check for null.
+eq((0, coachThreads_1.rowToThread)({ client_id: 'c1', last_kind: 'image' }).lastKind, 'image', 'an image comes through as an image');
+eq((0, coachThreads_1.rowToThread)({ client_id: 'c1', last_kind: 'video' }).lastKind, 'video', 'a video comes through as a video');
+eq((0, coachThreads_1.rowToThread)({ client_id: 'c1', last_sender: 'coach' }).lastSender, 'coach', 'the coach side comes through');
+// Values that are not numbers must not be coerced into one. The global
+// `isFinite('3')` is true; `Number.isFinite('3')` is not, and a count that
+// arrived as a string is a count we did not read.
+eq((0, coachThreads_1.rowToThread)({ client_id: 'c1', unread: '3' }).unread, null, 'a count that arrived as a string is not a count');
+eq((0, coachThreads_1.rowToThread)({ client_id: 'c1', unread: 2.7 }).unread, 2, 'a fractional count is truncated, not rounded up into a message nobody sent');
+// THE ONE THAT MATTERS. A null count is not zero.
+{
+    const r = (0, coachThreads_1.rowToThread)({ client_id: 'c1', unread: null });
+    eq(r.unread, null, 'an unread count that did not come back is null, never 0');
+    eq((0, coachThreads_1.unreadBadgeLabel)(r.unread), '—', 'and it draws a dash, which is not a claim that nobody is waiting');
+}
+{
+    const r = (0, coachThreads_1.rowToThread)({ client_id: 'c1', unread: 0 });
+    eq(r.unread, 0, 'a count of zero that DID come back is zero');
+    eq((0, coachThreads_1.unreadBadgeLabel)(r.unread), null, 'and draws no badge at all');
+}
+eq((0, coachThreads_1.unreadBadgeLabel)(1), '1', 'one unread message');
+eq((0, coachThreads_1.unreadBadgeLabel)(99), '99', 'ninety-nine fit');
+eq((0, coachThreads_1.unreadBadgeLabel)(100), '99+', 'past that the badge caps in text');
+eq((0, coachThreads_1.unreadBadgeLabel)(-2), null, 'a negative count is not a badge');
+// A blank name is not a name. Returning '' would draw an empty circle where a
+// monogram goes, which reads as a face that failed to load rather than as a
+// client whose name we could not read.
+{
+    const r = (0, coachThreads_1.rowToThread)({ client_id: 'c1', name: '   ', avatar: '' });
+    eq(r.name, null, 'a whitespace-only name is null');
+    eq(r.avatar, null, 'an empty avatar is null');
+}
+// A value this build does not know is null, not a cast. `last_kind: 'audio'`
+// would otherwise reach KIND_NOUN and preview as `undefined`.
+{
+    const r = (0, coachThreads_1.rowToThread)({ client_id: 'c1', last_sender: 'system', last_kind: 'audio' });
+    eq(r.lastSender, null, 'a sender this build does not know is null');
+    eq(r.lastKind, null, 'an attachment kind this build does not know is null');
+}
+/* ── 2 · which clients have a conversation ─────────────────────────────── */
+ok(!(0, coachThreads_1.hasConversation)(thread()), 'a client with no last message has no conversation');
+ok((0, coachThreads_1.hasConversation)(thread({ lastAt: '2026-08-31T20:13:44Z', lastBody: 'hi' })), 'a client with a last message has one');
+// The TIMESTAMP is the test, not the body — a photo with no caption is still a
+// conversation, and this is the assertion that stops somebody "simplifying"
+// this to a body check.
+ok((0, coachThreads_1.hasConversation)(thread({ lastAt: '2026-08-31T20:13:44Z', lastKind: 'image' })), 'a photo with no caption is still a conversation');
+ok(!(0, coachThreads_1.hasConversation)(thread({ lastAt: 'not a date' })), 'an unparseable timestamp is not a conversation');
+/* ── 3 · the order ─────────────────────────────────────────────────────── */
+{
+    const rows = [
+        thread({ clientId: 'old', lastAt: '2026-08-28T09:41:33Z', lastBody: 'Hello test', unread: 9 }),
+        thread({ clientId: 'new', lastAt: '2026-08-31T20:13:44Z', lastBody: 'Test test', unread: 0 }),
+        thread({ clientId: 'mid', lastAt: '2026-08-31T14:41:11Z', lastBody: 'Test test test', unread: null }),
+    ];
+    eq((0, coachThreads_1.sortThreads)(rows).map((t) => t.clientId).join(','), 'new,mid,old', 'most recent first');
+    // The alternative, refused. `old` has nine unread and still sorts last: the
+    // order does not consult a value that can be null, so a failed unread join
+    // cannot silently reshuffle the list.
+    ok((0, coachThreads_1.sortThreads)(rows)[0].clientId !== 'old', 'the unread count does not reorder anybody');
+    // Total order on ties, so two messages in the same millisecond do not swap
+    // places between renders. FOUR of them, reversed: a two-element list can be
+    // put in order by a comparator that is wrong in every other case, because
+    // there is only one comparison to get right.
+    const tied = ['d', 'c', 'b', 'a'].map((id) => thread({ clientId: id, lastAt: '2026-08-31T20:13:44Z', lastBody: 'x' }));
+    eq((0, coachThreads_1.sortThreads)(tied).map((t) => t.clientId).join(','), 'a,b,c,d', 'a tie breaks on the client id, stably');
+    // Same list, already in order. A comparator that never returns 0 for equal
+    // ids passes the reversed case and fails this one.
+    const already = ['a', 'b', 'c', 'd'].map((id) => thread({ clientId: id, lastAt: '2026-08-31T20:13:44Z', lastBody: 'x' }));
+    eq((0, coachThreads_1.sortThreads)(already).map((t) => t.clientId).join(','), 'a,b,c,d', 'and an ordered list is left alone');
+    // Not mutated in place: the hook holds this array and React compares it.
+    eq(rows[0].clientId, 'old', 'sortThreads does not reorder its input');
+}
+{
+    const rows = [
+        thread({ clientId: 'c5', name: null }),
+        thread({ clientId: 'c2', name: 'zoe' }),
+        thread({ clientId: 'c4', name: null }),
+        thread({ clientId: 'c1', name: 'Alice' }),
+        thread({ clientId: 'c3', name: 'Mo' }),
+    ];
+    // TWO unnamed rows, not one: with a single unnamed row at the end, a
+    // comparator that reports "equal" instead of "after" for the named/unnamed
+    // pair still happens to produce the right list.
+    eq((0, coachThreads_1.sortUnstarted)(rows).map((t) => t.clientId).join(','), 'c1,c3,c2,c4,c5', 'unstarted threads go by name, case-insensitively, with the unnameable last');
+    // Two people with the same name, which happens. They must not swap places
+    // between renders, so the id is the second key and not a coin toss.
+    const sameName = [
+        thread({ clientId: 'z', name: 'Sam Rivera' }),
+        thread({ clientId: 'a', name: 'sam rivera' }),
+        thread({ clientId: 'm', name: 'Sam Rivera' }),
+    ];
+    eq((0, coachThreads_1.sortUnstarted)(sameName).map((t) => t.clientId).join(','), 'a,m,z', 'two clients with the same name are ordered by id, stably');
+    // The two minimal pairs, stated for the record rather than as a trap.
+    //
+    // `npm run mutate` reports eleven survivors in this file and every one of them
+    // is in a comparator's "after" arm — `? 1 : 0` becoming `? 0 : 0`, `<`
+    // becoming `<=`. They survive because they are EQUIVALENT, not because
+    // nothing is watching: V8's sort is a stable insertion/merge sort and only
+    // ever consults the comparator in the "does a come before b" direction, so
+    // returning 0 where the original returns 1 is absorbed by the stability. A
+    // brute force over every arrangement of four rows drawn from {no name, Ann,
+    // Mo, zoe} finds no input that tells them apart. Eight of the eleven are
+    // additionally unreachable: they are in the clientId tie-break, and clientId
+    // is a primary key, so no two rows can share one.
+    //
+    // Recorded here so the next person reading a survivor list does not spend the
+    // hour finding that out again.
+    eq((0, coachThreads_1.sortUnstarted)([thread({ clientId: 'x', name: null }), thread({ clientId: 'y', name: 'Ann' })])
+        .map((t) => t.clientId).join(','), 'y,x', 'a client with no readable name sorts AFTER one with a name');
+    eq((0, coachThreads_1.sortUnstarted)([thread({ clientId: 'x', name: 'zoe' }), thread({ clientId: 'y', name: 'Ann' })])
+        .map((t) => t.clientId).join(','), 'y,x', 'and a later name sorts after an earlier one');
+}
+/* ── 4 · the split ─────────────────────────────────────────────────────── */
+{
+    const rows = [
+        thread({ clientId: 'a', lastAt: '2026-08-31T20:13:44Z', lastBody: 'hi' }),
+        thread({ clientId: 'b', name: 'Bea' }),
+        thread({ clientId: 'c', name: 'Cal' }),
+    ];
+    const s = (0, coachThreads_1.splitThreads)(rows);
+    eq(s.conversations.length, 1, 'one conversation');
+    eq(s.unstarted.length, 2, 'two clients who could be written to');
+    // Nobody is in both, and nobody is lost. A client who fell out of both lists
+    // would be a person the coach cannot reach from the only messaging screen.
+    eq(s.conversations.length + s.unstarted.length, rows.length, 'every client lands in exactly one list');
+}
+/* ── 5 · the preview line ──────────────────────────────────────────────── */
+{
+    const p = (0, coachThreads_1.threadPreview)(thread({ lastAt: '2026-08-31T20:13:44Z', lastBody: 'Can we move to 7?', lastSender: 'client' }));
+    eq(p.text, 'Can we move to 7?', "a client's words are shown as they wrote them");
+    eq(p.mine, false, 'and are not the coach’s own');
+}
+{
+    const p = (0, coachThreads_1.threadPreview)(thread({ lastAt: '2026-08-31T20:13:44Z', lastBody: 'See you Tuesday.', lastSender: 'coach' }));
+    eq(p.text, 'You: See you Tuesday.', 'the coach’s own last word is prefixed, because who said it changes what it means');
+    eq(p.mine, true, 'and is marked as theirs so the row can mute it');
+}
+// Defect 3: a message whose whole content is a photograph.
+eq((0, coachThreads_1.threadPreview)(thread({ lastAt: '2026-08-31T20:13:44Z', lastKind: 'image', lastSender: 'client' })).text, 'Sent you a photo', 'an uncaptioned photo says so rather than drawing a blank line');
+eq((0, coachThreads_1.threadPreview)(thread({ lastAt: '2026-08-31T20:13:44Z', lastKind: 'video', lastSender: 'coach' })).text, 'You sent a video', 'and a clip the coach sent back says so from their side');
+// A caption beats the envelope: the person chose those words.
+eq((0, coachThreads_1.threadPreview)(thread({ lastAt: '2026-08-31T20:13:44Z', lastKind: 'image', lastBody: 'Is this the one?', lastSender: 'client' })).text, 'Is this the one?', 'a captioned photo previews the caption, not a description of the attachment');
+// A row with a timestamp and nothing this build can render. Never blank.
+ok((0, coachThreads_1.threadPreview)(thread({ lastAt: '2026-08-31T20:13:44Z', lastSender: 'client' })).text.length > 0, 'a message this build cannot show still says something');
+eq((0, coachThreads_1.threadPreview)(thread()).text, 'No messages yet', 'a client with no thread says so plainly');
+/* ── 6 · when ──────────────────────────────────────────────────────────── */
+{
+    const now = Date.parse('2026-08-31T20:00:00Z');
+    eq((0, coachThreads_1.threadWhen)('2026-08-31T19:59:30Z', now), 'now', 'inside a minute');
+    eq((0, coachThreads_1.threadWhen)('2026-08-31T19:45:00Z', now), '15m', 'minutes');
+    eq((0, coachThreads_1.threadWhen)('2026-08-31T17:00:00Z', now), '3h', 'hours');
+    eq((0, coachThreads_1.threadWhen)('2026-08-29T20:00:00Z', now), '2d', 'days');
+    // Each boundary EXACTLY, because every one of these thresholds is one
+    // character away from being wrong and none of the cases above would notice.
+    // "60m" and "24h" and "7d" are all things this has printed in other screens.
+    eq((0, coachThreads_1.threadWhen)('2026-08-31T19:59:00Z', now), '1m', 'exactly a minute is a minute, not still "now"');
+    eq((0, coachThreads_1.threadWhen)('2026-08-31T19:00:00Z', now), '1h', 'exactly an hour is 1h, never 60m');
+    eq((0, coachThreads_1.threadWhen)('2026-08-30T20:00:00Z', now), '1d', 'exactly a day is 1d, never 24h');
+    eq((0, coachThreads_1.threadWhen)('2026-08-30T20:00:01Z', now), '23h', 'a second under a day is still hours');
+    ok(!/^\d+[mhd]$/.test((0, coachThreads_1.threadWhen)('2026-08-24T20:00:00Z', now) ?? ''), 'exactly a week is a date, never 7d');
+    eq((0, coachThreads_1.threadWhen)('2026-08-24T20:00:01Z', now), '6d', 'a second under a week is still days');
+    // Past a week it is a date rather than arithmetic. Three separate things are
+    // being asserted here and they take their literals from different places:
+    //
+    //   the DAY comes off the local calendar, because the date is the READER's.
+    //   `npm run test:zones` runs this suite in Kiritimati, Auckland, Dubai, UTC,
+    //   Los Angeles and Midway, and 2026-08-20T20:00:00Z is the 21st in the first
+    //   three and the 20th in the last three. A hardcoded day asserts a timezone.
+    //
+    //   the MONTH is written out, as a NAME, and it is the point of the block.
+    //   `fmtAxisDay` takes a 0-based month index, `getMonth()` gives one, and a
+    //   `+ 1` between them has been in this app's dates at least once before.
+    //   'Aug' is what proves the index went through unshifted; 'Sept' — which is
+    //   how en-GB abbreviates it — is what the defect looks like. The instant is
+    //   in August in all six zones `test:zones` runs.
+    //
+    //   the ORDER and the SHAPE are the latched locale's — en-GB, seeded at the
+    //   top of this file. This used to be asserted against `fmtAxisDay` called
+    //   with the same three arguments, which is an assertion that agrees with
+    //   itself no matter what either side does; a literal is the only form that
+    //   can catch `threadWhen` reverting to `${d.getDate()}/${d.getMonth() + 1}`,
+    //   which is what it printed before, and which reads as 20 August in London
+    //   and as no date at all in New York, where the month comes first.
+    {
+        const iso = '2026-08-20T20:00:00Z';
+        const d = new Date(Date.parse(iso));
+        eq((0, coachThreads_1.threadWhen)(iso, now), `${d.getDate()} Aug`, 'past a week, the local day and the month by name');
+        // Belt and braces on the shape, and cheap: no separator-joined pair of
+        // numbers, in any of the forms a locale writes one — 21/08, 21.08, 08-21.
+        // Two numbers in an order is a date to the reader who wrote it and a
+        // different date, or none, to everybody else.
+        ok(!/^\d{1,2}\s?[/.\-]\s?\d{1,2}\.?$/.test((0, coachThreads_1.threadWhen)(iso, now) ?? ''), 'and never a bare pair of numbers, which means two different days to two readers');
+    }
+    // A clock that puts the message in the future must not print "-3m".
+    eq((0, coachThreads_1.threadWhen)('2026-08-31T20:05:00Z', now), 'now', 'a message from the future reads as now, not as a negative');
+    eq((0, coachThreads_1.threadWhen)(null, now), null, 'no timestamp, no label');
+    eq((0, coachThreads_1.threadWhen)('whenever', now), null, 'an unreadable timestamp is not drawn as "now"');
+}
+/* ── 7 · the empty state, which is four sentences and not one ──────────── */
+eq((0, coachThreads_1.threadsEmptyNote)('loading', 0), null, 'nothing is claimed while the read is in flight');
+// Defect 2. The sentence that must never be "no conversations yet".
+{
+    const note = (0, coachThreads_1.threadsEmptyNote)('error', 0) ?? '';
+    ok(/could not/i.test(note), 'a failed read says the read failed');
+    ok(!/no conversations yet/i.test(note), 'a failed read NEVER says there are no conversations');
+    ok(!/no messages/i.test(note), 'and never says there are no messages');
+    // The roster count is unknown under an error too, so it must not change the
+    // sentence — being told "you have no clients" by a failed read is the same lie.
+    eq((0, coachThreads_1.threadsEmptyNote)('error', 5), note, 'the error sentence does not depend on a count the error made unknowable');
+}
+{
+    const note = (0, coachThreads_1.threadsEmptyNote)('ready', 0) ?? '';
+    ok(/no clients/i.test(note), 'a coach with no roster is told the reason is the roster');
+}
+{
+    const note = (0, coachThreads_1.threadsEmptyNote)('ready', 4) ?? '';
+    ok(/no conversations yet/i.test(note), 'a coach with clients and no threads is told to start one');
+    ok(!/no clients/i.test(note), 'and is not told they have no clients');
+}
+// 'partial' is a real answer about the rows that came back, so it reads like
+// 'ready' rather than like a failure.
+ok(((0, coachThreads_1.threadsEmptyNote)('partial', 4) ?? '').length > 0, 'a partial read still has something to say');
+if (errors.length) {
+    console.error(`coachThreads: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);
+    for (const e of errors)
+        console.error('  · ' + e);
+    process.exit(1);
+}
+console.log('coachThreads: ok');

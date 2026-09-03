@@ -555,7 +555,8 @@ export default function StandingAppointments() {
           actually does, in words, above its own button — and the only
           emphasised control on the sheet is the one that changes nothing. */}
       <Modal visible={!!endFor} animationType="slide" transparent onRequestClose={() => setEndFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEndFor(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEndFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
           {endFor ? (<>
             <Text style={{ ...ty.head, color: t.ink }}>One session, or the arrangement?</Text>
@@ -664,7 +665,8 @@ export default function StandingAppointments() {
           (`pauseOutcomeLines`). Both sentences live in src/lib/reschedule so
           they cannot drift from one another or from the tests. */}
       <Modal visible={!!pauseFor} animationType="slide" transparent onRequestClose={() => setPauseFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPauseFor(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPauseFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
           {pauseFor ? (<>
             <Text style={{ ...ty.head, color: t.ink }}>Pause this, or end it?</Text>

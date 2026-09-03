@@ -842,7 +842,8 @@ export default function Bookings() {
           no other open times" is a claim about their calendar, and a failed
           read may not make it. */}
       <Modal visible={!!moveFor} transparent animationType="slide" onRequestClose={() => setMoveFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setMoveFor(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setMoveFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
           {moveFor ? (<>
             <Text style={{ ...ty.title, color: t.ink }}>Move to another time</Text>

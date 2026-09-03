@@ -405,6 +405,56 @@ export function rhythm(
   return { weeks: out, firstDay, countedWeeks: counted.length, perWeek };
 }
 
+/**
+ * One bar of the rhythm strip, said in words.
+ *
+ * ── Why this is a function and not a `title` on the bar ───────────────────
+ *
+ * The strip draws four different facts and draws every one of them as a shape:
+ * a filled bar is a week with days in it, a flat grey bar is a covered week
+ * with none, a dashed outline is a week this app knows nothing about, and
+ * reduced opacity is the current week, which is not over. The number underneath
+ * is printed as `w.days || ''`, so a covered week with ZERO days and an
+ * uncovered week are both blank — the two are told apart by a border style and
+ * nothing else.
+ *
+ * That distinction is not decorative. This screen's own header refuses to
+ * compute an absence, and says the strip "marks the weeks it knows nothing
+ * about as exactly that". A dashed border is not "exactly that" to somebody
+ * using a screen reader, in bright sun, or with any of the colour vision the
+ * rest of this file's palette is contrast-tested for — and "you did not come
+ * that week" is the one sentence this screen was written not to say by
+ * accident.
+ *
+ * `weekOf` is the week's start already formatted by the caller, for the reason
+ * every prose module here takes its dates that way: a bare `getDate()` is
+ * "9/12", which is 9 December in London and 12 September in New York, and there
+ * is no locale in a pure module (scripts/check-hand-dates.mjs).
+ */
+export function rhythmWeekLabel(w: RhythmWeek, weekOf: string): string {
+  const when = weekOf.trim();
+  const head = when ? `Week of ${when}` : 'That week';
+  // Checked before the count, and that order is the whole of it: `days` is 0
+  // for an uncovered week too, and reading the zero first is exactly how "we
+  // have no record" becomes "you did not come".
+  if (!w.covered) {
+    return `${head}: nothing on record. Your gym's record of you starts later than this, so this is not a week you stayed away.`;
+  }
+  const n = w.days;
+  const dayWord = n === 1 ? '1 day' : `${n} days`;
+  if (!w.complete) {
+    // The current week. Never phrased as a total: four days by Thursday is not
+    // four days in a week, and the caption under the strip already says the
+    // last bar is unfinished.
+    return n === 0
+      ? `${head}: nothing recorded yet. This week is not over.`
+      : `${head}: ${dayWord} so far. This week is not over.`;
+  }
+  return n === 0
+    ? `${head}: no days recorded.`
+    : `${head}: ${dayWord} recorded.`;
+}
+
 /* ── the reads ────────────────────────────────────────────────────────────── */
 
 const BOOKING_COLUMNS = 'id, class_id, status, attended_at, created_at';

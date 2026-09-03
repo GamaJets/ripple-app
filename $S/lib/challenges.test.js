@@ -1,0 +1,247 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+// Shaping a challenge and its board. Compile with tsc, run with node.
+//
+// The bug this guards is the one the feature was BUILT out of. This screen has
+// twice told a client something about other people that was not true: first
+// with six invented athletes and invented scores, then — after those were
+// removed — with a one-person board captioned as though that were the finding.
+// Both are the same failure, which is a screen stating a fact it does not have.
+//
+// So most of what follows pins the sentences to the read's status. A rank is a
+// figure over a SET, and it is the single most dangerous figure in this app to
+// get wrong: "you're 12th of 40" printed off a truncated read is arithmetic
+// over an unknown fraction, and it is arithmetic about other people.
+//
+// The rest pins the parsing, because PostgREST hands `numeric` back as a STRING
+// and every score, goal and place in this feature is numeric. `"4.0"` is not a
+// number to a progress meter, and `Number(null)` is 0 — which on a leaderboard
+// is a real place, at the bottom.
+const challenges_1 = require("./challenges");
+const errors = [];
+const ok = (cond, msg) => { if (!cond)
+    errors.push(msg); };
+const eq = (a, b, msg) => ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
+const DAY = 86400000;
+const NOW = Date.parse('2026-08-31T12:00:00Z');
+const iso = (offsetDays) => new Date(NOW + offsetDays * DAY).toISOString();
+// Exactly the shape my_challenges() answered with, live, on 2026-08-31 —
+// numeric columns as strings, booleans as booleans.
+const raw = (over = {}) => ({
+    id: 'ch-1', title: 'Gym Consistency', blurb: 'Most training days.',
+    metric: 'days', unit: 'days', goal: '10',
+    starts_at: iso(-14), ends_at: iso(14), time_zone: 'Europe/London',
+    icon: 'flame', coach_id: null, joined: false, participants: 3, my_score: '4',
+    ...over,
+});
+const row = (over = {}) => ({
+    id: 'ch-1', title: 'Gym Consistency', blurb: 'Most training days.',
+    metric: 'days', unit: 'days', goal: 10,
+    startsAt: NOW - 14 * DAY, endsAt: NOW + 14 * DAY,
+    icon: 'flame', cohort: 'gym', joined: false, participants: 3, myScore: 4,
+    ...over,
+});
+const boardRow = (over = {}) => ({ place: 1, name: 'Ben', score: 6, isMe: false, ...over });
+/* ── a numeric arrives as a string, and a blank is not a zero ──────────── */
+// The live answer. Nothing downstream survives these staying strings: a meter
+// compares them, a sort orders them, and "4.0" fails both silently.
+eq((0, challenges_1.figure)('4.0'), 4, 'a numeric column arrives as a string and is parsed');
+eq((0, challenges_1.figure)('20'), 20, 'so does a whole-number goal');
+eq((0, challenges_1.figure)(6), 6, 'a real number passes through');
+eq((0, challenges_1.figure)(0), 0, 'zero is a figure — a score of nothing is an answer');
+// The three ways a confident zero used to get invented.
+eq((0, challenges_1.figure)(null), null, 'absent is not zero');
+eq((0, challenges_1.figure)(''), null, 'blank is not zero, though Number("") is');
+eq((0, challenges_1.figure)('nope'), null, 'unparseable is not zero');
+eq((0, challenges_1.figure)(Number.NaN), null, 'NaN is not a figure');
+eq((0, challenges_1.figure)(Number.POSITIVE_INFINITY), null, 'nor is infinity');
+/* ── shaping drops what cannot be drawn honestly ───────────────────────── */
+const shaped = (0, challenges_1.shapeChallenges)([
+    raw(),
+    raw({ id: 'ch-2', title: 'Squad Volume', metric: 'volume', unit: 't', goal: '20', coach_id: 'coach-1', my_score: '4.0' }),
+]);
+eq(shaped.length, 2, 'two good rows shape');
+eq(shaped[0].goal, 10, 'the goal is a number, not a string');
+eq(shaped[1].myScore, 4, 'so is the score');
+eq(shaped[0].cohort, 'gym', 'no coach_id means the cohort is the gym');
+eq(shaped[1].cohort, 'roster', 'a coach_id means the cohort is that coach’s athletes');
+// Each of these would render as something wrong rather than as nothing.
+eq((0, challenges_1.shapeChallenges)([raw({ id: null })]).length, 0, 'no id: the Join button would post nowhere');
+eq((0, challenges_1.shapeChallenges)([raw({ id: '   ' })]).length, 0, 'a blank id is no id');
+eq((0, challenges_1.shapeChallenges)([raw({ title: '' })]).length, 0, 'no title: an unnamed row on a list');
+eq((0, challenges_1.shapeChallenges)([raw({ metric: 'steps' })]).length, 0, 'an unknown metric has no unit and no meter');
+eq((0, challenges_1.shapeChallenges)([raw({ metric: null })]).length, 0, 'nor does a missing one');
+eq((0, challenges_1.shapeChallenges)([raw({ ends_at: null })]).length, 0, 'no window: the countdown would be a guess');
+eq((0, challenges_1.shapeChallenges)([raw({ ends_at: iso(-20) })]).length, 0, 'a window that ends before it starts is not a window');
+// A zero goal divides the meter by zero; a negative one can never be reached.
+// The database refuses both, and so does this, so a row written by anything
+// else cannot reach a progress bar.
+eq((0, challenges_1.shapeChallenges)([raw({ goal: '0' })]).length, 0, 'a goal of zero is completed by standing still');
+eq((0, challenges_1.shapeChallenges)([raw({ goal: '-5' })]).length, 0, 'a negative goal can never be completed');
+eq((0, challenges_1.shapeChallenges)([raw({ goal: null })]).length, 0, 'and a missing goal is not zero either');
+// A score that could not be computed stays null and reaches the screen as a
+// dash. It must NOT become 0, which on a board is last place.
+eq((0, challenges_1.shapeChallenges)([raw({ my_score: null })])[0].myScore, null, 'an uncomputed score is not a zero score');
+eq((0, challenges_1.shapeChallenges)([raw({ my_score: '0' })])[0].myScore, 0, 'a genuine zero survives');
+eq((0, challenges_1.shapeChallenges)([raw({ participants: null })])[0].participants, 0, 'an absent head count is treated as none — it is only ever used behind a ready status');
+eq((0, challenges_1.shapeChallenges)([raw({ unit: null })])[0].unit, 'days', 'a missing unit falls back to the metric’s own');
+eq((0, challenges_1.shapeChallenges)([raw({ unit: null, metric: 'volume' })])[0].unit, 't', 'and volume is tonnes');
+eq((0, challenges_1.shapeChallenges)([raw({ unit: null, metric: 'streak' })])[0].unit, 'day streak', 'and a streak is days');
+eq((0, challenges_1.shapeChallenges)(null).length, 0, 'a null read shapes to nothing rather than throwing');
+eq((0, challenges_1.shapeChallenges)([]).length, 0, 'so does an empty one');
+/* ── running first, then upcoming, then done ───────────────────────────── */
+// NOW is passed in rather than left to the clock. Every date in this file is
+// relative to NOW, so a sort that read `Date.now()` instead was comparing
+// fixtures from 31 Aug against whatever day the suite happened to run on — and
+// on 2 Sep at noon the challenge given two days to run had finished, which made
+// this assertion fail without a line of code changing.
+const sorted = (0, challenges_1.shapeChallenges)([
+    raw({ id: 'done', title: 'Finished', starts_at: iso(-20), ends_at: iso(-5) }),
+    raw({ id: 'later', title: 'Later', starts_at: iso(3), ends_at: iso(30) }),
+    raw({ id: 'soon', title: 'Ends soon', starts_at: iso(-10), ends_at: iso(2) }),
+    raw({ id: 'open', title: 'Ends later', starts_at: iso(-10), ends_at: iso(9) }),
+], NOW);
+eq(sorted.map((c) => c.id).join(','), 'soon,open,later,done', 'running challenges first, soonest to end at the top; then upcoming; then finished');
+/* ── the phase decides whether Join can work at all ────────────────────── */
+eq((0, challenges_1.challengePhase)(row(), NOW), 'open', 'inside its window a challenge is open');
+eq((0, challenges_1.challengePhase)(row({ startsAt: NOW + DAY, endsAt: NOW + 10 * DAY }), NOW), 'upcoming', 'before it starts');
+eq((0, challenges_1.challengePhase)(row({ startsAt: NOW - 10 * DAY, endsAt: NOW - DAY }), NOW), 'finished', 'after it ends');
+// The boundaries match `cp_self_join`, which refuses an insert once
+// now() >= ends_at. A Join button offered one second late is a button that
+// returns a 42501 the client cannot act on.
+eq((0, challenges_1.challengePhase)(row({ startsAt: NOW, endsAt: NOW + DAY }), NOW), 'open', 'the first instant is inside');
+eq((0, challenges_1.challengePhase)(row({ startsAt: NOW - DAY, endsAt: NOW }), NOW), 'finished', 'the last instant is outside');
+eq((0, challenges_1.canJoin)(row({ startsAt: NOW - DAY, endsAt: NOW }), NOW), false, 'a finished challenge cannot be joined');
+eq((0, challenges_1.canJoin)(row({ startsAt: NOW + DAY, endsAt: NOW + 2 * DAY }), NOW), true, 'one that has not started can be — the server allows it and the meter simply reads zero');
+/* ── the countdown never counts a day that is not there ────────────────── */
+eq((0, challenges_1.windowLine)(row({ endsAt: NOW + 12 * DAY }), NOW), '12 days left', 'whole days left');
+// Rounded up while it runs: with eight hours to go, "0 days left" reads as over.
+eq((0, challenges_1.windowLine)(row({ endsAt: NOW + DAY / 3 }), NOW), 'Last day', 'the final hours are the last day, not zero days');
+eq((0, challenges_1.windowLine)(row({ endsAt: NOW + DAY }), NOW), 'Last day', 'exactly one day left is the last day');
+eq((0, challenges_1.windowLine)(row({ startsAt: NOW + 3 * DAY, endsAt: NOW + 30 * DAY }), NOW), 'Starts in 3 days', 'before it starts');
+eq((0, challenges_1.windowLine)(row({ startsAt: NOW + DAY / 2, endsAt: NOW + 30 * DAY }), NOW), 'Starts tomorrow', 'starting within a day');
+eq((0, challenges_1.windowLine)(row({ startsAt: NOW - 30 * DAY, endsAt: NOW - 2 * DAY }), NOW), 'Finished 2 days ago', 'after it ends');
+eq((0, challenges_1.windowLine)(row({ startsAt: NOW - 30 * DAY, endsAt: NOW - DAY }), NOW), 'Finished yesterday', 'yesterday is named');
+eq((0, challenges_1.windowLine)(row({ startsAt: NOW - 30 * DAY, endsAt: NOW - DAY / 4 }), NOW), 'Finished today', 'today is named');
+ok(!/-/.test((0, challenges_1.windowLine)(row({ endsAt: NOW - 5 * DAY, startsAt: NOW - 30 * DAY }), NOW)), 'a finished challenge never prints a negative day count');
+// House rule: four figures carry a separator. A challenge can be a year long.
+ok(/1,200/.test((0, challenges_1.windowLine)(row({ endsAt: NOW + 1200 * DAY }), NOW)), 'a four-figure day count carries its thousands separator');
+/* ── nothing is stated unless the read was whole ───────────────────────── */
+// The whole point of this module. Under a failed or truncated read the numbers
+// on the row mean nothing, and every sentence the old screen wrote — "you're
+// the only athlete here", "#3 of 12" — is a claim about other people.
+for (const s of ['error', 'partial', 'loading']) {
+    const line = (0, challenges_1.standingLine)(s, row({ joined: true, participants: 12, myScore: 4 }));
+    ok(!/\b12\b/.test(line) && !/\b4\b/.test(line), `${s} states no figure — got ${JSON.stringify(line)}`);
+    ok(!/only|first one|nobody|alone/i.test(line), `${s} does not claim the board is empty — got ${JSON.stringify(line)}`);
+    ok(!/\b0\b/.test(line), `${s} does not print a zero it did not read`);
+    // The DENOMINATOR is the figure over the set, and it is wrong under all
+    // three. "of 2" counts the page, and the page is not the board.
+    const rl = (0, challenges_1.rankLine)(s, [boardRow({ isMe: true, place: 3 }), boardRow({ place: 1, name: 'Ben' })]);
+    ok(!/\bof 2\b/.test(rl), `${s} states no head count — got ${JSON.stringify(rl)}`);
+}
+// 'partial' is not 'error', and the two halves of a rank line come apart on it.
+//
+// `challenge_board()` computes `place` with a window function over EVERY
+// participant and only then applies its own `limit 200`, so the place in a
+// truncated page is the true place and the denominator beside it is not. This
+// line used to refuse both, which left a member who had joined — and been
+// scored — with no answer on the one sheet that exists to give them one.
+{
+    const cut = [boardRow({ isMe: true, place: 147 }), boardRow({ place: 1, name: 'Ben' })];
+    const partial = (0, challenges_1.rankLine)('partial', cut);
+    ok(/#147/.test(partial), `a truncated board still states the server's own place — got ${JSON.stringify(partial)}`);
+    ok(!/\bof\b/.test(partial), `and never a denominator over it — got ${JSON.stringify(partial)}`);
+    ok(/longer/i.test(partial), 'and says the board goes on past what is shown');
+    // The member who is past the cut has no honest figure anywhere, so the line
+    // has to be words. What it must not do is go quiet and leave them reading an
+    // unfamiliar list for a name that was never going to be in it.
+    const offPage = (0, challenges_1.rankLine)('partial', [boardRow({ place: 1, name: 'Ben' })]);
+    ok(!/#/.test(offPage), 'a member off the page is given no invented place');
+    ok(/past|beyond|cannot|can.t|not.*see/i.test(offPage), `and is told why they are not on it — got ${JSON.stringify(offPage)}`);
+    ok(!/\b1 on the board\b/.test(offPage), 'and never a head count of the page');
+}
+// The cap is the SERVER's, not PostgREST's, so nothing in rowCap.ts sees it.
+{
+    eq(challenges_1.BOARD_CAP, 200, 'the board cap matches `limit 200` in supabase/parts/128');
+    eq((0, challenges_1.boardTruncated)(challenges_1.BOARD_CAP), true, 'a board that came back at the cap is a prefix');
+    eq((0, challenges_1.boardTruncated)(challenges_1.BOARD_CAP - 1), false, 'one short of it is the whole board');
+    eq((0, challenges_1.boardTruncated)(0), false, 'and an empty board is not a truncated one');
+    // Counted off the RAW rows: `shapeBoard` drops a row with no place, and a
+    // full page carrying one of those is still a full page.
+    const rawFull = Array.from({ length: challenges_1.BOARD_CAP }, (_, i) => ({ place: i === 0 ? null : i + 1, display_name: 'A', score: '1', is_me: false }));
+    eq((0, challenges_1.shapeBoard)(rawFull).length, challenges_1.BOARD_CAP - 1, 'the unusable row is dropped from what is drawn');
+    eq((0, challenges_1.boardTruncated)(rawFull.length), true, 'but the read is still reported as cut off');
+}
+// And under 'ready' the figures are stated, because they are real.
+ok(/12/.test((0, challenges_1.standingLine)('ready', row({ joined: true, participants: 12 }))), 'a completed read says how many are on the board');
+ok(/first one in/i.test((0, challenges_1.standingLine)('ready', row({ joined: true, participants: 1 }))), 'a completed read may say the client is the first one in');
+ok(/not joined/.test((0, challenges_1.standingLine)('ready', row({ joined: false }))), 'a challenge not joined says so rather than reporting a standing');
+ok(/4 days/.test((0, challenges_1.standingLine)('ready', row({ joined: false, myScore: 4 }))), 'and shows what the client’s own log would score, which exposes nobody');
+ok(/—/.test((0, challenges_1.standingLine)('ready', row({ joined: false, myScore: null }))), 'an uncomputed score renders as a dash, not as zero');
+const board = (0, challenges_1.shapeBoard)([
+    { place: 1, display_name: 'Ben', score: '6', is_me: false },
+    { place: 2, display_name: 'Ana', score: '4', is_me: true },
+    { place: 3, display_name: '  ', score: '2', is_me: false },
+]);
+eq(board.length, 3, 'three board rows shape');
+eq(board[0].score, 6, 'a board score is parsed out of its string');
+eq(board[2].name, 'Athlete', 'a blank name renders as Athlete rather than as an empty row');
+eq((0, challenges_1.myBoardRow)(board)?.name, 'Ana', 'the client’s own row is findable');
+eq((0, challenges_1.myBoardRow)((0, challenges_1.shapeBoard)([{ place: 1, display_name: 'Ben', score: '6', is_me: false }])), null, 'and is null when the client is not on the page');
+ok(/#2 of 3/.test((0, challenges_1.rankLine)('ready', board)), 'a completed read states the rank');
+// A row with no place cannot be put in a ranked list; drawing it at zero would
+// move everybody below it down one.
+const holey = [
+    { place: null, display_name: 'Ghost', score: '9', is_me: false },
+    { place: 2, display_name: 'Ana', score: null, is_me: true },
+    { place: 1, display_name: 'Ben', score: '6', is_me: false },
+];
+eq((0, challenges_1.shapeBoard)(holey).length, 1, 'a row with no place or no score is dropped, not zeroed');
+eq((0, challenges_1.shapeBoard)(holey)[0].name, 'Ben', 'and the row that survives is the complete one');
+eq((0, challenges_1.shapeBoard)(null).length, 0, 'a null board shapes to nothing');
+/* ── scores read the way the metric means them ─────────────────────────── */
+eq((0, challenges_1.scoreText)('volume', 4), '4.0', 'tonnage keeps its decimal — 4.0 t is a different claim from 4 t');
+eq((0, challenges_1.scoreText)('days', 4), '4', 'a day count does not invent one');
+eq((0, challenges_1.scoreText)('streak', 14), '14', 'nor does a streak');
+eq((0, challenges_1.scoreText)('days', null), '—', 'an unknown score is a dash');
+eq((0, challenges_1.scoreText)('volume', 1204.5), '1,204.5', 'a four-figure tonnage carries its separator');
+eq((0, challenges_1.defaultUnit)('volume'), 't', 'volume is tonnes');
+/* ── the client is told who they are being measured against ────────────── */
+eq((0, challenges_1.cohortLabel)(row({ cohort: 'gym' })), 'Everyone at your gym', 'the gym cohort is named');
+ok(/coach/i.test((0, challenges_1.cohortLabel)(row({ cohort: 'roster' }))), 'and so is the coach’s roster');
+// These two sentences are the client-facing description of what
+// challenge_board() actually returns and where the numbers come from. They are
+// here rather than in the JSX so that widening the select list in
+// supabase/parts/128 fails a test rather than quietly outdating a paragraph.
+ok(/first name/i.test(challenges_1.BOARD_VISIBILITY_NOTE), 'the note says a first name is shared');
+ok(/score/i.test(challenges_1.BOARD_VISIBILITY_NOTE), 'and that the score is shared');
+ok(/surname/i.test(challenges_1.BOARD_VISIBILITY_NOTE) && /photo/i.test(challenges_1.BOARD_VISIBILITY_NOTE), 'and names what is not — the select list has neither');
+ok(/leave/i.test(challenges_1.BOARD_VISIBILITY_NOTE), 'and that leaving takes the client off the board');
+ok(/logged workouts/i.test(challenges_1.SCORING_NOTE), 'the scoring note says where a score comes from');
+ok(/time zone/i.test(challenges_1.SCORING_NOTE), 'and that everyone’s days are counted the same way');
+ok(/type a score/i.test(challenges_1.SCORING_NOTE), 'and that nobody can submit one');
+/* ── a control that changes what the screen says it cannot see ───────────── */
+// The banner said "We couldn’t check which challenges are running" and every
+// stale row underneath it kept a live Leave button. A member sees a challenge
+// they think they have finished, taps Leave, and comes off a board whose
+// current standing the app has just disclaimed.
+{
+    eq((0, challenges_1.challengeActionsAllowed)('ready'), true, 'a read that landed may be acted on');
+    eq((0, challenges_1.challengeActionsAllowed)('error'), false, 'JOINING AND LEAVING ARE OFF WHILE THE SCREEN CANNOT SEE THE BOARD');
+    eq((0, challenges_1.challengeActionsAllowed)('partial'), false, 'and off over a list that came back short');
+    eq((0, challenges_1.challengeActionsAllowed)('loading'), false, 'and off before it has come back at all');
+    eq((0, challenges_1.staleChallengeNote)('ready'), null, 'nothing is said when the controls are there');
+    for (const s of ['loading', 'error', 'partial']) {
+        const note = (0, challenges_1.staleChallengeNote)(s);
+        ok(note != null && note.length > 0, `and something is said when they are not (${s})`);
+    }
+    ok(/off until this can be checked/.test((0, challenges_1.staleChallengeNote)('error')), 'the failed read says why the button is gone');
+    ok(!/empty|nothing is running/i.test((0, challenges_1.staleChallengeNote)('error')), 'and never suggests the gym is running nothing');
+    eq(new Set([(0, challenges_1.staleChallengeNote)('loading'), (0, challenges_1.staleChallengeNote)('error'), (0, challenges_1.staleChallengeNote)('partial')]).size, 3, 'loading, failed and truncated are three different sentences');
+}
+if (errors.length) {
+    console.error(errors.join('\n'));
+    process.exit(1);
+}
+console.log(`challenges: ok (${shaped.length} rows shaped, ${board.length} board rows, ${sorted.length} sorted)`);

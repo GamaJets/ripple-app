@@ -407,7 +407,14 @@ export default function ScanMachine() {
                   {list.map((m) => {
                     const on = exercise === m.name;
                     return (
+                      // Two lines of text and a fill that says which one is
+                      // chosen. The name and the muscle group are separate
+                      // Texts and arrive as two stops with the selection
+                      // between them said in neither, so the pair is spoken as
+                      // one and the fill is spoken as `selected`.
                       <Pressable key={m.name} onPress={() => { applyDef(m); setQ(''); }}
+                        accessibilityRole="tab" accessibilityLabel={`${m.name}, ${m.group}`}
+                        accessibilityState={{ selected: on }}
                         style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: 11, paddingVertical: sp.sm }}>
                         <Text style={{ ...ty.caption, fontWeight: '500', color: on ? t.brandInk : t.ink }}>{m.name}</Text>
                         <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3 }}>{m.group}</Text>

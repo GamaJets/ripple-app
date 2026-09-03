@@ -1490,7 +1490,8 @@ export default function Calendar() {
           screen's, so a client who learns what a rest day means in one
           place has not learned a second, subtly different thing here. */}
       <Modal visible={planFor != null} transparent animationType="slide" onRequestClose={() => setPlanFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPlanFor(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPlanFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '86%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Plan a day</Text>
@@ -1558,7 +1559,8 @@ export default function Calendar() {
       </Modal>
 
       <Modal visible={showCoach} transparent animationType="slide" onRequestClose={() => setShowCoach(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCoach(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCoach(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '82%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: 30 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>

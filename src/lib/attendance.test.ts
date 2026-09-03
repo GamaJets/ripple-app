@@ -21,7 +21,8 @@
 import {
   localDay, daysBetween, addDays, weekStart, classOutcome, dwellMinutes,
   mergeAttendance, attendedDays, rhythm, staffScopeNote, STAFF_RECORD_NOTE,
-  type ClassDetail, type MyBooking, type MyVisit,
+  rhythmWeekLabel,
+  type ClassDetail, type MyBooking, type MyVisit, type RhythmWeek,
 } from './attendance';
 
 const errors: string[] = [];
@@ -299,6 +300,65 @@ ok(unknownGym !== noGym,
 
 ok(!/never|did not|has not/i.test(STAFF_RECORD_NOTE),
   'the standing note about one gym’s record says what it covers, never what the client did not do');
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   5. THE STRIP SAYS IN WORDS WHAT IT DRAWS IN SHAPES
+   ═══════════════════════════════════════════════════════════════════════════
+
+   The rhythm strip is the only thing on the attendance screen that carries a
+   fact nowhere else on the page: which weeks this app knows nothing about. It
+   carries it as a dashed border, and it prints `w.days || ''` underneath — so a
+   covered week with zero days and a week before the record even starts are both
+   an unlabelled shape with no number under it.
+
+   Rule 1 of this file is that the app may not tell somebody they did not come.
+   These assertions are that rule applied to the spoken half: an uncovered week
+   must never be worded as an absence, and it must never be worded the same as a
+   week that genuinely had none in it. */
+
+const week = (o: Partial<RhythmWeek>): RhythmWeek =>
+  ({ start: '2026-08-30', complete: true, covered: true, days: 0, ...o });
+
+const uncovered = rhythmWeekLabel(week({ covered: false }), '30 Aug');
+const emptyWeek = rhythmWeekLabel(week({ days: 0 }), '30 Aug');
+
+ok(uncovered !== emptyWeek,
+  'a week before the record starts and a week with nothing in it are different facts and must not read alike');
+ok(!/no days|nothing recorded|0 days/i.test(uncovered),
+  'an unread week is never worded as an absence — "no days recorded" is a claim we cannot make');
+ok(/record/i.test(uncovered),
+  'it names the record as the thing that is short, not the member');
+
+// The count is not the discriminator, and this is the mutation that matters: a
+// label that reaches for `w.days` before it asks whether the week is covered
+// hands an uncovered week the empty-week sentence, which is the false fact this
+// whole file exists to keep unreachable. Asserted against a week carrying a
+// count rather than against a zero, so the check cannot pass by both sides
+// happening to be the same wrong sentence.
+eq(rhythmWeekLabel(week({ covered: false, days: 4 }), '30 Aug'), uncovered,
+  'covered is read before the count, so no count can turn an unread week into an answer');
+
+// The current week is a running total, not a total.
+const running = rhythmWeekLabel(week({ complete: false, days: 3 }), '30 Aug');
+ok(/so far/i.test(running) && /not over/i.test(running),
+  'an unfinished week says it is unfinished, so three days by Wednesday is not read as the week’s figure');
+const runningEmpty = rhythmWeekLabel(week({ complete: false, days: 0 }), '30 Aug');
+ok(/not over/i.test(runningEmpty) && runningEmpty !== emptyWeek,
+  'and an unfinished week with nothing in it yet is not "no days recorded"');
+
+// Singular and plural, because "1 days" in the ear is the kind of thing that
+// makes a person stop trusting the rest of the sentence.
+ok(rhythmWeekLabel(week({ days: 1 }), '30 Aug').includes('1 day recorded'),
+  'one day is one day');
+ok(rhythmWeekLabel(week({ days: 2 }), '30 Aug').includes('2 days recorded'),
+  'two days are two days');
+
+// Nothing here builds a date. The caller formats it, so the sentence still
+// reads when the caller has nothing to format — a label opening with a bare
+// colon is scripts/check-prose.mjs's complaint, not a date bug.
+const noDate = rhythmWeekLabel(week({ days: 2 }), '   ');
+ok(!/\s:/.test(noDate) && !/of\s*:/.test(noDate) && noDate.includes('2 days'),
+  'an unformattable week start still produces a sentence rather than "Week of : 2 days"');
 
 if (errors.length) {
   console.error(`attendance.test.ts — ${errors.length} failure(s):`);

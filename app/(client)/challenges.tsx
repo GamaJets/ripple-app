@@ -240,7 +240,8 @@ export default function Challenges() {
       </ScrollView>
 
       <Modal visible={!!sheet} transparent animationType="slide" onRequestClose={() => setOpen(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setOpen(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setOpen(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, maxHeight: '80%', ...elevation.e2 }}>
           {sheet && (
             <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: 30 }}>

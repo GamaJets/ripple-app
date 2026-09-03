@@ -660,6 +660,70 @@ export function QuickRow({ items }: { items: { icon: IconName; label: string; on
   );
 }
 
+/* ── the dimmed half of a bottom sheet ────────────────────────────────────── */
+
+/**
+ * The tap-to-dismiss area above a bottom sheet.
+ *
+ * ── What this replaces, and why it is worth a component ───────────────────
+ *
+ * Sixty-eight times across the three apps, a sheet opens like this:
+ *
+ *     <Modal visible={open} transparent animationType="slide" …>
+ *       <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={close} />
+ *       <View style={sheet}>…</View>
+ *
+ * That `Pressable` has no children, so it has no text to be named by, and no
+ * `accessibilityLabel` to name it instead. React Native does not treat that as
+ * decoration: `Pressable` renders its View with `accessible={accessible !==
+ * false}`, so an element with no label at all is still FOCUSABLE. What
+ * VoiceOver finds when a sheet opens is an unnamed control covering the top
+ * third to half of the screen, announced as nothing, which dismisses the sheet
+ * if you double-tap it.
+ *
+ * So the reader who most needs to be told what is on screen gets, first, the
+ * one element on it that says nothing — and the gesture that gets rid of it.
+ *
+ * ── Named rather than hidden, and why that is the default ─────────────────
+ *
+ * `src/ui/DateSheet.tsx` reached the other answer first and argued it well: it
+ * hides its scrim, on the grounds that a full-screen touchable read out above
+ * the sheet's own heading makes it sound as though the whole month were one
+ * control, and that the Cancel button below is the accessible way out.
+ *
+ * That reasoning holds for DateSheet and does not generalise, which is why
+ * `hidden` is here as an option and is not the default. These are `transparent`
+ * slide-up modals: iOS gives them no swipe-to-dismiss and no system chrome, so
+ * on a sheet whose only exit is the scrim — and there are several — hiding it
+ * is not tidying the reading order, it is locking the reader in. A named button
+ * is never a trap; an unnamed one is only ever a trap or a surprise. Pass
+ * `hidden` where the sheet demonstrably has another way out, as DateSheet does,
+ * and say which one in a comment.
+ *
+ * `label` is what the tap DOES, not where it is: "Close", "Cancel", "Discard
+ * this draft". It is deliberately not defaulted to the sheet's title.
+ */
+export function Scrim({ onPress, label = 'Close', hidden, opacity = 0.55 }: {
+  onPress: () => void;
+  /** What tapping it does, in words. Read out before the sheet's heading. */
+  label?: string;
+  /** Take it out of the accessibility tree. Only where the sheet has another
+   *  way out — see DateSheet, and say which one at the call site. */
+  hidden?: boolean;
+  /** How dark. 0.55 everywhere except two sheets drawn over a photo. */
+  opacity?: number;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      {...(hidden
+        ? { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' as const }
+        : { accessibilityRole: 'button' as const, accessibilityLabel: label })}
+      style={{ flex: 1, backgroundColor: `rgba(0,0,0,${opacity})` }}
+    />
+  );
+}
+
 /* ── data marks ───────────────────────────────────────────────────────────── */
 
 /**

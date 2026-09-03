@@ -1,0 +1,664 @@
+"use strict";
+// What changed, written for the person who will read it.
+//
+// One source of truth for three places: the What's New sheet inside each app,
+// the "What to Test" text pasted into TestFlight, and the Play release notes.
+// They drifted before because each was written by hand at a different moment;
+// scripts/release-notes.mjs now prints the store text from this file, so a
+// change described to a tester is the same change described in the app.
+//
+// ── House rules for writing these ─────────────────────────────────────────
+//
+// Say what the reader can now do, or what stopped being wrong for them. Not
+// the mechanism. "Exercise videos load again" — not "fixed RLS recursion in
+// exercise_videos". A tester cannot act on the second one and does not care.
+//
+// Fixes for things people actually hit are worth listing even when they are
+// embarrassing: somebody spent twenty minutes failing to reset a password, and
+// seeing it named is how they learn to try again.
+//
+// Every entry names the apps it applies to. The three share a codebase and
+// almost nothing else from a user's point of view, and a coach reading about
+// a client-only change learns only that the notes are not for them.
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.MY_AUDIENCE = exports.CURRENT_RELEASE = exports.RELEASES = void 0;
+exports.releasesFor = releasesFor;
+exports.isVersion = isVersion;
+exports.unseenReleases = unseenReleases;
+exports.firstRunReleases = firstRunReleases;
+exports.compareVersions = compareVersions;
+exports.storeNotes = storeNotes;
+const variant_1 = require("./variant");
+const ALL = ['client', 'trainer', 'owner'];
+/**
+ * Newest first. Add to the top; never rewrite a shipped entry — somebody has
+ * already read it, and a note that changes after the fact is worse than none.
+ */
+exports.RELEASES = [
+    {
+        version: '1.3.0',
+        date: '2026-09-02',
+        headlines: {
+            client: 'Your card number has changed, your AI coach remembers the conversation, and what you write offline now waits and sends itself.',
+            trainer: 'A refund or a chargeback in Stripe now reaches you here, packs can be given a time limit, and your register, attendance and referrals are screens you can open.',
+            owner: 'The export says which period it covers and carries your paperwork, a signature records who actually gave it, and the door asks about the person.',
+        },
+        entries: [
+            /* ── the one every member has to be told ─────────────────────────── */
+            {
+                kind: 'fixed',
+                apps: ['client'],
+                title: 'Your member number has changed',
+                note: 'The old one was not unique — two members could be given the same number, and at a busy gym they were. Yours is new and yours alone. If you have already given the old one to reception, show them this screen again: Access › Member Card.',
+            },
+            /* ── client ──────────────────────────────────────────────────────── */
+            {
+                kind: 'fixed',
+                apps: ['client'],
+                title: 'Your Weekly Report no longer sends your body figures anywhere without asking',
+                note: 'It used to send your name and your measurements to write the summary. Now it asks first, tells you exactly what would travel, and you can change the answer whenever you like.',
+            },
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'Your AI coach remembers the conversation',
+                note: 'It used to forget everything the moment you left the screen. The thread is kept on your phone and never on a server, so your coach and your gym cannot read it. Clear it any time from the screen itself.',
+            },
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'What you write with no signal now waits and sends itself',
+                note: 'Your goal, your day plan and a glucose reading join messages and measurements in the queue. A day plan you marked for a date that has since passed is dropped rather than sent late, and you are told.',
+            },
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'Sign your gym’s waiver yourself',
+                note: 'Me › Connect › Agreements. Read it in full and sign from your own account, so the record shows you gave it rather than that reception typed your name.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client'],
+                title: 'Bodyweight sets count as work',
+                note: 'Pull-ups and dips used to read as no volume at all. Log a set with the weight box empty and it is counted at your bodyweight, plus anything you added.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client'],
+                title: 'Progress no longer calls losing weight good when you are trying to gain',
+                note: 'It reads your goal now. If your goal has no opinion on a figure, neither does the arrow.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client'],
+                title: 'Your streak no longer loses a day when the clocks change',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client'],
+                title: 'Eight screens that search could not find',
+                note: 'Account, Attendance, Compare, Gym Plans, Notices, Receipts, Standing and Intake are all findable from Explore now.',
+            },
+            /* ── trainer ─────────────────────────────────────────────────────── */
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'A refund you make in your own Stripe dashboard now reaches the app',
+                note: 'It used to stay invisible here, so Payments went on showing money you had given back.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'A chargeback arrives with its deadline',
+                note: 'Payments & Packages, above everything else. The date Stripe stops accepting evidence is the first line, because sending nothing loses it by default. The evidence itself still goes in through Stripe.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'A session pack can be given a time limit',
+                note: 'Set the validity when you create or edit a package. Nothing already sold is affected — a pack only ever gets the window that existed on the day it was bought — and if one runs out with sessions left you are told, by name and with the number.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'Move a session instead of cancelling it',
+                note: 'The client keeps their credit and the hour they gave up goes to whoever was waiting for it. Nothing is charged and nothing is drawn twice.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'Quiet hours',
+                note: 'Settings › Notifications. Hold pushes overnight, or over whatever hours you choose. Set on your account rather than this handset, and read in the timezone your phone was in when you set them.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'Your register, your clients’ attendance, and who refers you people',
+                note: 'Three screens over records the app already kept and never showed you. The register counts walk-ins beside the show rate rather than inside it, and a class nobody ticked is counted apart rather than as nobody turning up.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'Search your roster by name',
+                note: 'On Clients. The magnifying glass in the header still searches every screen; the field on the list searches people.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'Log a Session has a client picker',
+                note: 'You are told who it is for before you type it out, rather than after.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['trainer'],
+                title: 'Set type is a control you can see',
+                note: 'It read “Normal” with nothing to say it was a choice. It now says what the set type is, what that means, and that warm-ups, drop sets, AMRAP and eight others are behind it.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['trainer'],
+                title: 'Revenue counts what you marked delivered, not what the clock passed',
+                note: 'A session nobody marked is priced separately and shown on its own, so a no-show never reads as money.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['trainer'],
+                title: 'Your data export contains your business',
+                note: 'It held only the member-side record. It now carries your packages, invoices, receipts, payouts, costs, enquiries and join codes — and nobody else’s.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['trainer'],
+                title: 'A session fee is converted by its own currency',
+                note: 'Yen and dinar fees were snapshotted at a hundred times or a tenth of what they should have been, on the figure a gym settles payroll from.',
+            },
+            /* ── owner ───────────────────────────────────────────────────────── */
+            {
+                kind: 'new',
+                apps: ['owner'],
+                title: 'The export covers a period you choose, and says so',
+                note: 'Every file name and the top of the README name the dates. It also lists which files the period narrowed and which are whole whatever you asked, so two figures from the bundle are never added together by mistake.',
+            },
+            {
+                kind: 'new',
+                apps: ['owner'],
+                title: 'Waivers, signatures and your filed documents are in the export',
+                note: 'Each signature says whether the member gave it themselves or a member of staff recorded it for them. The files themselves are not in the bundle — a spreadsheet cannot hold a scan — but every one is listed with where it is.',
+            },
+            {
+                kind: 'new',
+                apps: ['owner'],
+                title: 'A signature records who actually gave it',
+                note: 'It used to be a member of staff typing the member’s name, with nothing to say so. Staff can still record one at the desk, and it is now marked as exactly that.',
+            },
+            {
+                kind: 'new',
+                apps: ['owner'],
+                title: 'The door asks about the person',
+                note: 'A cancelled, frozen or ended membership is refused at check-in, and staff can let them in anyway by saying why. Somebody already inside is not checked in twice. Check-ins taken with no signal wait and send themselves.',
+            },
+            {
+                kind: 'new',
+                apps: ['owner'],
+                title: 'Put a walk-in on a class, and tell people when one is called off',
+                note: 'Booking from the desk respects the capacity and the waiting list. Cancelling a class now notifies everyone booked and waitlisted.',
+            },
+            {
+                kind: 'new',
+                apps: ['owner'],
+                title: 'Online orders that need a person',
+                note: 'A new screen for money Stripe took where the membership or pass could not be granted. It was recorded and nobody was looking at it.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['owner'],
+                title: 'The console stops refusing at a thousand rows',
+                note: 'Members, retention, accounting, close and passes all went blank once a gym had enough history. They page now, and the door log is bounded by pass redemptions rather than by footfall.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['owner'],
+                title: 'A promo code you switched off is no longer counted as live',
+                note: 'The count read every code you had ever made. You can also turn one off without deleting it, and an inactive code can no longer be pushed to members.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['owner'],
+                title: 'A gym that changed currency keeps its revenue trend',
+                note: 'The whole thirteen-month history used to be withheld. Each currency now gets its own thirteen months — still never added together, because they do not add.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['owner'],
+                title: 'Churn is a rate, or it is not shown',
+                note: 'Departures were counted against a population they were not in. A month where somebody left with no recorded join date now says so instead of quoting a figure.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['owner'],
+                title: 'Growth says it measures trainers',
+                note: 'It was labelled as though it answered member churn. Nothing records when a membership was cancelled, so no figure was invented — the tab now says what it is.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['owner'],
+                title: 'Taking a member list to a spreadsheet is recorded',
+                note: 'The one-click download of names, emails and phone numbers logged nothing, while the slower export logged everything.',
+            },
+        ],
+    },
+    {
+        version: '1.2.0',
+        date: '2026-08-31',
+        headlines: {
+            client: 'Blood sugar beside your meals, injuries your plan works around, and bookings that no longer claim to have happened.',
+            trainer: 'Injuries in front of you before you write the plan, a package that renews, time you can block out, and your own training in the same app.',
+            owner: 'Your gym’s activity as it happens, promo codes that stay put, and figures that say when they could not be read.',
+        },
+        entries: [
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'Blood sugar from your monitor, beside what you ate',
+                note: 'Meals › Blood Sugar. A Dexcom, or a Libre through its own app, writes into Apple Health and Repple reads it from there — on iPhone; on Android you can type readings in yourself. Your coach sees none of it until you turn sharing on, and turning it off again hides the history too.',
+            },
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'Redeem a code your gym has given you',
+                note: 'Membership › Offers. Repple records that you used it and tells your gym, who take the discount off through their own billing. A code works once, and only at the gym that issued it.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'A client can choose to show you their glucose readings',
+                note: 'On their page, when they have turned it on. Readings and what they ate — not advice, and not something you can switch on for them.',
+            },
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'Tell your coach about an injury, and have your plan work around it',
+                note: 'Me › Injuries & Limitations. Type it in, or photograph a physio report or pick a PDF and we will read it back to you. Nothing is saved until you confirm it, and your coach is told the injury, never the document.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'Injuries a client discloses reach you before you write their plan',
+                note: 'They sit on the client’s page, and the program builder waits until you have read them. A new disclosure asks again; a client recovering does not.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client', 'trainer'],
+                title: 'A disclosed injury no longer vanishes on the way to the coach',
+                note: 'It was written in one shape and read back in another, so it arrived as nothing at all.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client', 'trainer'],
+                title: 'A booking that did not save no longer says it did',
+                note: 'The confirmation waits for the server. Two people can no longer hold the same time, and the diary you are shown is the one the server has.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client', 'trainer'],
+                title: 'Cancelled time is free to book again straight away',
+                note: 'The slot used to be announced as free before it was released, so the next person to try it was refused.',
+            },
+            {
+                kind: 'new',
+                apps: ['client', 'trainer'],
+                title: 'Sessions can start on any quarter hour, at any hour of the day',
+                note: 'And a day with nothing to book says why, instead of showing an empty week.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'Block out time you are not available',
+                note: 'Schedule › Manage › Block Out Time, for a whole day or a from-and-until pair. Blocked time is not an open slot and nobody can book it.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'The times you offer every week can start on any quarter hour',
+                note: 'Schedule › Manage › Weekly Availability. It offered whole hours between 6am and 8pm, so 6:45 every Tuesday could not be said at all. Slots you already had keep the time they had.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'Sell a package that renews every month',
+                note: 'Choose a billing interval when you create it. Packages already on sale are unchanged, and a price you raise later applies only to people who subscribe after it.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'See what each of your join codes actually returned',
+                note: 'Clients it brought, how many are still with you, what they have spent, and what you say the campaign cost. Two codes are only ranked when there are enough clients to tell them apart.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'Track your own training, meals and progress',
+                note: 'Clients › Coaching Tools. It is your log, not a client’s, and nobody you coach can see it.',
+            },
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'A release of liability, asked once and recorded against your account',
+                note: 'It appears however you signed in, and only asks again if the wording changes. Clearing the app does not clear your agreement.',
+            },
+            {
+                kind: 'new',
+                apps: ALL,
+                title: 'Confirm your email with a six-digit code instead of a link',
+                note: 'The code is in the same email. Asking for another one tells you plainly when nothing was sent.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['trainer'],
+                title: 'Unread message counts are read rather than assumed',
+                note: 'The roster printed “Unread 0” beside every client, the ones waiting on a reply included. A count that cannot be read now shows a dash.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client', 'trainer'],
+                title: 'A message can no longer be sent under somebody else’s name',
+                note: 'Who sent a message is decided where it is stored, not by the app that sent it.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['trainer'],
+                title: 'Your roster stops listing the same client twice, and stops failing quietly',
+                note: 'A roster that could not be read looked exactly like a roster with nobody on it.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client', 'trainer'],
+                title: 'Overhead Press and five other lifts show the right movement',
+                note: 'Deadlift is among them. They were cross-fading two stills, or playing the artwork of a near-identical lift, and both looked like the app was broken.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'A movement you type in is added to the library',
+                note: 'So a program you build from it shows your client the same demo as everything else.',
+            },
+            {
+                kind: 'new',
+                apps: ['owner'],
+                title: 'Ops › Activity is your gym’s own feed',
+                note: 'Members joining, coaches joining, sessions marked delivered or missed, and promo codes being used. Recorded as they happen rather than typed by anyone, and it holds the most recent hundred.',
+            },
+            {
+                kind: 'new',
+                apps: ['owner'],
+                title: 'Promo codes stay put, and say how many people used them',
+                note: 'Growth. A code you create is there next time you open the app and on your other devices, and each row counts the members who have redeemed it. A count that could not be read shows a dash.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['owner'],
+                title: 'Console figures show a dash when they could not be read',
+                note: 'Members, revenue and payroll totals used to report nought for a read that failed, which is indistinguishable from genuinely none.',
+            },
+            {
+                kind: 'fixed',
+                apps: ALL,
+                title: 'Your account opens only in the app for your gym',
+                note: 'Signing in to another brand’s app signs you straight back out and says why, rather than showing you somebody else’s gym.',
+            },
+            {
+                kind: 'fixed',
+                apps: ALL,
+                title: 'Back returns to where you came from',
+                note: 'It used to go to the tab a screen belonged to, which is rarely where you were.',
+            },
+        ],
+    },
+    {
+        version: '1.1.0',
+        date: '2026-08-27',
+        headlines: {
+            client: 'Face ID, joining your coach with a code, and a long list of things that were quietly wrong.',
+            trainer: 'Face ID, a coaching code that reaches anyone, and logging the session you just ran.',
+            owner: 'Face ID, and figures that admit when they could not be read instead of showing you a zero.',
+        },
+        entries: [
+            {
+                kind: 'new',
+                apps: ALL,
+                title: 'Face ID and Touch ID',
+                note: 'Turn it on under Settings › Security. Your passcode still works if a face will not read in a dark gym.',
+            },
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'Join your coach with a six-character code',
+                note: 'Ask your coach for their code and enter it under Find a trainer. It works even if they are not listed in the directory.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer'],
+                title: 'A coaching code you can read out',
+                note: 'Under Clients › Add a client. It reaches people whatever address they signed up with, which an email invitation cannot.',
+            },
+            {
+                kind: 'new',
+                apps: ['trainer', 'client'],
+                title: 'Coaches can log the session they just ran',
+                note: 'It lands in the client’s own history and counts towards their progress, PRs and calories. The client can correct it, and both sides see who logged it.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['trainer', 'client'],
+                title: 'Exercise Videos Load Again',
+                note: 'The library was returning nothing for everyone signed in. It was not empty; it could not be read.',
+            },
+            {
+                kind: 'fixed',
+                apps: ALL,
+                title: 'Password rules are shown before you are refused',
+                note: 'Eight characters with a capital, a number and a symbol — all listed as you type. The apps used to say six and then refuse it.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client'],
+                title: 'Your session pack is no longer reported as empty when it cannot be read',
+                note: 'A pack you have paid for showed as nothing at all if the read failed, and the warning that a booking had not been deducted was hidden.',
+            },
+            {
+                kind: 'fixed',
+                apps: ALL,
+                title: 'Figures we cannot read show a dash instead of a zero',
+                note: 'A roster, an inbox or a payroll total that failed to load used to render as 0 — indistinguishable from genuinely none.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['client', 'trainer'],
+                title: 'Class spaces are honest about what is unknown',
+                note: 'A full class could show every place free, and never showed as full to the coach.',
+            },
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'Sauna Counts as Recovery',
+                note: 'And Recovery is one thing now, not two screens using the word differently.',
+            },
+            {
+                kind: 'new',
+                apps: ['client'],
+                title: 'A Sign-out Button',
+                note: 'Under Me › Settings. There was not one.',
+            },
+            {
+                kind: 'fixed',
+                apps: ALL,
+                title: 'The signup screen no longer asks which kind of account you want',
+                note: 'The app you downloaded already decided. Picking the other one led nowhere.',
+            },
+            {
+                kind: 'fixed',
+                apps: ['owner'],
+                title: 'The owner app calls itself Repple Studio',
+                note: 'It introduced itself as Repple HQ in places, and averaged figures over trainers who were not there.',
+            },
+        ],
+    },
+];
+/** The releases relevant to one app, with entries for other apps removed. */
+function releasesFor(audience, releases = exports.RELEASES) {
+    return releases
+        .map((r) => ({ ...r, entries: r.entries.filter((e) => e.apps.includes(audience)) }))
+        .filter((r) => r.entries.length > 0);
+}
+/**
+ * The newest release this bundle carries, and therefore the one the reader is
+ * running.
+ *
+ * NOT the marketing version out of app.json. These notes ship inside the
+ * JavaScript bundle, and expo-updates replaces that bundle over the air without
+ * touching app.json — the app auto-applies an update on launch (see
+ * app/_layout.tsx), so somebody can be running four releases' worth of changes
+ * while `expoConfig.version` still reads 1.1.0. Keyed on the version stamped in
+ * the marketing version, a reader who took every OTA update would be told about
+ * nothing and a reader who took none would be told about everything.
+ *
+ * The list is the honest answer to "what is in this build", because the list is
+ * IN this build.
+ */
+exports.CURRENT_RELEASE = exports.RELEASES[0]?.version ?? '0.0.0';
+/**
+ * Whether a stored value is something this module is willing to compare.
+ *
+ * The stored "last seen" comes off the device, and a device is not a promise.
+ * It can hold a truncated write, a value from a much older shape of this
+ * feature, or somebody's debugging. compareVersions() would happily read
+ * "corrupt" as 0 and conclude the reader has seen nothing since the beginning
+ * of time — which is the loud failure, not the quiet one: every note ever
+ * written, to somebody who has read them all.
+ */
+function isVersion(v) {
+    return typeof v === 'string' && /^\d+(\.\d+)*$/.test(v.trim());
+}
+/**
+ * Which releases to show somebody who was last shown release `seen`, running
+ * release `current`.
+ *
+ * `null` — a brand-new account, or the first run after this feature shipped —
+ * shows NOTHING. A new account has missed nothing; the whole app is new to
+ * them, and opening it for the first time to a list of things that used to be
+ * broken explains nothing and is the single most common way this feature turns
+ * into an annoyance. They are told from their second release onward.
+ *
+ * Anything unreadable is treated the same way, deliberately: a value we cannot
+ * place is not evidence that somebody is behind.
+ *
+ * Capped at `current` because a release the running bundle does not contain has
+ * not happened for this reader, whatever the list says. Notes are written and
+ * committed before the build that carries them goes out.
+ */
+function unseenReleases(seen, current, audience, releases = exports.RELEASES) {
+    if (!isVersion(seen) || !isVersion(current))
+        return [];
+    const from = seen.trim();
+    const to = current.trim();
+    if (from === to)
+        return [];
+    return releasesFor(audience, releases).filter((r) => compareVersions(r.version, from) > 0 && compareVersions(r.version, to) <= 0);
+}
+/**
+ * What to show on the FIRST run after this feature existed at all.
+ *
+ * ── The bug this exists to end ────────────────────────────────────────────
+ *
+ * `unseenReleases(null, …)` returns nothing, and null is what EVERY account
+ * has the first time this runs — the key has never been written for anybody.
+ * So the release that introduced the whole feature was the one release nobody
+ * would ever be told about: every existing user got silently stamped at it and
+ * would first see a sheet at the release after.
+ *
+ * Reported plainly: "I have opened both client and coach apps and there was no
+ * page upon opening that said what has been updated since last logged in."
+ *
+ * The reasoning behind the silent stamp is still right for the case it was
+ * written for. Somebody who installed Repple this morning learns nothing from
+ * a list of things that used to be broken, and opening a brand-new app to a
+ * changelog is the single most common way this feature becomes an annoyance.
+ * What the old code could not do is TELL THE TWO APART, because both look
+ * identical from local storage: no stored position.
+ *
+ * The fact that separates them is not local. It is when the ACCOUNT was
+ * created, which the server knows. Somebody whose account predates this
+ * release was here for the changes and should be told; somebody who signed up
+ * after it shipped was not, and should not.
+ *
+ * Only the CURRENT release is shown, never the whole history back to the day
+ * they joined. On this one run there is no "since you last looked" to honour —
+ * the app has never told them anything — so the honest scope is what is new in
+ * the version they are holding.
+ *
+ * @param createdAtISO when the account was created. Null or unparseable means
+ *   stamp silently: an unknown age is not evidence somebody is owed a
+ *   changelog, and guessing wrong here spams every new signup.
+ */
+function firstRunReleases(createdAtISO, current, audience, releases = exports.RELEASES) {
+    if (!isVersion(current))
+        return [];
+    if (!createdAtISO)
+        return [];
+    const created = Date.parse(String(createdAtISO));
+    if (Number.isNaN(created))
+        return [];
+    const mine = releasesFor(audience, releases).filter((r) => r.version.trim() === current.trim());
+    if (mine.length === 0)
+        return [];
+    const rel = mine[0];
+    const shipped = Date.parse(rel.date);
+    // A release with an unreadable date cannot be placed against the account, and
+    // an unplaceable release is not grounds to interrupt somebody.
+    if (Number.isNaN(shipped))
+        return [];
+    // Signed up on or after the day it shipped: this is not news to them, it is
+    // the app they installed.
+    if (created >= shipped)
+        return [];
+    return [rel];
+}
+/** Semver-ish compare on dot-separated numbers. Returns >0 when a is newer. */
+function compareVersions(a, b) {
+    const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);
+    const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (d !== 0)
+            return d;
+    }
+    return 0;
+}
+/** Plain-text notes for App Store Connect / Play, for one app and version. */
+function storeNotes(audience, version, releases = exports.RELEASES) {
+    const r = releasesFor(audience, releases).find((x) => x.version === version);
+    if (!r)
+        return '';
+    const lines = [];
+    const headline = r.headlines?.[audience];
+    if (headline) {
+        lines.push(headline, '');
+    }
+    const news = r.entries.filter((e) => e.kind === 'new');
+    const fixes = r.entries.filter((e) => e.kind === 'fixed');
+    if (news.length) {
+        lines.push('NEW');
+        for (const e of news)
+            lines.push(`• ${e.title}${e.note ? ` — ${e.note}` : ''}`);
+        if (fixes.length)
+            lines.push('');
+    }
+    if (fixes.length) {
+        lines.push('FIXED');
+        for (const e of fixes)
+            lines.push(`• ${e.title}${e.note ? ` — ${e.note}` : ''}`);
+    }
+    return lines.join('\n');
+}
+/** This build's audience. */
+exports.MY_AUDIENCE = variant_1.VARIANT;

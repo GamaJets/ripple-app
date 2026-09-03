@@ -706,7 +706,8 @@ export default function PtSessions() {
           disputing does to their money, and it is the last thing before the
           write. */}
       <Modal visible={!!disputeFor} transparent animationType="slide" onRequestClose={() => setDisputeFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDisputeFor(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDisputeFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
           <ScrollView showsVerticalScrollIndicator={false}>
             <Text style={{ ...ty.title, color: t.ink }}>What is wrong with this session?</Text>

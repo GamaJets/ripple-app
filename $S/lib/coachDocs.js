@@ -1,0 +1,323 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.STANDING_TRUNCATED_NOTE = exports.STANDING_ROW_CAP = exports.COACH_DOC_ACCESS_ENDS_NOTE = exports.COACH_DOC_REACH_NOTE = exports.COACH_DOC_IMMUTABLE_NOTE = exports.COACH_DOC_NOT_REPPLE = exports.COACH_DOC_ACCEPT_RULE = exports.DOC_MIME_TYPES = exports.MAX_DOC_BYTES = void 0;
+exports.extForMime = extForMime;
+exports.slugify = slugify;
+exports.coachDocPath = coachDocPath;
+exports.isUuid = isUuid;
+exports.isCoachDocPath = isCoachDocPath;
+exports.ownerOfPath = ownerOfPath;
+exports.checkUpload = checkUpload;
+exports.uploadRefusalLine = uploadRefusalLine;
+exports.sizeLabel = sizeLabel;
+exports.shapeDocs = shapeDocs;
+exports.outstanding = outstanding;
+exports.outstandingCount = outstandingCount;
+exports.docState = docState;
+exports.docLine = docLine;
+exports.standingLine = standingLine;
+// A coach's own paperwork, and the record that somebody accepted it.
+//
+// ── What this is, and what it is emphatically not ─────────────────────────
+//
+// `liability_waivers` (supabase/parts/84) is REPPLE's release. It is the
+// client's legal record, it has no coach read policy, and nothing in this file
+// touches it or ever should. If you are here because a coach wants to see a
+// Repple waiver, this is the wrong file and there is no right one.
+//
+// This is the other thing: the studio waiver, the par-form, the photography
+// consent, the house rules for the unit a trainer rents. A working PT has their
+// own paperwork, and until part 135 the app that held the bookings and the
+// injuries and the money held no record that a client had agreed to any of it.
+//
+// ── The shape of the object key, and why it is checked here too ──────────
+//
+//   <coach_uid>/<millis>-<token>-<slug>.<ext>
+//
+// The first segment is the owning coach and it is the only thing the storage
+// policies read (`can_read_coach_doc`). Building and validating the same shape
+// on the device is what turns a mismatch into a sentence somebody can act on
+// rather than a bare 403 the app renders as "uploaded".
+//
+// ── Accepting is not editable, and the app must not imply otherwise ──────
+//
+// `coach_document_acceptances` has no UPDATE and no DELETE policy and no grant
+// behind one, exactly as part 84's does. There is no un-accept. Every sentence
+// below is written to be true of that: nothing offers to withdraw an
+// acceptance, and the coach-side wording never suggests they can edit a
+// document people have already signed — a re-issue is a new document and a
+// retirement of the old one, which the immutability trigger in part 135
+// enforces whatever a screen believes.
+const format_1 = require("./format");
+const brands_1 = require("./brands");
+/** Matches the bucket's `file_size_limit` and `coach_documents_bytes_chk`. The
+ *  device checks it BEFORE uploading, because a 413 from storage arrives as an
+ *  opaque failure and "that file is too large" is a sentence somebody can act
+ *  on. */
+exports.MAX_DOC_BYTES = 10485760;
+/** Matches the bucket's `allowed_mime_types` and `coach_documents_mime_chk`.
+ *  PDF because that is what a waiver is; JPEG and PNG because a coach with a
+ *  paper form photographs it. */
+exports.DOC_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+const EXT = {
+    'application/pdf': 'pdf',
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+};
+/** The extension for a type we accept, or null for one we do not. */
+function extForMime(mime) {
+    return (mime && EXT[mime]) || null;
+}
+/** A filename reduced to something safe to put in an object key. Never empty:
+ *  a document whose name was entirely punctuation would otherwise produce a key
+ *  with a double dash where the slug should be. */
+function slugify(name) {
+    const base = (name ?? '').replace(/\.[^./\\]+$/, '');
+    const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+    return slug || 'document';
+}
+/**
+ * The object key for a new upload.
+ *
+ * `token` is passed in rather than generated here so the caller supplies the
+ * randomness it already has and this stays pure and testable. `millis` likewise:
+ * two documents uploaded in the same second must not collide, which is what the
+ * token is for, and the timestamp is what makes a folder listing read in order.
+ */
+function coachDocPath(o) {
+    const ext = extForMime(o.mime);
+    if (!ext)
+        return null;
+    if (!isUuid(o.coachId))
+        return null;
+    const token = (o.token || '').replace(/[^a-z0-9]/gi, '').slice(0, 12) || 'x';
+    return `${o.coachId}/${Math.trunc(o.millis)}-${token}-${slugify(o.filename)}.${ext}`;
+}
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(v) {
+    return typeof v === 'string' && UUID.test(v);
+}
+/** Whether a key really is this coach's, in the shape the policies read. The
+ *  same question `(storage.foldername(name))[1] = auth.uid()::text` asks, on
+ *  this side of the wire. */
+function isCoachDocPath(path, coachId) {
+    if (typeof path !== 'string' || !isUuid(coachId))
+        return false;
+    const parts = path.split('/');
+    if (parts.length !== 2)
+        return false;
+    return parts[0].toLowerCase() === coachId.toLowerCase() && parts[1].length > 0;
+}
+/** The coach who owns a key, or null when the key is not one of ours. */
+function ownerOfPath(path) {
+    if (typeof path !== 'string')
+        return null;
+    const first = path.split('/')[0];
+    return isUuid(first) ? first : null;
+}
+/**
+ * Whether this file may be uploaded at all, decided before any bytes move.
+ *
+ * A refusal is a reason, not a boolean, because each of the four gets a
+ * different sentence and "that didn't work" is the one this repo keeps having
+ * to replace.
+ */
+function checkUpload(o) {
+    if (!o.filename || !o.filename.trim())
+        return { ok: false, reason: 'name' };
+    if (!extForMime(o.mime))
+        return { ok: false, reason: 'type' };
+    const b = typeof o.bytes === 'number' && Number.isFinite(o.bytes) ? o.bytes : 0;
+    if (b <= 0)
+        return { ok: false, reason: 'empty' };
+    if (b > exports.MAX_DOC_BYTES)
+        return { ok: false, reason: 'size' };
+    return { ok: true };
+}
+function uploadRefusalLine(reason) {
+    switch (reason) {
+        case 'type':
+            return 'That kind of file can’t be used as paperwork. A PDF, or a photograph of the page, is what a client can read and accept on their phone.';
+        case 'size':
+            return `That file is larger than ${sizeLabel(exports.MAX_DOC_BYTES)}, which is the most this can hold. A scan saved at a lower quality usually gets well under it.`;
+        case 'empty':
+            return 'That file is empty, so there is nothing to ask anybody to accept.';
+        case 'name':
+            return 'That file has no name, so there is nothing to file it under.';
+    }
+}
+/** "84 KB", "2.1 MB". Never a raw byte count on a screen. */
+function sizeLabel(bytes) {
+    const b = typeof bytes === 'number' && Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+    if (!b)
+        return '—';
+    if (b < 1024)
+        return `${b} B`;
+    if (b < 1024 * 1024)
+        return `${Math.round(b / 1024)} KB`;
+    return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+}
+function shapeDocs(rows) {
+    if (!rows || !rows.length)
+        return [];
+    return rows
+        .map((r) => ({
+        id: String(r.id),
+        coachId: String(r.coach_id),
+        title: typeof r.title === 'string' ? r.title.trim() : '',
+        path: String(r.path),
+        mime: String(r.mime),
+        bytes: typeof r.bytes === 'number' ? r.bytes : Number(r.bytes) || 0,
+        required: !!r.required,
+        retired: !!r.retired,
+        createdAt: String(r.created_at),
+        acceptedAt: r.accepted_at ? String(r.accepted_at) : null,
+    }))
+        // Outstanding paperwork first, then what is merely on file. Within each,
+        // newest first, because the thing a coach just issued is the thing being
+        // asked about.
+        .sort((a, b) => Number(outstanding(b)) - Number(outstanding(a))
+        || Number(b.required) - Number(a.required)
+        || b.createdAt.localeCompare(a.createdAt));
+}
+/** Required, still in circulation, and this reader has not accepted it. The one
+ *  question the client portal asks. */
+function outstanding(d) {
+    return d.required && !d.retired && d.acceptedAt == null;
+}
+/** How many pieces of paperwork are still waiting on this client.
+ *
+ *  The caller must gate this on a 'ready' read. Under 'error' the list is
+ *  whatever survived a failure, and a zero counted from it is the "you have
+ *  nothing outstanding" sentence said to somebody who has three. */
+function outstandingCount(docs) {
+    return docs.filter(outstanding).length;
+}
+function docState(d) {
+    if (d.acceptedAt != null)
+        return 'accepted';
+    if (d.retired)
+        return 'withdrawn';
+    return d.required ? 'must-accept' : 'optional';
+}
+/** The line under a document's title, on the client's list. */
+function docLine(d) {
+    switch (docState(d)) {
+        case 'accepted':
+            return `Accepted ${(0, format_1.fmtDay)(d.acceptedAt)}`;
+        case 'must-accept':
+            return 'Your coach asks you to read and accept this';
+        case 'optional':
+            return 'For you to read — no acceptance needed';
+        case 'withdrawn':
+            return 'Withdrawn by your coach';
+    }
+}
+/**
+ * What a client is told before they accept, and it has to be true afterwards.
+ *
+ * There is no un-accept, so it says there is no un-accept. An app that lets
+ * somebody agree to a legal document under the impression they can take it back
+ * has misrepresented the thing they were agreeing to.
+ */
+exports.COACH_DOC_ACCEPT_RULE = 'Accepting records the date against your name for your coach to see. It can’t be edited or withdrawn '
+    + 'afterwards, by you or by them — that permanence is what makes it worth anything.';
+/** The distinction that must never blur — and it blurs the moment the sentence
+ *  names a company that is not on the member's phone. Same reason as
+ *  `NOT_REPPLE` in src/lib/gymSigning.ts: this paragraph exists to say who is
+ *  responsible, so it has to name the party the member actually has. */
+exports.COACH_DOC_NOT_REPPLE = `This is your coach’s own paperwork, not ${brands_1.BRAND.label}’s. ${brands_1.BRAND.label} doesn’t write it, check it, or advise on it, `
+    + 'and the liability release you signed when you joined is a separate thing that your coach cannot read.';
+/** What a coach is told about editing. */
+exports.COACH_DOC_IMMUTABLE_NOTE = 'A document can’t be edited once it’s here, because people may already have accepted it. Changed the '
+    + 'wording? Upload the new version and retire the old one — everyone who accepted the old one keeps that '
+    + 'record, and can still read what they agreed to.';
+/** Who can open the file. Said plainly, because a coach uploading a document is
+ *  entitled to know who it reaches.
+ *
+ *  This used to end "…loses access to everything except what they accepted",
+ *  which is not what the policies do. `can_read_coach_doc` — the function a
+ *  signed URL is checked against — is `owner = auth.uid()` OR "a row in
+ *  `clients` where `id = auth.uid()` and `trainer_id = the owner`". There is no
+ *  acceptance branch in it at all, so when `clients.trainer_id` moves, EVERY
+ *  document goes with it, accepted or not. supabase/parts/135-a-coachs-own-
+ *  paperwork.sql says so in its own words beside that policy.
+ *
+ *  The exception was borrowed from COACH_DOC_IMMUTABLE_NOTE above, where it IS
+ *  true: `coach_documents_client_r` is `(retired_at is null or
+ *  has_accepted_coach_doc(id))`, so acceptance rescues a RETIRED document —
+ *  within the same coaching relationship, which is the clause that got dropped
+ *  in the move. A coach deciding what to put in front of a client was being
+ *  told their leavers keep the paperwork they signed. They do not, and the
+ *  acceptance RECORD that does survive is a document id and a timestamp. */
+exports.COACH_DOC_REACH_NOTE = 'Only you and the clients you currently coach can open these. Nobody else at the gym can — and if a '
+    + 'client moves to another coach they lose access to all of it, including anything they accepted. '
+    + 'Their record of having accepted it stays.';
+/**
+ * The same fact, said to the person it happens to.
+ *
+ * `COACH_DOC_REACH_NOTE` above has exactly one importer, and it is the COACH's
+ * screen. On the member's own screen the only permanence they were told about
+ * was `COACH_DOC_ACCEPT_RULE` — that their acceptance cannot be withdrawn — and
+ * nothing at all about losing the ability to read the thing they accepted.
+ *
+ * `can_read_coach_doc` has no acceptance branch, so the grant follows
+ * `clients.trainer_id`: the day a member switches coach, every waiver, health
+ * questionnaire and policy they agreed to disappears from their app, while
+ * `coach_document_acceptances` keeps a document id and a timestamp against
+ * their name. They are left holding proof they agreed to something they can no
+ * longer read — the worst possible half of a record to keep, and the half
+ * nobody warned them about.
+ *
+ * It sits beside the acceptance rule rather than replacing it, because the two
+ * facts are what make each other matter: the acceptance is permanent and the
+ * access is not.
+ */
+exports.COACH_DOC_ACCESS_ENDS_NOTE = 'You can open these while this coach is your coach. If you move to another coach, or your coaching '
+    + 'ends, they stop opening for you — including anything you have accepted, which is why it is worth '
+    + 'saving a copy of anything you may need later. Your record of having accepted it stays either way.';
+/**
+ * What to say instead of a count, when the acceptance read came back at its
+ * row limit.
+ *
+ * `standingLine` is not a number on a dashboard. "All 12 of your clients have
+ * accepted this" is a claim about a signed waiver, and a read that stopped at
+ * the cap (src/lib/rowCap.ts) can produce it out of twelve rows of nineteen —
+ * so the coach trains the other seven believing they are covered. A truncated
+ * read is strictly worse than a failed one, and this is the screen where that
+ * is most true, so nothing is counted over it.
+ */
+/**
+ * The ceiling `coach_document_standing()` takes, mirrored here because nothing
+ * on the client can see it.
+ *
+ * The limit is written inside the function body
+ * (supabase/parts/135-a-coachs-own-paperwork.sql), and that is what defeats
+ * src/lib/rowCap.ts: `capped()` finds truncation by asking for one row more
+ * than it will accept, and the server cannot answer with 501 however the
+ * request is phrased. The `.limit(capLimit())` on the call site is therefore
+ * asking for 1001 rows from a function that stops at 500 — it has been reading
+ * a full page as a whole set the entire time.
+ *
+ * `>= cap` rather than the `> cap` used elsewhere, for the reason
+ * src/lib/challenges.ts gives: 500 rows back from a `limit 500` IS the ceiling
+ * and there is no probe row to find. The coach with exactly five hundred
+ * clients is told the count cannot be stated when it could. That is the small
+ * wrong, and STANDING_TRUNCATED_NOTE is what they get instead — which, on a
+ * screen whose sentence is "all 12 of your clients have accepted this waiver",
+ * is the side to be wrong on.
+ */
+exports.STANDING_ROW_CAP = 500;
+exports.STANDING_TRUNCATED_NOTE = 'You have more clients than this list could bring back, so how many have accepted cannot be stated here. '
+    + 'The names below are real but they are not all of them — do not read this as everybody being covered.';
+/** "4 of 9 have accepted" — the coach's summary for one document.
+ *
+ *  Null when the roster could not be counted, rather than "0 of 0", which reads
+ *  as a fact about a coach with clients. */
+function standingLine(accepted, roster) {
+    if (!Number.isFinite(accepted) || !Number.isFinite(roster) || roster <= 0)
+        return null;
+    if (accepted >= roster)
+        return `All ${roster} of your clients have accepted this`;
+    return `${accepted} of ${roster} of your clients have accepted this`;
+}

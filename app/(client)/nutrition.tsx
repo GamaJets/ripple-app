@@ -744,6 +744,7 @@ export default function Nutrition() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Meals</Text>
           </View>
           <Pressable onPress={sharePlan} accessibilityRole="button" accessibilityLabel="Share plan"
+            hitSlop={hitSlopFor(38)}
             style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
             <Icon name="share" size={17} color={t.ink2} />
           </Pressable>
@@ -1249,7 +1250,8 @@ export default function Nutrition() {
         ) : (
           <>
 
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRecipe(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRecipe(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           {recipe && (
             <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -1317,7 +1319,8 @@ export default function Nutrition() {
 
       {/* ── grocery sheet ────────────────────────────────────────────────── */}
       <Modal visible={showGrocery} transparent animationType="slide" onRequestClose={() => setShowGrocery(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowGrocery(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowGrocery(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>Grocery List</Text>
@@ -1415,7 +1418,8 @@ export default function Nutrition() {
       </Modal>
 
       <Modal visible={dayInfo} transparent animationType="slide" onRequestClose={() => setDayInfo(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDayInfo(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDayInfo(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '82%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
             <Text style={{ ...ty.title, color: t.ink }}>Training, Standard, Rest</Text>

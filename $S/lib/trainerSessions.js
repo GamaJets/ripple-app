@@ -1,0 +1,249 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DELIVERED_WINDOW_DAYS = exports.MARK_WINDOW_DAYS = void 0;
+exports.windowStart = windowStart;
+exports.deliveredBetween = deliveredBetween;
+exports.awaitingOutcome = awaitingOutcome;
+exports.rowToSession = rowToSession;
+exports.fetchMySessions = fetchMySessions;
+exports.markMyOutcome = markMyOutcome;
+// A coach's OWN sessions — scoped by who delivered them, not by which gym they
+// were delivered in.
+//
+// ── The gap this closes ────────────────────────────────────────────────────
+//
+// src/lib/gymSessions.ts is written from the gym's side and everything in it
+// starts `.eq('tenant_id', tenantId)`, which is right for a gym owner looking
+// at their floor and wrong for the person who actually delivered the session.
+// Two screens in the coach app were reading it that way:
+//
+//   · app/(trainer)/sessions.tsx — "Mark Sessions", the queue of past sessions
+//     whose outcome nobody has recorded.
+//   · the UnmarkedSessions card on app/(trainer)/dashboard.tsx.
+//
+// Both opened with `if (!tenant?.id) return;`. A coach with no gym therefore
+// never got past that line: the card silently rendered nothing, which on that
+// dashboard means "nothing is outstanding", and the screen — reachable by deep
+// link, and by the card when it did appear — sat on "Loading…" for ever,
+// because `queue` stays null and null is the screen's not-read-yet state. There
+// was no error anywhere, on either screen, in either case.
+//
+// The independent trainer is not an edge case; he is the demo. He has no gym,
+// so he has no tenant, so he could not mark a single session outcome — and
+// marking is what the whole payroll and delivery story is built on.
+//
+// ── Why trainer_id is the right key, and not merely a workaround ───────────
+//
+// A session belongs to the coach who delivered it whether or not a gym exists.
+// `sessions_trainer` in supabase/parts/09-sessions-access.sql has said so since
+// the beginning — `for all using (trainer_id = auth.uid())` — so this scoping
+// is what row-level security was already enforcing; the tenant filter was an
+// extra narrowing the coach app had no reason to apply to its own rows.
+// Verified against the live database: that policy is present, `sessions` grants
+// select and update to `authenticated`, and a trainer reading by `trainer_id`
+// gets their own rows under it.
+//
+// It is also correct for a coach who DOES have a gym. `sessions.tenant_id` is
+// filled by trigger from `trainers.tenant_id` (part 33), so for a gym trainer
+// the two scopings return the same rows — except where they do not, and where
+// they do not the trainer_id one is the one a coach would expect: a session
+// they delivered before joining the gym, or after leaving it, is still theirs
+// to mark.
+//
+// Nothing here is about payroll. Payroll is the gym's question and stays on the
+// gym's module, tenant filter and all.
+const rowCap_1 = require("./rowCap");
+const idLookup_1 = require("./idLookup");
+const gymSessions_1 = require("./gymSessions");
+/**
+ * How far back the marking queue looks.
+ *
+ * Far enough to catch a forgotten fortnight and then some, short enough that
+ * the read stays cheap and the list stays something a person can clear. It was
+ * written as `90 * 86400_000` inline in both screens; it is one constant here
+ * so the card and the screen it links to cannot come to disagree about what
+ * "outstanding" covers — which would show a coach a badge for six sessions and
+ * then a list of four.
+ */
+exports.MARK_WINDOW_DAYS = 90;
+/**
+ * The window the "delivered" figure on the dashboard is counted over.
+ *
+ * A month, because that is the period a coach thinks in and the one the
+ * section it sits in is headed with. Stated rather than inlined for the same
+ * reason as above: the figure and the caption under it must be describing the
+ * same span.
+ */
+exports.DELIVERED_WINDOW_DAYS = 30;
+/** The ISO instant `days` before `now`. */
+function windowStart(days, now = Date.now()) {
+    return new Date(now - days * 86400000).toISOString();
+}
+/**
+ * How many of these sessions were actually delivered in the window.
+ *
+ * "Delivered" is `outcome === 'completed'` and nothing else — the same rule as
+ * `isDelivered` in gymSessions, and for the same reason: a booked session whose
+ * clock has passed is not a delivered one, and counting it that way is how a
+ * gym ends up paying for sessions nobody turned up to.
+ *
+ * Bounded at BOTH ends. The upper bound is not fussiness: a coach can mark a
+ * session before its slot has passed (they finished early, or the slot was
+ * mis-scheduled), and a "sessions delivered in the last 30 days" figure that
+ * silently included next Tuesday would be reporting the future as history.
+ */
+function deliveredBetween(sessions, sinceMs, untilMs = Date.now()) {
+    let n = 0;
+    for (const s of sessions) {
+        if (s.outcome !== 'completed')
+            continue;
+        const at = Date.parse(s.startsAt);
+        if (!Number.isFinite(at) || at < sinceMs || at > untilMs)
+            continue;
+        n += 1;
+    }
+    return n;
+}
+/** Sessions of these that are still waiting for somebody to say what happened. */
+function awaitingOutcome(sessions, now = Date.now()) {
+    return sessions.filter((s) => (0, gymSessions_1.isAwaitingOutcome)(s, now));
+}
+/**
+ * One `sessions` row as the app models it.
+ *
+ * A duplicate of the private mapper in gymSessions on purpose — that one is not
+ * exported, and reaching into it would couple a coach-side read to a module
+ * whose subject is a gym's payroll. The shape is deliberately identical so the
+ * two feed the same pure rules.
+ */
+function rowToSession(r, names) {
+    return {
+        id: r.id,
+        trainerId: r.trainer_id,
+        trainerName: names.get(r.trainer_id) ?? null,
+        clientId: r.client_id ?? null,
+        clientName: r.client_id ? names.get(r.client_id) ?? null : null,
+        startsAt: r.starts_at,
+        durationMin: r.duration_min ?? 60,
+        status: r.status,
+        outcome: r.outcome ?? null,
+        outcomeAt: r.outcome_at ?? null,
+        rateCents: r.rate_cents ?? null,
+        rateCurrency: r.rate_currency ?? null,
+        settlementId: r.settlement_id ?? null,
+        // What the CLIENT paid with (supabase/parts/370). Not the same question as
+        // `settlementId`, which is what the GYM paid the coach: a session can be
+        // settled with the coach and covered by nothing at all.
+        packDrawnKind: (r.pack_drawn_kind ?? null),
+        packDrawnAt: r.pack_drawn_at ?? null,
+        packDrawShortfallAt: r.pack_draw_shortfall_at ?? null,
+    };
+}
+/**
+ * Names for the people these rows name.
+ *
+ * A failure is not fatal and is deliberately swallowed: a missing name renders
+ * as "Client", which is honest, where throwing would deny a coach the whole
+ * marking queue over a label. Same call the gym module makes, same reason.
+ */
+async function fetchNames(sb, rows) {
+    // Chunked, exactly as `fetchSessionNames` in gymSessions is, and for a reason
+    // the swallow above makes sharper rather than softer. `rows` comes from a
+    // `capLimit()` read and every session names TWO people, so this list can be
+    // two thousand uuids — a 78KB request line against an 8KB limit. The 414 is
+    // returned as `data: null`, the `return new Map()` above turns it into "no
+    // name for anybody", and a coach's marking queue for a busy quarter renders
+    // as a column of "Client". One unreadable name is the case that fallback was
+    // written for; all of them, because the request was refused before it was
+    // asked, is not.
+    const out = new Map();
+    for (const chunk of (0, idLookup_1.chunkIds)((0, idLookup_1.uniqueIds)((0, gymSessions_1.sessionProfileIds)(rows)))) {
+        const { data, error } = await sb.from('profiles').select('id, full_name').in('id', chunk);
+        if (error)
+            return out;
+        for (const [id, name] of (0, gymSessions_1.namesById)((data ?? []))) {
+            out.set(id, name);
+        }
+    }
+    return out;
+}
+/**
+ * The signed-in coach's own sessions since `sinceIso`.
+ *
+ * No tenant filter, by design — see the note at the top of this file. Throws on
+ * a refused or unreachable read rather than returning [], because every caller
+ * turns the result into a COUNT, and an empty list would be read as "nothing
+ * outstanding" by a coach about to close the app.
+ */
+async function fetchMySessions(sb, trainerId, sinceIso, untilIso) {
+    let q = sb
+        .from('sessions')
+        .select('id, trainer_id, client_id, starts_at, duration_min, status, outcome, outcome_at, rate_cents, rate_currency, settlement_id, pack_drawn_kind, pack_drawn_at, pack_draw_shortfall_at')
+        .eq('trainer_id', trainerId)
+        .gte('starts_at', sinceIso)
+        .order('starts_at', { ascending: false });
+    if (untilIso)
+        q = q.lte('starts_at', untilIso);
+    q = q.limit((0, rowCap_1.capLimit)());
+    const { data, error } = await q;
+    if (error)
+        throw error;
+    // PostgREST stops at 1,000 rows and says nothing. A truncated set here would
+    // hand the dashboard a smaller queue than the coach actually has, with a tick
+    // beside it. `assertWhole` turns that silence into the failure it is, and
+    // both screens already have a "could not establish this" state to land in.
+    const rows = (0, rowCap_1.assertWhole)(data, 'your sessions in this period');
+    const names = await fetchNames(sb, rows);
+    return rows.map((r) => rowToSession(r, names));
+}
+/* ── writes ────────────────────────────────────────────────────────────────── */
+/**
+ * Record what happened to one of the coach's OWN sessions, and confirm it
+ * landed.
+ *
+ * ── why this exists next to gymSessions.markOutcome ───────────────────────
+ *
+ * That one is `update(...).eq('id', id)` and checks only `error`. PostgREST
+ * does not error on an UPDATE that matches nothing: a row-level-security
+ * refusal, a session id that no longer exists, a session belonging to another
+ * coach — all three come back `error: null`, zero rows touched. The Mark
+ * Sessions screen then removes the session from the queue, plays its haptic
+ * tick, and offers an Undo for a change that was never made. The outcome is
+ * still unrecorded, the session reappears at the next launch, and in between
+ * the coach has been told twice that it was handled.
+ *
+ * This is the repo's recurring bug class, so the COUNT is the answer here and
+ * a zero-row update throws. The extra `.eq('trainer_id', …)` is not the
+ * security boundary — the policy is — but it makes the zero-row case mean
+ * something specific instead of arriving as a mystery.
+ */
+async function markMyOutcome(sb, trainerId, sessionId, outcome, rateCents) {
+    const patch = { outcome };
+    // `undefined` means "do not touch the rate", which is not the same as null,
+    // which clears it. A coach with no rate set must not have a zero written in.
+    if (rateCents !== undefined)
+        patch.rate_cents = rateCents;
+    const { data, error } = await sb
+        .from('sessions').update(patch).eq('id', sessionId).eq('trainer_id', trainerId).select('id');
+    if (error)
+        throw error;
+    if (!Array.isArray(data) || data.length === 0) {
+        throw new Error('That session was not updated — it may no longer exist, or it is not yours to mark.');
+    }
+}
+// ── `clearMyOutcome` lived here, and is gone ─────────────────────────────
+//
+// It undid a wrongly recorded outcome by writing `outcome: null` straight to
+// the server, and app/(trainer)/sessions.tsx was its only caller. That was the
+// defect: the MARK beside it went through the floor queue (src/ui/floorQueue.ts)
+// and the UNDO did not, so the two halves of one feature met in exactly the
+// conditions the queue exists for. Offline, the undo threw, the screen said so
+// honestly, and the queue then flushed the "no show" the coach had retracted in
+// front of the client — onto that client's record and onto payroll.
+//
+// A retraction is now an act like any other: `{ kind: 'session-outcome',
+// outcome: null }`. It carries the same supersede key as the mark it takes
+// back, so offline it replaces the queued mark in place and nothing false is
+// ever sent, and when the mark had already reached the server it is sent — and
+// retried — like everything else. The statement itself is one line in that
+// module's sender, matched on the session and the coach exactly as this was.

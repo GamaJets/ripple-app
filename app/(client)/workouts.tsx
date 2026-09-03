@@ -1428,6 +1428,7 @@ export default function Train() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.lg }}>
           <Pressable accessibilityRole="button" accessibilityLabel="Previous week"
             onPress={() => { setWeekOffset((w) => w - 1); tapLight(); }}
+            hitSlop={hitSlopFor(34)}
             style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
             <Icon name={BACK_ICON} size={15} color={t.ink2} />
           </Pressable>
@@ -1438,6 +1439,7 @@ export default function Train() {
           {weekOffset < 0 ? (
             <Pressable accessibilityRole="button" accessibilityLabel="Next week"
               onPress={() => { setWeekOffset((w) => Math.min(0, w + 1)); tapLight(); }}
+              hitSlop={hitSlopFor(34)}
               style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
               <Icon name={FORWARD_ICON} size={15} color={t.ink2} />
             </Pressable>
@@ -1605,7 +1607,20 @@ export default function Train() {
             {WTYPES.map(([id, label]) => {
               const on = mode === id;
               return (
+                // What this screen is logging, and the quietest selection mark
+                // in the app: `t.surface2` against a transparent ground, with
+                // a half-step of font weight. Nothing else on the row says
+                // which of the six is live, and the form below — sets and
+                // reps, or distance and time — changes completely with it. A
+                // member who picks wrong logs a run as a lift.
+                //
+                // 9 + 18 + 9 is 36pt, four short of the minimum, and the six
+                // sit in one row with 24pt of air under it: the slop goes on
+                // the vertical only, exactly as `Cta` does, because horizontal
+                // slop here would reach into the neighbouring chip.
                 <Pressable key={id} onPress={() => { setMode(id); if (isSessionKind(id)) setCtype(SESSION_TYPES[id][0]); }}
+                  accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected: on }}
+                  hitSlop={{ top: hitSlopFor(36), bottom: hitSlopFor(36), left: 0, right: 0 }}
                   style={{ flex: 1, paddingVertical: 9, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.surface2 : 'transparent' }}>
                   {/* One line, shrunk to fit. A sixth chip took the widest label
                       — "Mobility" — under the width it needs at 13pt on a 375pt
@@ -1963,7 +1978,7 @@ export default function Train() {
                                 a clip is recorded against it, so "Kettlebell Windmill" can
                                 genuinely have a demo — hiding the button meant a client
                                 whose coach had filmed exactly that could never reach it. */}
-                            <Pressable accessibilityLabel={'Watch a demonstration of ' + nameOf(e)} accessibilityRole="button" onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: nameOf(e), from: 'clientWorkouts' } })} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
+                            <Pressable accessibilityLabel={'Watch a demonstration of ' + nameOf(e)} accessibilityRole="button" onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: nameOf(e), from: 'clientWorkouts' } })} hitSlop={hitSlopFor(38)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
                             {/* A pencil on every row. It used to be a pencil
                                 only on exercises the member had typed, and a
                                 SWAP arrow on everything the coach had planned —
@@ -1971,9 +1986,9 @@ export default function Train() {
                                 change the sets, the reps or the load at all.
                                 Swapping the movement is a different intention
                                 and keeps its own button beside this one. */}
-                            <Pressable accessibilityRole="button" accessibilityLabel={'Edit sets, reps and weight for ' + nameOf(e)} onPress={() => openEditFor(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
+                            <Pressable accessibilityRole="button" accessibilityLabel={'Edit sets, reps and weight for ' + nameOf(e)} onPress={() => openEditFor(e)} hitSlop={hitSlopFor(38)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
                             {!isCustom ? (
-                              <Pressable accessibilityRole="button" accessibilityLabel={'Swap ' + nameOf(e) + ' for another movement'} onPress={() => setSwapFor(e)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={t.ink2} /></Pressable>
+                              <Pressable accessibilityRole="button" accessibilityLabel={'Swap ' + nameOf(e) + ' for another movement'} onPress={() => setSwapFor(e)} hitSlop={hitSlopFor(38)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={t.ink2} /></Pressable>
                             ) : null}
                           </View>
                           {/* Opened on the hold box for a movement the plan
@@ -2391,7 +2406,8 @@ export default function Train() {
       {!showCal ? overlays : null}
 
       <Modal visible={!!swapFor} transparent animationType="slide" onRequestClose={() => setSwapFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSwapFor(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSwapFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, ...elevation.e2 }}>
           {swapFor && (<View>
             <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>Swap {nameOf(swapFor)}</Text>
@@ -2409,12 +2425,14 @@ export default function Train() {
 
 
       <Modal visible={showCal} transparent animationType="slide" onRequestClose={() => setShowCal(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCal(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setShowCal(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '88%', ...elevation.e2 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, flex: 1 }}>
               <Pressable accessibilityRole="button" accessibilityLabel="Previous month"
                 onPress={() => { setCalShift((m) => m - 1); tapLight(); }}
+                hitSlop={hitSlopFor(34)}
                 style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
                 <Icon name={BACK_ICON} size={15} color={t.ink2} />
               </Pressable>
@@ -2425,6 +2443,7 @@ export default function Train() {
               {!calAtNow ? (
                 <Pressable accessibilityRole="button" accessibilityLabel="Next month"
                   onPress={() => { setCalShift((m) => m + 1); tapLight(); }}
+                  hitSlop={hitSlopFor(34)}
                   style={{ width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface2 }}>
                   <Icon name={FORWARD_ICON} size={15} color={t.ink2} />
                 </Pressable>
@@ -2628,7 +2647,8 @@ export default function Train() {
           lands on the backdrop and closes the sheet instead. */}
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>{editingKey ? 'Edit exercise' : 'Add an exercise'}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{editingKey ? 'Rename it, or change the sets and reps you are aiming for.' : "Log something you did that isn't in today's plan."}</Text>
@@ -4369,7 +4389,8 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
         ) : null}
 
         <Modal visible={swapOpen} transparent animationType="slide" onRequestClose={() => setSwapOpen(false)}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSwapOpen(false)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSwapOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 32 }}>
             {ex ? (
               <View>
@@ -4730,7 +4751,8 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-      <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose} />
+      <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={onClose}
+          accessibilityRole="button" accessibilityLabel="Close" />
       <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, maxHeight: '86%', ...elevation.e2 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: sp.lg }}>
           <Pressable onPress={onClose} hitSlop={8}><Text style={{ ...ty.body, fontWeight: '500', color: t.ink3 }}>Cancel</Text></Pressable>

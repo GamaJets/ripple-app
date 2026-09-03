@@ -1,0 +1,104 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+// Blocking and reporting, on the one surface in this product that carries
+// photographs and video between two people.
+// Compile with tsc, run with node.
+//
+// The assertions here are about the two failures that would make the feature
+// worse than nothing: a screen that says "you have not blocked anybody" off a
+// read that failed, and a report path that quietly reports nothing.
+const threadSafety_1 = require("./threadSafety");
+const errors = [];
+const ok = (cond, msg) => { if (!cond)
+    errors.push(msg); };
+const eq = (a, b, msg) => ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
+const ME = 'me-uuid';
+const THEM = 'them-uuid';
+/* ── the state, and the read behind it ─────────────────────────────────── */
+eq((0, threadSafety_1.blockStateOf)('ready', [], ME), 'open', 'a completed read with no rows is an open thread');
+eq((0, threadSafety_1.blockStateOf)('ready', [{ blockerId: ME }], ME), 'blocked-by-me', 'my own row is my own block');
+eq((0, threadSafety_1.blockStateOf)('ready', [{ blockerId: THEM }], ME), 'blocked-by-them', 'their row is theirs');
+eq((0, threadSafety_1.blockStateOf)('ready', [{ blockerId: THEM }, { blockerId: ME }], ME), 'blocked-by-me', 'both blocking resolves to mine — it is the half this reader can lift');
+// The whole reason this is not a boolean. An empty list under 'error' is
+// UNKNOWN, and a screen that read it as "open" would tell somebody who blocked
+// their coach last night that they had not blocked anybody.
+eq((0, threadSafety_1.blockStateOf)('error', [], ME), 'unknown', 'an empty list under error is not an open thread');
+eq((0, threadSafety_1.blockStateOf)('loading', [], ME), 'unknown', 'nor is one still being read');
+eq((0, threadSafety_1.blockStateOf)('partial', [], ME), 'unknown', 'nor a truncated one');
+eq((0, threadSafety_1.blockStateOf)('ready', null, ME), 'unknown', 'nor a null list under any status');
+eq((0, threadSafety_1.blockStateOf)('ready', [{ blockerId: THEM }], null), 'unknown', 'not knowing who I am is not evidence that somebody blocked me');
+/* ── what the composer does with each ──────────────────────────────────── */
+// 'unknown' must NOT silence the composer: the server refuses a blocked write
+// anyway, and disabling it on a failed read gags somebody nobody has blocked.
+ok((0, threadSafety_1.canSendInto)('unknown'), 'a failed read does not gag anybody');
+ok((0, threadSafety_1.canSendInto)('open'), 'an open thread sends');
+ok(!(0, threadSafety_1.canSendInto)('blocked-by-me'), 'my own block stops me sending too — it is not a mute');
+ok(!(0, threadSafety_1.canSendInto)('blocked-by-them'), 'and theirs stops me');
+eq((0, threadSafety_1.blockedComposerNote)('open', 'your coach'), null, 'nothing to say on an open thread');
+eq((0, threadSafety_1.blockedComposerNote)('unknown', 'your coach'), null, 'and nothing claimed on an unread one');
+const mine = (0, threadSafety_1.blockedComposerNote)('blocked-by-me', 'your coach');
+ok(mine.includes('You blocked'), 'my own block says it was mine');
+ok(/unblock/i.test(mine), 'and says how to undo it');
+ok(/stays/.test(mine), 'and that the history is not deleted');
+const theirs = (0, threadSafety_1.blockedComposerNote)('blocked-by-them', 'your coach');
+ok(!/they blocked|blocked you/i.test(theirs), 'the blocked side is not handed an accusation — only the fact that nothing sends');
+ok(/stays/.test(theirs), 'and is told the history is still there, so it can still be reported');
+/* ── the confirm in front of the block ─────────────────────────────────── */
+const c = (0, threadSafety_1.blockConfirm)('your coach');
+ok(/Your coach/.test(c.body), 'the description is capitalised at the head of a sentence, never left as a dash');
+ok(/photos|photo/.test(c.body) && /video/.test(c.body), 'names what actually stops, on a thread whose whole risk is the attachments');
+ok(/not deleted|Nothing already/.test(c.body), 'says the conversation is kept');
+ok(/report/i.test(c.body), 'and that it can still be reported — a block must not read as the only option');
+// The sentence somebody most needs at eleven at night: this is not the button
+// that cancels Tuesday.
+ok(/does not end your coaching/.test(c.body), 'says it does not end the coaching');
+ok(/cancel any session/.test(c.body), 'nor cancel a session');
+ok(/move any money/.test(c.body), 'nor move money');
+ok(/unblock at any time/.test(c.body), 'and that it is reversible');
+ok(/stays/.test((0, threadSafety_1.unblockConfirm)('your coach').body), 'unblocking does not withdraw a report');
+eq((0, threadSafety_1.blockActionLabel)('open', 'your coach'), 'Block your coach', 'the control offers the block');
+eq((0, threadSafety_1.blockActionLabel)('blocked-by-me', 'your coach'), 'Unblock your coach', 'and the undo when there is one');
+eq((0, threadSafety_1.blockActionLabel)('unknown', 'your coach'), 'Block your coach', 'an unread thread still offers the block — the safe direction when nothing is known');
+eq((0, threadSafety_1.blockActionLabel)('blocked-by-them', 'your coach'), 'Block your coach', 'and being blocked does not take away your own ability to block them back');
+/* ── the refusal ───────────────────────────────────────────────────────── */
+ok((0, threadSafety_1.looksLikeThreadRefusal)({ code: '42501' }), 'the RLS code is recognised');
+ok((0, threadSafety_1.looksLikeThreadRefusal)({ message: 'new row violates row-level security policy for table "messages"' }), 'and the message when the code did not come through');
+ok(!(0, threadSafety_1.looksLikeThreadRefusal)({ code: '23505', message: 'duplicate key' }), 'an unrelated error is not a refusal');
+ok(!(0, threadSafety_1.looksLikeThreadRefusal)(null), 'and neither is nothing at all');
+ok(/not been sent/.test(threadSafety_1.SEND_REFUSED_NOTE), 'the refusal sentence states plainly that nothing was sent');
+ok(/blocked/.test(threadSafety_1.SEND_REFUSED_NOTE) && /no longer connected/.test(threadSafety_1.SEND_REFUSED_NOTE), 'and names both causes rather than asserting the one it would rather be');
+/* ── reporting ─────────────────────────────────────────────────────────── */
+eq(threadSafety_1.REPORT_OPTIONS.length, 5, 'five categories, matching the check constraint in part 240');
+eq(threadSafety_1.REPORT_OPTIONS[threadSafety_1.REPORT_OPTIONS.length - 1].id, 'other', 'the vaguest option is last — a list whose first entry is "other" is a list people pick "other" from');
+const ids = threadSafety_1.REPORT_OPTIONS.map((o) => o.id).join(',');
+eq(ids, 'threat,sexual,harassment,spam,other', 'ordered by severity, and pinned so the constraint cannot drift');
+for (const o of threadSafety_1.REPORT_OPTIONS) {
+    ok(/^[A-Z]/.test(o.label), `${o.id}: the label is a button, so it is Title Case`);
+    ok(/[.]$/.test(o.note), `${o.id}: the note is prose, so it is a sentence`);
+}
+eq((0, threadSafety_1.reportCategoryLabel)('threat'), 'Threats or Violence', 'a category names itself');
+eq((0, threadSafety_1.reportCategoryLabel)('nonsense'), 'Something Else', 'and an unknown one falls back rather than rendering an empty label');
+ok(/even if it is deleted/.test(threadSafety_1.REPORT_EXPLAINER), 'the explainer promises what part 240 actually implements: the message is copied into the report');
+ok(/not told/.test(threadSafety_1.REPORT_EXPLAINER), 'that the other person is not notified');
+ok(/does not stop them messaging you/.test(threadSafety_1.REPORT_EXPLAINER), 'and — the sentence that matters most — that a report is not a block');
+const filed = (0, threadSafety_1.reportFiledLine)('sexual', 'open');
+ok(/on record/.test(filed), 'the receipt states the row exists');
+ok(/Block them/.test(filed), 'and offers the block to somebody who has not made one');
+ok(!/Block them/.test((0, threadSafety_1.reportFiledLine)('sexual', 'blocked-by-me')), 'but does not nag somebody who already has');
+ok(/still blocked/.test((0, threadSafety_1.reportFiledLine)('sexual', 'blocked-by-me')), 'it confirms the block is still in force instead');
+ok(/not been filed|nothing has been filed/.test(threadSafety_1.REPORT_FAILED_NOTE), 'a failed report says plainly that nothing was recorded — somebody who believes one is filed stops looking for help');
+/* ── every state has a sentence ────────────────────────────────────────── */
+//
+// A state added later with no branch here renders as nothing on the screen,
+// which on this screen is a person who cannot tell whether they are protected.
+const STATES = ['unknown', 'open', 'blocked-by-me', 'blocked-by-them'];
+for (const s of STATES) {
+    ok(typeof (0, threadSafety_1.blockActionLabel)(s, 'your coach') === 'string', `${s}: has a control label`);
+    const note = (0, threadSafety_1.blockedComposerNote)(s, 'your coach');
+    ok(note === null || note.length > 20, `${s}: has either nothing to say or something worth reading`);
+}
+if (errors.length) {
+    console.error(errors.join('\n'));
+    process.exit(1);
+}
+console.log('threadSafety.test.ts — ok');
