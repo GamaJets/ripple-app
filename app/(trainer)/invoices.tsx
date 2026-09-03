@@ -791,6 +791,87 @@ export default function Invoices() {
           {ageing.undatedNote ? <Flag style={{ marginTop: sp.sm }}>{ageing.undatedNote}</Flag> : null}
         </Section>
 
+        {/* ── THE SAME MONEY, BY WHO OWES IT ──────────────────────────────
+            Above this line the answer is a list of documents banded by
+            lateness. That is the right answer to "what is late" and it is the
+            wrong shape for the act a coach performs, which is sending ONE
+            message to ONE person about everything they owe. The bands
+            interleave people, so a coach did that grouping in their head and
+            then typed the note out by hand — the numbers, the amounts, the
+            dates — scrolling back up for each line.
+
+            Only drawn when there is something to chase. A heading over an
+            empty list is a screen making a coach read a section to learn that
+            it is empty, and the section above already says so in a sentence. */}
+        {chase.groups.length || chase.withheld ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="By Who Owes It" note="Everything one person is late on, in one note" />
+              {chase.withheld ? <Flag style={{ marginTop: sp.sm }}>{chase.withheld}</Flag> : null}
+              {chase.groups.map((g) => (
+                <View key={g.key} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
+                    <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }} numberOfLines={1}>{g.billTo}</Text>
+                    <Text style={{ ...ty.label, color: t.ink3 }}>
+                      {g.invoices.length} invoice{g.invoices.length === 1 ? '' : 's'}
+                    </Text>
+                  </View>
+                  {/* One line per currency and never a sum across them. `pots`
+                      is null under anything but a whole read, which is why
+                      there is no figure to draw there rather than a hidden
+                      one. */}
+                  {g.pots ? g.pots.map((p) => (
+                    <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 }}>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>{p.count} in {p.currency}</Text>
+                      <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{minorMoney(p.minorUnits, p.currency) ?? DASH}</Text>
+                    </View>
+                  )) : null}
+                  {g.pots && g.pots.length > 1 ? (
+                    <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                      These are separate amounts of money and are deliberately not added together.
+                    </Flag>
+                  ) : null}
+                  {/* "Past a date they were shown" and "past a day you noted"
+                      are two different kinds of lateness, and only one of them
+                      is something to put in a demand. `overdue` counts the
+                      first alone — see `fromChaseDate` in
+                      src/lib/coachInvoice.ts. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                    {g.overdue
+                      ? `${g.overdue} past a date you stated, the oldest by ${g.worstDays} day${g.worstDays === 1 ? '' : 's'}.`
+                      : 'Outstanding, and none of it is past a date the client was ever shown.'}
+                  </Text>
+                  {g.clientId ? null : (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      Not tied to an account, so nothing here can notify them. This note is how you reach them.
+                    </Text>
+                  )}
+                  {chaseMessageCaveat(g) ? (
+                    <Flag style={{ marginTop: sp.sm }}>{chaseMessageCaveat(g)}</Flag>
+                  ) : null}
+                  {/* Absent rather than dead under a read that came back short:
+                      a note saying "these three are still outstanding" when
+                      there are five is a demand for the wrong money, under the
+                      coach's own name. The sentence above says why. */}
+                  {g.pots ? (
+                    <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm, flexWrap: 'wrap' }}>
+                      <Pressable onPress={() => sendChase(g)} hitSlop={8} accessibilityRole="button"
+                        accessibilityLabel={`Write a note to ${g.billTo} about ${g.invoices.length} outstanding invoice${g.invoices.length === 1 ? '' : 's'}`}
+                        style={{ paddingVertical: sp.xs }}>
+                        <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Write the note</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
+              ))}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                The note is built from what you recorded: your own numbers, the amounts you typed and the dates you stated. It says those are your records and asks — nothing here has been checked against a bank, and a client who paid you on Friday must not be told they did not.
+              </Text>
+            </Section>
+          </>
+        ) : null}
+
         {/* One group per band, longest overdue first. Grouped rather than
             listed flat because chasing is done in bands: a coach clears the
             two-month column before they look at last week's. */}

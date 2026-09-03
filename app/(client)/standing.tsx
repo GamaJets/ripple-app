@@ -50,6 +50,7 @@ import { View, Text, ScrollView, Alert, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { isWhole } from '../../src/ui/loadStatus';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';

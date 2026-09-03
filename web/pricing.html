@@ -132,7 +132,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <div class="stat-n">10%</div>
-        <div class="lbl"><strong>On payments taken through Repple&rsquo;s checkout.</strong> The one charge that is live. If a gym or a coach sells a membership, a pass or a package through Repple&rsquo;s own checkout, Repple keeps 10% of it and Stripe takes its processing fee on top. Refund the sale and our 10% goes back with it. A payment you record at the desk is a row rather than a transaction, so nothing is taken from it.</div>
+        <div class="lbl"><strong>On payments taken through Repple&rsquo;s checkout.</strong> The one charge that is live. If a gym or a coach sells a membership, a pass or a package through Repple&rsquo;s own checkout, Repple keeps 10% of it and Stripe takes its processing fee on top. A payment you record at the desk is a row rather than a transaction, so nothing is taken from it &mdash; and on an item cheap enough that 10% of it rounds below one unit of your currency, nothing is taken either. What happens on a refund is the part worth reading, and it is below.</div>
       </div>
       <div>
         <div class="stat-n">Free</div>
@@ -150,6 +150,39 @@ addEventListener('DOMContentLoaded', function () {
       through Repple&rsquo;s checkout, it is the platform&rsquo;s cut of a payment that otherwise lands in your
       own Stripe account, and it is the number to ask us about if it is the wrong one for your gym.
     </p>
+
+    <!-- ── what the 10% buys, and the one place it does not come back ─────
+         This page previously said "Refund the sale and our 10% goes back with
+         it" as a flat rule. It is true of exactly one route — a coach pressing
+         refund inside Repple Coach, where the request asks Stripe for the
+         platform fee back in the same call. It is NOT true of a refund made in
+         the seller's own Stripe dashboard, and a gym has no other route: the
+         console's own refund writes a negative row in the gym's ledger and
+         never speaks to Stripe. A sentence that overstates what comes back on
+         a refund is the same class of mistake as the one that said nothing was
+         charged at all, and it is on the same page. -->
+    <div class="tiles two after">
+      <div class="tile">
+        <div class="cap">What it buys</div>
+        <h3>A sale that lands as a row</h3>
+        <p>A card taken from inside the app, on your own Stripe account rather than ours, and a sale
+           that arrives as a record instead of a note to type in later. A membership term is extended
+           or opened for the member who bought it; a pass has its visits credited; a coach&rsquo;s package
+           has its sessions credited. The payment is written into the same ledger the front desk
+           writes into, so the month reconciles against one list rather than two.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">On a refund</div>
+        <h3>Where the 10% does not come back</h3>
+        <p>A coach who refunds a sale <em>inside Repple Coach</em> gets our 10% returned with it: the app
+           asks Stripe for the platform fee back in the same request. A refund made in your own Stripe
+           dashboard does not &mdash; Repple is not part of that request and the fee stays taken &mdash; and a gym
+           today has only that second route, because the console&rsquo;s own refund writes a reversing row
+           in your ledger rather than calling Stripe. That is a gap in the product rather than a
+           policy, and it is written here instead of found later in a settlement report.
+           <a href="mailto:support@repplefitness.com?subject=A%20refunded%20sale">Tell us if it has cost you</a>.</p>
+      </div>
+    </div>
   </div>
 </section>
 

@@ -255,5 +255,40 @@ const openAgain = coachMovedLine(moveRep({ moved: true, waiting: 2 }), 'Ana', '7
 ok(/open again/.test(openAgain), 'an unpromoted hour is reported as open');
 ok(!/nobody was waiting/.test(openAgain), 'and is not called empty while two people are in line');
 
+/* ── a pause previewed off a calendar that was not read whole ──────────── */
+//
+// `inRange` in app/(client)/standing.tsx is counted out of THIS DEVICE'S
+// `sessions`. `useSessions` publishes 'error' for a read that failed and
+// 'partial' for one PostgREST cut off at its thousand-row cap, and under either
+// the count is a FLOOR. Two of the sentences above are money claims sitting
+// immediately over a destructive confirm, and a floor produces both of them as
+// readily as the truth does.
+
+const notWhole = pausePreviewLine(0, 0, charges, false);
+ok(/could not read your own calendar/.test(notWhole),
+  'an uncountable calendar says so rather than reporting a count');
+ok(!/do not expect anything to be cancelled/.test(notWhole),
+  'and never tells a member with four sessions booked that nothing will be cancelled');
+// The sharper half: a SHORT list still has rows in it, so the ordinary
+// "N sessions … all outside the notice period, so this costs nothing" branch is
+// reachable with a `late` that is simply too low.
+const shortAndFree = pausePreviewLine(4, 0, charges, false);
+ok(!/costs nothing/.test(shortAndFree),
+  'a truncated read never produces "this costs nothing" — the late ones may be the rows that did not come back');
+// It says the words "late fee" only to say it cannot tell you about one. What
+// it must never do is assert a count of them or a price.
+ok(!/would carry their late fee|would each carry their late fee|inside your coach’s notice period/.test(shortAndFree),
+  'and it does not assert how many are inside the notice period: a floor supports neither claim, in either direction');
+ok(!/\d+ of them/.test(shortAndFree), 'and it prices nothing off a partial count');
+// It must still point at the authority, because the server counts again and its
+// account afterwards is the one that is true.
+ok(/authority/.test(notWhole), 'and it still says whose calendar decides');
+
+// The default keeps every caller and every assertion above meaning what it
+// meant. A screen that has not been taught the difference is not silently
+// switched into the cautious sentence.
+eq(pausePreviewLine(4, 2, charges), pausePreviewLine(4, 2, charges, true),
+  'omitting the flag is the same as saying the read was whole');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('reschedule.test.ts — ok');

@@ -220,7 +220,35 @@ export interface PauseReport {
  * the range, and `late` how many of those are inside the notice window. The
  * server counts again and the report afterwards is the authority.
  */
-export function pausePreviewLine(upcoming: number, late: number, policy: CancellationPolicy | null): string {
+export function pausePreviewLine(
+  upcoming: number,
+  late: number,
+  policy: CancellationPolicy | null,
+  /**
+   * Whether the calendar this count came out of was read WHOLE.
+   *
+   * `isWhole(sessionsStatus)` at the call site. Defaults to true so every
+   * existing caller and every existing assertion keeps its meaning; the false
+   * branch is the one that was missing.
+   *
+   * Two of the sentences below are money claims sitting immediately above a
+   * destructive confirm — "we do not expect anything to be cancelled" and "All
+   * of them are outside your coach's notice period, so this costs nothing" —
+   * and both are produced by a SHORT count as readily as by a true one. A
+   * refused read of `sessions` leaves the list empty and a PostgREST read cut
+   * off at its row cap leaves it short, and neither is a fact about what the
+   * member has booked. Under either, `upcoming` and `late` are floors, so the
+   * only honest thing this can say is that it does not know and the server
+   * will.
+   */
+  countable: boolean = true,
+): string {
+  if (!countable) {
+    // Deliberately says nothing about a fee, in either direction. "This costs
+    // nothing" and "this will cost you" are both claims, and a floor supports
+    // neither.
+    return 'We could not read your own calendar fully just now, so we cannot tell you how many sessions fall in those dates or whether any would carry a late fee. Your coach’s calendar is the authority and is checked when you confirm — the account you get afterwards is the true one.';
+  }
   if (upcoming === 0) return 'Nothing of this arrangement is booked in those dates, so we do not expect anything to be cancelled. Your coach’s calendar is the authority and is checked when you confirm.';
   // "will be cancelled" was stated as fact over a set counted on this device.
   // The device cannot see the series a booking belongs to — `TrainingSession`

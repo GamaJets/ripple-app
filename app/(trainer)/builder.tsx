@@ -69,7 +69,12 @@ import { buildProgram, type Program, type ProgramDay } from '../../src/lib/progr
 // that resolves the block, `withWeeks` the ONE writer that keeps `days` — which
 // is what the shipped client app renders — in step with week one. Neither this
 // screen nor any other builds the pair by hand; see src/lib/programBlock.ts.
-import { canAddWeek, isBlock, programWeeks, weekLabel, withWeeks } from '../../src/lib/programBlock';
+import { MAX_WEEKS, canAddWeek, isBlock, programWeeks, weekLabel, withWeeks } from '../../src/lib/programBlock';
+// The two week edits this screen could not make, and the block as one readable
+// list. Pure, and tested where an off-by-one in the index that comes back can
+// be asserted rather than discovered by a coach typing into a week they are not
+// looking at. See src/lib/blockPlan.ts.
+import { blockOverview, blockWarnings, duplicateWeek, moveWeek, weekEditWarning, type WeekEdit } from '../../src/lib/blockPlan';
 // Effort, share of a max and rep speed — three columns a coach was writing into
 // a free-text note because there was nowhere else for them. src/lib/setIntensity.ts
 // owns every parse and every bound, and now also the words the CLIENT reads
@@ -141,6 +146,40 @@ const GENERATED_NOTE = /latest InBody scan/i;
 
 let KEY = 1;
 const nextKey = () => 'e' + KEY++;
+
+/**
+ * A copy of one week that shares nothing with the week it came from.
+ *
+ * FRESH KEYS, and that is the whole of why this exists rather than a spread.
+ * `key` is what every list, every drag handler and every per-row draft on this
+ * screen matches on, so two weeks sharing one would make typing into week
+ * five's bench press edit week four's as well — silently, in a programme
+ * somebody is about to be sold.
+ *
+ * And written out here rather than routed through `addWeek` in
+ * src/lib/programBlock.ts, which works on a stored `Program`: this list holds
+ * the builder's own `BEx`, with its draft key and the unit the coach typed in,
+ * and round-tripping through `composeProgram` to copy a week would apply every
+ * one of its rewritings to a week the coach had not touched.
+ *
+ * Hoisted out of Add Week because Duplicate This Week needs the identical copy
+ * and a second spelling of it is the one that would drift.
+ */
+const cloneWeek = (w: BWeek | undefined): BWeek => ({
+  // The DAYS only. Neither the coach's own label nor the deload mark comes
+  // across: two weeks in the strip called the same thing cannot be told apart,
+  // and a week added after a deload is a new hard week far more often than it
+  // is a second light one. Duplicate This Week re-applies the deload mark
+  // itself, because there the coach asked for another one of THAT week.
+  days: (w?.days ?? []).map((d) => ({
+    ...d,
+    exercises: d.exercises.map((e) => ({
+      ...e,
+      key: nextKey(),
+      setRows: e.setRows ? e.setRows.map((r) => ({ ...r })) : e.setRows,
+    })),
+  })),
+});
 
 /**
  * A stored week as this screen edits it.
@@ -1192,6 +1231,39 @@ export default function Builder() {
 
   /** Exercises in the WEEK ON SCREEN. Used only where the sentence is about
    *  that week — the Training Days heading, and nothing else. */
+  /**
+   * Land a week edit from src/lib/blockPlan.ts, or say nothing happened.
+   *
+   * Null in means the edit would have changed nothing — a move to the same
+   * position, an index off the end — and the honest response to that is
+   * silence, not a redraw of the strip and a re-fold of every day.
+   *
+   * The one edit that is confirmed first is the one that reaches somebody else.
+   * `days` is week one and week one is what a client's phone renders, so moving
+   * a week into or out of position one changes what they will be given the next
+   * time this is assigned. Reordering weeks five and six changes a stored plan
+   * and nothing anybody can see, and asking about that would train a coach to
+   * dismiss the dialog that matters. Remove This Week below draws exactly the
+   * same distinction, in the same voice.
+   */
+  const applyWeekEdit = (edit: WeekEdit<BWeek> | null) => {
+    if (!edit) return;
+    const land = () => {
+      setBlockWeeks(edit.weeks);
+      setWeekIdx(edit.index);
+      // The fold map is keyed by day POSITION inside the week on screen, and
+      // the week on screen is about to be a different one — see
+      // src/lib/foldedDays.ts for why a stale map is not a stale list.
+      setFoldedDays(foldsForNewProgramme());
+    };
+    const warn = weekEditWarning(edit);
+    if (!warn) { land(); return; }
+    Alert.alert('This changes week one', warn, [
+      { text: 'Leave It', style: 'cancel' },
+      { text: 'Move It', onPress: land },
+    ]);
+  };
+
   const totalExercises = days.reduce((a, d) => a + d.exercises.length, 0);
   /**
    * Exercises in the WHOLE BLOCK, which is what every gate is about.
@@ -2228,27 +2300,10 @@ export default function Builder() {
                   // `addSetRow` copies a set: nobody adds week five in order to
                   // leave it empty, and a blank week would send the coach back
                   // to retyping the session — which is the thing they do today.
-                  setBlockWeeks((ws) => {
-                    // Written out here rather than through `addWeek`, because that
-                    // works on a stored `Program` and this list holds the
-                    // builder's own `BEx` — with its draft keys and the unit
-                    // the coach typed in. Round-tripping through `composeProgram`
-                    // to add a week would silently apply every one of its
-                    // rewritings to the week being copied.
-                    const last = ws[ws.length - 1];
-                    const copied: BWeek = {
-                      days: (last?.days ?? []).map((d) => ({
-                        ...d,
-                        // Fresh keys, and this is the whole of why the copy is
-                        // written out rather than spread. `key` is what every
-                        // list, drag handler and per-row draft on this screen
-                        // matches on; two weeks sharing one would make typing
-                        // into week five's bench press edit week four's as well.
-                        exercises: d.exercises.map((e) => ({ ...e, key: nextKey(), setRows: e.setRows ? e.setRows.map((r) => ({ ...r })) : e.setRows })),
-                      })),
-                    };
-                    return [...ws, copied];
-                  });
+                  // `cloneWeek` is the one copy on this screen — see its own
+                  // note for why it is written out rather than routed through
+                  // `addWeek`, and why every exercise in it gets a fresh key.
+                  setBlockWeeks((ws) => [...ws, cloneWeek(ws[ws.length - 1])]);
                   setWeekIdx(blockWeeks.length);
                   setFoldedDays(foldsForNewProgramme());
                 }}
@@ -2262,6 +2317,51 @@ export default function Builder() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md, alignItems: 'center' }}>
               <Ghost label={blockWeeks[weekIdx]?.deload ? 'Not a Deload' : 'Mark as Deload'}
                 onPress={() => setBlockWeeks((ws) => ws.map((w, i) => (i === weekIdx ? { ...w, deload: !w.deload } : w)))} />
+              {/* ── the copy Add Week could not make ──────────────────────
+                  Add Week copies THE LAST week, which is right when a coach is
+                  writing a block front to back and useless the moment they are
+                  not. A twelve-week block sold as three rounds of heavy, heavy,
+                  deload was four weeks of retyping: to make week four be week
+                  one again, the coach added a week — getting a copy of week
+                  three, the deload — and then rewrote every day of it by hand.
+                  The copy lands directly after the week it came from, because
+                  duplicating week two to make week three is a statement about
+                  order; appending it to the end of an eight-week block would be
+                  a different edit the coach would then undo six times. */}
+              <Ghost label="Duplicate This Week" onPress={() => {
+                // The deload mark comes across on a DUPLICATE and not on Add
+                // Week — see `cloneWeek`. A coach duplicating the light week
+                // asked for another light week.
+                const edit = duplicateWeek(
+                  blockWeeks, weekIdx,
+                  (w: BWeek) => ({ ...cloneWeek(w), deload: w.deload }),
+                  MAX_WEEKS,
+                );
+                if (!edit) {
+                  // Never a dead control and never a silent one. The ceiling is
+                  // real — every week is stored in full inside one jsonb value
+                  // that is re-encoded on every keystroke — and a coach who
+                  // taps and sees nothing concludes the button is broken.
+                  Alert.alert(
+                    'No room for another week',
+                    `A block holds ${MAX_WEEKS} weeks. Remove one you are not using, or write the rest as a second block — which is how a longer plan is periodised anyway.`,
+                  );
+                  return;
+                }
+                applyWeekEdit(edit);
+              }} />
+              {/* ── where the light week falls ────────────────────────────
+                  Periodisation is decided by the order of the weeks, and the
+                  strip was positional with no drag, no cut and no paste: a
+                  coach who wanted the deload at four rather than three had to
+                  retype two weeks into each other. Absent at the ends rather
+                  than disabled — there is nothing earlier than week one. */}
+              {weekIdx > 0 ? (
+                <Ghost label="Move Earlier" onPress={() => applyWeekEdit(moveWeek(blockWeeks, weekIdx, weekIdx - 1))} />
+              ) : null}
+              {weekIdx < blockWeeks.length - 1 ? (
+                <Ghost label="Move Later" onPress={() => applyWeekEdit(moveWeek(blockWeeks, weekIdx, weekIdx + 1))} />
+              ) : null}
               <Ghost label="Remove This Week" onPress={() => {
                 // Removing WEEK ONE moves what the client trains, immediately,
                 // because week two becomes week one and `days` follows it. The
@@ -2285,6 +2385,55 @@ export default function Builder() {
                   ],
                 );
               }} />
+            </View>
+          ) : null}
+
+          {/* ── THE BLOCK, WITHOUT OPENING TWELVE WEEKS ───────────────────
+              The strip above says how many weeks there are and nothing about
+              what is in any of them. To find out whether week seven was ever
+              written, a coach tapped week seven and scrolled — twelve times, on
+              a block they were about to sell.
+
+              Two things here are only visible from a list. A week with NO
+              TRAINING DAYS in it, which reaches a client as a week of nothing
+              and is what a coach gets by adding weeks onto an empty week one.
+              And a week IDENTICAL to the one before it, which is not a fault —
+              Add Week copies the previous week on purpose — but is exactly what
+              a coach who meant to edit week seven and did not has, four times
+              over, with nothing on the screen saying so.
+
+              Each row jumps to its week: this is a table of contents for the
+              thing underneath it, so it is also the way in. */}
+          {blockWeeks.length > 1 ? (
+            <View style={{ marginTop: sp.lg }}>
+              {blockWarnings(blockWeeks).map((w, i) => (
+                <Flag key={i} style={{ marginBottom: sp.sm }}>{w}</Flag>
+              ))}
+              {blockOverview(blockWeeks).map((row) => (
+                <Pressable
+                  key={row.n}
+                  onPress={() => { setWeekIdx(row.n - 1); setFoldedDays(foldsForNewProgramme()); }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: row.n - 1 === weekIdx }}
+                  accessibilityLabel={`${row.label}. ${row.detail}.${row.sameAsPrevious ? ' The same as the week before it.' : ''} Opens it.`}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: sp.md,
+                    minHeight: MIN_TARGET, paddingHorizontal: sp.md,
+                    borderRadius: radius.sm,
+                    backgroundColor: row.n - 1 === weekIdx ? t.surface2 : 'transparent',
+                  }}>
+                  <Text style={{ ...ty.label, color: row.empty ? t.ink3 : t.ink, flex: 1 }} numberOfLines={1}>
+                    {row.label}
+                  </Text>
+                  {/* The repeat is a WORD, never a tint. Colour is not the only
+                      channel carrying meaning anywhere in this app, and this
+                      one is read by somebody scanning twelve rows. */}
+                  {row.sameAsPrevious ? (
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>same as the week before</Text>
+                  ) : null}
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>{row.detail}</Text>
+                </Pressable>
+              ))}
             </View>
           ) : null}
         </Section>

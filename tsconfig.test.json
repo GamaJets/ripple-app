@@ -433,6 +433,12 @@
     "src/lib/changedRows.ts",
     "src/lib/changedRows.test.ts",
     "src/lib/registerGaps.ts",
-    "src/lib/registerGaps.test.ts"
+    "src/lib/registerGaps.test.ts",
+    "src/lib/blockPlan.ts",
+    "src/lib/blockPlan.test.ts",
+    "src/lib/templateUsage.ts",
+    "src/lib/templateUsage.test.ts",
+    "src/lib/chaseList.ts",
+    "src/lib/chaseList.test.ts"
   ]
 }

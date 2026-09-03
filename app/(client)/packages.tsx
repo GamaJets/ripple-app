@@ -199,7 +199,22 @@ export default function ClientPackages() {
     // not hold still shows a dash rather than a number in some default unit.
     const infoRead = await withDeadline(packageLabels(ids));
     const info = infoRead.answered ? infoRead.value : null;
-    if (info) setPkgInfo(info);
+    // Replaced only when BOTH lists it labels came back; merged otherwise.
+    //
+    // `ids` is built out of `p` and `s`, so a failed purchases read makes it
+    // empty, `packageLabels([])` returns an empty Map, and assigning that wiped
+    // the names and currencies this screen had just restored from the device
+    // cache — leaving the cached purchases listed with a generic label and a
+    // dash where every amount should be. A list of packs with no prices is
+    // barely a list, and it was produced by a read that failed rather than by
+    // anything about what the member bought.
+    //
+    // No currency is invented by the merge: an id the map does not hold still
+    // renders as a dash rather than a number in some default unit, which is the
+    // rule this whole screen is built on.
+    if (info) {
+      setPkgInfo((prev) => (p != null && s != null ? info : new Map([...prev, ...info])));
+    }
     // Cached only when the purchases actually came back. `p === null` is a
     // failed read, and writing that over a good copy would replace what
     // somebody bought with the fact that we could not ask.
@@ -261,6 +276,28 @@ export default function ClientPackages() {
   // What is left to buy: everything the coach sells that this client is not
   // already subscribed to. A one-off pack stays on offer however many they own.
   const buyable = (offers ?? []).filter((p) => !(p.billing_interval && subIds.has(p.id)));
+  /**
+   * Whether we actually know what this member is already paying for.
+   *
+   * `subIds` is built out of what came BACK. A refused or unanswered
+   * subscriptions read leaves `subs` null, so `liveSubs` is empty, so `subIds`
+   * is empty, so the very package this member is already subscribed to comes
+   * back into the list below under a live "Subscribe" button — and a second tap
+   * is a second Stripe subscription and a second charge every month until
+   * somebody notices. `fetchMySubscriptions`' own docstring names this exact
+   * consequence: "the obvious response to that sentence is to subscribe, and
+   * the client is then paying their coach twice a month."
+   *
+   * The flag above the list said so in prose and the button under it stayed
+   * enabled. A sentence is not a guard when the thing it warns about is one tap
+   * away, so the recurring rows below are shown — a member is still entitled to
+   * see what their coach sells — and cannot be bought until we know.
+   *
+   * `subsFailed` rather than `subs === null`, so a WARM CACHE does not count as
+   * knowing either: it is up to a week old (see `withinHorizon`), and a
+   * subscription taken out since is exactly the one that would not be in it.
+   */
+  const subsUnknown = subsFailed;
   const G = layout.gutter;
 
   /** The package, in the shape the code rule reads. */
@@ -717,8 +754,22 @@ export default function ClientPackages() {
                       <Ghost label="Have A Code" onPress={() => { setCodeFor(p.id); setCode(''); }} />
                     </View>
                   )}
+                  {p.billing_interval && subsUnknown ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+                      We could not read what you are already subscribed to, so this cannot be bought right
+                      now — if you are already on it, subscribing again would charge you twice every
+                      {p.billing_interval === 'month' ? ' month' : ' year'}. Pull down to try the read again.
+                    </Flag>
+                  ) : null}
                   <View style={{ marginTop: sp.md }}>
-                    <Cta label={busy === p.id ? 'Opening…' : p.billing_interval ? 'Subscribe' : 'Buy'} wide disabled={busy === p.id || !!codeProblem(p)} onPress={() => start(p)} />
+                    {/* A recurring package is not buyable while `subsUnknown`.
+                        See the note on that flag: the guard used to be a
+                        sentence at the top of the screen with a live button
+                        under it. A one-off pack is unaffected — buying a second
+                        ten-pack is a thing people do on purpose. */}
+                    <Cta label={busy === p.id ? 'Opening…' : p.billing_interval ? 'Subscribe' : 'Buy'} wide
+                      disabled={busy === p.id || !!codeProblem(p) || (!!p.billing_interval && subsUnknown)}
+                      onPress={() => start(p)} />
                   </View>
                 </View>
               ))}

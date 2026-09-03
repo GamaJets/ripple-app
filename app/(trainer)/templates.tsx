@@ -39,7 +39,7 @@
 // excluded from the write, and the button says "Assign to 7 of 8". Nobody is
 // silently skipped — a bulk assign that quietly dropped somebody would be worse
 // than one that refused, because the coach would believe they had sent it.
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -55,6 +55,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates, type ProgramTemplate } from '../../src/ui/programTemplates';
 import { deleteRefusedLine } from '../../src/lib/templateLibrary';
+import { templateUsage } from '../../src/lib/templateUsage';
 import { notifySuccess } from '../../src/ui/haptics';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { CLIENT_STARTS_NOW, isStartDate } from '../../src/lib/programStart';
@@ -83,7 +84,7 @@ export default function Templates() {
   // silently overwrites however many of them were on something bespoke.
   const { templates, removeTemplateFrom, isStarter, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
   const { roster, status: rosterStatus, refresh: refreshRoster } = useRoster();
-  const { assignProgramTo, getProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
+  const { programs, assignProgramTo, getProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
   const acks = useInjuryAcks();
   // Four reads, and this screen crosses all four on every tap: assigning a
   // template to a ticked list needs the library, the book, what each of them
@@ -267,6 +268,27 @@ export default function Templates() {
     Alert.alert(report.title, parts.join('\n\n'));
   };
 
+  /**
+   * Who is training each of these, right now.
+   *
+   * A library of twenty rows all reading "5 days · 24 exercises" gives a coach
+   * nothing to choose on, and the one fact that would — whether anybody is on
+   * it — was already on this screen and unused. `programs` is the map this
+   * screen holds anyway, because the bulk assign below needs it to say whose
+   * training it is about to replace. Nothing new is read.
+   *
+   * `programStatus` governs the whole thing: `getProgram` returns null both for
+   * a client on nothing and for a client whose row did not come back, which is
+   * the trap this file's own header describes, and a count built over it under
+   * 'error' would tell a coach nobody is on a template twelve people train. See
+   * src/lib/templateUsage.ts, which refuses to produce a number at all under
+   * anything but a whole read.
+   */
+  const usage = useMemo(
+    () => templateUsage(templates, programs, programStatus),
+    [templates, programs, programStatus],
+  );
+
   const dayCount = (tpl: ProgramTemplate) => tpl.program.days.length;
   const exCount = (tpl: ProgramTemplate) => tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
 
@@ -315,6 +337,11 @@ export default function Templates() {
             <PartialRead what="templates in your library" shown={templates.length} />
           ) : null}
 
+          {/* Said once for the whole list rather than once per row: the reason
+              is a fact about a single read, and twenty copies of it is twenty
+              times the noise for the same information. */}
+          {usage.withheld ? <Flag style={{ marginTop: sp.sm }}>{usage.withheld}</Flag> : null}
+
           {templates.length === 0 && tplStatus === 'ready' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No templates yet — build a program above and save it here.</Text>
           ) : null}
@@ -327,6 +354,14 @@ export default function Templates() {
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{dayCount(tpl)} days · {exCount(tpl)} exercises{isStarter(tpl.id) ? ' · starter' : ''}</Text>
+                  {/* Present tense, and only ever about who is ON something.
+                      Nothing behind this line reads a session or an adherence
+                      figure, so it must never be read as saying a programme
+                      worked — and a template nobody is on says nothing at all
+                      rather than reporting its own absence twenty times over. */}
+                  {usage.byId[tpl.id]?.line ? (
+                    <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{usage.byId[tpl.id].line}</Text>
+                  ) : null}
                 </View>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
