@@ -487,6 +487,8 @@
     "src/lib/sharedRead.ts",
     "src/lib/sharedRead.test.ts",
     "src/lib/departureSection.ts",
-    "src/lib/departureSection.test.ts"
+    "src/lib/departureSection.test.ts",
+    "src/lib/sumCurrency.ts",
+    "src/lib/sumCurrency.test.ts"
   ]
 }

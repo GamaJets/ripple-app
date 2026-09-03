@@ -20,7 +20,7 @@ import {
   axisLabel, pointLabel, tickIndices, maxTicksForWidth,
   segments, readablePoints, hasInteriorGap, nearestPoint,
 } from '../lib/chartAxis';
-import { FORWARD_CHAR, FORWARD_ICON } from './direction';
+import { END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from './direction';
 
 /* ── how this kit talks ───────────────────────────────────────────────────
  *
@@ -92,8 +92,28 @@ export function Section({ children, style }: { children: ReactNode; style?: Styl
 export function SectionHead({ title, note, onPress }: { title: string; note?: string; onPress?: () => void }) {
   const t = useTheme();
   return (
-    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: sp.lg }}>
-      <Text style={{ ...ty.micro, color: t.ink3 }}>{title}</Text>
+    // `gap` and the two `flexShrink`s are not tidying. Without them this row
+    // had no way to be too wide: `space-between` puts nothing between the two
+    // children when they already fill the line, and a Text that cannot shrink
+    // runs off the end rather than wrapping. Seen on an iPhone 17 Pro at the
+    // DEFAULT text size, on two screens:
+    //
+    //   AT-RISK CLIENTSWell below their own rate over the last 14 days. I
+    //   WHAT YOU HAVE ISSUEDPriced in AED, from your gym's setting
+    //
+    // — no space after the title, the first line running past the right edge,
+    // and the remainder wrapping to a stray centred second line. Twenty-odd
+    // call sites pass a `note` over 28 characters, so this is the whole set of
+    // them, not two screens; and it gets worse, not better, at the larger text
+    // sizes a good many people use.
+    //
+    // Both children shrink rather than one: giving only the note `flexShrink`
+    // protects the title and squeezes the note to a column of single letters,
+    // which is not better. Yoga shrinks proportionally to size, so the short
+    // uppercase title keeps most of its width and the long sentence gives up
+    // most of the slack, which is the right trade in every case here.
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: sp.md, marginBottom: sp.lg }}>
+      <Text style={{ ...ty.micro, color: t.ink3, flexShrink: 1 }}>{title}</Text>
       {note ? (
         // The chevron is drawn as a character, so it is also SPOKEN as one —
         // "All activity right-pointing angle quotation mark". The label says the
@@ -111,8 +131,12 @@ export function SectionHead({ title, note, onPress }: { title: string; note?: st
           accessibilityRole={onPress ? 'button' : undefined}
           accessibilityLabel={onPress ? note : undefined}
           hitSlop={{ top: 14, bottom: 14, left: 12, right: 12 }}
+          style={{ flexShrink: 1 }}
         >
-          <Text style={{ ...ty.caption, color: t.ink3 }}>{note}{onPress ? ' ' + FORWARD_CHAR : ''}</Text>
+          {/* END_ALIGN rather than a raw 'right': a note that has wrapped to a
+              second line must stay against the trailing edge it started at, and
+              in a right-to-left locale that edge is the left one. */}
+          <Text style={{ ...ty.caption, color: t.ink3, textAlign: END_ALIGN }}>{note}{onPress ? ' ' + FORWARD_CHAR : ''}</Text>
         </Pressable>
       ) : null}
     </View>

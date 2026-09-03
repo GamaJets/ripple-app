@@ -33,6 +33,9 @@ import { weightIn, weightToKg, weightDeltaIn, kgToLb, readNumber, type WeightUni
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { useGoalTracker, type GoalSaved } from '../../src/ui/goalTracker';
 import { fmtFullDay } from '../../src/lib/format';
+// The chip's span turned into a day on the MEMBER'S calendar. See the header of
+// that file for the two whole-day errors the expression this replaced carried.
+import { targetDayIn } from '../../src/lib/goalDeadline';
 // Whether a row is still on this phone. The queue was built for goals set with
 // no signal and this screen was never told about it: the waiting row was drawn
 // exactly like a stored one, could not be removed or ticked off, and both
@@ -175,7 +178,16 @@ export default function Goal() {
 
   const save = async () => {
     if (saving) return;
-    const targetDateISO = days == null ? null : new Date(Date.now() + days * 86400000).toISOString();
+    // `targetDayIn`, not `new Date(Date.now() + days * 86400000).toISOString()`.
+    // That expression named UTC's calendar day, and src/ui/goalTracker.tsx
+    // writes `.slice(0, 10)` of whatever it gets into a bare Postgres `date` —
+    // so "4 wks" tapped in the evening in Los Angeles was stored 29 days out and
+    // the same tap in the morning in Auckland 27. It also added `days` lots of
+    // twenty-four hours, which is a day short across a clocks change. Both are
+    // argued and asserted in src/lib/goalDeadline.ts. Computed at the moment of
+    // the tap rather than held in a memo, so a screen left open across midnight
+    // counts from the day the member is actually in when they press Save.
+    const targetDateISO = targetDayIn(days);
     setSaving(true);
     let ok: GoalSaved = false;
     if (kind === 'custom') {

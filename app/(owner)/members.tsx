@@ -38,6 +38,9 @@ import {
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
 import { FORWARD_ICON } from '../../src/ui/direction';
+// What money a SUM is in. `summarise` reports it and this screen used to throw
+// it away — see the header of src/lib/sumCurrency.ts for what that printed.
+import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '../../src/lib/sumCurrency';
 // The gym's own calendar day for the date this screen WRITES, and the sentence
 // for a gym that has not said which calendar that is. See `today` below.
 import { fetchGymZone } from '../../src/lib/gymZone';
@@ -259,6 +262,28 @@ export default function OwnerMembers() {
   const loaded = hasRows(state);
   const list = rows ?? [];
   const sum = useMemo(() => summarise(payments, list, plans), [payments, list, plans]);
+  /* ── which money the recurring total is in ────────────────────────────────
+   *
+   * This hero was `money(sum.mrrCents, cur)`, where `cur` is `tenants.currency`
+   * — the gym's CURRENT setting — and `sum.mrrCents` is the prices of every
+   * active membership's plan added together with no regard to what currency
+   * each plan states. `membership_plans.currency` is `not null default 'AED'`,
+   * so a gym that has since set GBP had its legacy dirhams added to its pounds
+   * and the biggest figure on its register screen labelled GBP.
+   *
+   * `summarise` reports `mrrCurrency` for exactly this, and its own header says
+   * a caller holding a null must withhold the figure and say why. The console's
+   * /money and Overview both obey it; this screen threw it away. See
+   * src/lib/sumCurrency.ts, which is now the one place the rule is written.
+   *
+   * `mrrCents == null` means no active membership sits on a priced plan — no
+   * rows contributed, so nothing has contradicted the gym's own currency and
+   * the label stays stable under the dash the branch below prints anyway.
+   */
+  const mrrCcy = useMemo(
+    () => (sum.mrrCents == null ? emptyTotalMoney(cur) : totalMoney(sum.mrrCents, sum.mrrCurrency, cur)),
+    [sum.mrrCents, sum.mrrCurrency, cur],
+  );
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -457,12 +482,17 @@ export default function OwnerMembers() {
           // empty arrays returns a null MRR today, so this was already a dash
           // under a failed read — by arithmetic rather than on purpose, which is
           // one refactor of `summarise` away from printing a confident 0.
-          figure={hasRows(state) ? (money(sum.mrrCents, cur) ?? '—') : '—'}
+          figure={hasRows(state) ? (money(sum.mrrCents, mrrCcy.currency) ?? '—') : '—'}
           note={state === 'failed'
             ? failedNote('register', reason)
             : state === 'loading'
             ? 'Reading your register…'
-            : sum.mrrCents != null && !cur
+            : mrrCcy.gap === 'unstated'
+            // The plans this total is made of are not all in one money. Adding
+            // them was never a sum, and the previous version of this line put
+            // the result under whichever code the gym had set most recently.
+            ? MIXED_CURRENCY_NOTE
+            : sum.mrrCents != null && mrrCcy.gap === 'no_gym_currency'
             // The figure is known and the money it is in is not. Printing it
             // bare would be read in whatever currency the owner is thinking in,
             // which is the same wrong number with fewer clues.

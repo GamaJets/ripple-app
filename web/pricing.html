@@ -155,7 +155,7 @@ addEventListener('DOMContentLoaded', function () {
       </div>
       <div>
         <dt class="stat-n">10%</dt>
-        <dd class="lbl"><strong>On payments taken through Repple&rsquo;s checkout.</strong> The one charge that is live. If a gym or a coach sells a membership, a pass or a package through Repple&rsquo;s own checkout, Repple keeps 10% of it and Stripe takes its processing fee on top. A payment you record at the desk is a row rather than a transaction, so nothing is taken from it &mdash; and on an item cheap enough that 10% of it rounds below one unit of your currency, nothing is taken either. What happens on a refund is the part worth reading, and it is below.</dd>
+        <dd class="lbl"><strong>On payments taken through Repple&rsquo;s checkout.</strong> The one charge that is live. If a gym or a coach sells a membership, a pass or a package through Repple&rsquo;s own checkout, Repple keeps 10% of it and Stripe takes its processing fee on top. A payment you record at the desk is a row rather than a transaction, so nothing is taken from it &mdash; and on a <em>one-off</em> sale small enough that 10% of it rounds to zero, which means under five minor units of your currency, no fee is sent at all. That relief is on one-off sales only: a recurring plan hands Stripe the percentage and Stripe rounds each invoice itself. What happens on a refund is the part worth reading, and it is below.</dd>
       </div>
       <div>
         <dt class="stat-n">Free</dt>
@@ -200,8 +200,9 @@ addEventListener('DOMContentLoaded', function () {
         <p>A coach who refunds a sale <em>inside Repple Coach</em> gets our 10% returned with it: the app
            asks Stripe for the platform fee back in the same request. A refund made in your own Stripe
            dashboard does not &mdash; Repple is not part of that request and the fee stays taken &mdash; and a gym
-           today has only that second route, because the console&rsquo;s own refund writes a reversing row
-           in your ledger rather than calling Stripe. That is a gap in the product rather than a
+           today has only that second route, because the gym console has no refund button at all. A
+           refund a gym makes in Stripe comes back into your ledger as a reversing row, so the record
+           stays right; the 10% does not come back with it. That is a gap in the product rather than a
            policy, and it is written here instead of found later in a settlement report.
            <a href="mailto:support@repplefitness.com?subject=A%20refunded%20sale">Tell us if it has cost you</a>.</p>
       </div>
@@ -319,7 +320,7 @@ addEventListener('DOMContentLoaded', function () {
           <tr>
             <th scope="row"><strong>Repple Studio</strong></th>
             <td>The gym</td>
-            <td>Timetable, one-to-one payroll, the price book and memberships, the door log, the equipment register and the CSV import &mdash; on the floor as a phone app and at the desk as a browser console. <a href="/studio">What it runs</a>.</td>
+            <td>Timetable, one-to-one payroll, the price book and memberships, the door log, the equipment register and the CSV import. The browser console runs all of it; the phone app is the part you can carry onto the floor &mdash; members, revenue, class attendance and the equipment register &mdash; and the desk jobs stay at the desk. <a href="/studio">What it runs</a>.</td>
           </tr>
         </tbody>
       </table>

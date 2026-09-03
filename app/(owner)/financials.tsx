@@ -48,7 +48,7 @@ import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, 
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { emptyFinances, hasFigures, anyEntered, reviewFinances, reviewBasis, storageNote, type FinInputs, type FinFlag } from '../../src/lib/finReview';
 import { reconcile, reconcileNote, unreadable } from '../../src/lib/finReconcile';
-import { fetchPlans, fetchMemberships, fetchPayments, summarise } from '../../src/lib/gymRecord';
+import { fetchPlans, fetchMemberships, fetchPayments, summarise, sharedCurrency } from '../../src/lib/gymRecord';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
@@ -57,6 +57,9 @@ import { readNumber } from '../../src/lib/units';
 // A minor-unit integer from the register, as the whole-unit number the owner
 // typed into the form beside it — scaled by the currency, never by a hundred.
 import { wholeFromMinor, NO_CURRENCY_CHECK_NOTE } from '../../src/lib/wholeUnits';
+// What money a SUM is in — the rule this screen held and breached six lines
+// apart. See the header of src/lib/sumCurrency.ts.
+import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '../../src/lib/sumCurrency';
 // `tenants.timezone`, and the one function that turns it into a calendar day.
 // The "joined this month" check compares against `memberships.started_on`,
 // which app/(owner)/members.tsx writes on the gym's own calendar.
@@ -163,6 +166,19 @@ export default function Financials() {
    * owner's figures against the register, that is the worst available sentence.
    */
   const [derivedFailed, setDerivedFailed] = useState(false);
+  /**
+   * The register holds more than one currency, so there is no figure to check
+   * against — for the recurring total, for the thirty-day takings, or for both.
+   *
+   * A third silence, kept apart from the other two for the reason the second
+   * one exists. A null derived figure already means either "nothing recorded"
+   * or "the read failed"; this is a register that is full, was read, and states
+   * two moneys. Folding it into `no_record` tells an owner their register is
+   * empty when it is not, and folding it into the currency-blind sentence sends
+   * them to Ops to set a field that is already set.
+   */
+  const [mrrMixed, setMrrMixed] = useState(false);
+  const [revenueMixed, setRevenueMixed] = useState(false);
 
   // Bumped by the Refresh control under the title. A counter, so two taps are
   // two reads.
@@ -223,6 +239,10 @@ export default function Financials() {
         if (!live) return;
         setDerivedMrr(null); setDerivedMembers(null);
         setDerivedRevenue(null); setDerivedNew(null);
+        // Cleared alongside the figures. A mixed-ledger sentence left standing
+        // over a read that never happened is a claim about a register nobody
+        // looked at, which is the same class of mistake as the one above it.
+        setMrrMixed(false); setRevenueMixed(false);
         setDerivedFailed(tenantStatus !== 'ready');
         return;
       }
@@ -274,7 +294,23 @@ export default function Financials() {
         // could then be hundredths of something or whole units of it and the
         // decimal point itself would be a guess. The form says so instead —
         // NO_CURRENCY_CHECK_NOTE, below.
-        setDerivedMrr(wholeFromMinor(sum.mrrCents, cur));
+        //
+        // ── and scaled by the currency the PLANS state, not the gym's ──────
+        //
+        // `cur` is `tenants.currency`, the gym's current setting. `sum.mrrCents`
+        // is every active membership's plan price added together with no regard
+        // to what currency each plan states, and `summarise` reports which
+        // currency those plans share — null when they share none. This line
+        // used `cur` and threw that away, so a gym that has changed currency
+        // had a sum of two moneys divided by the new code's decimal places and
+        // reported back as the owner's own MRR figure being wrong. The takings
+        // check twenty lines below has always grouped on the rows' own currency
+        // first; this is that same rule, from the one place it now lives.
+        const mrrCcy = sum.mrrCents == null
+          ? emptyTotalMoney(cur)
+          : totalMoney(sum.mrrCents, sum.mrrCurrency, cur);
+        setMrrMixed(mrrCcy.gap === 'unstated');
+        setDerivedMrr(wholeFromMinor(sum.mrrCents, mrrCcy.currency));
         setDerivedMembers(memberships.length ? sum.activeMembers : null);
 
         // `since` above is thirty days back in whole days, so the window does
@@ -287,16 +323,25 @@ export default function Financials() {
         // its currency has two in its ledger and adding them is not a sum. Null
         // withholds the check rather than comparing a typed figure against a
         // number made of two moneys.
-        const oneMoney = recent.length > 0 && new Set(recent.map((p) => p.currency)).size === 1;
+        //
+        // This was a hand-written `new Set(recent.map((p) => p.currency)).size
+        // === 1`, which is `sharedCurrency` with one difference: it does not
+        // normalise, so a ledger holding 'gbp' beside 'GBP' read as two moneys
+        // and withheld a check the gym was entitled to. It now asks the same
+        // question the recurring total above asks, in the same words.
+        const takenCents = recent.length
+          ? recent.reduce((a, p) => a + p.amountCents, 0)
+          : null;
         // Scaled by the currency the rows actually agree on, not by the gym's
-        // current setting: `oneMoney` has just established that every payment
-        // in the window states the same currency, and a gym that changed its
-        // currency last month has a ledger whose older rows are still in the
-        // old one. Using `cur` here would divide yen by a hundred the moment
-        // the gym switched to GBP.
-        setDerivedRevenue(oneMoney
-          ? wholeFromMinor(recent.reduce((a, p) => a + p.amountCents, 0), recent[0].currency)
-          : null);
+        // current setting: a gym that changed its currency last month has a
+        // ledger whose older rows are still in the old one, and using `cur`
+        // here would divide yen by a hundred the moment the gym switched to
+        // GBP.
+        const revCcy = takenCents == null
+          ? emptyTotalMoney(cur)
+          : totalMoney(takenCents, sharedCurrency(recent), cur);
+        setRevenueMixed(revCcy.gap === 'unstated');
+        setDerivedRevenue(wholeFromMinor(takenCents, revCcy.currency));
 
         /**
          * The cut-off day, on the GYM's calendar — not UTC's.
@@ -328,6 +373,7 @@ export default function Financials() {
         if (!live) return;
         setDerivedMrr(null); setDerivedMembers(null);
         setDerivedRevenue(null); setDerivedNew(null); setDerivedFailed(true);
+        setMrrMixed(false); setRevenueMixed(false);
       } finally {
         if (live) setBusy(false);
       }
@@ -516,7 +562,17 @@ export default function Financials() {
                   // unaffected — a member count needs no currency — so they
                   // keep their own wording.
                   const currencyBlind = asMoney && !cur;
-                  const note = currencyBlind
+                  // The register was read, it is not empty, and it holds more
+                  // than one currency — so there is no single figure to check
+                  // this against. Said before the currency-blind sentence
+                  // because they are different missing things: that one is a
+                  // field in Ops, this one is a ledger with two moneys in it,
+                  // and the Ops sentence sends an owner to change a setting
+                  // that is already right.
+                  const mixed = f.key === 'mrr' ? mrrMixed : f.key === 'revenue' ? revenueMixed : false;
+                  const note = mixed
+                    ? MIXED_CURRENCY_NOTE
+                    : currencyBlind
                     ? NO_CURRENCY_CHECK_NOTE
                     : reconcileNote(chk, f.label.toLowerCase(), fmtv);
                   if (!note) return null;
@@ -535,7 +591,7 @@ export default function Financials() {
                           This button WRITES the derived figure into the owner's
                           own numbers, which is what made the scaling bug above
                           more than a display fault. */}
-                      {val != null && !currencyBlind ? (
+                      {val != null && !currencyBlind && !mixed ? (
                         <Ghost label="Use It" onPress={() => setDraft((d) => ({ ...d, [f.key]: String(val) }))} />
                       ) : null}
                     </View>

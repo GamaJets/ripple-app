@@ -139,9 +139,23 @@ export async function fetchStatementInput(period: StatementPeriod, brand: string
 
     // Sessions. Counted, never priced — `rate_cents` is a gym payroll rate and
     // is deliberately not selected, so nothing downstream can be tempted by it.
+    //
+    // `startsAt:starts_at` is an ALIAS and is load-bearing. This is the one read
+    // on this statement whose rows reach `coachStatement()` unmapped — every
+    // other camelCase row shape here is built by a `toInvoice`/`toCharge`/
+    // `toCost` mapper in the `.then` below its own read. `StatementSession`
+    // declares `startsAt`, `splitByDay` splits on `r.startsAt`, and the column
+    // is `starts_at`, so selecting the bare column handed every row a field
+    // that did not exist. `undefined` is not a date: every session fell into
+    // `undated`, and the document told a coach that they had delivered NOTHING
+    // all year while separately reporting that a few hundred sessions could not
+    // be dated. The `as unknown as` cast on the line below is what let tsc
+    // agree — it asserts the row shape rather than deriving it, which is why
+    // the alias has to be maintained by hand and why scripts/check-row-shapes
+    // now checks it.
     paged<StatementSession>('your sessions in this period', (f, t) => supabase
       .from('sessions')
-      .select('starts_at, outcome')
+      .select('startsAt:starts_at, outcome')
       .eq('trainer_id', uid)
       .gte('starts_at', bounds.fromIso)
       .lt('starts_at', bounds.toIso)

@@ -166,7 +166,9 @@ addEventListener('DOMContentLoaded', function () {
           <tr><th scope="row"><strong>Workouts</strong> — exercises, sets, reps, weight, perceived effort, cardio, calories, time in heart-rate zone</th><td>Your training history, progress and personal records.</td><td>When you log a workout or import one.</td></tr>
           <tr><th scope="row"><strong>Apple Health data</strong> — heart rate, active energy, steps, resting heart rate, workouts</th><td>Live heart rate and calories during a session, and importing workouts you recorded on your watch.</td><td>Only if you grant Health permission. You can revoke it at any time.</td></tr>
           <tr><th scope="row"><strong>Blood glucose</strong> &mdash; readings a continuous glucose monitor wrote into Apple Health or Health Connect</th><td>Shown beside your own food log, so you can see what happened around a meal. Repple does not interpret them and does not tell you what to eat.</td><td>Only if you ask for it on the Blood Sugar screen and grant that permission separately. Your coach sees none of it unless you turn sharing on yourself.</td></tr>
+          <tr><th scope="row"><strong>Sleep</strong> &mdash; hours slept and how many nights a device actually measured, from Apple Health, Health Connect or a wearable you connected</th><td>Shown in your own record, and used as one input to the readiness figure.</td><td>Only if you grant Health permission or connect a device that reports it. Nights you typed in yourself are kept apart from nights a device measured, because a guess and a measurement are not the same fact.</td></tr>
           <tr><th scope="row"><strong>Body measurements and InBody scans</strong></th><td>To show change over time.</td><td>If you record them.</td></tr>
+          <tr><th scope="row"><strong>Photographs of a meal, or of a scan printout</strong></th><td>Only to read them &mdash; the food in a meal photo, the figures on an InBody or DEXA sheet &mdash; so you do not type them in by hand.</td><td>Only when you ask Repple to read one, and we ask before the first time. The picture is sent to be read and is not kept: what is stored afterwards is the figures, not the photograph. A scan sheet often carries your name and date of birth, so this is asked per sheet rather than once.</td></tr>
           <tr><th scope="row"><strong>Progress photographs</strong></th><td>To compare two of them side by side. Held in a private store, reachable only through a temporary link you ask for.</td><td>If you take them. A coach cannot see one unless you share that specific photo with them, and you can withdraw it.</td></tr>
           <tr><th scope="row"><strong>Injuries, and any document you upload about one</strong></th><td>So the training plan works around the area until you mark it recovered. Your coach sees the area and the severity, never the document.</td><td>If you record an injury. Uploading a document is a separate step, and sending one to be read as text is a separate question we ask you per document.</td></tr>
           <tr><th scope="row"><strong>Food and meal logs</strong></th><td>Nutrition tracking, and sharing with your coach if you have one.</td><td>If you use the nutrition features.</td></tr>
@@ -174,6 +176,7 @@ addEventListener('DOMContentLoaded', function () {
           <tr><th scope="row"><strong>Messages</strong> between you and your coach</th><td>To deliver them.</td><td>When you send one.</td></tr>
           <tr><th scope="row"><strong>Device push token</strong></th><td>To send notifications you have asked for.</td><td>If you allow notifications.</td></tr>
           <tr><th scope="row"><strong>Connected device tokens</strong> (WHOOP, Oura, Spotify)</th><td>To read the data you connected them for.</td><td>Only if you connect that service. Fitbit and Garmin are listed in the app but cannot be connected yet, so there is no token for either.</td></tr>
+          <tr><th scope="row"><strong>Agreements you sign</strong> &mdash; Repple&rsquo;s own liability waiver, and any paperwork your gym asks for</th><td>To hold the record of what you agreed to, as it was worded at the time. Repple&rsquo;s waiver is the release and physician acknowledgement that opens the client app. A gym can additionally ask you to sign membership terms, a contract, a pre-exercise health questionnaire (PAR-Q), permission to photograph you in the building, or &mdash; for a member under 18 &mdash; a guardian&rsquo;s agreement.</td><td>When you sign one. These are evidence, so a signed agreement cannot be edited or withdrawn afterwards; re-wording one later creates a new record rather than changing the old. Repple&rsquo;s own waiver is readable by you and by nobody else &mdash; not your coach and not your gym. A gym&rsquo;s paperwork is readable by that gym, which is the point of it.</td></tr>
           <tr><th scope="row"><strong>Crash and error reports</strong></th><td>To find and fix faults.</td><td>When the app hits an error.</td></tr>
           <tr><th scope="row"><strong>Payment records</strong></th><td>For trainers and gyms taking payment through Repple.</td><td>Card details are handled by Stripe and never reach our servers.</td></tr>
         </tbody>
@@ -216,8 +219,32 @@ addEventListener('DOMContentLoaded', function () {
         <li><strong>Stripe</strong> — payments, where a trainer or gym takes them. Stripe handles card details directly; we never receive them.</li>
         <li><strong>Open Food Facts</strong> — barcode and food-name lookups. Your phone asks them directly, so they see the barcode you scanned and your IP address, but nothing that identifies your account.</li>
         <li><strong>WHOOP, Oura, Spotify</strong> — only if you connect them, and only for what you connected them for. Spotify is the one that goes outwards rather than inwards: it creates a playlist in your own Spotify account.</li>
-        <li><strong>Google, Meta and TikTok</strong> — for coaches only, and only for a coach&rsquo;s own accounts: putting a coach&rsquo;s own sessions on their own calendar, and reading back what a coach&rsquo;s own advertising cost them. A client&rsquo;s name is never sent to any of the three. A calendar event Repple writes says &ldquo;Coaching session&rdquo; and nothing else.</li>
+        <li><strong>Google, Meta and TikTok</strong> — <em>inside the apps</em>, for coaches only, and only for a coach&rsquo;s own accounts: putting a coach&rsquo;s own sessions on their own calendar, and reading back what a coach&rsquo;s own advertising cost them. A client&rsquo;s name is never sent to any of the three. A calendar event Repple writes says &ldquo;Coaching session&rdquo; and nothing else. Google separately receives a request from <em>this website</em>, from everybody, and that is set out immediately below rather than folded into this line.</li>
       </ul>
+
+      <h2 id="website">This website, separately from the apps</h2>
+      <p>Everything above is about the Repple apps. This page you are reading is a plain static site with
+         no analytics, no tracking pixels, no advertising tags, no cookie banner and no cookies of its own
+         &mdash; we set none, and we measure nothing about your visit. That is worth stating because it is
+         unusual, and because it makes the two exceptions easy to name honestly:</p>
+      <ul>
+        <li><strong>Google Fonts</strong> (<code>fonts.googleapis.com</code> and <code>fonts.gstatic.com</code>).
+            The typefaces on this site are fetched from Google when the page loads. To serve them Google
+            receives your IP address, your browser&rsquo;s user-agent string and the address of the page you
+            are on. This happens on <em>every</em> page of this site, including this one, before you have
+            agreed to anything &mdash; so it is not covered by the &ldquo;coaches only&rdquo; line above, and we
+            would rather say so than let that line read as though Google hears nothing about an ordinary
+            visitor. Nothing is sent that identifies your Repple account, because at that moment you do
+            not have one loaded.</li>
+        <li><strong>jsDelivr</strong> (<code>cdn.jsdelivr.net</code>). The pages that talk to your account
+            &mdash; creating one, confirming it, resetting a password, joining a gym by invitation &mdash;
+            load the Supabase browser library from this public code CDN. It receives your IP address and
+            user-agent when it serves that file. It receives none of what you then type: your email and
+            password go from your browser straight to Supabase.</li>
+      </ul>
+      <p>Both are ordinary practice on the web and both are avoidable, which is the reason for naming them:
+         serving the fonts and that one library from our own domain would remove both requests, and we
+         would rather record the gap than describe a site that does not make them.</p>
 
       <h2 id="ai">What the AI features send, and where</h2>
       <p>Several things in Repple are done by a model that does not run on your phone, which means the material it reads leaves this app. That is worth a section of its own rather than a line in a list.</p>
@@ -244,8 +271,8 @@ addEventListener('DOMContentLoaded', function () {
       <ul>
         <li><strong>Get a copy.</strong> Ask and we will export everything we hold about you. There is also an export in the app, under <strong>Me → Settings → Your data</strong> &mdash; it is not quite everything, and <a href="/delete-account">Deleting your account</a> lists what the in-app one leaves out. Ask us and you get the rest.</li>
         <li><strong>Correct it.</strong> Most of it you can edit in the app; ask us for the rest.</li>
-        <li><strong>Delete it.</strong> Request account deletion in <strong>Me → Settings</strong>, or email us.</li>
-        <li><strong>Withdraw consent.</strong> Turn off Health access or disconnect a device whenever you like.</li>
+        <li><strong>Delete it.</strong> Request account deletion in <strong>Me → Settings</strong>, or email us. Worth knowing which of those two is the reliable one: the in-app request records that you asked, and a person then has to carry it out &mdash; if you are not a member of a gym there is nobody on the other end of it, so a request made that way can sit unseen. Emailing us always reaches a person. <a href="/delete-account">Deleting your account</a> explains why it is built that way.</li>
+        <li><strong>Withdraw consent.</strong> Turn off Health access or disconnect a device whenever you like. The same goes for the narrower permissions: a progress photo you shared with a coach can be withdrawn one photo at a time, and the switch that lets the in-app coach read your health figures can be turned back off. An answer you gave about one injury document or one scan sheet applies only to that document; the next one asks again.</li>
         <li><strong>Object or complain.</strong> If you are in the UK or EU you may also complain to your data protection authority.</li>
       </ul>
       <p>Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a> for any of these. We will respond within 30 days.</p>

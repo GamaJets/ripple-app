@@ -54905,3 +54905,798 @@ end $$;
 --     for whom it is 07:00 locally, which needs a zone per coach —
 --     `trainer_availability.tz` and `notify_quiet_hours.tz` both hold one — and
 --     is its own part.
+
+-- ▶ the-notification-that-arrived-at-three-in-the-morning.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The notification that arrived at three in the morning.
+--
+-- Six nightly passes in this database each fire at a fixed UTC minute:
+--
+--   run_overdue_client_notices      07:12 UTC   (part 202)
+--   run_credential_expiry_notices   07:19 UTC   (part 202)
+--   run_block_ended_notices         07:26 UTC   (part 471)
+--   run_pack_expiry                 07:33 UTC   (part 612)
+--   run_invoice_ageing_notices      07:40 UTC   (part 613)
+--   run_open_slot_extension         07:48 UTC   (part 650)
+--
+-- Read against `cron.job` on the live database, all six confirmed.
+--
+-- ── Four separate parts each say, in their own words, that this hour was ──
+-- ── chosen to AVOID waking somebody at three in the morning ──────────────
+--
+-- Part 202, above `cron.schedule('overdue-client-notices', '12 7 * * *')`:
+--
+--     "07:12 and 07:19 UTC. Morning rather than the small hours on purpose:
+--      both of these wake a phone, and a coach whose insurance notification
+--      arrives at 03:17 is a coach who turns notifications off."
+--
+-- Part 471, above `'26 7 * * *'`:
+--
+--     "07:26 UTC, seven minutes after part 202's second pass and on the same
+--      morning reasoning: this wakes a phone, and a coach whose notification
+--      arrives at 03:17 is a coach who turns notifications off."
+--
+-- Part 612, above `'33 7 * * *'`:
+--
+--     "07:33 UTC. Morning rather than the small hours for part 202's reason —
+--      this wakes a phone, and a coach whose notifications arrive at 03:17 is
+--      a coach who turns notifications off."
+--
+-- Part 613, above `'40 7 * * *'`:
+--
+--     "07:40 UTC, seven minutes after part 612's pass and on the same morning
+--      reasoning parts 202 and 471 set out: this wakes a phone, and a coach
+--      whose notification arrives at 03:17 is a coach who turns notifications
+--      off."
+--
+-- Every one of those sentences is true about the number and false about the
+-- world. 07:12 UTC is 03:12 in New York and 00:12 in Los Angeles. The hour that
+-- four separate parts chose in order not to arrive at 03:17 arrives, for every
+-- coach in the Americas, at 03:12. The reasoning was done in UTC and read as
+-- though it were local, four times, each part citing the one before it.
+--
+-- ── Quiet hours do not rescue it in either direction ─────────────────────
+--
+-- `notify_quiet_hours` (part 530) carries `from_hour`, `to_hour` and a `tz`
+-- that is NOT NULL. A coach who has never set them is woken at 03:12. A coach
+-- who HAS set them fares worse: the push is suppressed, not deferred, so they
+-- are never told at all that their public liability insurance lapsed. Silence
+-- and a 3am buzz are the only two outcomes this schedule can produce for an
+-- American coach, and the second is the one that looks like it is working.
+--
+-- ── The shape of the fix ─────────────────────────────────────────────────
+--
+-- Each pass runs HOURLY, on the minute it already used so the six still do not
+-- contend, and each one does its work only for the coaches for whom it is
+-- currently the intended local hour. Nothing about what a pass SAYS, or WHO it
+-- is about, changes: every function body below was taken verbatim out of the
+-- live database with `pg_get_functiondef` and carries exactly two additions —
+-- one `select ... into v_due` before the loop, and one `= any(v_due)` in the
+-- driving query. No sentence, no threshold, no date arithmetic and no
+-- bookkeeping table was touched.
+--
+-- ══ 1 · WHERE THE COACH IS ═══════════════════════════════════════════════
+--
+-- The zone already exists and is already stored, in two places:
+--
+--   `notify_quiet_hours.tz`      not null, written when a coach sets quiet
+--                                hours. An explicit statement by the coach
+--                                about which clock their day runs on.
+--   `trainer_availability.tz`    added by part 650 for this same wall, stamped
+--                                by src/ui/availability.ts on every write.
+--
+-- `notice_local_tz` prefers the first, because it is the one the coach typed
+-- about their own waking hours, and falls back to the most common zone on
+-- their availability rows. Both are validated against `pg_timezone_names`
+-- before use — part 650's rule, and the reason a typo cannot make an hourly
+-- job raise every hour instead of once a night.
+--
+-- ── A coach with no zone keeps 07:00 UTC, unchanged, and that is a choice ──
+--
+-- Not a guess at UTC and not a guess at anything else. Part 650 already refused
+-- to guess a zone for a coach who has not stated one — "UTC would put a London
+-- coach's 07:00 at 08:00 for half the year and a Dubai coach's four hours out
+-- all of it" — and that refusal holds here. What is left is the question of
+-- which hour to use for somebody we cannot place, and the honest answer is the
+-- hour they are already getting: 07:00 UTC, exactly as today. That way this
+-- part cannot make anybody's notification arrive at a worse time than it does
+-- now. It can only make it arrive at a better one.
+--
+-- ══ 2 · A THREE-HOUR WINDOW, NOT AN HOUR ═════════════════════════════════
+--
+-- The gate is `local hour between 7 and 9`, not `= 7`, for two reasons.
+--
+-- ── The day 07:00 local does not exist ───────────────────────────────────
+--
+-- Most zones move the clocks at 02:00, which leaves 07:00 alone. Some do not:
+-- there are jurisdictions that shift at midnight, and Lord Howe Island shifts
+-- by thirty minutes. A zone that springs forward across 07:00 has no 07:00 at
+-- all on that date, and a gate testing `= 7` would silently skip that coach for
+-- that day — the block that ended would be announced to nobody, because part
+-- 471's condition is true on exactly one day and there is no bookkeeping table
+-- to catch it tomorrow. With `between 7 and 9` the pass lands at 08:00 local
+-- instead, one hour late and said once.
+--
+-- The complementary case, a zone that falls back across 07:00, has 07:00 TWICE.
+-- The window does not help there; the claim table in section 3 does.
+--
+-- ── A missed tick is not a missed day ────────────────────────────────────
+--
+-- Three chances instead of one, so a pass that fails or a database that is
+-- briefly unreachable costs an hour rather than a day.
+--
+-- The window stops at 9 rather than running to the end of the day on purpose.
+-- If all three ticks are missed the coach hears nothing until tomorrow, which
+-- is the same failure the current single nightly run already has, and strictly
+-- better than the alternative: a catch-up pass firing at 22:00 local is this
+-- part's own defect wearing a different hat.
+--
+-- ══ 3 · EXACTLY ONCE, UNDER EVERY MOVEMENT OF A CLOCK ════════════════════
+--
+-- `notice_pass_runs` is keyed `(pass, coach_id, utc_day)`, and a coach is
+-- processed by a pass only on the tick that successfully INSERTS that row.
+-- `on conflict do nothing` plus `returning` makes the claim and the decision
+-- the same statement, so two ticks racing cannot both win.
+--
+-- ── Why the key is the UTC day and not the coach's local day ─────────────
+--
+-- This is the part that is easy to get wrong, and getting it wrong sends two.
+--
+-- The passes themselves are written against `current_date`, which is the UTC
+-- date, and not one character of that arithmetic is being changed here. So the
+-- unit of work is "this coach, this UTC date" and the claim has to be keyed on
+-- exactly that, or the same UTC date's rows can be evaluated twice.
+--
+-- Consider a coach at UTC+7 whose zone springs forward to UTC+8. On the day
+-- before, their 07:00 local is 00:00 UTC. On the transition day it is 23:00 UTC
+-- the PREVIOUS day. Both instants fall inside the same UTC date, they are
+-- different LOCAL days, and a claim keyed on the local day would let both
+-- through — two passes over one UTC date's rows.
+--
+-- Keyed on the UTC day, the second is refused. What the coach loses is one
+-- notification-day out of a spring-forward transition, and what they gain is
+-- that a duplicate is arithmetically impossible.
+--
+-- Nothing is ever dropped the other way. Every UTC date is 24 hours long and
+-- every fixed zone passes through local hours 7, 8 and 9 within any 24 hours,
+-- so every UTC date contains at least one tick where the gate is open. There is
+-- no UTC date a coach can be skipped on.
+--
+-- ── A coach who changes zone ─────────────────────────────────────────────
+--
+-- Same key, same answer. Moving from Berlin to Los Angeles mid-morning cannot
+-- produce a second notification, because the claim for that UTC date is already
+-- taken. Moving the other way cannot produce one either. The worst case a zone
+-- change can cause is one day at the old zone's hour, which is what a person
+-- who has just changed continent would expect anyway.
+--
+-- ── And the guards that were already there still hold ────────────────────
+--
+-- `coach_credential_notices (credential_id, stage)`, `coach_overdue_notices
+-- (coach_id, client_id, last_active_on)` and `coach_invoice_ageing_notices
+-- (invoice_id, bucket)` are untouched and still refuse a second message about
+-- the same fact. The claim table is a second, coarser floor underneath them,
+-- and it is the ONLY floor `run_block_ended_notices` has ever had — part 471
+-- explicitly decided it did not need one because "the condition is true on
+-- exactly ONE day", which was true of a job that ran once a day and stops being
+-- true the moment it runs hourly.
+--
+-- ══ 4 · THE ONE PASS THAT WRITES DATA AS WELL AS SENTENCES ═══════════════
+--
+-- `run_pack_expiry` closes a validity window: it reduces `sessions_total` to
+-- `sessions_used` and stamps `expired_at`. Moving it to the coach's local
+-- morning moves that closure by up to about half a day in either direction.
+--
+-- That is safe and it is already named. `packWindow` in src/lib/packExpiry.ts
+-- returns 'lapsed' for exactly this gap — "the window between midnight and the
+-- nightly pass" — and its comment says why: in that gap the credits are STILL
+-- SPENDABLE, because nothing in the database stops a draw until the pass has
+-- run. Both apps already render 'lapsed' as its own sentence. The gap gets
+-- wider by hours; it does not get newer.
+--
+-- One row type is deliberately NOT gated: a purchase with a null `trainer_id`
+-- has no coach to be told and no coach to be timed against, and gating it would
+-- leave its window open forever. Those close at the first tick of the UTC day,
+-- exactly once, and tell nobody — which is what they did before.
+--
+-- `run_open_slot_extension` writes rows too and notifies nobody at all, so the
+-- hour is of no consequence to a sleeping coach. It is moved with the other
+-- five rather than left behind, because six passes on one mechanism is a thing
+-- somebody can hold in their head and five-plus-one is not, and because it
+-- already does its date arithmetic in the coach's own zone (part 650) so the
+-- local morning is where it belongs.
+--
+-- ══ 5 · WHAT THIS DOES NOT DO ════════════════════════════════════════════
+--
+-- It does not touch quiet hours. It does not need to: 07:00–09:00 local is
+-- outside any quiet-hours range a person would set, so the suppression that
+-- currently swallows these messages whole simply stops being reached. Whether
+-- a suppressed push should be deferred rather than dropped is a real question
+-- and it is a different one, in supabase/functions, which this part does not
+-- own.
+--
+-- It does not change a single word any pass says, a single threshold, or a
+-- single date comparison. Every body below is `pg_get_functiondef` output with
+-- two lines added.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · Where a coach is
+-- ═════════════════════════════════════════════════════════════════════════
+
+create or replace function public.notice_local_tz(p_user uuid)
+returns text
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select z.tz
+    from (
+      select (
+        select q.tz from public.notify_quiet_hours q where q.user_id = p_user
+      ) as tz
+      union all
+      select (
+        select mode() within group (order by ta.tz)
+          from public.trainer_availability ta
+         where ta.trainer_id = p_user and ta.tz is not null
+      )
+    ) z
+   where z.tz is not null
+     and exists (select 1 from pg_timezone_names n where n.name = z.tz)
+   limit 1;
+$fn$;
+
+revoke all on function public.notice_local_tz(uuid) from public, anon, authenticated;
+
+comment on function public.notice_local_tz(uuid) is
+  'The timezone a coach''s day runs on: notify_quiet_hours.tz first because the coach typed it about their own waking hours, then the most common trainer_availability.tz (part 650). Null when neither is set or the stored name is not a real zone, so a typo cannot make an hourly job raise.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · Whether it is that coach's morning
+-- ═════════════════════════════════════════════════════════════════════════
+
+create or replace function public.notice_hour_due(p_user uuid, p_hour int)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  select case
+    when public.notice_local_tz(p_user) is null
+      -- No zone. Exactly the hour they get today, because part 650's refusal to
+      -- guess a zone holds and the fallback that cannot make anything worse is
+      -- the status quo. One hour, not a window: this is a UTC clock and there
+      -- is no transition to step over.
+      then extract(hour from (now() at time zone 'UTC'))::int = p_hour
+    else
+      extract(hour from (now() at time zone public.notice_local_tz(p_user)))::int
+        between p_hour and p_hour + 2
+  end;
+$fn$;
+
+revoke all on function public.notice_hour_due(uuid, int) from public, anon, authenticated;
+
+comment on function public.notice_hour_due(uuid, int) is
+  'True when it is currently between p_hour and p_hour+2 in the coach''s own timezone — three hours so a zone that springs forward across p_hour still has a tick, and a missed run costs an hour rather than a day. For a coach with no stored zone, true only on the UTC hour itself, which is the hour they already get.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · Once, and once only, per coach per pass per UTC day
+-- ═════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.notice_pass_runs (
+  pass     text        not null,
+  -- No foreign key. A coach id reaches this table from six different columns
+  -- in six different tables, and a row in any of them that does not resolve to
+  -- an auth user would turn a missing notification into a nightly raise. This
+  -- table is bookkeeping about a run, not a statement about who exists.
+  coach_id uuid        not null,
+  utc_day  date        not null,
+  ran_at   timestamptz not null default now(),
+  primary key (pass, coach_id, utc_day)
+);
+
+alter table public.notice_pass_runs enable row level security;
+-- No policy. This is the scheduler's own bookkeeping; the passes reach it as
+-- SECURITY DEFINER and nobody signed in has any business reading it.
+
+comment on table public.notice_pass_runs is
+  'One row per (nightly pass, coach, UTC day), inserted by the tick that processes that coach. Keyed on the UTC day and not the coach''s local day because the passes themselves are written against current_date, so the unit of work is a UTC date and a claim on anything else can let one be evaluated twice across a DST transition.';
+
+create or replace function public.claim_notice_pass(p_pass text, p_coaches uuid[], p_hour int)
+returns uuid[]
+language plpgsql
+volatile
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_claimed uuid[];
+begin
+  -- A week is more than long enough to answer "did today already run", and it
+  -- keeps this table at coaches x six rows rather than growing forever.
+  delete from public.notice_pass_runs where utc_day < current_date - 7;
+
+  with ins as (
+    insert into public.notice_pass_runs (pass, coach_id, utc_day)
+    select p_pass, c, current_date
+      from unnest(coalesce(p_coaches, '{}'::uuid[])) as c
+     where public.notice_hour_due(c, p_hour)
+    on conflict (pass, coach_id, utc_day) do nothing
+    returning coach_id
+  )
+  select coalesce(array_agg(coach_id), '{}'::uuid[]) into v_claimed from ins;
+
+  return coalesce(v_claimed, '{}'::uuid[]);
+end $fn$;
+
+revoke all on function public.claim_notice_pass(text, uuid[], int) from public, anon, authenticated;
+
+comment on function public.claim_notice_pass(text, uuid[], int) is
+  'The coaches this tick may process: those for whom it is currently the intended local hour AND for whom no tick has already claimed today. The claim and the decision are one statement, so two ticks racing cannot both win. Returns an empty array rather than null.';
+
+-- ▶ the-fallback-that-was-the-bug.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The fallback that WAS the bug.
+--
+-- Part 1060 reversed a coalesce and declared two policies fixed. It reversed
+-- the right coalesce. It did not remove the branch that the defect lives in,
+-- and the header of 1060 describes that branch as the legitimate case.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- `revoke_staff_role()` (part 711) takes a coach off a gym's staff by writing
+-- exactly one thing:
+--
+--     update public.profiles set tenant_id = null where id = p_subject;
+--
+-- It deliberately KEEPS the `trainers` row, and its own comment gives the
+-- reason: deleting it would set `clients.trainer_id` null underneath the
+-- history. `trainers.tenant_id` is NOT NULL, so after a revocation the coach
+-- has two answers to "which gym are you at" — `profiles.tenant_id` says none,
+-- `trainers.tenant_id` goes on naming the gym they left, for ever.
+--
+-- Part 1060 corrected the write triggers and added `staff_tenant_of()`, which
+-- reads `profiles` and only `profiles`. Part 1061 repointed eleven policies at
+-- it. Both are right and both are applied.
+--
+-- What 1060 did NOT do is repair `tenant_of_user()`. It rewrote it as:
+--
+--     select coalesce(
+--       (select p.tenant_id from profiles p where p.id = u),   -- live
+--       (select t.tenant_id from trainers t where t.id = u)    -- historical
+--     );
+--
+-- and its header says the fallback now only fires "for a subject who has no
+-- profile tenant AND is on a roster, which is the case this function was
+-- reaching for in the first place."
+--
+-- That sentence is a precise description of a coach who has just been revoked.
+-- No profile tenant, still on the roster, is not an edge case the function was
+-- reaching for — it is the ONLY state `revoke_staff_role()` produces, and it is
+-- the state the whole 1060/1061 sweep exists to make safe. So the reversal
+-- moved the branch from "always wrong" to "wrong in precisely the case that
+-- matters", and the two policies 1060 claimed to fix by that line alone are
+-- still wrong today:
+--
+--     coach_clients_owner_r  →  is_owner_of(tenant_of_user(trainer_id))
+--     app_errors_owner       →  is_owner_of(tenant_of_user(user_id))
+--
+-- ── WHAT SOMEBODY COULD ACTUALLY DO ──────────────────────────────────────
+--
+-- A gym owner removes a coach from their staff. The coach joins a second gym,
+-- or goes independent, and builds a new book of clients there.
+--
+--   · `coach_clients_owner_r` — the FIRST gym's owner keeps a full read of that
+--     coach's roster: the id, name, goal and coaching mode of every client the
+--     coach has taken on since leaving, at a gym the first owner has no
+--     relationship with. This is the cross-tenant read the white-label promise
+--     exists to prevent, and it is the same leak part 1061 closed on
+--     `sessions`, `client_purchases` and `connect_accounts` — through the one
+--     door 1061 was told had already been shut.
+--
+--   · `app_errors_owner` — the first gym's owner keeps reading the crash and
+--     error reports the coach's phone files afterwards, which carry route
+--     names, screen state and message text from their work at the new gym.
+--
+-- ── LIVE OR LATENT ───────────────────────────────────────────────────────
+--
+-- LATENT, on the same evidence 1060 gave and re-verified on 4 Sep 2026: of 8
+-- `trainers` rows, 8 carry a tenant, 0 have a tenant while their profile has
+-- none, and 0 disagree with their profile. No owner has yet removed a coach, so
+-- no row is in the drifted state and nothing is being disclosed today. It
+-- becomes live on the first call to `revoke_staff_role()`, with no further
+-- action by anybody, and it discloses silently and continuously from then on.
+--
+-- ── THE FIX ──────────────────────────────────────────────────────────────
+--
+-- The branch goes. "Which gym is this person at" has exactly one live answer in
+-- this schema and it is `profiles.tenant_id`; a subject with no profile tenant
+-- is at no gym, and the honest answer is null, not the last gym they were at.
+-- `is_owner_of(null)` is already false, which is the behaviour these two
+-- policies want.
+--
+-- Two changes, and they say the same thing twice on purpose:
+--
+--   1. The two policies are re-emitted against `staff_tenant_of()`, which is
+--      part 1060's own helper and the form all eleven policies in 1061 now use.
+--      After this there is no policy anywhere in the schema that resolves a
+--      caller's gym through `tenant_of_user()`, so the next person to read 1061
+--      does not have to know this function's history to trust the sweep.
+--
+--   2. `tenant_of_user()` itself is redefined to delegate to `staff_tenant_of()`
+--      so that a future policy written in terms of it cannot reintroduce the
+--      defect. Signature, return type, volatility, security and search_path are
+--      character-for-character the live ones; only the body changes. It becomes
+--      an alias, and that is the intent — it is kept rather than dropped
+--      because it is granted to `authenticated` and dropping a name from
+--      PostgREST is a bigger change than this defect warrants.
+--
+-- ── WHAT THIS DELIBERATELY DOES NOT DO ───────────────────────────────────
+--
+--   · It does not clear `trainers.tenant_id` on revocation, and it does not
+--     backfill the column. Part 711 refused that for reasons that have not
+--     changed and part 1060 restated them: the column is NOT NULL and it is
+--     load-bearing for history. The column stays; the QUESTION moved.
+--
+--   · It does not touch `revoke_staff_role()`. That function's closing comment
+--     asserts clearing the profile tenant "is what actually removes the
+--     access". After this part that assertion is finally true for these two
+--     policies; before it, it was not.
+--
+--   · It does not widen either policy. A gym owner reads the same rows they
+--     read before for every coach currently on their staff, because for those
+--     coaches the two columns agree and the fallback never fired.
+--
+--   · It does not address the OTHER defect on `coach_clients` — that the row a
+--     coach is read through is one the coach can issue to themselves. That is a
+--     different mechanism with a different fix and it is part 1901.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── The function ─────────────────────────────────────────────────────────
+--
+-- Was: coalesce(profiles.tenant_id, trainers.tenant_id) — falling through to
+-- the historical column for a subject with no profile tenant, which is exactly
+-- a revoked coach.
+-- Now: profiles.tenant_id, via part 1060's helper. One answer, from the column
+-- `revoke_staff_role()` writes.
+
+create or replace function public.tenant_of_user(u uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  select public.staff_tenant_of(u);
+$$;
+
+-- ── The two policies ─────────────────────────────────────────────────────
+--
+-- Re-emitted in part 1061's form. Each keeps its name, its command, its roles
+-- and its shape; the only change is that the gym is resolved by the helper that
+-- reads the live column, said out loud rather than hidden one call deeper.
+
+drop policy if exists coach_clients_owner_r on public.coach_clients;
+create policy coach_clients_owner_r on public.coach_clients
+  for select
+  using (public.is_owner_of(public.staff_tenant_of(trainer_id)));
+
+drop policy if exists app_errors_owner on public.app_errors;
+create policy app_errors_owner on public.app_errors
+  for select
+  using (public.is_owner_of(public.staff_tenant_of(user_id)));
+
+-- ▶ a-roster-row-a-coach-writes-about-a-stranger.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A roster row a coach writes about a stranger, and the profile it opens.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- `coach_clients` carries two different kinds of row and always has:
+--
+--   · a name a coach TYPED IN — somebody with no Repple account at all. The
+--     table's `id` is `uuid default gen_random_uuid()` precisely so these rows
+--     get an id the phone never had to invent. `src/ui/roster.tsx:450` inserts
+--     one with no `id` at all.
+--
+--   · a REAL client, linked by `link_coaching()`, whose `id` is that person's
+--     `auth.users` id. `studio-web/app/coach/page.tsx:823` upserts this half
+--     after the RPC has run.
+--
+-- Because of the first kind, `coach_clients.id` has no foreign key and no
+-- trigger, and both write policies constrain only the other column:
+--
+--     cc_own                    with check (trainer_id = auth.uid())
+--     coach_clients_trainer_rw  for all using (trainer_id = auth.uid())
+--
+-- Nothing on the write side asks whether the person named by `id` has anything
+-- to do with the coach doing the writing. And on the read side:
+--
+--     profiles_trainer_r_clients
+--       my_role() = 'trainer'
+--       and exists (select 1 from coach_clients
+--                    where trainer_id = auth.uid() and id = profiles.id)
+--
+-- So the row that authorises reading a stranger's profile is a row the reader
+-- issues to themselves. This is the plainest shape of broken access control
+-- there is: a permission check against a fact the caller controls.
+--
+-- ── WHAT SOMEBODY COULD ACTUALLY DO ──────────────────────────────────────
+--
+-- Anybody signed in with `profiles.role = 'trainer'` — which is every coach on
+-- the platform, at every gym, and anybody who signs up on the coach app — can
+-- run two ordinary PostgREST calls with no special tooling:
+--
+--     POST /rest/v1/coach_clients   { "id": "<victim uuid>",
+--                                     "trainer_id": "<self>",
+--                                     "name": "x" }
+--     GET  /rest/v1/profiles?id=eq.<victim uuid>
+--
+-- and read that person's `full_name`, `avatar`, `role`, `tenant_id` and
+-- `deletion_requested_at`. The victim can be a member, a receptionist, an owner
+-- or a coach at ANY gym on the platform. `tenant_id` is the part that matters
+-- most for a white-label product: it says which gym a named person belongs to,
+-- to a reader at a competing gym who is supposed to be unable to see that the
+-- person exists.
+--
+-- Two things bound it, and neither is a control anybody designed:
+--
+--   · The attacker must already hold the victim's uuid. Uuids are not
+--     guessable, but they are not secret either — `trainers_public_directory_r`
+--     hands out every listed coach's id to any signed-in user, and ids travel
+--     through class rosters, invite links and shared reports.
+--
+--   · `coach_clients_pkey` is `primary key (id)`, so a victim who already has a
+--     roster row cannot be claimed: the insert collides, and the upsert branch
+--     fails `cc_own`'s using clause because the existing row belongs to their
+--     real coach. Everybody without a roster row is exposed, which today is 18
+--     of the 20 profiles in this database.
+--
+-- What it does NOT reach, checked one by one: `clients` (the health record) is
+-- gated on `clients.trainer_id`, which only definer functions set; `messages`,
+-- `my_coach()` and `can_use_message_thread()` all read `clients` too, so the
+-- forged row grants no thread and no impersonation; `progress_photos` needs an
+-- explicit share plus `coaching_link_active()`. The disclosure is the profile
+-- row and it stops there.
+--
+-- ── LIVE OR LATENT ───────────────────────────────────────────────────────
+--
+-- LIVE. Not a shape that becomes reachable after some future state change —
+-- reachable right now by any account with the coach role, against 18 of the 20
+-- profiles that exist. Established by reading the two write policies, the read
+-- policy, `pg_constraint` on `coach_clients` (one pkey, one FK on `trainer_id`,
+-- none on `id`) and `pg_trigger` (no triggers on the table at all). It was NOT
+-- established by performing the insert: this lane's database access is read
+-- only and no forged row was written.
+--
+-- ── THE FIX ──────────────────────────────────────────────────────────────
+--
+-- The write is where the defect is, so that is where the check goes. A roster
+-- row naming a person who HAS a Repple account must be corroborated by a
+-- relationship the coach did not invent. `coach_roster_row_is_earned()` says
+-- when that holds, and it admits exactly the three cases the product creates:
+--
+--   1. No `profiles` row for that id — a name the coach typed in. This is the
+--      common case and the reason the column is unconstrained; such a row
+--      discloses nothing, because there is no profile behind it to read.
+--
+--   2. A `clients` row already pointing at this coach — what `link_coaching()`
+--      writes one statement before the roster upsert.
+--
+--   3. A `coach_requests` row from that client to this coach — the same
+--      condition `link_coaching()` itself accepts, and the same one
+--      `profiles_requesting_client_r` already trusts for a profile read. It is
+--      here so that accepting a directory request cannot fail on ordering.
+--
+-- The helper is SECURITY DEFINER, like `is_my_client()` and `is_owner_of()`
+-- beside it, for the ordinary reason: `profiles` has a policy that selects from
+-- `coach_clients`, so a `coach_clients` policy that selected from `profiles`
+-- under RLS would recurse (42P17) — the failure part 28 is named after.
+--
+-- `coach_clients_trainer_rw` is dropped rather than amended. It is a
+-- character-for-character duplicate of `cc_own` — same command, same roles,
+-- same predicate written in the other order — and two permissive FOR ALL
+-- policies are OR'd, so tightening one while the other stands would change
+-- nothing at all. Dropping it also retires 24 `multiple_permissive_policies`
+-- advisories on this table.
+--
+-- `profiles_trainer_r_clients` is then narrowed as well, and this half is belt
+-- and braces rather than the fix: with the write closed the roster row can no
+-- longer be forged, but a read policy whose whole basis is a row the reader can
+-- write should not be the only thing standing there. It gains
+-- `is_my_client()`, the same definer helper the rest of the coach surface uses.
+-- Verified against the live catalogue on 4 Sep 2026: of the 2 roster rows that
+-- have a profile behind them, 0 lack a matching `clients` row, so this removes
+-- no read that anybody has today.
+--
+-- ── WHAT THIS DELIBERATELY DOES NOT DO ───────────────────────────────────
+--
+--   · It does not add a foreign key from `coach_clients.id` to `profiles.id`.
+--     That would delete the hand-typed client, which is a first-class product
+--     feature with six screens behind it.
+--
+--   · It does not touch the USING clause of `cc_own`. A coach keeps full read,
+--     update and delete of every row already on their roster, including any row
+--     that predates this part and would not pass the new check — an old row is
+--     not made unreadable or undeletable by a rule about new ones.
+--
+--   · It does not change `link_coaching()`, which is SECURITY DEFINER and
+--     therefore never saw these policies in the first place. Every legitimate
+--     link continues to be written by it, unaffected.
+--
+--   · It does not narrow `profiles_requesting_client_r`. A pending request is a
+--     deliberate, client-initiated disclosure and is out of scope here.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── The helper ───────────────────────────────────────────────────────────
+
+create or replace function public.coach_roster_row_is_earned(p_client uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  select p_client is not null
+     and (
+       -- A name the coach typed in: nobody's account, nothing to disclose.
+       not exists (select 1 from public.profiles p where p.id = p_client)
+       -- The link `link_coaching()` writes, one statement earlier.
+       or exists (select 1 from public.clients c
+                   where c.id = p_client
+                     and c.trainer_id = (select auth.uid()))
+       -- A request that client sent this coach. `link_coaching()` accepts this
+       -- and `profiles_requesting_client_r` already trusts it for a read.
+       or exists (select 1 from public.coach_requests r
+                   where r.client_id = p_client
+                     and r.trainer_id = (select auth.uid()))
+     );
+$$;
+
+grant execute on function public.coach_roster_row_is_earned(uuid) to authenticated;
+
+-- ── The write side ───────────────────────────────────────────────────────
+--
+-- The duplicate goes first: while it stands, tightening `cc_own` accomplishes
+-- nothing, because permissive policies are OR'd.
+
+drop policy if exists coach_clients_trainer_rw on public.coach_clients;
+
+drop policy if exists cc_own on public.coach_clients;
+create policy cc_own on public.coach_clients
+  for all
+  using (trainer_id = (select auth.uid()))
+  with check (
+    trainer_id = (select auth.uid())
+    and public.coach_roster_row_is_earned(id)
+  );
+
+-- ── The read side ────────────────────────────────────────────────────────
+--
+-- Same name, same command, same roles. It keeps its roster-row test and gains
+-- the corroboration, so it is now a statement about a relationship rather than
+-- about a row the reader wrote.
+
+drop policy if exists profiles_trainer_r_clients on public.profiles;
+create policy profiles_trainer_r_clients on public.profiles
+  for select
+  using (
+    public.my_role() = 'trainer'
+    and exists (select 1 from public.coach_clients cc
+                 where cc.trainer_id = (select auth.uid())
+                   and cc.id = profiles.id)
+    and public.is_my_client(profiles.id)
+  );
+
+-- ▶ eight-functions-that-trust-whatever-search-path-they-are-handed.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Eight functions that trust whatever search_path they are handed.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- All 250 SECURITY DEFINER functions in `public` set `search_path`. That was
+-- checked one by one against `pg_proc.proconfig` on 4 Sep 2026 and there are no
+-- exceptions, which is the important half of this rule and it holds.
+--
+-- Eight SECURITY INVOKER functions do not, and Supabase's own linter names them
+-- (`function_search_path_mutable`, eight WARNs). Six are triggers, one is a
+-- reporting function and one formats money:
+--
+--     body_scan_sheet_consent_names_a_recipient()   trigger
+--     coach_message_templates_touch()               trigger
+--     injury_doc_consent_path_is_the_clients()      trigger
+--     notify_channel_prefs_touch()                  trigger
+--     notify_quiet_hours_check()                    trigger
+--     trainer_availability_check()                  trigger
+--     coach_exercise_roster(text, timestamptz, timestamptz)
+--     money_text(bigint, text)
+--
+-- A function with no `search_path` of its own resolves unqualified names
+-- against whatever the CALLER has set. The caller can set it, because
+-- `search_path` is a plain session GUC and PostgREST clients reach it.
+--
+-- ── WHAT SOMEBODY COULD ACTUALLY DO ──────────────────────────────────────
+--
+-- Much less than for a definer function, and this part should not be read as
+-- claiming otherwise. These eight run as the CALLER, so a hijacked name
+-- resolves to a table the caller could already read and the RLS on it still
+-- applies. There is no privilege escalation here and no cross-tenant read.
+--
+-- What there IS, in the two that matter:
+--
+--   · `injury_doc_consent_path_is_the_clients()` is the trigger that enforces
+--     the firmest product rule in this schema — an injury document belongs to
+--     the client and the coach never sees the file. A guard that resolves its
+--     own table names through a caller-controlled setting is a guard whose
+--     answer depends on who is asking. Nothing today makes it answer wrongly;
+--     it should not be possible to make it answer wrongly.
+--
+--   · `trainer_availability_check()` and `notify_quiet_hours_check()` are the
+--     same shape for booking and for quiet hours.
+--
+-- The other five are formatting and `updated_at` stamps and are here only
+-- because the rule is worth being able to state without exceptions.
+--
+-- ── LIVE OR LATENT ───────────────────────────────────────────────────────
+--
+-- LATENT, and weakly so. This is a hardening change, not a breach. It is worth
+-- doing because "every function in this schema pins its search_path" is a
+-- sentence a gate can enforce for ever (scripts/check-definer.mjs, added
+-- alongside this part), and a rule with eight exceptions is not enforceable.
+--
+-- ── THE FIX ──────────────────────────────────────────────────────────────
+--
+-- `alter function … set search_path` and nothing else. No body is rewritten, no
+-- signature changes, no volatility or security setting is touched, and the
+-- value is `public, pg_temp` — the same one all 250 definer functions carry.
+--
+-- `alter function` is idempotent by nature: setting a config that is already
+-- set is a no-op, so this part can be applied twice with no effect.
+--
+-- ── WHAT THIS DELIBERATELY DOES NOT DO ───────────────────────────────────
+--
+--   · It does not schema-qualify anything inside the bodies. That would be a
+--     rewrite of eight functions to fix a setting, and a rewrite is where a
+--     mistake gets made.
+--
+--   · It does not move `pg_net` or `btree_gist` out of `public`, which the same
+--     linter also flags. Relocating an extension changes every call site of
+--     every function it provides, in a database with 471 functions and no
+--     staging copy, to close a lint that is INFO-shaped for a schema where
+--     every function now pins its path anyway. It is left, named here, and
+--     belongs in a migration of its own with a rollback plan.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter function public.body_scan_sheet_consent_names_a_recipient()
+  set search_path to 'public', 'pg_temp';
+
+alter function public.coach_message_templates_touch()
+  set search_path to 'public', 'pg_temp';
+
+alter function public.injury_doc_consent_path_is_the_clients()
+  set search_path to 'public', 'pg_temp';
+
+alter function public.notify_channel_prefs_touch()
+  set search_path to 'public', 'pg_temp';
+
+alter function public.notify_quiet_hours_check()
+  set search_path to 'public', 'pg_temp';
+
+alter function public.trainer_availability_check()
+  set search_path to 'public', 'pg_temp';
+
+alter function public.coach_exercise_roster(p_slug text, p_from timestamp with time zone, p_split timestamp with time zone)
+  set search_path to 'public', 'pg_temp';
+
+alter function public.money_text(p_amount_cents bigint, p_currency text)
+  set search_path to 'public', 'pg_temp';

@@ -99,10 +99,32 @@ const hash = createHash('sha256').update(css).digest('hex').slice(0, 10);
 
 // Matches a bare link and an already-stamped one, so the stamp is replaced
 // rather than accumulated.
-const RE = /href="styles\.css(?:\?v=[a-f0-9]+)?"/g;
-const want = `href="styles.css?v=${hash}"`;
+//
+// The leading `(\.\.\/)*` is load-bearing and was missing. A page in a
+// SUBDIRECTORY reaches the stylesheet as `../styles.css`, which this pattern
+// did not match, so such a page was reported as having no stylesheet link at
+// all rather than as stale — and, because the walk below was not recursive
+// either, it was never opened in the first place. Both halves of that were
+// true of `web/ads/callback.html`, which sat at v=276220735b while the other
+// twenty-one pages were at v=38b4504e80 and this gate printed "ok". The two
+// bugs hid each other: fixing only the walk turns a stale page into a "no
+// stylesheet link" report, and fixing only the pattern still opens nothing.
+const RE = /href="((?:\.\.\/)*)styles\.css(?:\?v=[a-f0-9]+)?"/g;
+/** The replacement, preserving whatever `../` prefix the page used to get there. */
+const want = (_, up) => `href="${up}styles.css?v=${hash}"`;
 
-const pages = readdirSync(WEB).filter((n) => n.endsWith('.html')).sort();
+// Recursive, for the reason above: `web/` is not flat. `ads/callback.html` is a
+// real page a real visitor lands on — it is where an ad platform returns a
+// coach after they grant consent — and it was outside every gate this repo has
+// over the site purely because it is one directory down.
+function walk(dir, pre = '', out = []) {
+  for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
+    if (e.isDirectory()) walk(join(dir, e.name), `${pre}${e.name}/`, out);
+    else if (e.name.endsWith('.html')) out.push(pre + e.name);
+  }
+  return out;
+}
+const pages = walk(WEB);
 
 // The empty-set guard. Without it, a `web/` that has moved, been renamed, or
 // been read from the wrong working directory produces zero pages, zero stale
@@ -150,7 +172,7 @@ if (CHECK) {
     for (const [now, files] of byLink) {
       console.error(`  ${files.length} page${files.length === 1 ? ' links' : 's link'} ${now}`);
       console.error(`      ${files.map((f) => 'web/' + f).join('\n      ')}`);
-      console.error(`  should be ${want}\n`);
+      console.error(`  should be href="…styles.css?v=${hash}" (keeping each page's own ../ prefix)\n`);
     }
     for (const f of missing) {
       console.error(`  web/${f}`);

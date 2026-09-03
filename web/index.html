@@ -513,8 +513,8 @@ addEventListener('DOMContentLoaded', function () {
           <tr><th scope="row"><span class="lbl">Timetable &amp; classes</span><span class="hint">Bookings, capacity, attendance.</span></th><td class="yes"><span class="tick"></span>Book a place</td><td class="yes"><span class="tick"></span>Your own week</td><td class="yes"><span class="tick"></span>The whole gym&rsquo;s</td></tr>
           <tr><th scope="row"><span class="lbl">Memberships &amp; payments</span><span class="hint">What is sold and what was taken.</span></th><td class="yes"><span class="tick"></span>Your own</td><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>Everyone&rsquo;s</td></tr>
           <tr><th scope="row"><span class="lbl">Staff &amp; payroll</span><span class="hint">Delivered sessions, priced.</span></th><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>What you delivered</td><td class="yes"><span class="tick"></span>What the gym owes</td></tr>
-          <tr><th scope="row"><span class="lbl">The door</span><span class="hint">Who is in the building right now.</span></th><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>Working the desk</td><td class="yes"><span class="tick"></span>The whole log</td></tr>
-          <tr><th scope="row"><span class="lbl">The business picture</span><span class="hint">Retention, revenue, capacity.</span></th><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>On phone and on the web</td></tr>
+          <tr><th scope="row"><span class="lbl">The door</span><span class="hint">Who is in the building right now.</span></th><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>Working the desk, on the web console</td><td class="yes"><span class="tick"></span>The whole log, on the web console</td></tr>
+          <tr><th scope="row"><span class="lbl">The business picture</span><span class="hint">Retention, revenue, capacity.</span></th><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="no">—<span class="vh">Not this app&rsquo;s job</span></td><td class="yes"><span class="tick"></span>Revenue and capacity on both; retention on the web</td></tr>
         </tbody>
       </table>
     </div>
@@ -579,7 +579,7 @@ addEventListener('DOMContentLoaded', function () {
           <span class="no">1</span>
           <div>
             <h3>Monday — the class goes on the board</h3>
-            <p>Built once as a repeating series rather than twelve copies of the same hour. Its capacity is fourteen, and the equipment register is what says fourteen is still true.</p>
+            <p>Built once as a repeating series rather than twelve copies of the same hour. Its capacity is fourteen, set by whoever put it on the board &mdash; and the equipment register is checked against that fourteen while they type it, so kit out of service is on the screen at the moment the number is chosen rather than discovered when the room fills up.</p>
           </div>
         </li>
         <li>
@@ -664,7 +664,7 @@ addEventListener('DOMContentLoaded', function () {
             <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Heart-rate zones</span><span class="mt">needs live samples</span></div>
             <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Show rate</span><span class="mt">needs attendance marked</span></div>
             <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Monthly recurring</span><span class="mt">needs plans priced</span></div>
-            <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Class capacity</span><span class="mt">needs kit in the register</span></div>
+            <div class="row" style="grid-template-columns:1fr auto"><span class="nm">Seat check on a class</span><span class="mt">needs kit in the register</span></div>
           </div>
         </div>
       </div>
@@ -715,7 +715,7 @@ addEventListener('DOMContentLoaded', function () {
           <tr>
             <th scope="row"><span class="job">Knowing what a room holds</span></th>
             <td>A number written on a laminated sheet some years ago, which nobody revisits when kit breaks.</td>
-            <td>Checked against the equipment register, so kit out of service changes the capacity the gym measures itself against.</td>
+            <td>Checked against the equipment register at the moment somebody types a capacity: if the usable kit seats fewer than the number being entered, the console says so on the spot. It warns rather than overrules — the capacity stays the number a person decided on.</td>
           </tr>
           <tr>
             <th scope="row"><span class="job">Finding last year's figures</span></th>
@@ -773,7 +773,7 @@ addEventListener('DOMContentLoaded', function () {
       <div class="tile">
         <div class="cap">Money</div>
         <h3>Held as whole minor units</h3>
-        <p>Every amount in the system is an integer number of cents or fils, never a decimal. Floats do not belong near a ledger: 0.1 plus 0.2 is a rounding error in a spreadsheet and a dispute in a gym.</p>
+        <p>Money that has moved is held as an integer number of cents or fils &mdash; every payment, invoice, package and ledger row. Floats do not belong near a ledger: 0.1 plus 0.2 is a rounding error in a spreadsheet and a dispute in a gym. The exception is honest rather than hidden: a few <em>rates</em> a person types, a gym&rsquo;s session fee among them, are still stored in whole units and converted on the way past. That is an inconsistency we have not finished removing, not a second design.</p>
       </div>
       <div class="tile">
         <div class="cap">Shared functions</div>
@@ -820,7 +820,7 @@ addEventListener('DOMContentLoaded', function () {
       </details>
       <details>
         <summary>Does a member have to book a class to be counted as attending?</summary>
-        <div class="a"><p>No. The door log records entries at the desk, by QR or from the app, whether or not anything was booked. That matters beyond the headline count: without it, a member who switched from classes to training on the floor is indistinguishable from a member who stopped coming.</p></div>
+        <div class="a"><p>No. The door log records entries at the desk &mdash; found by name, or scanned from the barcode Repple puts on the member&rsquo;s phone &mdash; whether or not anything was booked. That matters beyond the headline count: without it, a member who switched from classes to training on the floor is indistinguishable from a member who stopped coming. Being plain about the shape of it: the desk is where a visit is recorded, and the desk is the browser console. There is no turnstile integration and no screen a member taps to check themselves in.</p></div>
       </details>
       <details>
         <summary>Does it work without an Apple Watch?</summary>
