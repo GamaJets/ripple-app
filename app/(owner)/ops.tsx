@@ -1,5 +1,13 @@
-// Owner · Operations. The session fee, notices to members, a support inbox and
-// the gym's activity log.
+// Owner · Operations. The session fee, where the gym is, notices to members, a
+// support inbox and the gym's activity log.
+//
+// WHERE THE GYM IS was added last and is the one setting on this screen that
+// is WRONG rather than empty while it is unset. `tenants.timezone` had a single
+// writer in the whole product — the web console — and all 54 gyms in the live
+// database had it null, so six console screens print the words "in the gym's
+// own timezone" over figures bucketed on whichever laptop is open. See the
+// section itself, and src/lib/zonePicker.ts for why the picker refuses to offer
+// `Etc/GMT+4` and why there is no "use this phone's zone" button.
 //
 // The Announce tab was a notepad. It wrote to a `useState` in
 // src/ui/ownerOps.tsx and its own confirmation said so — "Saved to this device
@@ -111,6 +119,26 @@ import { reportError } from '../../src/lib/reportError';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+/* ── where the gym is ──────────────────────────────────────────────────────
+ *
+ * `tenants.timezone` (supabase/parts/710) had exactly one writer in the whole
+ * product — the web console's Gym settings screen — and on 4 September 2026
+ * all 54 gyms in the live database had it null. Six console screens print the
+ * words "in the gym's own timezone" over figures bucketed with the READER's
+ * clock while it is unset, and this app, the one an owner actually carries,
+ * could not set it at all.
+ *
+ * The write goes through `saveGymProfile` rather than `updateTenant`: the
+ * provider's patch type does not admit the column (src/ui/tenant.tsx), and
+ * `saveGymProfile` already carries the rule that matters — it checks the row
+ * COUNT, so an UPDATE that RLS matched nothing against is reported as a
+ * refusal instead of drawing "Saved" over an unchanged row.
+ */
+import { saveGymProfile } from '../../src/lib/gymPolicy';
+import {
+  parseGymZone, zoneOptions, gymTimeLabel, gymDay, readerZone, fetchGymZone,
+} from '../../src/lib/gymZone';
+import { searchZones, NO_ZONE_LIST_NOTE, type ZoneChoice } from '../../src/lib/zonePicker';
 
 /** One row of the gym's event feed. */
 interface GymEvent { id: string; kind: string; summary: string; at: string }
@@ -158,6 +186,37 @@ function ago(iso: string) {
 }
 
 /** An honest "nothing here yet" line — these lists genuinely start empty. */
+/**
+ * One zone, offered.
+ *
+ * The clock is on the row rather than only on the stored value, because the
+ * choice is made HERE: an owner picking between Europe/London and
+ * Europe/Lisbon is choosing between 14:32 and 14:32 in March and 14:32 and
+ * 13:32 in July, and the row is where that is visible. A null clock means this
+ * runtime cannot resolve the zone, and the row says so instead of drawing a
+ * blank beside a name.
+ */
+function ZoneRow({ zone, where, tick, busy, onPress }: {
+  zone: string; where: string; tick: number | null; busy: boolean; onPress: () => void;
+}) {
+  const t = useTheme();
+  const clock = gymTimeLabel(tick, zone);
+  const city = zone.split('/').slice(-1)[0].replace(/_/g, ' ');
+  return (
+    <Pressable onPress={onPress} disabled={busy} accessibilityRole="button"
+      accessibilityLabel={clock ? `Set this gym to ${zone}, where it is ${clock}` : `Set this gym to ${zone}`}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, opacity: busy ? 0.5 : 1 }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ ...ty.body, color: t.ink }}>{city}</Text>
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{where ? `${where} · ${zone}` : zone}</Text>
+      </View>
+      <Text style={{ ...ty.label, ...numeric, color: clock ? t.ink2 : t.ink3 }}>
+        {clock ?? 'no clock'}
+      </Text>
+    </Pressable>
+  );
+}
+
 function Empty({ tone, children }: { tone: string; children: string }) {
   return <Text style={{ ...ty.label, color: tone }}>{children}</Text>;
 }
@@ -272,6 +331,86 @@ export default function OwnerOps() {
   // be offered as one: saving over it would write a value read off a failed
   // read. 'partial' cannot happen here — it is a single row — but worstStatus
   // semantics are respected by asking for 'ready' rather than not-'error'.
+  /* ── where this gym is ────────────────────────────────────────────────────
+   *
+   * Its own read, and three states rather than two: `zoneErr` set means nobody
+   * could ask, `zone` null with no error means the gym has not said. Rendering
+   * the first as the second would tell an owner their gym has no timezone on
+   * the strength of a query that never answered, and they would set one that
+   * is already set — over the top of whatever is really there.
+   */
+  const [zone, setZone] = useState<string | null>(null);
+  const [zoneErr, setZoneErr] = useState<string | null>(null);
+  const [zoneRead, setZoneRead] = useState(false);
+  const [zoneQuery, setZoneQuery] = useState('');
+  const [zoneBusy, setZoneBusy] = useState(false);
+  const [zoneMsg, setZoneMsg] = useState<{ bad: boolean; text: string } | null>(null);
+  /**
+   * A clock, ticking, beside the zone.
+   *
+   * The one test of this setting a person can actually perform: nobody can
+   * check whether 'Asia/Dubai' is the right STRING, and anybody can check
+   * whether the time next to it matches the clock on the wall behind them. The
+   * console does the same thing for the same reason.
+   *
+   * Fifteen seconds rather than one: the label has minute resolution, and a
+   * per-second timer on a screen an owner leaves open is a battery cost for a
+   * digit that does not change.
+   */
+  const [tick, setTick] = useState<number | null>(null);
+  useEffect(() => {
+    setTick(Date.now());
+    const id = setInterval(() => setTick(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      if (!USE_SUPABASE || !tenant?.id) return;
+      const r = await fetchGymZone(supabase as any, tenant.id);
+      if (!live) return;
+      setZone(r.zone); setZoneErr(r.error); setZoneRead(true);
+    })();
+    return () => { live = false; };
+  }, [tenant?.id, readTick]);
+
+  /**
+   * Every zone this runtime knows, minus the ones a gym must never be in.
+   *
+   * Empty is a real answer — `zoneOptions()` returns `[]` on a runtime without
+   * `Intl.supportedValuesOf`, which is a live possibility on Hermes — and the
+   * screen then offers a typed field with `NO_ZONE_LIST_NOTE` beside it rather
+   * than an empty picker. `parseGymZone` is the gate either way.
+   */
+  const zoneAll = zoneOptions();
+  const zoneHits: ZoneChoice[] = searchZones(zoneAll, zoneQuery);
+  /** What the owner has typed, when it is itself a valid zone name. This is
+   *  what makes the screen usable at all on a runtime with no list: the field
+   *  is a search AND the field. */
+  const typedZone = parseGymZone(zoneQuery);
+  const saveZone = async (next: string) => {
+    if (!tenant?.id) return;
+    setZoneBusy(true); setZoneMsg(null);
+    try {
+      // The count is checked inside `saveGymProfile`, so a refused UPDATE
+      // arrives here as a throw rather than as a silent success.
+      await saveGymProfile(supabase as any, tenant.id, { timezone: next });
+      setZone(next); setZoneQuery(''); setZoneErr(null);
+      setZoneMsg({
+        bad: false,
+        text: `This gym's day is now measured in ${next}. Every date and time on the owner console — the month close, the payroll month, footfall by hour — is drawn on it from here on, and figures already on a screen change when it is next read.`,
+      });
+    } catch (e: any) {
+      reportError('ops.saveZone', e);
+      setZoneMsg({
+        bad: true,
+        text: zone
+          ? `Not saved. This gym is still measured in ${zone}.`
+          : 'Not saved. This gym still has no timezone, so every date in the console is still drawn on whichever machine it is read from.',
+      });
+    } finally { setZoneBusy(false); }
+  };
+
   const feeKnown = tenantStatus === 'ready' && !!tenant;
   const saveFee = async () => {
     const parsed = parseSessionFee(feeField);
@@ -609,6 +748,105 @@ export default function OwnerOps() {
                   <Cta wide label={feeBusy ? 'Saving…' : 'Save Session Fee'} disabled={feeBusy}
                     onPress={() => { void saveFee(); }} />
                 </View>
+              </>)}
+            </Section>
+
+            <Rule />
+
+            {/* ── where this gym is ────────────────────────────────────────
+                The setting every gym on the platform is missing, and the only
+                one on this screen that is WRONG rather than empty while it is
+                unset: with no zone, "today", the month close, the payroll month
+                and footfall by hour are each cut on whichever machine the page
+                is open on. Read at the front desk they are right by accident.
+
+                No "use this phone's zone" button, and the phone's own zone is
+                shown as a fact about the phone with nothing to press. Part 710
+                makes the argument about a laptop and it holds harder here: an
+                owner going through their books in an airport would set the gym
+                to Europe/Amsterdam with one tap and never find out. */}
+            <Section>
+              <SectionHead title="Where This Gym Is"
+                note={zoneRead && !zoneErr && zone ? (gymTimeLabel(tick, zone) ?? undefined) : undefined} />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Whose day this gym's day is. The month close, the payroll month and every "today"
+                in the owner console are cut on it.
+              </Text>
+              {tenantStatus === 'loading' || (tenant?.id && !zoneRead) ? (
+                <Empty tone={t.ink3}>Reading your gym…</Empty>
+              ) : !tenant ? (
+                <Empty tone={t.ink3}>This account is not attached to a gym, so there is no timezone to set.</Empty>
+              ) : zoneErr ? (
+                <Empty tone={t.warn}>
+                  This gym's timezone could not be read, so whether one is set is not known — this is
+                  not a statement that none is. Nothing can be changed until it can be read.
+                </Empty>
+              ) : (<>
+                {zone ? (
+                  <View style={{ marginBottom: sp.md }}>
+                    <Text style={{ ...ty.body, color: t.ink }}>{zone}</Text>
+                    {/* The check anybody can actually perform. A null clock is a
+                        stored zone this runtime cannot resolve — said as that,
+                        rather than left blank. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {gymTimeLabel(tick, zone) && gymDay(tick, zone)
+                        ? `It is ${gymTimeLabel(tick, zone)} on ${gymDay(tick, zone)} there. If that is not the time at the gym, this is the wrong zone.`
+                        : 'This phone cannot resolve that zone, so the clock cannot be shown against it. Search below to set one it knows.'}
+                    </Text>
+                  </View>
+                ) : (
+                  <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                    Not set. Until it is, every date in the owner console is drawn on whichever
+                    machine it is read from — right at the front desk by accident, and wrong for
+                    anyone reading from another country.
+                  </Flag>
+                )}
+
+                <TextInput value={zoneQuery} onChangeText={(v) => { setZoneQuery(v); if (zoneMsg) setZoneMsg(null); }}
+                  placeholder={zoneAll.length ? 'Search a city — London, Dubai' : 'Europe/London'}
+                  placeholderTextColor={t.ink3} autoCapitalize="none" autoCorrect={false}
+                  accessibilityLabel="Search for the city this gym is in"
+                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
+
+                {zoneAll.length === 0 ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{NO_ZONE_LIST_NOTE}</Text>
+                ) : null}
+
+                {/* Typed a full zone name that this runtime knows, and it is not
+                    already in the list below. The only path on a runtime with no
+                    list, and a shortcut for anybody who knows the name. */}
+                {typedZone.kind === 'zone' && !zoneHits.some((h) => h.zone === typedZone.zone) ? (
+                  <ZoneRow zone={typedZone.zone} where="typed" tick={tick} busy={zoneBusy}
+                    onPress={() => { void saveZone(typedZone.zone); }} />
+                ) : null}
+
+                {zoneHits.map((h) => (
+                  <ZoneRow key={h.zone} zone={h.zone} where={h.where} tick={tick} busy={zoneBusy}
+                    onPress={() => { void saveZone(h.zone); }} />
+                ))}
+
+                {zoneQuery.trim() && zoneHits.length === 0 && typedZone.kind !== 'zone' ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    {typedZone.kind === 'bad'
+                      ? typedZone.reason
+                      : `Nothing matches “${zoneQuery.trim()}”. Search the nearest large city rather than the town — zones are named after the city whose clock a place keeps.`}
+                  </Text>
+                ) : null}
+
+                {zoneMsg ? (
+                  zoneMsg.bad
+                    ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{zoneMsg.text}</Flag>
+                    : <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{zoneMsg.text}</Text>
+                ) : null}
+
+                {/* A fact about this phone, labelled as one. Not a suggestion,
+                    and not something to press — see the note above the section. */}
+                {readerZone() ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    This phone's own clock is set to {readerZone()}. That is where the phone is, which
+                    is not necessarily where the gym is — so it is not filled in for you.
+                  </Text>
+                ) : null}
               </>)}
             </Section>
 

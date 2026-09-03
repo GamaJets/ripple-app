@@ -34,7 +34,7 @@ const ALL = [
   'Europe/London', 'Europe/Lisbon', 'Europe/Amsterdam', 'Europe/Istanbul',
   'America/New_York', 'America/Los_Angeles', 'America/North_Dakota/New_Salem',
   'America/Argentina/Buenos_Aires',
-  'Asia/Dubai', 'Asia/Tokyo', 'Asia/Kolkata',
+  'Asia/Dubai', 'Asia/Tokyo', 'Asia/Kolkata', 'Asia/Amman', 'Asia/Manila',
   'Australia/Sydney', 'Africa/Cairo', 'Pacific/Auckland',
   // The two families that must never reach a gym.
   'Etc/GMT+4', 'Etc/GMT-4', 'Etc/UTC',
@@ -52,7 +52,7 @@ const ALL = [
   ok(!list.includes('Factory'), 'nor the placeholder zone that is not a place');
   ok(list.includes('Asia/Tokyo') && list.includes('Europe/London'),
     'the canonical names survive');
-  eq(list.length, 14, 'fourteen of the twenty-three entries are places a gym can be in');
+  eq(list.length, 16, 'sixteen of the twenty-five entries are places a gym can be in');
 
   // Stable and de-duplicated: two calls over a shuffled list agree.
   const again = pickableZones([...ALL].reverse());
@@ -100,10 +100,23 @@ const ALL = [
   eq(europe[0]?.zone, 'Europe/Amsterdam', 'a region match returns the region, alphabetically');
   eq(europe.length, 4, 'all four of them');
 
-  // The band really is a band: a region-only match must not outrank a city.
-  const asia = searchZones(['Asia/Dubai', 'America/Asiago_Falls'], 'asia');
-  eq(asia[0]?.zone, 'America/Asiago_Falls',
-    'a city beginning with the query beats a region containing it — defect 3');
+  // The band really is a band, and this is the pair that proves it: both are
+  // real zones, both cities hold "man", and only Manila STARTS with it — while
+  // Amman sorts first alphabetically. So a ranking that lost the band, or that
+  // stopped telling "starts with" from "contains", would put Amman on top.
+  const man = searchZones(ALL, 'man');
+  eq(man[0]?.zone, 'Asia/Manila',
+    'a city beginning with the query beats one merely containing it — defect 3');
+  ok(man.some((c) => c.zone === 'Asia/Amman'), 'and the other is still offered, below it');
+
+  // A region-only match must not outrank a city either.
+  const asia = searchZones(ALL, 'asia');
+  eq(asia[0]?.city, 'Amman', 'the region band comes last, so Asia/… sorts by city');
+
+  // The underscore is folded on the WHOLE id, not only on the city — so a
+  // query that spans two segments finds the zone.
+  eq(searchZones(ALL, 'north dakota')[0]?.zone, 'America/North_Dakota/New_Salem',
+    'a query spanning an underscored segment still matches');
 
   // Typed with a space where the id has an underscore, and with the slash.
   eq(searchZones(ALL, 'los angeles')[0]?.zone, 'America/Los_Angeles',

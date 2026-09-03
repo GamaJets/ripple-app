@@ -20,6 +20,8 @@ import { classFillState, isCancelled, classesThatRan } from '../../src/lib/gymSc
 import { classCancelBody } from '../../src/lib/classCancel';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
+import { Fetched } from '../../src/ui/fetched';
+import { useReadStamp } from '../../src/ui/readStamp';
 import { useClasses } from '../../src/ui/classes';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useReachability } from '../../src/ui/reachability';
@@ -42,6 +44,11 @@ export default function Classes() {
   const t = useTheme();
   const router = useRouter();
   const { classes, myStatus, status: classStatus, book, cancel, countsKnown, cachedNote, refresh } = useClasses();
+  // When the timetable last came off the server. Distinct from `cachedNote`
+  // below and complementary to it: that says the copy on screen came off this
+  // phone, and this says how old it is even when it did not. A member reads a
+  // class list in a basement and walks to a room on the strength of it.
+  const { at: readAt, busy: readBusy } = useReadStamp(classStatus, classes);
   // The timetable and this member's place in it come from one provider read, so
   // one call brings back both the classes and whether they are booked on them.
   const pull = usePullToRefresh(useCallback(() => { void refresh(); }, [refresh]));
@@ -224,6 +231,14 @@ export default function Classes() {
             {branches.map((b) => chip(b, branch === b, () => setBranch(b === branch ? null : b)))}
           </ScrollView>
         ) : null}
+
+        {/* When the server last answered, and a way to ask again. A member
+            reads a timetable in a basement and walks to a room on the strength
+            of it, and the providers now repair themselves silently on
+            reconnect (src/lib/readRefresh.ts) — which makes the difference
+            between "this landed a second ago" and "this landed before you came
+            downstairs" invisible everywhere else. */}
+        <Fetched at={readAt} onRefresh={refresh} busy={readBusy} />
 
         {/* The timetable came off this phone, not off the server. Said once,
             above the list, because a member reading a cached timetable as a

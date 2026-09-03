@@ -525,22 +525,23 @@ export default function OwnerOverview() {
  * name is on Brand here and on Gym settings in the console, the currency and
  * the session fee are on Ops here and on the same console screen there.
  *
- * Two of the six have NO phone screen at all, and that is a fact about this
- * app rather than a gap in the list:
- *
- *   · the timezone — `updateTenant` in src/ui/tenant.tsx does not admit the
- *     column and no owner screen offers it, so the console is the only writer;
- *   · the price book — nothing in `app/(owner)/**` writes `membership_plans`.
- *
+ * ONE of the six has no phone screen at all, and that is a fact about this app
+ * rather than a gap in the list: nothing in `app/(owner)/**` writes
+ * `membership_plans`, so the price book is priced in the console or nowhere.
  * A null here is therefore an honest "not from this app", and the card says so
- * in one line rather than routing somebody to a screen that cannot do it. A
- * Record keyed by SetupKey rather than a lookup with a fallback: a seventh item
- * added to the module fails to compile here instead of rendering with nowhere
- * to go.
+ * in one line rather than routing somebody to a screen that cannot do it.
+ *
+ * The timezone used to be the second one. It is now on Ops, which is the point
+ * of putting this card here at all — an item that can only end in "go and open
+ * a browser" is a nag rather than a task.
+ *
+ * A Record keyed by SetupKey rather than a lookup with a fallback: a seventh
+ * item added to the module fails to compile here instead of rendering with
+ * nowhere to go.
  */
 const PHONE_WHERE: Record<SetupKey, { route: string; label: string; icon: IconName } | null> = {
   currency: { route: '/(owner)/ops', label: 'Ops', icon: 'wrench' },
-  timezone: null,
+  timezone: { route: '/(owner)/ops', label: 'Ops', icon: 'wrench' },
   name: { route: '/(owner)/brand', label: 'Brand', icon: 'palette' },
   plan: null,
   // Members opens a membership against an account that already exists. It
@@ -589,7 +590,7 @@ function SetUp({ items, onGo }: { items: SetupItem[]; onGo: (route: string) => v
         {elsewhere.length > 0 ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {elsewhere.map((i) => i.title.toLowerCase()).join(', ')} — in the Repple Studio web
-            console. Neither is settable from this app.
+            console, which is the only place this app can send you for it.
           </Text>
         ) : null}
 

@@ -21,6 +21,20 @@
   --panel2:    #142622;
   --sunk:      #081210;
   --line:      rgba(233,242,240,0.10);
+  /* A COLOUR, not a border shorthand — and it was written into seven border
+     declarations as though it were one. `border-bottom: var(--hair)` resolves
+     to `border-bottom: rgba(233,242,240,0.06)`, which is not a valid shorthand,
+     so the whole declaration is dropped and no line is drawn. Nothing errors and
+     nothing looks broken; the rule simply is not there.
+
+     That is why no table on this site has ever had a row separator, why the
+     three columns of the home page's comparison ran together, and why the
+     support page's questions had nothing between them. The intent was never in
+     doubt — `table.data tr:last-child td { border-bottom: none }` sits four
+     lines below the rule that was doing nothing, turning off a line that was
+     never on. All seven now say `1px solid var(--hair)`. Compare `--rule`
+     below, which IS a shorthand; the two are not interchangeable and the names
+     do not say so. */
   --hair:      rgba(233,242,240,0.06);
 
   --ink:       #e9f2f0;
@@ -429,7 +443,7 @@ a.rail:hover .go .arw { transform: translateX(4px); }
 .rows { display: flex; flex-direction: column; }
 .row {
   display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center;
-  padding: 12px 16px; border-top: var(--hair); font-size: 14.5px;
+  padding: 12px 16px; border-top: 1px solid var(--hair); font-size: 14.5px;
 }
 .row:first-child { border-top: none; }
 .row .nm { color: var(--ink); font-weight: 500; }
@@ -569,7 +583,7 @@ table.data th {
   text-transform: uppercase; color: var(--ink3); font-weight: 500;
   border-bottom: var(--rule); white-space: nowrap;
 }
-table.data td { padding: 13px 15px; border-bottom: var(--hair); color: var(--ink2); vertical-align: top; line-height: 1.5; font-family: var(--sans); }
+table.data td { padding: 13px 15px; border-bottom: 1px solid var(--hair); color: var(--ink2); vertical-align: top; line-height: 1.5; font-family: var(--sans); }
 table.data tr:last-child td { border-bottom: none; }
 table.data td strong, table.data tbody th strong { color: var(--ink); }
 
@@ -605,7 +619,7 @@ table.data tbody th {
   white-space: normal;
   color: var(--ink2);
   background: none;
-  border-bottom: var(--hair);
+  border-bottom: 1px solid var(--hair);
 }
 table.data tbody tr:last-child th { border-bottom: none; }
 
@@ -618,7 +632,7 @@ table.data.compare { min-width: 760px; }
 table.data.compare th.app {
   position: relative; vertical-align: top; padding-top: 18px;
   text-transform: none; letter-spacing: normal; font-family: var(--sans);
-  border-left: var(--hair); width: 20%;
+  border-left: 1px solid var(--hair); width: 20%;
 }
 table.data.compare th.app::before {
   content: ''; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--c);
@@ -637,7 +651,7 @@ table.data.compare th.app .who { display: block; font-size: 13px; color: var(--i
 table.data.compare td:nth-child(2), table.data.compare th:nth-child(2) { --c: var(--client); }
 table.data.compare td:nth-child(3), table.data.compare th:nth-child(3) { --c: var(--coach); }
 table.data.compare td:nth-child(4), table.data.compare th:nth-child(4) { --c: var(--studio); }
-table.data.compare td { border-left: var(--hair); font-size: 13.5px; }
+table.data.compare td { border-left: 1px solid var(--hair); font-size: 13.5px; }
 table.data.compare td:first-child { border-left: none; }
 
 /* Row headers are general (see `table.data tbody th`); the comparison only
@@ -673,7 +687,7 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
    new. Someone on the support page is stuck, so the way out sits at the top
    rather than after the prose. */
 .sup-top { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,360px); gap: clamp(28px,4vw,56px); align-items: start; }
-.qa { display: grid; grid-template-columns: minmax(0,300px) minmax(0,1fr); gap: clamp(20px,4vw,48px); padding: 22px 0; border-bottom: var(--hair); }
+.qa { display: grid; grid-template-columns: minmax(0,300px) minmax(0,1fr); gap: clamp(20px,4vw,48px); padding: 22px 0; border-bottom: 1px solid var(--hair); }
 .qa h3 { margin: 0; font-size: 17px; line-height: 1.35; letter-spacing: -0.018em; }
 .qa p { margin: 0; font-size: 16px; line-height: 1.62; color: var(--ink2); }
 .qa p + p { margin-top: 10px; }
@@ -938,7 +952,7 @@ figcaption.chart-note strong { color: var(--ink2); font-weight: 600; }
    Built on table.data so it inherits the scroll box and header treatment. */
 table.data.vs { min-width: 660px; }
 table.data.vs tr > :first-child { width: 26%; }
-table.data.vs th + td, table.data.vs td + td { border-left: var(--hair); width: 37%; }
+table.data.vs th + td, table.data.vs td + td { border-left: 1px solid var(--hair); width: 37%; }
 table.data.vs th .job { display: block; color: var(--ink); font-weight: 500; font-size: 15px; }
 
 /* ══════════════════════════════════════════════════════════════════════════

@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=d84a82bb66">
+<link rel="stylesheet" href="styles.css?v=a54c9215fb">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -128,6 +128,7 @@ addEventListener('DOMContentLoaded', function () {
         <li><a href="#who">Who can read what</a></li>
         <li><a href="#photos">Progress photos</a></li>
         <li><a href="#fence">How the fence holds</a></li>
+        <li><a href="#the-phone">The phone in your hand</a></li>
         <li><a href="#deletion">Deletion</a></li>
         <li><a href="#held">Where it is held</a></li>
         <li><a href="#limits">What this page does not claim</a></li>
@@ -375,6 +376,71 @@ addEventListener('DOMContentLoaded', function () {
         <p>The privileged key used for background work is read from a secret store at the moment
         it is needed, not written into a function body where anything able to read the schema
         could read it too.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── the phone in your hand ─────────────────────────────────────────
+     WHERE EACH CLAIM IS IN THE CODE:
+       · the lock is over a session, and stores
+         no password                          src/lib/appLock.ts:5-16
+       · sixty seconds in the background       src/lib/appLock.ts:24 (GRACE_MS)
+       · passcode fallback deliberately on     src/ui/appLock.tsx:158
+       · platform-correct wording              src/lib/appLock.ts:60 (lockMethodsLabel)
+       · mounted for all three apps            app/_layout.tsx:100, :101
+       · the current password is required, and
+         why                                   src/lib/accountSecurity.ts:18-27
+       · ending other sessions keeps this one  src/lib/accountSecurity.ts:262
+                                               app/(trainer)/account.tsx:156 -->
+<section class="band" id="the-phone">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">The phone in your hand</div>
+      <h2 class="hd">The other half of this<br><span class="serif">is a bench in a changing room.</span></h2>
+      <p class="lede">
+        Everything above is about what a request may read. None of it helps if the phone is face
+        up on a bench and somebody picks it up.
+      </p>
+    </div>
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">Lock</div>
+        <h3>Face ID, Touch ID or a passcode over the app</h3>
+        <p>On iOS it is offered in those words; on Android as a fingerprint, face unlock or a
+        screen lock, because that is what the handset calls them. It asks on a cold start and
+        after a minute in the background &mdash; not every time you glance at a notification,
+        which is how a lock gets turned off within a day.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Not a sign-in</div>
+        <h3>It stores no password, because it is not one</h3>
+        <p>This is a lock over a session you are already signed in to, not a second way to sign
+        in. A &ldquo;log in with Face ID&rdquo; that keeps your password in the keychain and
+        replays it would create a copy of something we do not hold at all. The device check
+        decides whether the app is shown; nothing about your credentials changes.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Fallback</div>
+        <h3>A face that will not read is not a lockout</h3>
+        <p>The device passcode is deliberately left as a fallback. A gym is dark, you are sweating
+        and your hands are chalked, and being unable to open your own training record because of
+        that is a worse outcome than the one the lock prevents.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Password</div>
+        <h3>Changing it asks for the old one</h3>
+        <p>The platform underneath does not require that: any live session can set a new password,
+        which means an unlocked unattended phone is enough to lock you out of your own account
+        permanently. So the current password is checked first, and it is checked the only way a
+        phone honestly can &mdash; by signing in with it.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Sessions</div>
+        <h3>Sign out everywhere else, and stay signed in here</h3>
+        <p>Changing your password offers to end every other session. It keeps this one on purpose:
+        you have just proved you know the password, and dropping you onto a sign-in screen would
+        leave you wondering whether the change went through.</p>
       </div>
     </div>
   </div>

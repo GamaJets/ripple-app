@@ -50,7 +50,7 @@ export default function ThisWeek() {
   const t = useTheme();
   const router = useRouter();
   const c = useClientData();
-  const { getProgram, status: programStatus, reload: reloadPrograms } = useAssignedPrograms();
+  const { getProgram, status: programStatus, reload: reloadPrograms, cachedNote } = useAssignedPrograms();
   const coachProgram = getProgram(c.id);
   const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   // What the coach assigned, what has been trained against it, and the profile
@@ -179,6 +179,19 @@ export default function ThisWeek() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>This Week</Text>
           </View>
         </View>
+
+        {/* ── whose copy of the coach's plan this is ──────────────────────
+            Non-null for exactly as long as the phone's own copy is what is
+            drawn — `mayServeCached` in src/ui/assignedPrograms.tsx decides
+            that, and the note carries the age — so it needs no gating of its
+            own and disappears the moment a live read lands.
+            
+            It is here rather than left unsaid because the horizon on that
+            cache is THIRTY DAYS. A member reading a month-old block as their
+            current one trains the wrong week, and a coach who reassigned them
+            a fortnight ago has no way to know why. The same sentence sits over
+            the timetable on app/(client)/classes.tsx, for the same reason. */}
+        {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{cachedNote}</Flag> : null}
 
         {programUnknown ? (
           <View style={{ marginTop: sp.lg }}>

@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=d84a82bb66">
+<link rel="stylesheet" href="styles.css?v=a54c9215fb">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -467,6 +467,30 @@ addEventListener('DOMContentLoaded', function () {
         an exercise name and plays against that movement for every client who has it &mdash; and
         where you have not filmed one, the catalogue's own animation plays instead, so nobody is
         ever left reading a name and guessing.</p>
+      </div>
+      <!-- The twelve methods and their rest behaviour are SET_METHODS in
+           src/lib/setMethods.ts; the picker is imported at
+           app/(trainer)/builder.tsx and the runner at app/(client)/workouts.tsx.
+           Warm-up and Cool-down carry countsToVolume: false; Drop set carries
+           restsAfter: false; Rest-pause and Cluster carry restsAfter: 15. -->
+      <div class="tile">
+        <div class="cap">Prescribe</div>
+        <h3>Twelve ways to run a set</h3>
+        <p>Normal, warm-up, to failure, drop set, AMRAP, rest-pause, cluster, tempo, eccentric,
+        isometric hold, back-off and cool-down. Each one is a real instruction and not a label:
+        a warm-up and a cool-down do not count towards training volume, a drop set gets no rest
+        after it, and rest-pause and cluster sets get fifteen seconds &mdash; the client's timer
+        obeys what you picked.</p>
+      </div>
+      <!-- groupLabel() in src/lib/setGroups.ts: >=4 "Giant set", 3 "Tri-set",
+           otherwise "Superset". The badge text is "Superset · 2 of 2". -->
+      <div class="tile">
+        <div class="cap">Pair</div>
+        <h3>The name follows the count</h3>
+        <p>Mark the exercises that run back to back and the app names the group itself: two is a
+        superset, three a tri-set, four or more a giant set. You never pick the word, so a
+        &ldquo;superset&rdquo; on a client's screen can never turn out to hold four movements.
+        Drag one out of a tri-set and it relabels itself on the way.</p>
       </div>
       <div class="tile">
         <div class="cap">Adjust</div>

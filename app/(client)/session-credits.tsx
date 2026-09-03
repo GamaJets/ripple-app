@@ -49,6 +49,9 @@ import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
 import { packDeadline, bookedBy } from '../../src/lib/packDeadline';
 import { useToday } from '../../src/ui/today';
+import { Fetched } from '../../src/ui/fetched';
+import { useReadStamp } from '../../src/ui/readStamp';
+import type { LoadStatus } from '../../src/ui/loadStatus';
 
 // The day used to judge whether a gym pass is still live was a private copy of
 // `todayIso` built here — local, correctly, because a pass expires on a date at
@@ -175,6 +178,36 @@ export default function SessionCredits() {
   }, [soleWindow, ledger, today]);
 
   const loading = packs === undefined || passes === undefined || sessions === undefined;
+
+  // ── when this number was last confirmed ───────────────────────────────
+  //
+  // A read stamp on a money figure is a strong claim, so it is worth saying why
+  // this screen earns one and what it is answering.
+  //
+  // `load` above deliberately does NOT blank what is on screen when a
+  // pull-to-refresh stalls: `setPacks((v) => (v === undefined ? null : v))`
+  // keeps the balance, on the argument in src/lib/staleRead.ts that an unread
+  // refresh does not mean the credits stopped existing. That is right, and it
+  // leaves a hole: the member pulls down, the request never lands, the same
+  // four sits there, and nothing on the screen has changed. `balanceUnread` is
+  // false — the values are real — so not one of the banners fires. The stamp is
+  // the only thing that can say "this is the four we read eleven minutes ago",
+  // and it comes with the Refresh that failed gesture's affordance beside it.
+  //
+  // The rule `src/lib/readStamp.ts` keeps is exactly the one this needs: the
+  // stamp is the last read that LANDED, never the last attempt. A stall leaves
+  // `packs` pointing at the same object it already held, so neither the status
+  // nor the token changes and the stamp correctly does not move.
+  //
+  // The status is synthesised because these three are plain reads rather than a
+  // provider — the same three states the rest of the screen already branches
+  // on, named once so the stamp cannot disagree with the banners.
+  const readStatus: LoadStatus = loading ? 'loading'
+    : (packs === null || passes === null || sessions === null) ? 'error' : 'ready';
+  // `packs` as the token: `load` reassigns all three together on every read
+  // that lands, so its identity moves exactly when a read has landed and at no
+  // other time.
+  const { at: readAt, busy: readBusy } = useReadStamp(readStatus, packs);
   // Named separately from `loading`, because "still reading" and "we asked and
   // could not get an answer" are different sentences and only one of them is
   // about somebody's money.
@@ -208,6 +241,10 @@ export default function SessionCredits() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: layout.gutter, paddingBottom: sp.xxl * 2 }} refreshControl={pull}>
         <Text style={{ ...ty.title, color: t.ink }}>Session Credits</Text>
+        {/* Under the title rather than under the figure: it is a statement
+            about everything below it, and a member deciding whether to book is
+            owed it before they read the number rather than after. */}
+        <Fetched at={readAt} onRefresh={load} busy={readBusy} />
 
         {loading ? (
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>Reading what pays for your sessions…</Text>

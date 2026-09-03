@@ -5,12 +5,13 @@
 // `tenants.timezone` (supabase/parts/710) is the column every dated figure in
 // this product is supposed to be cut on, and on 4 September 2026 all 54 gyms
 // in the live database had it null. The reason is not that owners disagree
-// with the idea. It is that the ONLY writer in the whole product is the web
+// with the idea. It was that the only writer in the whole product was the web
 // console's Gym settings screen, and the owner app — the thing that actually
 // ships to a gym owner's pocket — could not set it at all. So the console said
 // "in the gym's own timezone" over figures it was drawing on the reader's
 // laptop, the phone said nothing, and the setting that would fix it was on a
-// screen many owners will never open.
+// screen many owners will never open. `app/(owner)/ops.tsx` is the second
+// writer, and this is the control it needed.
 //
 // The console's control is a text field with a `<datalist>` behind it. That is
 // the right control for a keyboard and the wrong one for a thumb: there is no

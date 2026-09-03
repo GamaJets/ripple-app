@@ -7,7 +7,11 @@
 // of four competing 20px numbers, hairline-separated sections instead of eleven
 // stacked bordered cards, and a card spent only on the thing you can act on.
 import { useState, useEffect, useCallback } from 'react';
+import { Fetched } from '../../src/ui/fetched';
+import { useReadStamp } from '../../src/ui/readStamp';
+import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useNow } from '../../src/ui/today';
 import { useReachability } from '../../src/ui/reachability';
 import { offlineBanner } from '../../src/lib/reachability';
 import { useOutbox } from '../../src/ui/outbox';
@@ -47,7 +51,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
-import { shownStreak, weekStats, personalRecords, streakRisk, freezeBudget } from '../../src/lib/streaks';
+import { shownStreak, thisWeekStats, personalRecords, streakRisk, freezeBudget } from '../../src/lib/streaks';
 import { severeSummary } from '../../src/lib/injuries';
 import { booksInPerson, coachedRemotely, COACHED_MODE_SHORT, COACHING_MODE_NOTE } from '../../src/lib/types';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
@@ -148,7 +152,25 @@ export default function Home() {
   // log, the programs, the invites and readiness are all status-gated a few
   // lines from here. "No Sessions Booked" said to somebody expected in the room
   // on Thursday is the sentence this app pays most dearly for.
+  // The clock the calendar week is measured against. A `Date.now()` in the
+  // body would be read once per render on a screen that has no reason to
+  // re-render at midnight, so a member with Home open across a Sunday goes on
+  // being shown last week's total under "This Week". `useNow` re-settles at the
+  // next local midnight and on every return to the foreground.
+  const nowMs = useNow().getTime();
   const { sessions, status: sessionStatus, refresh: refreshSessions } = useSessions();
+  // ── when the figures on this screen were last confirmed ───────────────
+  //
+  // Home draws from three reads at once — the training log behind "This Week",
+  // the diary behind the next booking, and the profile behind the body
+  // figures — so one stamp over all three has to be true of the WORST of them.
+  // `oldestFetch` in src/lib/freshness.ts makes that argument in full: taking
+  // the newest gives a figure read an hour ago a confident wrong label instead
+  // of none, and `oldestFetch` returns null if any of them has never landed,
+  // which `<Fetched>` renders as "Reading…" rather than as an age.
+  const logRead = useReadStamp(logStatus, log);
+  const sessionsRead = useReadStamp(sessionStatus, sessions);
+  const bodyRead = useReadStamp(c.status, c.id);
   const sessionsKnown = sessionStatus === 'ready' || sessionStatus === 'partial';
   // `status` is read, not discarded. useInvites documents that under 'error' an
   // empty `received` means the check did not happen — not that nobody invited
@@ -324,7 +346,17 @@ export default function Home() {
   // Priced with the member's own weight over time, so a pull-up counts. See
   // src/lib/bodyweightSets.ts — an unweighed member's bodyweight sets are
   // reported as unpriced rather than silently counted as zero.
-  const wk = weekStats(log, Date.now(), c.weightSeries);
+  // `thisWeekStats`, not `weekStats`. Everything this feeds is captioned "This
+  // Week" — the KPI row, the day dots and the goal ring — and `weekStats` is a
+  // rolling 168 hours. On a Monday morning the ring counted the previous
+  // Wednesday and Thursday and could read "4 of 4 this week · goal met" to
+  // somebody who had not trained since the week opened; tapping through to
+  // This Week, which is Sunday-anchored, then showed a different number for the
+  // same phrase. See src/lib/weekStart.ts for why the anchor is product-wide.
+  //
+  // `useNow()` rather than `Date.now()`, because the answer changes at the
+  // Sunday midnight this screen sits open across.
+  const wk = thisWeekStats(log, nowMs, c.weightSeries);
   const prs = personalRecords(log, c.weightSeries);
   const goalDays = planDays.length || 4;
 
@@ -486,6 +518,15 @@ export default function Home() {
             <NotificationBell group="client" />
           </View>
         </View>
+
+        {/* One line over three reads, and it is the age of the OLDEST of them:
+            "This Week" comes off the training log, the next booking off the
+            diary, and the body figures off the profile, so a single stamp is a
+            claim about all three and has to be true of the worst. See
+            src/lib/freshness.ts. The Refresh does what pulling down does. */}
+        <Fetched at={oldestFetch(logRead.at, sessionsRead.at, bodyRead.at)}
+          onRefresh={() => { reloadLog(); void refreshSessions(); c.reload(); }}
+          busy={logRead.busy || sessionsRead.busy || bodyRead.busy} />
 
         {/* ── what you are looking at ─────────────────────────────────────
             One row, shut, and gone for good once it is read. See

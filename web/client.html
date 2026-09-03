@@ -29,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=d84a82bb66">
+<link rel="stylesheet" href="styles.css?v=a54c9215fb">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -198,6 +198,7 @@ addEventListener('DOMContentLoaded', function () {
       <li><a href="#effort">Effort</a></li>
       <li><a href="#beyond-the-barbell">Beyond the barbell</a></li>
       <li><a href="#meals">Meals</a></li>
+      <li><a href="#no-signal">No signal</a></li>
     </ul>
 </div>
 </section>
@@ -441,7 +442,9 @@ addEventListener('DOMContentLoaded', function () {
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Strength standards</strong> — the big lifts expressed as a multiple of your bodyweight, so a number has a scale to sit on. Add a weight and the ratios appear.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>Lifting tools</strong> — an Epley one-rep-max estimate from your best set, the training percentages off it, and a plate calculator that tells you what to load a side and what the closest loadable total actually is.</span></li>
+            <span><strong>Lifting tools</strong> — an Epley one-rep-max estimate from your best set, the training percentages off it, and a plate calculator that tells you what to load a side and what the closest loadable total actually is. It is not a converted answer: in kilograms it loads the competition set from 25 down to 1.25 against a 20 kg or 15 kg bar, and in pounds the American commercial set against a 45 lb or 35 lb bar — because a US 45 lb bar is 20.41 kg, and a converted answer would have you loading 11.34 lb plates that no gym owns.<!-- src/lib/plateMath.ts BARS and PLATES, and the header argument about the 20.41 kg bar. --></span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A rest timer that knows the exercise</strong> — it starts by itself when you log a set, counts down from whatever your coach set for that movement, and says which it used: <em>set by your coach</em> or <em>app default</em>. The default is ninety seconds and the app calls it a fallback rather than a recommendation. A drop set gets no rest after it at all; rest-pause and cluster sets get fifteen seconds.<!-- src/lib/restTimer.ts DEFAULT_REST_SEC = 90 and restSecondsFor; the label is drawn at app/(client)/workouts.tsx:4317; restsAfter for drop / restpause / cluster is in src/lib/setMethods.ts. --></span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Badges that mean something</strong> — streaks, session counts, records, cardio and volume, all derived from the log. Locked ones say what would earn them.</span></li>
         </ul>
@@ -1065,6 +1068,68 @@ addEventListener('DOMContentLoaded', function () {
       Pricing is not published yet, and nothing on this page quotes one. Classes, the entry pass
       and personal-training sessions depend on your gym running Repple Studio; the log, meals,
       scans and charts do not.
+    </p>
+  </div>
+</section>
+
+<!-- ── no signal ──────────────────────────────────────────────────────
+     EVERY CLAIM IN THIS SECTION IS PARSED OUT OF THE CODE, AND HERE IS WHERE:
+
+       · the list of what is queued        src/lib/outbox.ts:191  (OUTBOX_KINDS)
+       · what is deliberately NOT queued   src/lib/outbox.ts:20-50
+       · the wording the app itself uses   src/lib/offlineQueue.ts:270 (unsentNote)
+       · a refusal is not a retry          src/lib/offlineQueue.ts:138 (classifyWrite)
+       · the queue is flushed on reconnect src/ui/offlineFlush.tsx:47
+         and on returning to the app       src/ui/offlineFlush.tsx:49
+         and both are mounted at the root  app/_layout.tsx:211
+       · signal is measured by asking OUR
+         server, not by asking the radio   src/lib/reachability.ts:26
+                                           app/_layout.tsx:204
+
+     Do not add a sentence here without a line like these to put beside it. -->
+<section class="band tint" id="no-signal">
+  <div class="wrap">
+    <div class="lead-in">
+      <div class="eyebrow">No signal</div>
+      <h2 class="hd">Basements, lifts, and<br><span class="serif">the back of the free-weights room.</span></h2>
+      <p class="lede">
+        The place you train is frequently the place with no reception. An app that loses a set
+        because a wall is in the way is an app you stop trusting on the third occasion.
+      </p>
+    </div>
+
+    <div class="assure">
+      <div class="pair">
+        <div class="card">
+          <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 11l4 4 4-4"/><path d="M4 17v3h16v-3"/></svg></div>
+          <h3>Your typed set is kept on the phone</h3>
+          <p>Sets, food, habit ticks and check-ins are written locally first. So are messages, measurements, goals, glucose readings, scans, a day plan, confirming a session your trainer logged, accepting a document from your coach, and asking for a session. They go up when there is signal.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+          <h3>It goes up by itself</h3>
+          <p>The moment the connection comes back, and again whenever you open the app. You never press a Retry button, and until it has gone the app says so in as many words: <em>saved on this phone and not sent yet.</em> It does not say &ldquo;saved&rdquo;, because it has not been.</p>
+        </div>
+      </div>
+      <div class="pair">
+        <div class="card">
+          <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 16H3l9-16z"/><path d="M12 10v4M12 17h.01"/></svg></div>
+          <h3>Booking a class is not queued, on purpose</h3>
+          <p>A seat is a scarce thing somebody else can take. Queueing the intent would mean telling you we will book you later, and by later the class is full and you have arranged your evening around a place you never had. Offline, a booking fails immediately and says so. Cancelling, buying and sending a photograph are held back for the same kind of reason.</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8.8a16 16 0 0120 0"/><path d="M5 12.3a11 11 0 0114 0"/><path d="M8.5 15.8a6 6 0 017 0"/><path d="M12 19.5h.01"/></svg></div>
+          <h3>&ldquo;Connected&rdquo; is measured by asking us</h3>
+          <p>Gym wifi with a captive portal reports a perfect connection and answers nothing; so does one bar of 5G in a lift shaft. The app decides whether it is online by whether our server actually replied, which is the only question that matters, and it distinguishes <em>we refused</em> from <em>nobody answered</em> — those need different things from you.</p>
+        </div>
+      </div>
+    </div>
+
+    <p class="tiny">
+      A write the server actively <em>refuses</em> &mdash; a rule that says no, a duplicate, a
+      figure out of range &mdash; is never queued and retried. It is told to you at the time.
+      Retrying a refusal produces the same refusal for ever, silently, and leaves you believing
+      something is on its way that is not.
     </p>
   </div>
 </section>

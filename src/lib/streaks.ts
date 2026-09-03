@@ -5,6 +5,10 @@
 // can light up confetti on a new milestone.
 import type { WorkoutEntry } from './mockData';
 import { isBodyweightSet, setLoadKg, entryTonnage, type BodyweightHistory } from './bodyweightSets';
+// The product's week anchor. Sunday, everywhere, for the reason that file's
+// header gives: a week measured from a different place on two handsets puts the
+// same seven sessions in different buckets.
+import { startOfWeek } from './weekStart';
 // A held set's first number is seconds, not reps. Epley over it returns a
 // strength figure computed from a stopwatch, so this board leaves holds alone
 // and src/lib/timedSets.ts keeps the record they do belong on.
@@ -255,14 +259,17 @@ export interface WeekStats {
 }
 
 /**
- * Totals for the trailing 7 days. Volume = Σ reps × load across all sets.
+ * Totals over everything logged at or after `sinceMs`. Volume = Σ reps × load.
+ *
+ * The engine under both windows below, because the two of them differ ONLY in
+ * where the window opens and a second copy of this loop is how they would come
+ * to disagree about the same fortnight.
  *
  * `history` is the member's weight over time; without it a bodyweight set has
  * no load and lands in `unpricedSets` rather than being counted as zero.
  */
-export function weekStats(log: WorkoutEntry[], now: number = Date.now(), history: BodyweightHistory = []): WeekStats {
-  const since = now - 7 * DAY;
-  const recent = log.filter((e) => Date.parse(e.t) >= since);
+export function statsSince(log: WorkoutEntry[], sinceMs: number, history: BodyweightHistory = []): WeekStats {
+  const recent = log.filter((e) => Date.parse(e.t) >= sinceMs);
   let volume = 0, kcal = 0, unpriced = 0;
   for (const e of recent) {
     kcal += e.kcal ?? 0;
@@ -277,6 +284,47 @@ export function weekStats(log: WorkoutEntry[], now: number = Date.now(), history
     kcal: Math.round(kcal),
     days: new Set(recent.map((e) => dayKey(e.t))).size,
   };
+}
+
+/**
+ * Totals for the trailing 7 days — a ROLLING 168 hours, ending now.
+ *
+ * Right for a question about load and recovery, which is what it was written
+ * for: `deloadCheck` and the rest-day suggestion in app/(client)/restday.tsx
+ * ask "how much have you done lately", and lately does not reset on a Sunday.
+ *
+ * WRONG for anything captioned "this week", and it was being used for exactly
+ * that on three screens. See `thisWeekStats` below.
+ */
+export function weekStats(log: WorkoutEntry[], now: number = Date.now(), history: BodyweightHistory = []): WeekStats {
+  return statsSince(log, now - 7 * DAY, history);
+}
+
+/**
+ * Totals for the CALENDAR week the member is in — from local midnight on the
+ * day the week opened, which `src/lib/weekStart.ts` fixes at Sunday for the
+ * whole product.
+ *
+ * ── What this is the fix for ──────────────────────────────────────────────
+ *
+ * `weekStats` is a rolling 168 hours and says so. Three screens printed it
+ * under the words "this week" anyway, while `week.tsx`, `trends.tsx` and
+ * `consistency.tsx` measured the same phrase with `startOfWeek`. So the same
+ * member, on the same Monday morning, read three different answers to one
+ * question — and the sharpest of them was the goal ring on Home, which could
+ * say "4 of 4 this week · goal met" on a Monday to somebody who had not
+ * trained since the week opened, because it was still counting the previous
+ * Wednesday and Thursday.
+ *
+ * `weekStart.ts` opens with the reason the anchor is product-wide and not
+ * per-device: otherwise "the same seven sessions land in different buckets on
+ * two handsets". A rolling window is that failure without the second handset.
+ *
+ * Calendar arithmetic, via `startOfWeek`, so a week containing a clocks change
+ * is still seven days and not 167 hours.
+ */
+export function thisWeekStats(log: WorkoutEntry[], now: number = Date.now(), history: BodyweightHistory = []): WeekStats {
+  return statsSince(log, startOfWeek(now).getTime(), history);
 }
 
 /** A short, friendly milestone label for a streak count (for the confetti banner). */

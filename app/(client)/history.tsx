@@ -675,6 +675,11 @@ export default function History() {
       status={whole ? 'ready' : 'partial'}
       unit={wu}
       voice={{ they: 'You', their: 'your', have: 'have' }}
+      /* The panel already draws a read stamp; without this it said WHEN and
+         offered nothing to do about it, which is half an answer — see the prop's
+         own comment. `read` is this screen's own reload, the one pull-to-refresh
+         calls, so the button and the gesture do the same thing. */
+      onRefresh={() => { void read(); }}
     />
   </>);
 }
