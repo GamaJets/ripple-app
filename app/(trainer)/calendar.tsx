@@ -44,6 +44,7 @@ import type { TrainingSession } from '../../src/lib/types';
 import { buildIcs, shareIcs } from '../../src/lib/exportShare';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { minorFromWhole } from '../../src/lib/coachMoney';
+import { hitSlopFor } from '../../src/lib/a11y';
 import { supabase } from '../../src/lib/supabase';
 import { useTenant } from '../../src/ui/tenant';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
@@ -745,6 +746,100 @@ export default function TrainerSchedule() {
    * coach told "48 slots added" over twelve that landed has a week their
    * clients cannot see three quarters of.
    */
+  /**
+   * Every slot the coach offers, grouped by day.
+   *
+   * The flat list was fine when a week was six slots typed in by hand. A range
+   * puts fifty on one day, and fifty rows with a minus each is the form this
+   * whole feature exists to abolish, pointed backwards.
+   */
+  const availByDay = DOW.map((_, dow) => availSlots.filter((sl) => sl.dow === dow))
+    .map((slots, dow) => ({ dow, slots }))
+    .filter((g) => g.slots.length > 0);
+
+  /**
+   * The slots the CURRENT range selection already covers.
+   *
+   * Matched on the day and on the start time falling inside the window — not on
+   * the duration, deliberately. A coach who set 07:00-19:00 in hours and now
+   * wants it gone selects the same stretch; asking them to also remember they
+   * were 60-minute slots would make removal harder than adding, which is the
+   * asymmetry this whole sheet exists to remove.
+   */
+  const rangeExisting = availKnown
+    ? availSlots.filter((sl) => {
+        if (!avDays.includes(sl.dow)) return false;
+        const at = sl.hour * 60 + sl.minute;
+        return at >= rangeInput.fromMin && at < rangeInput.toMin;
+      })
+    : [];
+
+  /** Take everything in the selected stretch off the week. */
+  const removeRange = () => {
+    const n = rangeExisting.length;
+    if (n === 0) return;
+    const dayNames = [...new Set(avDays)].sort((a, b) => a - b).map((d) => DOW[d]).join(', ');
+    Alert.alert(
+      `Remove ${n} slot${n === 1 ? '' : 's'}?`,
+      `This takes every weekly slot between ${avTime(avFrom, avFromMin)} and ${avTime(avTo, avToMin)} off ${dayNames}. `
+      + 'Open slots already generated from them are NOT withdrawn — anything a client has booked stays booked, '
+      + 'and anything still open stays open until it passes. This only stops new ones being generated.',
+      [
+        { text: 'Keep them', style: 'cancel' },
+        {
+          text: `Remove ${n}`,
+          style: 'destructive',
+          onPress: async () => {
+            setAvBusy(true);
+            let gone = 0;
+            for (const sl of rangeExisting) { if (await removeAvail(sl.id)) gone++; }
+            setAvBusy(false);
+            if (gone < n) {
+              Alert.alert(
+                'Some are still there',
+                `${gone} of ${n} were removed. The rest are still on your week and still generating open slots — try again when you have a connection.`,
+                [{ text: 'OK' }],
+              );
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  /** Take a whole day off the week, with the count named before it happens. */
+  const clearDay = (dow: number, count: number) => {
+    Alert.alert(
+      `Remove ${DOW[dow]}?`,
+      `This takes all ${count} weekly slot${count === 1 ? '' : 's'} off ${DOW[dow]}. `
+      + 'Open slots already generated from them are NOT withdrawn — a client who has booked one keeps it, '
+      + 'and anything still open stays open until it passes. This only stops new ones being generated.',
+      [
+        { text: 'Keep them', style: 'cancel' },
+        {
+          text: `Remove ${count}`,
+          style: 'destructive',
+          onPress: async () => {
+            const mine = availSlots.filter((sl) => sl.dow === dow);
+            let gone = 0;
+            for (const sl of mine) { if (await removeAvail(sl.id)) gone++; }
+            // Counted from what the server confirmed, like every other write on
+            // this screen: `removeSlot` resolves true only when the row is
+            // actually gone, and a coach told "removed" over slots still on the
+            // server is bookable at an hour they think they closed.
+            if (gone < mine.length) {
+              Alert.alert(
+                'Some are still there',
+                `${gone} of ${mine.length} were removed. The rest are still on your week and still generating open slots — try again when you have a connection.`,
+                [{ text: 'OK' }],
+              );
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const addRange = async () => {
     if (rangeRefusal || avBusy) return;
     const { fresh, duplicates } = rangeSplit;
@@ -2477,16 +2572,35 @@ export default function TrainerSchedule() {
             ) : availSlots.length === 0 ? (
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>No weekly slots yet.</Text>
             ) : null}
-            {availSlots.map((sl, i) => (
-              <View key={sl.id}>
-                {i > 0 ? <Rule /> : null}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                  <Icon name="clock" size={16} color={t.brand} />
-                  <Text style={{ ...ty.body, ...numeric, fontWeight: '500', color: t.ink, flex: 1 }}>{DOW[sl.dow]} · {avTime(sl.hour, sl.minute)} · {sl.dur}min</Text>
-                  <Pressable onPress={() => removeAvail(sl.id)} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Remove ${DOW[sl.dow]} slot`}>
-                    <Icon name="minus" size={16} color={t.ink3} />
-                  </Pressable>
+            {/* Grouped by day, with the day's own Remove. A range writes fifty
+                rows onto one day and a flat list of fifty minus buttons is the
+                form this feature exists to abolish, pointed backwards. The
+                individual slots are still each removable underneath — a coach
+                who wants Tuesday minus the 11:15 can have it. */}
+            {availByDay.map((g, gi) => (
+              <View key={'day' + g.dow}>
+                {gi > 0 ? <Rule /> : null}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.sm }}>
+                  <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }}>
+                    {DOW[g.dow]} · {g.slots.length} slot{g.slots.length === 1 ? '' : 's'}
+                  </Text>
+                  <Ghost label="Remove" onPress={() => clearDay(g.dow, g.slots.length)} />
                 </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
+                  {g.slots.map((sl) => (
+                    <Pressable
+                      key={sl.id}
+                      onPress={() => { void removeAvail(sl.id); }}
+                      hitSlop={hitSlopFor(30)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${DOW[sl.dow]} ${avTime(sl.hour, sl.minute)}`}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: radius.pill, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}
+                    >
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink }}>{avTime(sl.hour, sl.minute)}</Text>
+                      <Icon name="minus" size={12} color={t.ink3} />
+                    </Pressable>
+                  ))}
+                </ScrollView>
               </View>
             ))}
 
@@ -2578,11 +2692,9 @@ export default function TrainerSchedule() {
                   that refuses with "No availability set. Add at least one
                   weekly slot first", which is a true sentence and a useless
                   one when the times are typed in directly above it. */}
-              <Cta
-                label={avBusy ? 'Adding…' : rangeRefusal ? 'Check the times above' : addButtonLabel(rangeSplit.fresh.length, rangeSplit.duplicates)}
-                wide
-                onPress={() => { void addRange(); }}
-              />
+              {/* The action itself lives in the sheet FOOTER, not here. See the
+                  note there: inside this ScrollView it sat below the fold on a
+                  phone, under a footer that showed a different button. */}
             </>) : (<>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.md }}>
               {DOW.map((d, i) => <Chip key={d} t={t} label={d} on={avDow === i} onPress={() => setAvDow(i)} />)}
@@ -2606,12 +2718,46 @@ export default function TrainerSchedule() {
             </>)}
           </ScrollView>
           <View style={{ height: sp.lg }} />
-          {/* Step two, and it looks like step two now. A coach with no weekly
-              hours cannot generate anything — `generateSlots` refuses on
-              exactly that — so offering it as the loudest control on the sheet
-              was inviting the press that fails. Under that state it drops to a
-              Ghost and says what has to happen first, which is the sentence
-              the alert used to deliver after the fact. */}
+
+          {/* ── the sheet's actions, where they can always be seen ───────────
+              This is a correction, and the simulator found it rather than the
+              code did. The Add control was the last thing inside the scroll
+              view: on a phone it sat below the fold, under a footer that showed
+              Generate Open Slots — so the only visible button was the one that
+              refuses with "No availability set", and the one that works was
+              off-screen. A primary action a person has to scroll to find, in a
+              region a fixed footer overlaps, is not a primary action.
+
+              Both steps are in the footer now, in the order they happen. */}
+          {avRange && availKnown ? (
+            <>
+              <Cta
+                label={avBusy ? 'Working…' : rangeRefusal ? 'Check the times above' : addButtonLabel(rangeSplit.fresh.length, rangeSplit.duplicates)}
+                wide
+                onPress={() => { void addRange(); }}
+              />
+              {/* Removal is the same gesture pointed backwards, and it has to be
+                  as cheap as adding was. A coach who put fifty slots on Tuesday
+                  in one press must not need fifty presses to take them off.
+                  Only drawn when the selected stretch actually covers something,
+                  so it never sits there offering to remove nothing. */}
+              {rangeExisting.length > 0 ? (
+                <>
+                  <View style={{ height: sp.sm }} />
+                  <Ghost
+                    label={`Remove the ${rangeExisting.length} already in this range`}
+                    onPress={removeRange}
+                  />
+                </>
+              ) : null}
+              <View style={{ height: sp.sm }} />
+            </>
+          ) : null}
+
+          {/* Step two, and it looks like step two. A coach with no weekly hours
+              cannot generate anything — `generateSlots` refuses on exactly that
+              — so offering it as the loudest control was inviting the press
+              that fails. */}
           {availKnown && availSlots.length === 0 ? (
             <>
               <Ghost label="Generate Open Slots · Next 4 Weeks" onPress={generateSlots} />
