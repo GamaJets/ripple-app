@@ -777,7 +777,12 @@ function SetUp({ items }: { items: SetupItem[] }) {
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)' }}>
         <h2>Set this gym up</h2>
         <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '4px 0 0' }}>
-          {line} Each one says what is broken until it is done. Nothing here is cosmetic.
+          {/* `needsSetup` is true, so `setupLine` cannot be null here — the
+              guard is for the reader rather than for the renderer, since a
+              null interpolated into JSX would leave a sentence starting with
+              a space and nobody would know where it went. */}
+          {line ? `${line} ` : ''}Each one says what is broken until it is done. Nothing here is
+          cosmetic.
         </p>
       </div>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
@@ -807,6 +812,7 @@ function SetUp({ items }: { items: SetupItem[] }) {
                   </p>
                 ) : null}
                 <p style={{ fontSize: 12.5, margin: '6px 0 0' }}>
+                  <span style={{ color: 'var(--ink3)' }}>Set it on </span>
                   <a href={SETUP_WHERE[i.key].href} style={{ color: 'var(--brand)' }}>
                     {SETUP_WHERE[i.key].label}
                   </a>

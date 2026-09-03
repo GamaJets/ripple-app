@@ -366,7 +366,11 @@ export default function OwnerOps() {
   useEffect(() => {
     let live = true;
     (async () => {
-      if (!USE_SUPABASE || !tenant?.id) return;
+      // Settled either way. Without this the demo build — which has no
+      // Supabase at all — sits on "Reading your gym…" for ever, which is the
+      // one sentence that means "wait, this is coming".
+      if (!USE_SUPABASE) { setZoneRead(true); return; }
+      if (!tenant?.id) return;
       const r = await fetchGymZone(supabase as any, tenant.id);
       if (!live) return;
       setZone(r.zone); setZoneErr(r.error); setZoneRead(true);
@@ -388,6 +392,28 @@ export default function OwnerOps() {
    *  what makes the screen usable at all on a runtime with no list: the field
    *  is a search AND the field. */
   const typedZone = parseGymZone(zoneQuery);
+  /**
+   * Replacing a zone is asked about; setting the first one is not.
+   *
+   * Setting a zone for the first time only ever improves what is on the
+   * screens — before it, every date was drawn on whichever machine read it.
+   * CHANGING one moves the boundary of every month that has already been
+   * closed: a class at 23:30 on the 31st can leave the month it was filed in.
+   * That is not irreversible, and it is not obvious either, so the question is
+   * asked and it names both zones rather than saying "are you sure".
+   */
+  const askZone = (next: string) => {
+    if (!zone || zone === next) { void saveZone(next); return; }
+    Alert.alert(
+      'Change this gym’s timezone?',
+      `This gym is measured in ${zone}. Changing it to ${next} re-cuts every day, month and payroll period in the owner console — including months already closed, where a late class can move into the month next door.`,
+      [
+        { text: 'Keep ' + zone, style: 'cancel' },
+        { text: 'Use ' + next, style: 'destructive', onPress: () => { void saveZone(next); } },
+      ],
+    );
+  };
+
   const saveZone = async (next: string) => {
     if (!tenant?.id) return;
     setZoneBusy(true); setZoneMsg(null);
@@ -398,7 +424,7 @@ export default function OwnerOps() {
       setZone(next); setZoneQuery(''); setZoneErr(null);
       setZoneMsg({
         bad: false,
-        text: `This gym's day is now measured in ${next}. Every date and time on the owner console — the month close, the payroll month, footfall by hour — is drawn on it from here on, and figures already on a screen change when it is next read.`,
+        text: `This gym’s day is now measured in ${next}. Every date and time on the owner console — the month close, the payroll month, footfall by hour — is drawn on it from here on, and figures already on a screen change when it is next read.`,
       });
     } catch (e: any) {
       reportError('ops.saveZone', e);
@@ -769,7 +795,7 @@ export default function OwnerOps() {
               <SectionHead title="Where This Gym Is"
                 note={zoneRead && !zoneErr && zone ? (gymTimeLabel(tick, zone) ?? undefined) : undefined} />
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                Whose day this gym's day is. The month close, the payroll month and every "today"
+                Whose day this gym’s day is. The month close, the payroll month and every “today”
                 in the owner console are cut on it.
               </Text>
               {tenantStatus === 'loading' || (tenant?.id && !zoneRead) ? (
@@ -778,7 +804,7 @@ export default function OwnerOps() {
                 <Empty tone={t.ink3}>This account is not attached to a gym, so there is no timezone to set.</Empty>
               ) : zoneErr ? (
                 <Empty tone={t.warn}>
-                  This gym's timezone could not be read, so whether one is set is not known — this is
+                  This gym’s timezone could not be read, so whether one is set is not known — this is
                   not a statement that none is. Nothing can be changed until it can be read.
                 </Empty>
               ) : (<>
@@ -817,12 +843,12 @@ export default function OwnerOps() {
                     list, and a shortcut for anybody who knows the name. */}
                 {typedZone.kind === 'zone' && !zoneHits.some((h) => h.zone === typedZone.zone) ? (
                   <ZoneRow zone={typedZone.zone} where="typed" tick={tick} busy={zoneBusy}
-                    onPress={() => { void saveZone(typedZone.zone); }} />
+                    onPress={() => { askZone(typedZone.zone); }} />
                 ) : null}
 
                 {zoneHits.map((h) => (
                   <ZoneRow key={h.zone} zone={h.zone} where={h.where} tick={tick} busy={zoneBusy}
-                    onPress={() => { void saveZone(h.zone); }} />
+                    onPress={() => { askZone(h.zone); }} />
                 ))}
 
                 {zoneQuery.trim() && zoneHits.length === 0 && typedZone.kind !== 'zone' ? (
@@ -843,7 +869,7 @@ export default function OwnerOps() {
                     and not something to press — see the note above the section. */}
                 {readerZone() ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                    This phone's own clock is set to {readerZone()}. That is where the phone is, which
+                    This phone’s own clock is set to {readerZone()}. That is where the phone is, which
                     is not necessarily where the gym is — so it is not filled in for you.
                   </Text>
                 ) : null}

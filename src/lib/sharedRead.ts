@@ -106,6 +106,10 @@ export const SAME_LAUNCH_MS = 5_000;
 interface Entry<T> {
   /** The request currently out, if any. Shared, not copied. */
   inflight: Promise<ReadOutcome<T>> | null;
+  /** Which flight `inflight` is. Compared rather than the promise itself,
+   *  because a flight has to recognise ITSELF from inside its own body and a
+   *  promise cannot be referred to while it is still being constructed. */
+  inflightId: number;
   /** The last SUCCESSFUL answer and when it landed. Failures never get here. */
   held: { at: number; outcome: { ok: true; value: T } } | null;
   /** Bumped by `forget`. A read that started under an older one has been
@@ -121,10 +125,11 @@ export function createSharedRead<T>(opts?: {
   const freshMs = opts?.freshMs ?? SAME_LAUNCH_MS;
   const now = opts?.now ?? Date.now;
   const entries = new Map<string, Entry<T>>();
+  let nextFlightId = 1;
 
   const entryFor = (key: string): Entry<T> => {
     let e = entries.get(key);
-    if (!e) { e = { inflight: null, held: null, generation: 0 }; entries.set(key, e); }
+    if (!e) { e = { inflight: null, inflightId: 0, held: null, generation: 0 }; entries.set(key, e); }
     return e;
   };
 
@@ -137,6 +142,7 @@ export function createSharedRead<T>(opts?: {
     if (e.inflight) return e.inflight;
 
     const startedAt = e.generation;
+    const flightId = nextFlightId++;
     const p: Promise<ReadOutcome<T>> = (async () => {
       let outcome: ReadOutcome<T>;
       try {
@@ -149,12 +155,13 @@ export function createSharedRead<T>(opts?: {
         outcome = { ok: false, error };
       }
       const cur = entryFor(key);
-      if (cur.inflight === p) cur.inflight = null;
+      if (cur.inflightId === flightId) cur.inflight = null;
       // Rule 2 and rule 4, in one condition.
       if (outcome.ok && cur.generation === startedAt) cur.held = { at: now(), outcome };
       return outcome;
     })();
     e.inflight = p;
+    e.inflightId = flightId;
     return p;
   };
 

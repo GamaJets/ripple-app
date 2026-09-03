@@ -1794,7 +1794,22 @@ export default function TrainerClients() {
             same argument the card above makes: a fifth warning on this screen
             saying "we could not count why anybody left" is noise, and a tally
             over a prefix would put a reason on top because of the row cap. */}
-        {departures && departureNote ? (<>
+        {/* ── and only when there is a tally to show ──────────────────────
+            Gated on `counts.length` and not merely on the read having landed.
+            With nothing recorded against any departure, `departureLine`
+            returns "1 person has left your book in the last 90 days, and
+            nothing is recorded about why any of them did… none of them will be
+            in March" — which is the sentence the UnexplainedDepartures card
+            immediately above has just said in different words, down to the
+            month. Seen on a device the two sat one after the other, and under
+            them a heading with no rows, a caption pointing at "the counts
+            above" that were not there, and a note explaining why a tally of
+            nothing is not shown as a percentage.
+
+            The card above is the one that can be acted on — it names the
+            person and offers Record Why. This section is the read-back, and it
+            has nothing to read back until at least one answer exists. */}
+        {departures && departureNote && departures.counts.length > 0 ? (<>
           <Rule />
           <Section>
             <SectionHead title="Why People Have Left" note={`Last ${DEPARTURE_WINDOW_DAYS} days`} />

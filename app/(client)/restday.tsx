@@ -18,7 +18,7 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
 import { deloadCheck } from '../../src/lib/training';
-import { weekStats } from '../../src/lib/streaks';
+import { weekStats, thisWeekStats } from '../../src/lib/streaks';
 import { volumeHeadline } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 import { useToday } from '../../src/ui/today';
@@ -57,19 +57,35 @@ export default function RestDay() {
 
   const info = useMemo(() => {
     const dl = deloadCheck(log);
+    // ── two windows, because there are two questions ──────────────────
+    //
+    // `wk` is a ROLLING seven days and stays that way: the rest suggestion
+    // below asks "how much have you done lately", and lately does not reset on
+    // a Sunday — a member who trained Thursday, Friday and Saturday is as tired
+    // on Sunday morning as they were on Saturday night, and a window that
+    // emptied at midnight would tell them to go again.
+    //
+    // `cal` is the CALENDAR week, and it is what the "Volume This Week" figure
+    // below is captioned as. That figure was coming off `wk`, so it silently
+    // included work from the previous week and disagreed with the same phrase
+    // on Home, This Week and Trends. See src/lib/weekStart.ts.
     const wk = weekStats(log);
+    const cal = thisWeekStats(log);
     // Compared as local day KEYS rather than through `toDateString`, so the
     // day being asked about is the day the member is actually in.
     const trainedToday = log.some((e) => dayKeyOf(e.t) === today);
     // Suggest a rest day if 3+ of the last 7 days trained and today already trained,
     // or if a deload is due.
     const restToday = dl.due || (wk.days >= 4 && trainedToday);
-    return { dl, wk, trainedToday, restToday };
+    return { dl, wk, cal, trainedToday, restToday };
   }, [log, today]);
 
-  const { dl, wk, restToday } = info;
+  const { dl, wk, cal, restToday } = info;
   // Tonnes for a metric reader, pounds for an imperial one. See volumeHeadline.
-  const vol = volumeHeadline(wk.volumeKg, wu);
+  // Off `cal`, the calendar week, because the label under it says "This Week".
+  // The rest suggestion above still reads `wk`, which is the rolling window it
+  // was written for.
+  const vol = volumeHeadline(cal.volumeKg, wu);
   const tone = !known ? t.warn : dl.due ? t.s3 : restToday ? t.warn : t.brand;
   // "You are well recovered" was a claim this screen is not entitled to make.
   // Everything here is inferred from the TRAINING LOG: it knows how much you

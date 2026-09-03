@@ -109,13 +109,41 @@ export default function Membership() {
   // their gym's supplier's initials in one string. See src/lib/membership.ts.
   const memberNo = memberNoFrom(c.name, c.id, appName);
 
+  // The day this screen is being read on. Declared here rather than beside the
+  // membership standing further down, because the memo below needs it too and
+  // was the one place on this screen still frozen.
+  //
+  // The comment on `primaryMembership` records this fix being made for the
+  // standing and gives the argument in full: this screen is registered
+  // `href: null` in app/(client)/_layout.tsx, so it mounts once and is never
+  // torn down, and nothing on it renders on a clock. `useToday` holds the day
+  // as state and re-reads it at the next local midnight and on every return to
+  // the foreground.
+  const today = useToday();
+
   const { visits, last } = useMemo(() => {
-    const now = new Date();
+    // ── "This Month" was whichever month it was when `log` last changed ──
+    //
+    // This was `const now = new Date()` inside a memo keyed on `[log]` alone,
+    // and the figure it produces is captioned "Sessions Logged This Month".
+    // So a member who opened Membership on 30 September and came back on 2
+    // October read September's count under the word "This" — and one who had
+    // trained on the 1st read "No sessions logged yet this month" unless the
+    // log itself happened to change. `check:frozen-day` only flags an EMPTY
+    // dependency list, so `[log]` sailed through it while behaving the same way.
+    //
+    // Compared as a `YYYY-MM` prefix off the local day rather than through
+    // Date parts on both sides: `today` is already the member's own local day,
+    // and matching strings keeps a timezone out of a question that has none.
+    const thisMonth = today.slice(0, 7);
     const days = new Set<string>();
     let latest = 0;
     for (const e of log) {
       const d = new Date(e.t);
-      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) days.add(d.toDateString());
+      if (Number.isFinite(d.getTime())) {
+        const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        if (month === thisMonth) days.add(d.toDateString());
+      }
       const ts = Date.parse(e.t); if (ts > latest) latest = ts;
     }
     // `day()` at the top of this file already goes through `appLocale()`; this
@@ -123,7 +151,7 @@ export default function Membership() {
     // two different ways.
     const lastLabel = latest ? fmtFullDay(new Date(latest).toISOString()) : '—';
     return { visits: days.size, last: lastLabel };
-  }, [log]);
+  }, [log, today]);
 
   /* ── the membership itself ────────────────────────────────────────────── */
 
@@ -198,7 +226,6 @@ export default function Membership() {
   // `useToday` (src/ui/today.ts) holds the day as state and re-reads it at the
   // next local midnight and on every return to the foreground, which is the
   // render this line was already written to be correct in.
-  const today = useToday();
   const primary = primaryMembership(mships, today);
   const standing = primary ? standingOf(primary, today) : null;
   const planState = primary ? planStateOf(primary) : null;

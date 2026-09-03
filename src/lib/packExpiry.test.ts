@@ -164,8 +164,15 @@ ok(!/had been used/i.test(refundedOntoClosed),
 ok(refundedOntoClosed.includes('1'), 'the credit is counted out loud rather than quietly dropped');
 ok(/cannot be booked/i.test(refundedOntoClosed),
   'and the member is told it cannot be spent, which is the fact they would otherwise discover at the door');
-ok(/coach/i.test(refundedOntoClosed),
-  'with the one person who can do anything about it named');
+// Voice-neutral, and deliberately. `expiryLine` is read by both apps — the
+// coach's app/(trainer)/payments.tsx falls through to it whenever
+// `strandedNote` is null, and null is exactly this case — so a sentence saying
+// "ask your coach" would be shown to the coach about their own client. Every
+// other sentence in that function keeps the same rule.
+ok(!/your coach|your gym/i.test(refundedOntoClosed),
+  'and addresses nobody, because the coach reads this same line about their own client');
+ok(/still open|new pack|move/i.test(refundedOntoClosed),
+  'while still saying what has to happen to it');
 
 // Both things at once are two separate events and both are said.
 const lostAndBack = expiryLine(

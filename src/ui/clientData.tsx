@@ -43,6 +43,7 @@ import { capLimit, capped } from '../lib/rowCap';
 import { registerFlush } from '../lib/offlineQueue';
 import { writeFailure } from '../lib/wroteRows';
 import { useRecoverRead } from './readRefresh';
+import { readMyProfileRow, readMyClientRow, forgetMyRows } from './myProfile';
 
 // Declared in src/lib/types.ts alongside the labels and the two predicates the
 // screens branch on; re-exported because every client screen imports it from
@@ -326,9 +327,23 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       // defaults. Tracked rather than swallowed, because the push effect below
       // is about to publish whatever is on screen back to the server.
       let failed = false;
-      try {
-        const { data, error } = await supabase.from('profiles').select('full_name, avatar').eq('id', sbUid).single();
-        if (error) { reportError('clientData.hydrate.profiles', error); failed = true; }
+      // Shared with the three other providers reading this same row on the
+      // same launch — src/ui/myProfile.ts. It was `.single()` here, which
+      // reports a MISSING row as the error PGRST116; the shared read is
+      // `maybeSingle`, because tenant.tsx and settings.tsx both have honest
+      // answers for a row that is not there. This call site does not: it arms
+      // an UPDATE of the whole `clients` row off a successful read, and a
+      // profiles row it never saw is not something to arm a write over. So the
+      // absence is turned back into a failure HERE, explicitly, rather than
+      // being inherited from a `.single()` nobody would think to look at.
+      const profOut = await readMyProfileRow(sbUid);
+      {
+        const data = profOut.ok ? profOut.value : null;
+        if (!profOut.ok) { reportError('clientData.hydrate.profiles', profOut.error); failed = true; }
+        else if (data == null) {
+          reportError('clientData.hydrate.profiles', new Error('no profiles row for the signed-in account'));
+          failed = true;
+        }
         else if (!cancelled) {
           const fromProfile = typeof data?.full_name === 'string' ? data.full_name.trim() : '';
           if (fromProfile) setName(fromProfile);
@@ -362,7 +377,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           }
           if (typeof data?.avatar === 'string' && data.avatar) setPhoto(data.avatar);
         }
-      } catch (e) { reportError('clientData.hydrate.profiles', e); failed = true; }
+      }
 
       // Read the rest of the profile back BEFORE the push effect below is allowed
       // to run. Without this the local state is still at its defaults (the local
@@ -370,10 +385,9 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       // overwrite the user's real goal/diet/allergens on the server with those
       // defaults on every single app launch.
       try {
-        const { data: c, error: cErr } = await supabase
-          .from('clients')
-          .select('dob, height_cm, goal, diet, avoid, mode, trainer_id, injuries, focus_areas, manual_weight_kg, manual_body_fat_pct, manual_at, meals_per_day, step_goal, sleep_goal_hours, water_goal_glasses')
-          .eq('id', sbUid).maybeSingle();
+        const cOut = await readMyClientRow(sbUid);
+        const cErr = cOut.ok ? null : cOut.error;
+        const c = cOut.ok ? cOut.value : null;
         // maybeSingle, not single. `single()` treats NO ROW as the error
         // PGRST116, and having no `clients` row is not a failure — it is the
         // normal, permanent state of every coach and every gym owner, because
@@ -433,6 +447,13 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
               // and the console read. A promotion that silently landed nowhere
               // leaves a hybrid client reading as in-person to everybody but
               // themselves — which is the state this block exists to end.
+              // Deliberately does NOT forget the shared read (src/ui/myProfile.ts).
+              // This runs in the middle of the launch fan-out, and dropping the
+              // rows here would send the providers still waiting on them back to
+              // the server one at a time — which is the thing being fixed. It is
+              // safe only because `mode` is read by nothing but this provider,
+              // which already holds `agreed`; a promotion of any column another
+              // reader takes would have to forget.
               const mRes = await supabase.from('clients').update({ mode: agreed }, { count: 'exact' }).eq('id', sbUid);
               const mWhy = writeFailure('Your coaching mode', mRes);
               if (mWhy) reportError('clientData.promoteMode', mRes.error ?? new Error(mWhy));
@@ -575,6 +596,12 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (cMissed) reportError('clientData.push.clients', new Error('update matched no rows'));
           setSaveFailed(!!(pErr || cErr || pMissed || cMissed));
         } catch (e) { reportError('clientData.push', e); setSaveFailed(true); }
+        // Both rows have just changed underneath the shared read that the other
+        // providers take their copy of this person from. Outside the try, so it
+        // runs on the failure path too: a write that threw may still have
+        // landed, and the safe move on "we do not know" is to make the next
+        // reader ask the server. src/ui/myProfile.ts.
+        forgetMyRows(sbUid);
       })();
     }, 600);
     return () => clearTimeout(timer);

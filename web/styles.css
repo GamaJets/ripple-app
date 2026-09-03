@@ -688,11 +688,20 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
    rather than after the prose. */
 .sup-top { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,360px); gap: clamp(28px,4vw,56px); align-items: start; }
 .qa { display: grid; grid-template-columns: minmax(0,300px) minmax(0,1fr); gap: clamp(20px,4vw,48px); padding: 22px 0; border-bottom: 1px solid var(--hair); }
-.qa h3 { margin: 0; font-size: 17px; line-height: 1.35; letter-spacing: -0.018em; }
+/* h3 or h4. A .qa row sitting directly under a section's h2 asks its question
+   at h3; inside a .qa-group the group's own name takes that level and the
+   question drops to h4. Both look identical, because the level is about where
+   the question sits in the outline and not about how loud it is. */
+.qa h3, .qa h4 { margin: 0; font-size: 17px; line-height: 1.35; letter-spacing: -0.018em; }
 .qa p { margin: 0; font-size: 16px; line-height: 1.62; color: var(--ink2); }
 .qa p + p { margin-top: 10px; }
 .qa-group { margin-top: clamp(34px,5vw,52px); }
-.qa-group > h2 { font-size: 15px; letter-spacing: -0.01em; margin: 0 0 14px; }
+/* h3, not h2. These name a sub-group of questions BENEATH the section heading
+   above them, and were marked at the same level as it — twelve of them on this
+   page, each styled down to 15px to look subordinate while telling a screen
+   reader they were not. The questions inside them moved to h4 to match, so the
+   outline now says what the type size has always said. */
+.qa-group > h3 { font-size: 15px; letter-spacing: -0.01em; margin: 0 0 14px; }
 .qa-group > .bar { height: 1px; background: var(--line); }
 
 .signup-grid { display: grid; grid-template-columns: minmax(0,420px) minmax(0,1fr); gap: clamp(32px,5vw,72px); align-items: start; }

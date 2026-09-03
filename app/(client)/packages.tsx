@@ -500,12 +500,10 @@ export default function ClientPackages() {
                  so a figure on a screen headed "bought from your coach" is not
                  mistaken for something they bought from their coach; the pack
                  list below still, correctly, shows nothing. */
-              <>
-                <Hero label="Sessions Remaining" figure={fig(book.left)} note={creditsHeroNote(book) ?? ''} />
-                <ListRow icon="calendar" title="Your Gym PT Pass"
-                  note="Which sessions used a credit, and what your bookings are due to draw"
-                  onPress={() => router.push('/(client)/session-credits')} />
-              </>
+              /* No second route to the ledger beside it: the "Session Credits"
+                 row below already goes there, for every member, and two rows to
+                 one screen a few inches apart reads as two different places. */
+              <Hero label="Sessions Remaining" figure={fig(book.left)} note={creditsHeroNote(book) ?? ''} />
             ) : balance.lines.length > 0 && remaining != null ? (
               <Hero label="Sessions Remaining" figure={fig(remaining)}
                 note={balance.live > 0

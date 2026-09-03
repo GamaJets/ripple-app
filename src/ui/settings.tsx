@@ -71,6 +71,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { useAuthRevision } from './authRevision';
+import { readMyProfileRow, readMyClientRow, forgetMyRows } from './myProfile';
 import { registerForPush, pushAvailable, handsetPushTokens, forgetRegisteredToken } from './pushNotifications';
 import { consentFromStored, recordPushConsent } from '../lib/pushConsent';
 import { soundFromStored, recordRestSoundConsent } from '../lib/restTimer';
@@ -426,9 +427,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         // Signed out: the device cache is the whole story, and there is nothing
         // to push to. Not an error state.
         if (!uid) { if (!cancelled) setUnitsLoaded(true); return; }
-        const { data, error } = await supabase
-          .from('clients').select('weight_unit, length_unit').eq('id', uid).maybeSingle();
+        // Shared with clientData.tsx, which reads this same row on the same
+        // launch for the rest of the member's profile — src/ui/myProfile.ts.
+        // The outcome carries the error, so the guard below still tells a
+        // refused read apart from an account that has no `clients` row.
+        const cOut = await readMyClientRow(uid);
         if (cancelled) return;
+        const data = cOut.ok ? cOut.value : null;
+        const error = cOut.ok ? null : cOut.error;
         if (error) {
           // The read failed. Leave `writable` null so nothing is pushed for the
           // rest of this session: the client may well have chosen pounds on
@@ -451,9 +457,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         let row: { weight_unit?: unknown; length_unit?: unknown } | null = data ?? null;
         let home: 'clients' | 'profiles' = 'clients';
         if (!row) {
-          const { data: prof, error: profErr } = await supabase
-            .from('profiles').select('weight_unit, length_unit').eq('id', uid).maybeSingle();
+          // The same shared read the tenant, profile and invites providers are
+          // taking on this launch, for its own two columns.
+          const pOut = await readMyProfileRow(uid);
           if (cancelled) return;
+          const prof = pOut.ok ? pOut.value : null;
+          const profErr = pOut.ok ? null : pOut.error;
           if (profErr) {
             // Same reasoning as the clients read above: a failed read leaves
             // `writable` null so this device publishes nothing over a choice
@@ -572,6 +581,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // is a report rather than an alert; the point is that the report happens at
     // all, so the unit a coach reads and TYPES on somebody else's record has an
     // audit trail when it does not follow them to a second phone.
+    // The row this account's providers share a read of has just changed, so
+    // the held copy is dropped before the request is even sent. Dropped rather
+    // than patched: what is shared is the read, not an answer anybody keeps in
+    // step, and the next reader asking the server is the whole of the fix.
+    forgetMyRows(uid);
     supabase.from(unitHome.current).update(row, { count: 'exact' }).eq('id', uid)
       .then((r) => {
         const why = writeFailure('Your units', r);

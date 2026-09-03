@@ -25,6 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
+import { readMyProfileRow } from './myProfile';
 import { capLimit, capped } from '../lib/rowCap';
 import { readCoachedMode, type CoachedMode } from '../lib/types';
 import { writeFailure } from '../lib/wroteRows';
@@ -233,10 +234,16 @@ export function InvitesProvider({ children }: { children: ReactNode }) {
         // Signed out: no invitations addressed to anybody, which is true.
         if (!u) { setStatus('ready'); return; }
         setUid(u.id);
-        try {
-          const prof = await supabase.from('profiles').select('full_name').eq('id', u.id).single();
-          if (!cancelled() && prof.data) setMyName(prof.data.full_name ?? null);
-        } catch { /* the coach's own name is cosmetic on the invite */ }
+        // The same read of the same row the tenant, profile and settings
+        // providers are making on this launch — src/ui/myProfile.ts. Three of
+        // them read `full_name`, landed at different moments, and could
+        // disagree about what this person is called for the length of a launch;
+        // that is the half of the duplication that showed. The failure branch
+        // is unchanged and stays silent on purpose: the coach's own name is
+        // cosmetic on the invite, and it is the invitations below that this
+        // provider's `status` is about.
+        const prof = await readMyProfileRow(u.id);
+        if (!cancelled() && prof.ok && prof.value) setMyName(prof.value.full_name ?? null);
 
         // Sent (I'm the coach). `s.error` was never read, so a refused read
         // showed the coach an empty "invitations sent" list and invited them to

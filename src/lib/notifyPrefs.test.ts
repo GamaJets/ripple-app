@@ -15,7 +15,7 @@
 //
 // `ok`/`eq` into an errors array and process.exit(1) — never node:assert.
 import {
-  CATEGORIES, DEFAULT_NOTIFY_PREFS, allows, categoryDef, hourToDeliver,
+  CATEGORIES, DEFAULT_NOTIFY_PREFS, allows, categoryDef, categoryForRoute, hourToDeliver,
   timeToDeliver, deliveryMinute, movedNote,
   inQuietHours, prefsFromStored, quietLabel, whenToDeliver, type NotifyPrefs,
 } from './notifyPrefs';
@@ -212,6 +212,45 @@ const prefs = (over: Partial<NotifyPrefs> = {}): NotifyPrefs => ({ ...DEFAULT_NO
   ok(note != null && /instead/.test(note), 'and says when it will actually arrive');
   eq(movedNote(9, 0, 'reminders', p, label), null, 'a time outside them says nothing');
   eq(movedNote(3, 0, 'sessions', p, label), null, 'and a non-quietable one is not warned about a move that will not happen');
+}
+
+/* ── the category a caller forgot to pass ──────────────────────────────── */
+//
+// `scheduleLocal` reads `if (category && !allows(...))`, so an omitted category
+// is not a gate at all — and src/ui/badgeWatch.tsx omitted it. A member who
+// turned OFF 'Streaks And Badges', a switch whose own label reads "when you
+// unlock a badge", went on being congratulated; one with quiet hours got the
+// congratulation at the hour it happened, because `motivation` is quietable and
+// nothing asked. A switch shown, used and ignored is worse than no switch.
+
+eq(categoryForRoute('/(client)/achievements'), 'motivation',
+  'a notification that opens Achievements is a badge, whoever wrote it');
+eq(categoryForRoute('/(client)/achievements?from=finish'), 'motivation',
+  'and a query string is part of the route, not part of the match');
+eq(categoryForRoute('/(client)/workouts'), 'motivation', 'the streak nudge’s screen too');
+
+// Whole-route matching, as inboxIcon and notificationChannel both do it.
+// Somebody who believed it was prefix matching would "fix" a miss by reordering
+// the table and nothing would change.
+eq(categoryForRoute('/(client)/achievements-archive'), null,
+  'a longer route that starts with a known one is a different screen');
+eq(categoryForRoute('/(client)/calendar'), null,
+  'a booked session is not motivational — it is a thing the member asked for');
+eq(categoryForRoute(''), null, 'nothing to go on is nothing decided');
+eq(categoryForRoute(null), null, 'and neither is no route');
+eq(categoryForRoute(undefined), null, 'nor a missing one');
+
+// Null is the SAFE answer and it means "nobody has decided". An unclassified
+// local notification is still scheduled: the failure of a missed gate is a
+// banner somebody did not want, and the failure of a default-deny is a session
+// reminder that never arrives.
+{
+  const offMotivation: NotifyPrefs = { ...DEFAULT_NOTIFY_PREFS, off: { motivation: true } };
+  const inferred = categoryForRoute('/(client)/achievements');
+  ok(inferred != null && !allows(inferred, offMotivation),
+    'with Streaks And Badges off, a badge banner inferred from its route is refused');
+  const unknown = categoryForRoute('/(client)/somewhere-new');
+  eq(unknown, null, 'and a route nobody has classified is not refused — it is not decided');
 }
 
 if (errors.length) {

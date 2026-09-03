@@ -304,7 +304,15 @@ export function expiryLine(p: PackExpiry, left: number | null, today: string): s
           : `${lost} session${lost === 1 ? '' : 's'} were still on this pack when it ran out, and they can no longer be booked.`);
       }
       if (back > 0) {
-        parts.push(`${back} session${back === 1 ? '' : 's'} went back on to this pack after it had already run out, so ${back === 1 ? 'it cannot' : 'they cannot'} be booked either. Ask your coach to put ${back === 1 ? 'it' : 'them'} on a new pack.`);
+        // Stated, and no further. `expiryLine` is read by BOTH apps — the
+        // client's Memberships & Packs and the coach's Payments, which falls
+        // through to it whenever `strandedNote` is null, and null is exactly
+        // this case. So it names no party and asks nobody for anything: "ask
+        // your coach" would be printed to the coach about their own client.
+        // Every other sentence in this function is voice-neutral for the same
+        // reason, and `strandedNote` is where the coach's half of the
+        // conversation lives.
+        parts.push(`${back} session${back === 1 ? '' : 's'} went back on to this pack after it had already run out, so ${back === 1 ? 'it cannot' : 'they cannot'} be booked. ${back === 1 ? 'It needs' : 'They need'} to move to a pack that is still open.`);
       }
       if (parts.length) return parts.join(' ');
       // Only now, and only because both counts were read and both were nought.

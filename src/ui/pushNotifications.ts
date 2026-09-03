@@ -8,7 +8,7 @@ import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { inboxDecision, safeRoute } from '../lib/notifyInbox';
 import { pushConsent } from '../lib/pushConsent';
-import { allows, timeToDeliver, whenToDeliver, type NotifyCategory } from '../lib/notifyPrefs';
+import { allows, categoryForRoute, timeToDeliver, whenToDeliver, type NotifyCategory } from '../lib/notifyPrefs';
 import { notifyPrefs } from '../lib/notifyPrefsLatch';
 import { VARIANT, type AppVariant } from '../lib/variant';
 import type { CoachChannel } from '../lib/coachNotify';
@@ -430,8 +430,25 @@ export async function scheduleLocal(title: string, body: string, date: Date, dat
   if (!Notifications) return null;
   try {
     const prefs = notifyPrefs();
-    if (category && !allows(category, prefs)) return null;
-    const at = category ? whenToDeliver(date, category, prefs) : date;
+    // ── the omitted category, filled from the route ──────────────────────
+    //
+    // `if (category && …)` means an omitted category is no gate at all, and
+    // exactly one caller in the three apps omits it: src/ui/badgeWatch.tsx,
+    // which schedules the badge banner with a route and no category. So a
+    // member who turned OFF 'Streaks And Badges' — a switch whose own label
+    // says "when you unlock a badge" — went on being congratulated, and one
+    // with quiet hours got the congratulation at midnight, because
+    // `motivation` is quietable and nothing asked.
+    //
+    // Filled here rather than at that call site for the reason `registerForPush`
+    // gives about the consent gate two screens up: a gate a caller can skip is
+    // a gate the next caller skips, and the one that skipped it is the one
+    // whose switch stopped working. `categoryForRoute` is the decision and it
+    // is in src/lib/notifyPrefs.ts under test; an explicit category always
+    // wins, and a route nobody has classified is still delivered ungated.
+    const cat = category ?? categoryForRoute(typeof data?.route === 'string' ? data.route : null) ?? undefined;
+    if (cat && !allows(cat, prefs)) return null;
+    const at = cat ? whenToDeliver(date, cat, prefs) : date;
     if (at.getTime() <= Date.now()) return null;
     // The id, returned rather than discarded. It used to resolve to void, so
     // nothing that scheduled a one-off could ever take it back — which is fine

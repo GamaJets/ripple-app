@@ -19,7 +19,8 @@
 // invariant on each: a member who trained on N consecutive LOCAL calendar days
 // has a streak of N. In UTC, Dubai, Kiritimati and Midway that is a plain
 // restatement; in Auckland and Los Angeles it lands on the transition twice.
-import { currentStreak, currentStreakFrozen, shownStreak, freezeBudget, streakRisk, activeDays, longestStreak } from './streaks';
+import { currentStreak, currentStreakFrozen, shownStreak, freezeBudget, streakRisk, activeDays, longestStreak, weekStats, thisWeekStats, statsSince } from './streaks';
+import { startOfWeek } from './weekStart';
 import type { WorkoutEntry } from './mockData';
 
 const errors: string[] = [];
@@ -178,6 +179,67 @@ const runEndingAt = (end: Date, n: number): WorkoutEntry[] => {
   eq(shownStreak(log, today.getTime()), currentStreak(log, today.getTime()),
     'with nothing to bridge the shown streak is the plain chain');
   eq(shownStreak([], today.getTime()), 0, 'and an empty log is zero, not a crash');
+}
+
+
+/* ── a calendar week is not a rolling one ─────────────────────────────────── */
+//
+// `weekStats` is a rolling 168 hours and its docstring always said so.
+// app/(client)/dashboard.tsx, restday.tsx and report.tsx printed it under the
+// words "this week" anyway, while week.tsx, trends.tsx and consistency.tsx
+// measured the same phrase with `startOfWeek`. The sharpest consequence was the
+// goal ring on Home reading "4 of 4 this week · goal met" on a Monday morning
+// to somebody who had not trained since the week opened.
+//
+// No literal date is asserted anywhere below — `npm test` runs under six
+// timezones and the whole point of this window is that it is LOCAL — so every
+// instant is built from `startOfWeek` of a chosen `now`.
+
+{
+  // A Wednesday, mid-afternoon local. Built from local parts, never parsed from
+  // a bare string: `new Date('2026-09-02')` is UTC midnight and is the day
+  // before west of Greenwich, which would move the week under half the world.
+  const now = new Date(2026, 8, 2, 15, 0, 0).getTime();
+  const weekOpened = startOfWeek(now).getTime();
+  const HOUR = 3600_000;
+
+  const entry = (t: number): WorkoutEntry =>
+    ({ t: new Date(t).toISOString(), exercise: 'Bench', sets: [[8, 60]] } as WorkoutEntry);
+
+  // One session an hour after the week opened, and one six hours BEFORE it —
+  // last week, by a few hours, and inside a rolling seven days either way.
+  const log = [entry(weekOpened + HOUR), entry(weekOpened - 6 * HOUR)];
+
+  eq(thisWeekStats(log, now).workouts, 1,
+    'the calendar week counts only what was done since the week opened');
+  eq(weekStats(log, now).workouts, 2,
+    'and the rolling window still counts both, which is what it is for');
+  ok(thisWeekStats(log, now).workouts !== weekStats(log, now).workouts,
+    'the two windows are genuinely different answers, which is why one screen may not print the other’s figure under the other’s caption');
+
+  // The Monday-morning case that produced "goal met" over a week with nothing
+  // in it. Everything logged last week, nothing since the week opened.
+  const lastWeekOnly = [entry(weekOpened - 6 * HOUR), entry(weekOpened - 30 * HOUR)];
+  eq(thisWeekStats(lastWeekOnly, now).workouts, 0,
+    'a week with nothing done in it counts nought, however busy the seven days before it were');
+  eq(thisWeekStats(lastWeekOnly, now).days, 0, 'and no active days either');
+
+  // The boundary itself: an entry AT the opening instant is in the week.
+  eq(thisWeekStats([entry(weekOpened)], now).workouts, 1,
+    'the instant the week opened belongs to the week it opened');
+  eq(thisWeekStats([entry(weekOpened - 1)], now).workouts, 0,
+    'and the millisecond before it does not');
+
+  // The engine both windows share. The report screen states a span and now
+  // counts exactly that span, which is what this is for.
+  eq(statsSince(log, weekOpened).workouts, thisWeekStats(log, now).workouts,
+    'the calendar week is statsSince from the moment the week opened, and nothing else');
+  eq(statsSince(log, 0).workouts, 2, 'and an open window counts everything');
+
+  // Nothing is invented from an empty log.
+  eq(thisWeekStats([], now).workouts, 0, 'an empty log is nought sessions');
+  eq(thisWeekStats([], now).volumeKg, 0, 'and nought volume');
+  eq(thisWeekStats([], now).unpricedSets, 0, 'with no unpriced sets to declare');
 }
 
 if (errors.length) { errors.forEach((e) => console.error(e)); console.error(`streaks: ${errors.length} failure(s)`); process.exit(1); }

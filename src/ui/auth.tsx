@@ -25,6 +25,7 @@ import { phoneAuthError, digitsOnly } from '../lib/phone';
 import { emailCodeError, emailResendError, type OtpOutcome } from './emailOtp';
 import { checkTenantBrand, stampTenantBrand, signUpWithBrand, brandSignUpMetadata } from '../lib/tenantBrand';
 import { clearPersonalDeviceState } from './signOutState';
+import { readMyProfileRow, forgetMyRows } from './myProfile';
 
 export type Role = 'owner' | 'trainer' | 'client';
 export interface AuthUser { id: string; name: string; email: string; role: Role }
@@ -340,19 +341,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // is that they never had a name. Counted now, and reported; the
         // sign-in still succeeds, which is the part that was right.
         try {
-          const { data: prof, error: profErr } = await supabase
-            .from('profiles').select('full_name').eq('id', data.session.user.id).maybeSingle();
-          if (profErr) {
-            reportError('auth.verifyPhoneCode.name', profErr);
-          } else if (!((prof as any)?.full_name || '').trim()) {
+          const uid = data.session.user.id;
+          // The shared read (src/ui/myProfile.ts). This one is not a launch
+          // read, but it sits immediately before four providers make theirs —
+          // `refreshFromSession` below bumps the auth revision they all hang
+          // off — so it is the read they join rather than a fifth one.
+          const prof = await readMyProfileRow(uid);
+          if (!prof.ok) {
+            reportError('auth.verifyPhoneCode.name', prof.error);
+          } else if (!((prof.value?.full_name) || '').trim()) {
             const res = await supabase.from('profiles')
               .update({ full_name: wanted }, { count: 'exact' })
-              .eq('id', data.session.user.id);
+              .eq('id', uid);
             // `count: 'exact'`, because `profiles_self_rw` is `id = auth.uid()`
             // and a row this session may not write matches nothing and returns
             // `error: null`. Zero rows and success look identical without it.
             const why = writeFailure('Your name', res);
             if (why) reportError('auth.verifyPhoneCode.name', res.error ?? new Error(why));
+            // MANDATORY, and the sharpest case for it in the app: the read a
+            // line above is what the providers are about to join, and it says
+            // this person has no name. Leaving it held would greet somebody by
+            // nothing on the very launch their name was set. Outside the
+            // success check, because a write that could not be read may still
+            // have landed.
+            forgetMyRows(uid);
           }
         } catch (e) { reportError('auth.verifyPhoneCode.name', e); }
       }
@@ -508,6 +520,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // `authed`, and making somebody watch a network round trip before the app
     // admits they have gone is how a second tap arrives.
     setUser(null);
+    // Whoever signs in next on this handset must not be served the rows of the
+    // person signing out. The read is keyed on the account id, so this cannot
+    // reach them anyway — but a shared read that outlives a sign-out is exactly
+    // the sort of thing that stops being true when somebody adds a second key
+    // to it, and it costs one call to be certain. src/ui/myProfile.ts.
+    forgetMyRows();
     if (!USE_SUPABASE) return;
     // ── Before the session ends ───────────────────────────────────────────
     //

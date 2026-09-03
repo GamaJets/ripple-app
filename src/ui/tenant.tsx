@@ -28,6 +28,7 @@ import type { LoadStatus } from './loadStatus';
 import { classifySetCurrencyError, isCurrencyCode, readSetCurrency, type SetCurrencyOutcome, type SetCurrencyReply } from '../lib/coachCurrency';
 import { useAuthRevision } from './authRevision';
 import { useRecoverRead } from './readRefresh';
+import { readMyProfileRow, forgetMyRows } from './myProfile';
 
 /**
  * What the EXISTING rows in the gym operating record were recorded as — and
@@ -225,7 +226,10 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [brandMismatch, setBrandMismatch] = useState<string | null>(null);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [tick, setTick] = useState(0);
-  const refresh = useCallback(() => setTick((t) => t + 1), []);
+  // Forgets the shared profile read before re-running, so a refresh is a real
+  // re-read rather than the answer the launch already had. A person pulling
+  // down is asking the server, not asking us again.
+  const refresh = useCallback(() => { forgetMyRows(); setTick((t) => t + 1); }, []);
 
   useEffect(() => {
     if (!USE_SUPABASE) { setLoading(false); setStatus('ready'); return; }
@@ -247,12 +251,18 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         // Signed out: no tenant, and that is a fact rather than a failure.
         if (!uid) { setTenant(null); setRole(null); setStatus('ready'); setLoading(false); return; }
 
-        const { data: prof, error: profErr } = await supabase
-          .from('profiles').select('role, tenant_id').eq('id', uid).maybeSingle();
+        // ONE read of this row per launch, shared with the three other
+        // providers that were each reading it for their own columns — and it is
+        // still this provider that decides what a failure here means. See
+        // src/ui/myProfile.ts; the outcome carries the error rather than a null
+        // row, which is what keeps the check below able to tell "refused" from
+        // "this user has no gym".
+        const profOut = await readMyProfileRow(uid);
         if (cancelled) return;
         // Without this check a refused read fell through as prof = null, which
         // the tid line below reads as "this user has no gym".
-        if (profErr) { reportError('tenant.load.profile', profErr); setStatus('error'); setLoading(false); return; }
+        if (!profOut.ok) { reportError('tenant.load.profile', profOut.error); setStatus('error'); setLoading(false); return; }
+        const prof = profOut.value;
         setRole(prof?.role ?? null);
 
         // Whose gym is this, and is it ours to be showing? Asked through an

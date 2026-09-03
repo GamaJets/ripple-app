@@ -33,7 +33,7 @@ import { deltaLabel, deltaMoved, movementIsProgress } from '../../src/lib/deltaL
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useMeasurements } from '../../src/ui/measurements';
 import { useCheckIns } from '../../src/ui/checkins';
-import { shownStreak, weekStats, personalRecords, streakMilestone } from '../../src/lib/streaks';
+import { shownStreak, statsSince, personalRecords, streakMilestone } from '../../src/lib/streaks';
 import { useState, useEffect, useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { askAboutMyWeek, coachAvailable } from '../../src/lib/coach';
@@ -90,7 +90,7 @@ export default function WeeklyReport() {
   const wu = st.weightUnit;
   const lu = st.lengthUnit;
 
-  const wk = weekStats(log, Date.now(), c.weightSeries);
+
   // The figure this screen prints AND the figure it hands the model that
   // writes the summary. Both were the raw chain, so the report contradicted
   // the ring on Home and the model was told a streak the app had already told
@@ -130,8 +130,27 @@ export default function WeeklyReport() {
   // local midnight, on foreground, and on focus, which is the moment a member
   // comes back to this tab to send it.
   const today = useNow();
-  const weekStart = new Date(today); weekStart.setDate(today.getDate() - 6);
+  // Local midnight of the first day NAMED in the range, not the same
+  // time-of-day seven days back.
+  //
+  // ── the header and the figures were about different weeks ────────────
+  //
+  // `range` is seven whole calendar days — `today − 6` through today — and it
+  // is printed as "Week of …" at the top of a document the member SENDS to
+  // their coach. The figures under it came from `weekStats`, which is a rolling
+  // 168 hours ending at the instant of reading. So a session logged at 08:00 on
+  // the first day of the stated range fell out of the totals the moment the
+  // report was opened after 08:00 today — a document whose own header is wrong
+  // about what it covers, and whose facts go on to a language model that writes
+  // the summary from them.
+  //
+  // Counting from midnight makes the sentence true: the window the report
+  // states and the window it counts are now the same seven days.
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - 6);
+  weekStart.setHours(0, 0, 0, 0);
   const range = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${today.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+  const wk = statsSince(log, weekStart.getTime(), c.weightSeries);
 
   const comp = compositionInsights(isWhole(c.scansStatus) ? c.scans : []);
   // Facts only. A line built from a read that did not land whole is not a

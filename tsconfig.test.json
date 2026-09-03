@@ -482,6 +482,10 @@
     "src/lib/gymSetup.ts",
     "src/lib/gymSetup.test.ts",
     "src/lib/zonePicker.ts",
-    "src/lib/zonePicker.test.ts"
+    "src/lib/zonePicker.test.ts",
+    "src/lib/sharedRead.ts",
+    "src/lib/sharedRead.test.ts",
+    "src/lib/departureSection.ts",
+    "src/lib/departureSection.test.ts"
   ]
 }

@@ -168,6 +168,78 @@ export function categoryDef(key: string): CategoryDef | null {
   return CATEGORIES.find((c) => c.key === key) ?? null;
 }
 
+/* ── the switch that did not work ─────────────────────────────────────────
+ *
+ * The header above states, as a fact about this app, that badge unlocks
+ * (src/ui/badgeWatch.tsx) go through `scheduleLocal` "which is where the gate
+ * is applied so that a caller cannot skip it". `CATEGORIES` says the same thing
+ * in the words on the switch: 'Streaks And Badges' — "When a streak is about to
+ * break, and when you unlock a badge."
+ *
+ * badgeWatch.tsx calls `scheduleLocal(note.title, note.body, at, { route:
+ * '/(client)/achievements' })` — FIVE arguments. There is no category, and
+ * `scheduleLocal` reads `if (category && !allows(...))`, so a missing one is
+ * not a gate at all. It is the only uncategorised caller of that function in
+ * the three apps, and the consequence is exact: a member who turns off Streaks
+ * And Badges goes on being congratulated, and a member with quiet hours set
+ * gets the congratulation at the hour it happened, because `motivation` is
+ * `quietable: true` and nothing asked.
+ *
+ * A switch that reads off while the banner keeps arriving is the shape of bug
+ * src/lib/pushConsent.ts exists for, and it is worse here than a missing switch
+ * would be: the member has been shown a control, used it, and been ignored.
+ *
+ * ── Why the fallback is by ROUTE and lives here ──────────────────────────
+ *
+ * The narrow fix is one argument at one call site, and this codebase has
+ * already argued twice why that is not the fix: `registerForPush` puts the
+ * consent gate inside the function "because there were three call sites … and
+ * the next call site added would have been the fourth chance to forget", and
+ * src/lib/notifyInbox.ts puts the record/skip decision at one choke point
+ * rather than at eleven call sites. A category the caller may omit is a gate
+ * the caller may skip, and the one caller that omitted it is the one whose
+ * switch stopped working.
+ *
+ * So an omitted category falls back to what the ROUTE says, which is the same
+ * structural signal `inboxIcon` and `notificationChannel` are derived from and
+ * for the same reason: a notification that opens Achievements is about a badge
+ * whoever wrote it. An explicit category always wins — this only ever fills a
+ * hole — and a route nobody has classified still returns null and is still
+ * delivered ungated, which is the safe direction the header argues for.
+ */
+const CATEGORY_BY_ROUTE: ReadonlyArray<readonly [string, NotifyCategory]> = [
+  // Badges. The whole of the defect above, and 'motivation' is the category
+  // whose own label already promises it.
+  ['/(client)/achievements', 'motivation'],
+  // The streak nudge's route, from app/(client)/dashboard.tsx. That caller
+  // already passes 'motivation' explicitly and this changes nothing for it —
+  // it is here so the table is a statement about the two motivational routes
+  // rather than a single-entry patch, and so a second caller cannot land on
+  // the same screen ungated.
+  ['/(client)/workouts', 'motivation'],
+];
+
+/**
+ * The category a route implies, or null for one this build cannot place.
+ *
+ * WHOLE-ROUTE matching with a query string allowed after it — the rule
+ * `inboxIcon` and `notificationChannel` both use, stated rather than assumed so
+ * that nobody "fixes" a miss by reordering the table.
+ *
+ * Null is the safe answer and it means "nobody has decided", not "no category".
+ * An unclassified local notification is scheduled ungated, which is what it is
+ * today: the failure of a missed gate is a banner somebody did not want, and
+ * the failure of a default-deny is a session reminder that never arrives.
+ */
+export function categoryForRoute(route: string | null | undefined): NotifyCategory | null {
+  const r = (route ?? '').trim();
+  if (!r) return null;
+  for (const [screen, key] of CATEGORY_BY_ROUTE) {
+    if (r === screen || r.startsWith(screen + '?')) return key;
+  }
+  return null;
+}
+
 /**
  * Whether this category may be sent at all.
  *
