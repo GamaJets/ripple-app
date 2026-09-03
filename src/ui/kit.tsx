@@ -574,8 +574,20 @@ export function Field({ label, hint, children, style, a11y, accessory }: {
   );
 }
 
-export function Ghost({ label, onPress, icon, a11yLabel }: {
+export function Ghost({ label, onPress, icon, a11yLabel, disabled }: {
   label?: string; onPress: () => void; icon?: IconName; a11yLabel?: string;
+  /**
+   * Off, and visibly so.
+   *
+   * `Cta` has had this since it was written and `Ghost` had not, so a screen
+   * with a control that must not be pressed yet — a minus button over a water
+   * count that has not been read, where the tap writes an absolute figure
+   * computed from an unread base — had no way to say it with the quiet form of
+   * the button and had to say it with the loud one. Same three effects as
+   * `Cta`: the press is refused, the state is announced, and the fill drops so
+   * it does not merely look broken.
+   */
+  disabled?: boolean;
 }) {
   const t = useTheme();
   const round = !label;
@@ -590,7 +602,9 @@ export function Ghost({ label, onPress, icon, a11yLabel }: {
   return (
     // The round form is 38pt and the pill form 40pt tall; both are under 44, and
     // the round one is the back button on nearly every screen in the app.
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={spoken}
+    <Pressable onPress={onPress} disabled={disabled}
+      accessibilityRole="button" accessibilityLabel={spoken}
+      accessibilityState={{ disabled: !!disabled }}
       hitSlop={round ? hitSlopFor(38) : { top: 2, bottom: 2, left: 0, right: 0 }}
       style={{
         backgroundColor: t.surface2,
@@ -598,9 +612,10 @@ export function Ghost({ label, onPress, icon, a11yLabel }: {
         width: round ? 38 : undefined, height: round ? 38 : undefined,
         paddingVertical: round ? 0 : 11, paddingHorizontal: round ? 0 : sp.lg,
         alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: sp.sm,
+        opacity: disabled ? 0.5 : 1,
       }}>
-      {icon ? <Icon name={icon} size={round ? 18 : 15} color={t.ink2} /> : null}
-      {label ? <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{label}</Text> : null}
+      {icon ? <Icon name={icon} size={round ? 18 : 15} color={disabled ? t.ink3 : t.ink2} /> : null}
+      {label ? <Text style={{ ...ty.label, fontWeight: '500', color: disabled ? t.ink3 : t.ink }}>{label}</Text> : null}
     </Pressable>
   );
 }

@@ -56,7 +56,7 @@ import { monthNamesShort } from '../../src/lib/format';
 import { shareDoc, shareTextFile, pdfExportAvailable, fileShareBlocker } from '../../src/lib/exportShare';
 import {
   coachStatement, statementDoc, statementCsv, statementItemsCsv, statementFileStem,
-  statementShareBlurb, periodSentence, fiscalYear, fiscalQuarter, customRange,
+  statementShareBlurb, periodSentence, fiscalYear, fiscalQuarter, calendarMonth, customRange,
   isCalendarStart, CALENDAR_YEAR_START, YEAR_START_IS_YOURS,
   STATEMENT_NOT, STATEMENT_NOT_THE_WHOLE_BOOK, STATEMENT_STRIPE_IS_THE_RECORD, PERIOD_IS_YOURS,
   type Statement, type StatementInput, type StatementPeriod, type YearStart,
@@ -82,7 +82,7 @@ import { MIN_TARGET } from '../../src/lib/a11y';
  * document they hand to an accountant is the kind of wrong that is not noticed
  * until it matters. `YEAR_START_IS_YOURS` says so on the page.
  */
-type Span = 'year' | 1 | 2 | 3 | 4 | 'custom';
+type Span = 'year' | 1 | 2 | 3 | 4 | 'month' | 'custom';
 
 const SPANS: { key: Span; label: string }[] = [
   { key: 'year', label: 'Whole Year' },
@@ -90,6 +90,18 @@ const SPANS: { key: Span; label: string }[] = [
   { key: 2, label: 'Q2' },
   { key: 3, label: 'Q3' },
   { key: 4, label: 'Q4' },
+  // ── one month ──────────────────────────────────────────────────────────
+  // The span this screen was missing, and the only one a coach reaches for
+  // MONTHLY rather than once a year. Reconciling against a bank statement is
+  // done a month at a time; so is answering "what did I take in August"; so is
+  // handing a bookkeeper the period they asked for. Without it the only route
+  // was Any Dates and typing both ends by hand, which is two chances to be a
+  // day out on a document that goes to somebody else.
+  //
+  // `calendarMonth` in src/lib/coachStatement.ts has been written, tested and
+  // locale-aware — it labels the period in the reader's own language — since
+  // the file was written, and no screen in this app had ever called it.
+  { key: 'month', label: 'One Month' },
   { key: 'custom', label: 'Any Dates' },
 ];
 
@@ -130,6 +142,16 @@ export default function StatementOfRecord() {
 
   const [year, setYear] = useState(thisYear);
   const [span, setSpan] = useState<Span>('year');
+  /**
+   * Which month, 1 to 12, when the span is one month.
+   *
+   * Starts on the month the DEVICE is in, which is where a coach reconciling
+   * is standing, and it is a starting value rather than a claim: the period is
+   * printed in full above the figures and on every file this screen produces.
+   * A month held across a year change stays put on purpose — a coach comparing
+   * August to August taps the year and expects August.
+   */
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [start, setStart] = useState<YearStart>(CALENDAR_YEAR_START);
   const [fromText, setFromText] = useState('');
   const [toText, setToText] = useState('');
@@ -182,8 +204,14 @@ export default function StatementOfRecord() {
    */
   const period: StatementPeriod = useMemo(() => {
     if (span === 'custom') return customRange(fromText.trim(), toText.trim()) ?? fiscalYear(year, start);
+    // A CALENDAR month, and it does not move with the coach's own year start.
+    // A year beginning on 6 April does not make August run from the 6th to the
+    // 5th: an accountant's month, a bank statement's month and a bookkeeper's
+    // month are all the calendar's, and a period that quietly disagreed with
+    // all three would be five days wrong at each end with nothing saying so.
+    if (span === 'month') return calendarMonth(year, month);
     return span === 'year' ? fiscalYear(year, start) : fiscalQuarter(year, span, start);
-  }, [year, span, start, fromText, toText]);
+  }, [year, span, start, month, fromText, toText]);
 
   const rangeProblem = span === 'custom' && !customRange(fromText.trim(), toText.trim())
     ? 'Type both dates as YYYY-MM-DD, with the earlier one first. Until they read as a period, the figures below are for your own year and the heading says which.'
@@ -214,7 +242,7 @@ export default function StatementOfRecord() {
     // a calendar year — a coach who changed their year start, or typed a second
     // custom range while the first was still reading, would have had the older
     // answer land under the newer heading at full confidence.
-    const key = `${year}:${String(span)}:${start.month}-${start.day}:${period.from}:${period.to}`;
+    const key = `${year}:${String(span)}:${month}:${start.month}-${start.day}:${period.from}:${period.to}`;
     wanted.current = key;
     setInput(null);
     const next = await fetchStatementInput(period, appName || null);
@@ -222,7 +250,7 @@ export default function StatementOfRecord() {
     // it: the read for the period now selected is the one that may set state.
     if (wanted.current !== key) return;
     setInput(next);
-  }, [period, appName, year, span, start]);
+  }, [period, appName, year, span, month, start]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
   // One read, and it is the whole statement: `fetchStatementInput` composes

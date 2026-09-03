@@ -460,9 +460,19 @@ export default function Recovery() {
    // the strength of a number that had not arrived.
    onPress={hydration.offerGoal ? () => router.push('/(client)/habits') : undefined}
   />
+  {/* Dead until the count has arrived, which is the same fact `hydration`
+      already withholds the figure on. `pushWater` in src/ui/habits.tsx upserts
+      an ABSOLUTE count for the day and `addWater` computes it from a ref that
+      is 0 until the read lands — so a member who logged five glasses on another
+      device this morning and taps here too early writes 1 over their 5. The
+      hero above already says "Reading today's glasses…"; a live Add beside it
+      invited exactly the tap that does the damage. */}
   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingBottom: layout.section }}>
-   <Ghost icon="minus" onPress={removeCup} />
-   <View style={{ flex: 1 }}><Cta label="Add a Glass" wide onPress={addCup} /></View>
+   <Ghost icon="minus" onPress={removeCup} disabled={!hydration.showCount} />
+   <View style={{ flex: 1 }}>
+    <Cta label={hydration.showCount ? 'Add a Glass' : 'Reading today’s glasses…'}
+     disabled={!hydration.showCount} wide onPress={addCup} />
+   </View>
   </View>
   {/* Which copy of the count is on screen.
       The figure above is REAL either way — it is this phone's tally, and a

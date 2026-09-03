@@ -735,6 +735,20 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // has to match a column is a copy that will one day not match it, and the
   // symptom would be writes the client never sees refused.
   const addWater = () => {
+    // ── nothing is counted from a base that has not arrived ──────────────
+    //
+    // `waterRef.current` starts at 0 and the first read is what fills it, so a
+    // tap while `waterStatus` is 'loading' computes 0 + 1 — and `pushWater`
+    // upserts an ABSOLUTE count for the day, not a delta. A member who logged
+    // five glasses on another device this morning, opens this screen and taps
+    // once before the read lands, therefore writes 1 over their 5, server-side,
+    // and the four glasses are gone.
+    //
+    // Refused rather than queued, because a delta applied later would need to
+    // survive a read that never lands at all. Both screens that offer this
+    // control disable it while the read is in flight and say why, so the tap is
+    // not silently dropped — this is the backstop for the one that forgets.
+    if (waterStatus === 'loading') return;
     // Local, cached, then sent — in that order, and never conditional on the
     // send. The count on screen is this device's tally and it is real whether
     // or not the server hears about it; `waterStatus` is where "the server has
@@ -760,6 +774,11 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     if (hit && waterGoal != null && next >= waterGoal) markWaterDone();
   };
   const removeWater = () => {
+    // The same guard as `addWater`, and for the same reason: this device may
+    // have restored a cached count before the server read landed, so
+    // `waterRef.current - 1` can be a real number computed from a stale base
+    // and `pushWater` writes it as the absolute count for the day.
+    if (waterStatus === 'loading') return;
     const next = clampGlasses(waterRef.current - 1);
     if (next === waterRef.current) return;
     waterRef.current = next;

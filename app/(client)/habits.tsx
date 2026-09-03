@@ -30,6 +30,7 @@ import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/the
 import { useHabits } from '../../src/ui/habits';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { unsentNote } from '../../src/lib/offlineQueue';
+import { hydrationNote } from '../../src/lib/hydrationHero';
 import { donePercent } from '../../src/lib/checklist';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -67,6 +68,13 @@ export default function Habits() {
   // read behind it is whole, and withheld otherwise.
   const doneKnown = isWhole(h.status);
   const c = useClientData();
+  // The water half of this screen, through the module that already owns the
+  // four states it has — loading, count unread, goal unread, and a real
+  // figure. app/(client)/recovery.tsx has used it since it was written; this
+  // screen, which that one links to, printed the loading zero as fact.
+  const hydration = hydrationNote(h.waterStatus, c.profileStatus, h.water, h.waterGoal);
+  // The count may be shown, and therefore counted from and written to.
+  const waterCounted = hydration.showCount;
   // The ticks and the water count come from the habits provider; the targets
   // they are measured against are on the profile. Both are server reads.
   const pull = usePullToRefresh(useCallback(() => { h.reload(); c.reload(); }, [h.reload, c.reload]));
@@ -125,12 +133,28 @@ export default function Habits() {
               the row silently vanished rather than saying anything. The count
               they have drunk is still true and still theirs, so it leads, and
               the row draws exactly the glasses they logged. */}
-          <SectionHead title="Water" note={h.waterGoal != null ? `${h.water} / ${h.waterGoal} glasses` : `${h.water} ${h.water === 1 ? 'glass' : 'glasses'}`} />
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: h.waterGoal == null ? sp.md : sp.lg }}>
-            {Array.from({ length: h.waterGoal ?? h.water }).map((_, i) => (
-              <View key={i} style={{ width: 24, height: 32, borderRadius: radius.sm, borderWidth: hairline, borderColor: i < h.water ? t.brand : t.ring, backgroundColor: i < h.water ? t.brand : 'transparent', opacity: i < h.water ? 0.9 : 1 }} />
-            ))}
-          </View>
+          {/* The count is withheld until it has arrived.
+              `src/ui/habits.tsx` starts `water` at 0 under a 'loading' status,
+              so the first frame of this screen stated "0 / 8 glasses" over
+              eight empty glasses to a member who had drunk six. That is the
+              defect src/lib/hydrationHero.ts was written about — for the hero
+              on Recovery, which this screen is the destination of. The hero
+              there says "Reading today's glasses…" and correctly shows no
+              figure; the member taps through and lands here, where the same
+              unread zero was printed as fact. One module, both screens. */}
+          <SectionHead title="Water"
+            note={!waterCounted ? undefined
+              : h.waterGoal != null ? `${h.water} / ${h.waterGoal} glasses`
+              : `${h.water} ${h.water === 1 ? 'glass' : 'glasses'}`} />
+          {waterCounted ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: h.waterGoal == null ? sp.md : sp.lg }}>
+              {Array.from({ length: h.waterGoal ?? h.water }).map((_, i) => (
+                <View key={i} style={{ width: 24, height: 32, borderRadius: radius.sm, borderWidth: hairline, borderColor: i < h.water ? t.brand : t.ring, backgroundColor: i < h.water ? t.brand : 'transparent', opacity: i < h.water ? 0.9 : 1 }} />
+              ))}
+            </View>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>{hydration.text}</Text>
+          )}
           {/* `waterGoal` is `clients.water_goal_glasses` and nothing else, with
               no local copy under USE_SUPABASE — so a null one is "you have not
               set a goal" only when the row it lives on was actually read. Said
@@ -153,13 +177,22 @@ export default function Habits() {
                 credited, and the correction is another two taps. `hitSlopFor`
                 grows only the boundary; the circle is a deliberate visual size
                 against the Cta next to it. See MIN_TARGET in src/lib/a11y.ts. */}
+            {/* Both controls are dead until the count has arrived, and that is
+                not tidiness. `pushWater` upserts an ABSOLUTE count for the day,
+                and `addWater` computes it from `waterRef.current` — which is 0
+                until the read lands. A member who logged five glasses on
+                another device this morning and taps once too early writes 1
+                over their 5, server-side. src/ui/habits.tsx refuses the write
+                as a backstop; these two say why rather than swallowing a tap. */}
             <Pressable accessibilityLabel="Remove a glass of water" accessibilityRole="button" onPress={h.removeWater}
+              disabled={!waterCounted}
+              accessibilityState={{ disabled: !waterCounted }}
               hitSlop={hitSlopFor(38)}
-              style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+              style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: waterCounted ? 1 : 0.5 }}>
               <Icon name="minus" size={16} color={t.ink2} />
             </Pressable>
             <View style={{ flex: 1 }}>
-              <Cta label="Add a Glass" wide onPress={h.addWater} />
+              <Cta label={waterCounted ? 'Add a Glass' : 'Reading today’s glasses…'} disabled={!waterCounted} wide onPress={h.addWater} />
             </View>
           </View>
           {/* Which copy of the count these glasses are drawn from.
