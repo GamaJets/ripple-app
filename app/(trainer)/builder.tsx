@@ -55,6 +55,7 @@ import { sp, layout, radius, hairline, elevation, type as ty, value } from '../.
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
+import { deleteRefusedLine } from '../../src/lib/templateLibrary';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { useSettings } from '../../src/ui/settings';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
@@ -400,11 +401,13 @@ export default function Builder() {
    * resolved to a week somebody can train today.
    */
   const [startsOn, setStartsOn] = useState('');
-  /** Whether the month sheet over that field is open. Reported from the floor:
-   *  "is there a way that when you click on the space of the date the whole
-   *  calendar option pops up for selection?" — src/ui/DateSheet.tsx. The field
-   *  stays editable either way; the sheet is a second way in, not a
-   *  replacement, because coaches paste dates out of their own messages. */
+  /** Whether the month sheet over that field is open. Reported from the floor
+   *  twice: "is there a way that when you click on the space of the date the
+   *  whole calendar option pops up for selection?", then "when you tap the date
+   *  the keyboard pops up and blocks what you are typing" — src/ui/DateSheet.tsx.
+   *  The field is now a button and nothing on this screen raises a keyboard for
+   *  a date; typing lives inside the sheet, so coaches who paste dates out of
+   *  their own messages still have a way in. */
   const [startPick, setStartPick] = useState(false);
   const days: BDay[] = blockWeeks[weekIdx]?.days ?? [];
   const setDays: React.Dispatch<React.SetStateAction<BDay[]>> = (updater) =>
@@ -1804,7 +1807,17 @@ export default function Builder() {
    * key in the database points at `program_templates` at all. That is said in
    * the confirmation rather than left for the coach to worry about.
    */
-  const [tplDelFailed, setTplDelFailed] = useState<string | null>(null);
+  /**
+   * The template whose delete was refused, and the sentence saying why.
+   *
+   * Keyed by id, and said in an alert as well, for the reason
+   * app/(trainer)/templates.tsx carries at length: this used to be one line
+   * drawn ABOVE the list, inside a scrolling picker. A coach who had scrolled
+   * to a template half-way down their library got the explanation off the top
+   * of the sheet, which is indistinguishable from the button doing nothing —
+   * and "the button does nothing" is what was reported.
+   */
+  const [tplDelFailed, setTplDelFailed] = useState<{ id: string; why: string } | null>(null);
   const deleteTemplate = (id: string, name: string) => {
     Alert.alert(
       'Delete This Template?',
@@ -1813,7 +1826,10 @@ export default function Builder() {
         { text: 'Keep', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: async () => {
           const gone = await removeTemplateFrom(id);
-          setTplDelFailed(gone.ok ? null : `“${name}” is still in your library. ${gone.why ?? 'The server did not say why.'}`);
+          if (gone.ok) { setTplDelFailed((p) => (p && p.id === id ? null : p)); return; }
+          const why = deleteRefusedLine(name, gone.why);
+          setTplDelFailed({ id, why });
+          Alert.alert('That template was not deleted', why);
         } },
       ],
     );
@@ -2061,40 +2077,53 @@ export default function Builder() {
               `assignProgramTo` only when `isStartDate` can read it. */}
           <View style={{ marginBottom: sp.lg }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Starts on</Text>
-            {/* ── two ways to say a date, in one control ──────────────────
-                The field and the calendar button share a box, so tapping the
-                date's own space opens the month — which is what was asked for.
-                The TEXT half stays a real TextInput and keeps its keyboard,
-                because coaches paste dates out of a client's message and out of
-                their own notes, and a picker that took typing away would be a
-                regression for every one of them.
+            {/* ── the field IS the button ─────────────────────────────────
+                This was a `TextInput` with a small calendar button beside it,
+                and it was reported: "when you tap the date the keyboard pops up
+                and blocks what you are typing". The soft keyboard comes up over
+                the bottom of the window, so on a phone tapping the field to fill
+                it in is the gesture that hides it — and the calendar was
+                reachable only from a 44pt target off to one side, which is not
+                where anybody taps when they want to set a date.
+
+                So the whole box opens the month sheet and nothing here raises a
+                keyboard. Typing has NOT been dropped — coaches paste dates out
+                of a client's message and out of their own notes — it moved
+                inside `DateSheet`, behind its own "Type a Date", so a date is
+                entered in one place by either route. The same shape as the
+                assign panel in app/(trainer)/templates.tsx, deliberately: two
+                controls for one value is what produced the bug.
 
                 Not `@react-native-community/datetimepicker`. That is a native
                 module, a native module is a new binary, and this has to reach
                 coaches over the air on the build they are already running. */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
-              <View style={[inp, { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 0, paddingHorizontal: 0 }]}>
-                <TextInput value={startsOn} onChangeText={setStartsOn}
-                  placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
-                  autoCapitalize="none" autoCorrect={false}
-                  accessibilityLabel="The day this block begins, as year, month and day. You can type it, or use the calendar button beside it."
-                  style={{ ...ty.body, color: t.ink, flex: 1, paddingVertical: 9, paddingHorizontal: 12 }} />
-                <Pressable onPress={() => setStartPick(true)}
-                  hitSlop={hitSlopFor(MIN_TARGET)}
-                  accessibilityRole="button"
-                  accessibilityLabel={startsOn ? 'Pick the start day from a calendar. Currently ' + startsOn : 'Pick the start day from a calendar'}
-                  style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="calendar" size={18} color={t.ink2} />
-                </Pressable>
-              </View>
+              <Pressable onPress={() => setStartPick(true)}
+                accessibilityRole="button"
+                accessibilityLabel={startsOn
+                  ? 'The day this block begins. Currently ' + startsOn + '. Opens a calendar.'
+                  : 'The day this block begins. No day set, so it starts now. Opens a calendar.'}
+                style={{
+                  flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                  minHeight: MIN_TARGET, paddingHorizontal: 12,
+                  backgroundColor: t.surface2, borderRadius: radius.sm,
+                }}>
+                <Text style={{ ...ty.body, color: startsOn ? t.ink : t.ink3, flex: 1 }}>
+                  {startsOn || 'YYYY-MM-DD'}
+                </Text>
+                <Icon name="calendar" size={18} color={t.ink2} />
+              </Pressable>
               {startsOn ? (
                 <Ghost label="Clear" onPress={() => setStartsOn('')} />
               ) : null}
             </View>
-            {/* Refused rather than corrected, and said while they type. A date
-                this app cannot read is not stored at all — a stored value that
-                will not parse puts every screen reading it into "unreadable"
-                for ever, over a plan the coach believes carries a date. */}
+            {/* Refused rather than corrected. Kept even though the sheet only
+                ever hands back a `YYYY-MM-DD`: `assignProgramTo` below drops an
+                unreadable date silently, and the one thing a coach must never be
+                is told "Assigned" for a block whose start date went nowhere. A
+                stored value that will not parse puts every screen reading it
+                into "unreadable" for ever, over a plan the coach believes
+                carries a date — so it is not stored at all. */}
             {startsOn && !isStartDate(startsOn) ? (
               <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
                 Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the
@@ -3496,19 +3525,12 @@ export default function Builder() {
             {templates.length === 0 && tplStatus === 'ready' ? (
               <Text style={{ ...ty.label, color: t.ink3 }}>No templates saved yet.</Text>
             ) : null}
-            {/* A refused delete leaves the row exactly where it was, which is
-                right and is also silent — so it says so here. */}
-            {tplDelFailed ? (
-              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{tplDelFailed}</Text>
-            ) : null}
             {templates.map((tpl, i) => {
               const dc = tpl.program.days.length;
               const ec = tpl.program.days.reduce((a, d) => a + d.exercises.length, 0);
               return (
-                <View key={tpl.id} style={{
-                  flexDirection: 'row', alignItems: 'center',
-                  borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
-                }}>
+                <View key={tpl.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Pressable onPress={() => { loadFrom(tpl.program, null); setTplName(tpl.name); setTplPick(false); }}
                     accessibilityRole="button" accessibilityLabel={`Start from ${tpl.name}`}
                     style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
@@ -3532,6 +3554,13 @@ export default function Builder() {
                       <Icon name="minus" size={17} color={t.ink3} />
                     </Pressable>
                   )}
+                </View>
+                {/* A refused delete leaves the row exactly where it was, which
+                    is right and is also silent — so it says so ON the row that
+                    stayed, where the coach is looking. */}
+                {tplDelFailed && tplDelFailed.id === tpl.id ? (
+                  <Flag tone={t.crit} style={{ marginBottom: sp.md }}>{tplDelFailed.why}</Flag>
+                ) : null}
                 </View>
               );
             })}

@@ -40,13 +40,13 @@
 // silently skipped — a bulk assign that quietly dropped somebody would be worse
 // than one that refused, because the coach would believe they had sent it.
 import { useCallback, useState } from 'react';
-import { View, Text, Pressable, ScrollView, Modal, Alert, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { DateSheet } from '../../src/ui/DateSheet';
-import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
+import { MIN_TARGET } from '../../src/lib/a11y';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
@@ -54,6 +54,7 @@ import { useInjuryAcks } from '../../src/ui/injuryAcks';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates, type ProgramTemplate } from '../../src/ui/programTemplates';
+import { deleteRefusedLine } from '../../src/lib/templateLibrary';
 import { notifySuccess } from '../../src/ui/haptics';
 import { guardOverwrite } from '../../src/lib/overwriteGuard';
 import { CLIENT_STARTS_NOW, isStartDate } from '../../src/lib/programStart';
@@ -119,7 +120,18 @@ export default function Templates() {
   const [startPick, setStartPick] = useState(false);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [assignBusy, setAssignBusy] = useState(false);
-  const [delFailed, setDelFailed] = useState<string | null>(null);
+  /**
+   * The template whose delete was refused, and the sentence saying why.
+   *
+   * Keyed by id rather than held as a bare string, because this used to be
+   * drawn once, above the list. The refusal is real, correct and was invisible:
+   * a coach who had scrolled to a template half-way down their library got the
+   * explanation off the top of the screen, which is indistinguishable from the
+   * button doing nothing — and "the button does nothing" is what was reported.
+   * It is now drawn ON the row that did not go, and said again in an alert
+   * while the coach is still looking at the confirmation they just tapped.
+   */
+  const [delFailed, setDelFailed] = useState<{ id: string; why: string } | null>(null);
 
   // One assign here is many overwrites, so it is held until the programmes it
   // would replace have actually been read. See src/lib/overwriteGuard.ts.
@@ -303,10 +315,6 @@ export default function Templates() {
             <PartialRead what="templates in your library" shown={templates.length} />
           ) : null}
 
-          {delFailed ? (
-            <Notice tone={t.crit} kicker="Delete" title="That template was not deleted" note={delFailed} />
-          ) : null}
-
           {templates.length === 0 && tplStatus === 'ready' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>No templates yet — build a program above and save it here.</Text>
           ) : null}
@@ -341,13 +349,25 @@ export default function Templates() {
                     `“${tpl.name}” is removed from your library for good — there is no undo. Anybody already training it keeps their programme, and every session they have logged is untouched: an assignment is a copy, not a link back to this.`,
                     [{ text: 'Keep', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: async () => {
                       const gone = await removeTemplateFrom(tpl.id);
-                      setDelFailed(gone.ok ? null : `“${tpl.name}” is still in your library. ${gone.why ?? 'The server did not say why.'}`);
+                      if (gone.ok) { setDelFailed((p) => (p && p.id === tpl.id ? null : p)); return; }
+                      // Said twice, on purpose, and neither one is where it used
+                      // to be. The alert lands where the coach's eyes already
+                      // are — they tapped Delete in a dialog a moment ago — and
+                      // the notice below the row survives it, so the answer is
+                      // still there when they look at the template that stayed.
+                      const why = deleteRefusedLine(tpl.name, gone.why);
+                      setDelFailed({ id: tpl.id, why });
+                      Alert.alert('That template was not deleted', why);
                     } }])}
                     hitSlop={8} accessibilityRole="button" accessibilityLabel={'Delete ' + tpl.name} style={{ padding: 8 }}>
                     <Icon name="minus" size={17} color={t.ink3} />
                   </Pressable>
                 ) : null}
               </View>
+              {/* On the row, not at the top of the list. See `delFailed`. */}
+              {delFailed && delFailed.id === tpl.id ? (
+                <Notice tone={t.crit} kicker="Delete" title="That template was not deleted" note={delFailed.why} />
+              ) : null}
             </View>
           ))}
         </Section>
@@ -366,7 +386,13 @@ export default function Templates() {
           app/(trainer)/log-session.tsx: `behavior="padding"` pads the KAV, which shrinks
           the flex:1 scrim above the sheet and lifts the sheet with it — and the sheet's
           percentage maxHeight resolves against the shrunken box, so it stays whole
-          instead of running off the top. */}
+          instead of running off the top.
+
+          Nothing in this sheet raises a keyboard any more — the start date is a
+          Pressable that opens `DateSheet`, for the reason written over it — so
+          the wrapper currently lifts nothing. It stays because it is the sheet's
+          correct shape and the next field added in here would otherwise be
+          covered by the keyboard exactly as the last one was. */}
       <Modal visible={!!assignTpl} transparent animationType="slide" onRequestClose={() => setAssignTpl(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAssignTpl(null)} />
@@ -430,30 +456,48 @@ export default function Templates() {
                     <Text style={{ ...ty.micro, color: t.ink3 }}>
                       Starts on · {weekCount(assignTpl.program)} week block
                     </Text>
+                    {/* ── the field IS the button ───────────────────────────
+                        This was a `TextInput` with a small calendar button
+                        beside it, and it was reported: "when you tap the date
+                        the keyboard pops up and blocks what you are typing".
+                        On a phone the soft keyboard comes up over the bottom of
+                        the window, which is where this sheet is anchored — so
+                        tapping the field to fill it in is the gesture that hides
+                        it. The calendar was reachable only from a 44pt target to
+                        its right, which is not where anybody taps when they want
+                        to set a date.
+
+                        So the whole box opens the month sheet and nothing here
+                        raises a keyboard. Typing a date has NOT been dropped —
+                        coaches paste them out of a client's message — it lives
+                        inside `DateSheet`, behind its own "Type a Date", so the
+                        sheet is the one place a date is entered by either
+                        route. */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xs }}>
-                      <View style={{
-                        flex: 1, flexDirection: 'row', alignItems: 'center',
-                        backgroundColor: t.surface2, borderRadius: radius.sm,
-                      }}>
-                        <TextInput value={startsOn} onChangeText={setStartsOn}
-                          placeholder="YYYY-MM-DD" placeholderTextColor={t.ink3}
-                          autoCapitalize="none" autoCorrect={false}
-                          accessibilityLabel="The day this block begins, as year, month and day. You can type it, or use the calendar button beside it."
-                          style={{ ...ty.body, color: t.ink, flex: 1, paddingHorizontal: 12, paddingVertical: 9 }} />
-                        <Pressable onPress={() => setStartPick(true)}
-                          hitSlop={hitSlopFor(MIN_TARGET)}
-                          accessibilityRole="button"
-                          accessibilityLabel={startsOn ? 'Pick the start day from a calendar. Currently ' + startsOn : 'Pick the start day from a calendar'}
-                          style={{ width: MIN_TARGET, height: MIN_TARGET, alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="calendar" size={18} color={t.ink2} />
-                        </Pressable>
-                      </View>
+                      <Pressable onPress={() => setStartPick(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel={startsOn
+                          ? 'The day this block begins. Currently ' + startsOn + '. Opens a calendar.'
+                          : 'The day this block begins. No day set, so it starts now. Opens a calendar.'}
+                        style={{
+                          flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                          minHeight: MIN_TARGET, paddingHorizontal: 12,
+                          backgroundColor: t.surface2, borderRadius: radius.sm,
+                        }}>
+                        <Text style={{ ...ty.body, color: startsOn ? t.ink : t.ink3, flex: 1 }}>
+                          {startsOn || 'YYYY-MM-DD'}
+                        </Text>
+                        <Icon name="calendar" size={18} color={t.ink2} />
+                      </Pressable>
                       {startsOn ? <Ghost label="Clear" onPress={() => setStartsOn('')} /> : null}
                     </View>
-                    {/* Refused rather than corrected, and said while they type. A
-                        date this app cannot read is not stored at all — a stored
-                        value that will not parse puts every screen reading it
-                        into "unreadable" for ever. */}
+                    {/* Refused rather than corrected. Kept even though the sheet
+                        only ever hands back a `YYYY-MM-DD`: `assignProgramTo`
+                        below drops an unreadable date silently, and the one
+                        thing a coach must never be is told "Assigned" for a
+                        block whose start date went nowhere. A stored value that
+                        will not parse puts every screen reading it into
+                        "unreadable" for ever, so it is not stored at all. */}
                     {startsOn && !isStartDate(startsOn) ? (
                       <Flag tone={t.warn} style={{ marginTop: sp.xs }}>
                         Write the date as year, month and day — 2026-09-07. Anything else is not saved, and the

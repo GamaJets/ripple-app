@@ -38,6 +38,7 @@ import type { Injury } from '../lib/injuries';
 import { reportError } from '../lib/reportError';
 import { isDeviceAvatar } from '../lib/avatarImage';
 import { worstStatus, type LoadStatus } from './loadStatus';
+import { useReadDeadline } from './readDeadline';
 import { capLimit, capped } from '../lib/rowCap';
 import { registerFlush } from '../lib/offlineQueue';
 import { writeFailure } from '../lib/wroteRows';
@@ -226,6 +227,24 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [nameSynced, setNameSynced] = useState(false);
   const [profileStatus, setProfileStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [scansStatus, setScansStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  // What the rest of the app is told, which is the above with an ending on it.
+  //
+  // Neither of those two can leave 'loading' unless a request SETTLES, and no
+  // request in this app carries a timeout (src/lib/readDeadline.ts). The
+  // profile read is worse off than most: its three attempts are sequential
+  // `await`s, so a socket that accepts and then says nothing never even reaches
+  // the second one, and the loop that would have published 'error' after the
+  // third is unreachable. A member on a captive-portal wifi was left with
+  // Lifting Tools saying "Reading your measurements…" and Profile showing
+  // nothing, indefinitely, on a provider that mounts once per launch.
+  //
+  // The reads themselves are deliberately untouched. This provider's own header
+  // sets out what happened the last time a failed read and a live write were
+  // allowed to interleave — the member's recorded injuries overwritten with
+  // blanks — and `nameSynced` still arms the push only on a read that actually
+  // landed. All that changes is the sentence on screen while nothing answers.
+  const publishedProfileStatus = useReadDeadline(profileStatus);
+  const publishedScansStatus = useReadDeadline(scansStatus);
   const [saveFailed, setSaveFailed] = useState(false);
   /** Bumped by `reload`, and read by both server effects below. A counter, so
    *  two pulls in a row are two reads. */
@@ -798,13 +817,13 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     // point at zero. A charted zero is not a small reading, it is a cliff: it
     // dominates the axis and reads as total muscle loss between two scans.
     muscleSeries: sorted.flatMap((s) => (s.skeletalMuscleKg != null ? [{ t: s.takenAt, v: s.skeletalMuscleKg }] : [])),
-    profileStatus, scansStatus, saveFailed, reload,
+    profileStatus: publishedProfileStatus, scansStatus: publishedScansStatus, saveFailed, reload,
     // The combined view: 'error' the moment either half failed, because a
     // profile screen shows both at once and cannot honestly present half of it
     // as the client's own data. 'partial' rolls up the same way — a truncated
     // scan history makes the profile's total change since starting a figure
     // over an unknown fraction of the record.
-    status: worstStatus(profileStatus, scansStatus),
+    status: worstStatus(publishedProfileStatus, publishedScansStatus),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

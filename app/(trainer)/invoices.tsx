@@ -68,6 +68,9 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { currencyGapLine, currencyGapOfStatus } from '../../src/lib/currencyGap';
 import { myCurrencyLine } from '../../src/lib/currencySource';
+import { DateSheet } from '../../src/ui/DateSheet';
+import { Icon } from '../../src/ui/Icon';
+import { MIN_TARGET } from '../../src/lib/a11y';
 
 const DASH = '—';
 
@@ -133,6 +136,19 @@ export default function Invoices() {
   // it, which puts the invoice back on the undated list.
   const [chaseTarget, setChaseTarget] = useState<CoachInvoice | null>(null);
   const [chaseDay, setChaseDay] = useState('');
+  /**
+   * Which of this screen's three dates has the month sheet open, if any.
+   *
+   * One value for all three rather than three booleans, and the type is what
+   * enforces it: three booleans can all be true at once, and three modals
+   * presented from the same parent is the defect
+   * scripts/check-runtime-traps.mjs was written for — iOS presents one and
+   * silently drops the others. Each sheet is also a sibling of the sheet its
+   * field lives in, never a child of it, which is the pattern
+   * app/(trainer)/templates.tsx settled: a modal nested inside a modal's own
+   * subtree is the arrangement that does not present at all.
+   */
+  const [pick, setPick] = useState<null | 'due' | 'settle' | 'chase'>(null);
 
   const load = useCallback(async () => {
     const [list, who, cur] = await Promise.all([fetchMyInvoices(), fetchInvoiceIssuer(), fetchInvoiceCurrency()]);
@@ -404,6 +420,15 @@ export default function Invoices() {
   };
 
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
+  /** A date, drawn as `inp` is but reachable as a button: `MIN_TARGET` tall
+   *  rather than padded to roughly that, because the number is the floor and
+   *  this screen is used one-handed. Shared by all three dates here so they
+   *  cannot drift apart. */
+  const dayBox = {
+    flex: 1, flexDirection: 'row' as const, alignItems: 'center' as const, gap: sp.sm,
+    minHeight: MIN_TARGET, paddingHorizontal: 12,
+    backgroundColor: t.surface2, borderRadius: radius.sm,
+  };
   const G = layout.gutter;
 
   /**
@@ -894,9 +919,34 @@ export default function Invoices() {
                   below preselect nothing and the field stays empty until one is
                   tapped or a date is typed. */}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>When you expect to be paid (optional)</Text>
-              <TextInput value={dueText} onChangeText={setDueText} autoCapitalize="none" autoCorrect={false}
-                placeholder="YYYY-MM-DD, or leave it empty" placeholderTextColor={t.ink3}
-                accessibilityLabel="Due date" style={inp} />
+              {/* ── the chips stay, and the month joins them ──────────────
+                  "In a week" and "In a month" answer the common cases in one
+                  tap and a calendar does not replace them — a coach who means
+                  thirty days should not have to count to thirty on a grid. What
+                  the grid answers is the OTHER case: "the Friday after their
+                  holiday", which was a `TextInput` and was the reported fault
+                  — the soft keyboard comes up over the bottom of this sheet,
+                  which is where the field sits.
+
+                  Days before today are greyed out because
+                  `invoiceDraftBlocker` refuses them: an invoice cannot fall due
+                  before it exists, and this one is issued today. Clearing is
+                  the empty state and stays reachable — a due date is optional,
+                  there is no suggested term, and none is preselected. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+                <Pressable onPress={() => setPick('due')}
+                  accessibilityRole="button"
+                  accessibilityLabel={dueText
+                    ? 'When you expect to be paid. Currently ' + dueText + '. Opens a calendar.'
+                    : 'When you expect to be paid. Not set, so the document states no due date at all. Opens a calendar.'}
+                  style={dayBox}>
+                  <Text style={{ ...ty.body, color: dueText ? t.ink : t.ink3, flex: 1 }}>
+                    {dueText || 'No due date'}
+                  </Text>
+                  <Icon name="calendar" size={18} color={t.ink2} />
+                </Pressable>
+                {dueText ? <Ghost label="Clear" a11yLabel="Clear the due date — the document then states none" onPress={() => setDueText('')} /> : null}
+              </View>
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
                 {([['On the day', 0], ['In a week', 7], ['In two weeks', 14], ['In a month', 30]] as [string, number][]).map(([label, n]) => {
                   const when = plusDays(today, n);
@@ -1014,14 +1064,28 @@ export default function Invoices() {
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
               This records your own statement that the money arrived. Nothing about the document changes — it still says what it said when you issued it — and this is written once: if the money later goes back out, that is a refund or a chargeback and it happened on its own day.
             </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day it arrived (YYYY-MM-DD)</Text>
-            <TextInput value={settleDay} onChangeText={setSettleDay}
-              placeholder={today} placeholderTextColor={t.ink3} autoCapitalize="none" autoCorrect={false}
-              accessibilityLabel="The day the money arrived" style={inp} />
-            {/* The refusal, live, rather than after the tap. Both ends are
-                refused and neither is corrected: a day before the invoice is a
-                typo that would sort to the top of a ledger, and a day after
-                today is money recorded as arriving before it has. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day it arrived</Text>
+            {/* A box that opens a month, not a box that raises a keyboard over
+                itself. The refused days are GREYED OUT in the sheet rather than
+                offered and then refused — `settleDayBlocker` has two hard ends
+                and a coach who has to tap a day to find out it is not allowed
+                is being handed the text box back with extra steps. See
+                `range` on the sheet at the foot of this file. */}
+            <Pressable onPress={() => setPick('settle')}
+              accessibilityRole="button"
+              accessibilityLabel={settleDay
+                ? 'The day the money arrived. Currently ' + settleDay + '. Opens a calendar.'
+                : 'The day the money arrived. Not set yet. Opens a calendar.'}
+              style={dayBox}>
+              <Text style={{ ...ty.body, color: settleDay ? t.ink : t.ink3, flex: 1 }}>{settleDay || today}</Text>
+              <Icon name="calendar" size={18} color={t.ink2} />
+            </Pressable>
+            {/* The refusal is kept even though the sheet no longer offers a day
+                that trips it. `settleInvoice` and part 660's function refuse on
+                the same two conditions, and the screen's copy is the
+                convenience rather than the rule — if a day ever reaches this
+                state by another route, the coach reads why here instead of
+                being told "Recorded" for a write that did not happen. */}
             {settleTarget && settleDay.trim() && settleDayBlocker(settleTarget, settleDay.trim(), today) ? (
               <Flag style={{ marginTop: sp.sm }}>{settleDayBlocker(settleTarget, settleDay.trim(), today)}</Flag>
             ) : null}
@@ -1057,10 +1121,20 @@ export default function Invoices() {
               Chase invoice {chaseTarget ? invoiceNumber(chaseTarget.seq) : ''} from
             </Text>
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{CHASE_FROM_IS_NOT_A_DUE_DATE}</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day (YYYY-MM-DD)</Text>
-            <TextInput value={chaseDay} onChangeText={setChaseDay}
-              placeholder={today} placeholderTextColor={t.ink3} autoCapitalize="none" autoCorrect={false}
-              accessibilityLabel="The day to start chasing this invoice from" style={inp} />
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day</Text>
+            {/* The same box, and the same greying, with ONE end. `chaseFromDayBlocker`
+                has no upper bound on purpose — a coach who has agreed to wait
+                until March sets March, and that is a plan about their own book —
+                so the sheet greys out only what is before the invoice existed. */}
+            <Pressable onPress={() => setPick('chase')}
+              accessibilityRole="button"
+              accessibilityLabel={chaseDay
+                ? 'The day to start chasing this invoice from. Currently ' + chaseDay + '. Opens a calendar.'
+                : 'The day to start chasing this invoice from. Not set yet. Opens a calendar.'}
+              style={dayBox}>
+              <Text style={{ ...ty.body, color: chaseDay ? t.ink : t.ink3, flex: 1 }}>{chaseDay || today}</Text>
+              <Icon name="calendar" size={18} color={t.ink2} />
+            </Pressable>
             {chaseTarget && chaseDay.trim() && chaseFromDayBlocker(chaseTarget, chaseDay.trim()) ? (
               <Flag style={{ marginTop: sp.sm }}>{chaseFromDayBlocker(chaseTarget, chaseDay.trim())}</Flag>
             ) : null}
@@ -1091,6 +1165,54 @@ export default function Invoices() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── the three months ─────────────────────────────────────────────────
+          Siblings of the sheets whose fields open them, for the reason `pick`
+          gives. Every one of them carries the SAME bounds as the blocker that
+          guards its write, so a day the sheet offers is a day the write takes:
+          a coach who taps a cell and reads a refusal has been handed back the
+          text box these replaced.
+
+          The bounds are read straight off the invoice in hand, and an invoice
+          whose `issuedOn` came back unreadable produces no floor rather than an
+          empty calendar — see src/lib/dayRange.ts. The blockers below the
+          fields still refuse it, so widening the grid cannot let a bad day
+          through. */}
+      <DateSheet
+        visible={pick === 'due'}
+        value={dueText}
+        range={{ min: today }}
+        heading="Due Date"
+        note="When you expect to be paid. It cannot fall before today, which is the day this one is issued."
+        onCancel={() => setPick(null)}
+        onPick={(iso) => { setDueText(iso); setPick(null); }}
+      />
+      <DateSheet
+        visible={pick === 'settle'}
+        value={settleDay}
+        fallback={today}
+        /* Both ends of `settleDayBlocker`, drawn rather than said. Money cannot
+           have arrived before the document existed, and money recorded as
+           arriving tomorrow is a figure in a ledger about a day that has not
+           happened. */
+        range={{ min: settleTarget?.issuedOn ?? null, max: today }}
+        heading="The Day It Arrived"
+        note="Your own record of when the money reached you. Nothing before the invoice was written, and nothing after today."
+        onCancel={() => setPick(null)}
+        onPick={(iso) => { setSettleDay(iso); setPick(null); }}
+      />
+      <DateSheet
+        visible={pick === 'chase'}
+        value={chaseDay}
+        fallback={today}
+        /* One end only, matching `chaseFromDayBlocker`. There is deliberately no
+           ceiling: a coach who has agreed to wait until March sets March. */
+        range={{ min: chaseTarget?.issuedOn ?? null }}
+        heading="Chase It From"
+        note="Your own note about your own list. Nothing before the invoice was written."
+        onCancel={() => setPick(null)}
+        onPick={(iso) => { setChaseDay(iso); setPick(null); }}
+      />
     </SafeAreaView>
   );
 }

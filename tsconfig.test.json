@@ -30,6 +30,7 @@
   "files": [
     "src/lib/monthEnd.ts",
     "src/lib/staffView.ts",
+    "src/lib/readDeadline.test.ts",
     "src/lib/sliceTruncated.test.ts",
     "src/lib/gymWhen.ts",
     "src/lib/gymWhen.test.ts",
@@ -386,6 +387,8 @@
     "src/lib/calendarNames.test.ts",
     "src/lib/monthGrid.ts",
     "src/lib/monthGrid.test.ts",
+    "src/lib/dayRange.ts",
+    "src/lib/dayRange.test.ts",
     "src/lib/daySession.ts",
     "src/lib/daySession.test.ts",
     "src/lib/sessionFinish.ts",
@@ -410,8 +413,14 @@
     "src/lib/coachMacros.test.ts",
     "src/lib/settlementStamp.test.ts",
     "src/lib/wholeUnits.test.ts",
+    "src/lib/deadline.ts",
+    "src/lib/deadline.test.ts",
     "src/lib/cappedByIds.ts",
     "src/lib/cappedByIds.test.ts",
-    "src/lib/consoleClock.test.ts"
+    "src/lib/consoleClock.test.ts",
+    "src/lib/templateLibrary.ts",
+    "src/lib/templateLibrary.test.ts",
+    "src/lib/pullRefresh.ts",
+    "src/lib/pullRefresh.test.ts"
   ]
 }

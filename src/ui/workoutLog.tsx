@@ -70,6 +70,7 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { worstStatus, type LoadStatus } from './loadStatus';
+import { useReadDeadline } from './readDeadline';
 import { capLimit, capped } from '../lib/rowCap';
 import { isPending, localId } from '../lib/wellnessSync';
 import { classifyWrite, registerFlush, serverRows, unsentCount, type WriteOutcome } from '../lib/offlineQueue';
@@ -633,7 +634,17 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
 
   // The worse of the two reads. A screen fed by this is only as complete as the
   // weaker of "what the server said" and "what this device was holding".
-  const status = worstStatus(serverStatus, queueStatus);
+  //
+  // Under a ceiling, because neither of the two statuses above can ever leave
+  // 'loading' on its own if the request never settles — and no request in this
+  // app carries a timeout. The hydrate effect moves `serverStatus` in a `try`
+  // and in a `catch`; a socket that accepts and then says nothing runs neither,
+  // so a member on gym wifi behind a captive portal was left with Home reading
+  // "Reading your training log…" over dashes where their streak and this week's
+  // sessions should be, for as long as the app stayed open — and this screen is
+  // a tab, so that is until it is killed. src/lib/readDeadline.ts is the whole
+  // argument; the read itself is untouched and a late answer still lands.
+  const status = useReadDeadline(worstStatus(serverStatus, queueStatus));
 
   return (
     <Ctx.Provider value={{

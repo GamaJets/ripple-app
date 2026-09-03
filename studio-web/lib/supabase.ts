@@ -12,6 +12,11 @@ import { createClient } from '@supabase/supabase-js';
 // scripts/check-currency.mjs is looking for and would otherwise have had to be
 // argued with.
 import type { WeightUnit } from '@lib/units';
+// A request that is never going to answer, given up on rather than waited for.
+// The rule, the two sentences and the timer live in one tested module because
+// the phone app has exactly the same hole and this is the half of the fix that
+// is not a browser type.
+import { changesThings, deadlineMsFor, withDeadline, type BodyKind } from '@lib/deadline';
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -25,8 +30,79 @@ if (!url || !key) {
   );
 }
 
+/**
+ * What sort of body a request is carrying, in the three terms the deadline
+ * rule is written in.
+ *
+ * A string is JSON — every write this console makes. A Blob, a File, a
+ * FormData, a stream or a raw buffer is an upload, and `/compliance` sends a
+ * gym document through this same client. Anything unrecognised is treated as
+ * JSON rather than as an upload: erring the other way would hand a request
+ * three minutes of silence at a front desk.
+ */
+function bodyKind(body: BodyInit | null | undefined): BodyKind {
+  if (body == null) return 'none';
+  if (typeof body === 'string') return 'text';
+  if (typeof Blob !== 'undefined' && body instanceof Blob) return 'file';
+  if (typeof FormData !== 'undefined' && body instanceof FormData) return 'file';
+  if (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream) return 'file';
+  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return 'file';
+  return 'text';
+}
+
+/**
+ * `fetch`, with a deadline on it.
+ *
+ * ── Why this is here and not at each call site ────────────────────────────
+ *
+ * Because the condition is not a property of any call site. A captive portal at
+ * a front desk accepts the socket, completes the handshake and then answers
+ * nothing, and every request made through this client behaves identically: the
+ * promise never settles, in either direction. There are some three hundred
+ * awaits across thirty-five routes and none of them is wrong; the fetch under
+ * all of them is what has no deadline. See src/lib/deadline.ts for what each
+ * screen does today when one of these hangs — the short version is that
+ * `Fetched`'s "Read again" button disables itself permanently, because the
+ * `finally` that clears its `running` flag never runs.
+ *
+ * ── What a caller sees ────────────────────────────────────────────────────
+ *
+ * A rejection, which is what every screen here is already built for: supabase-js
+ * turns a fetch rejection into a thrown error on `.then`, and a thrown read is
+ * `landed()`'s 'failed' arm, the banner, and the retry. Nothing downstream needs
+ * to know this exists.
+ *
+ * ── The caller's own signal is kept ───────────────────────────────────────
+ *
+ * PostgREST's `.abortSignal()` passes one through `init`, and dropping it would
+ * silently break every caller that cancels. Both signals abort the one request,
+ * and the listener is removed on settle so a long-lived signal does not
+ * accumulate one per query.
+ */
+const timedFetch: typeof fetch = (input, init) => {
+  const method = init?.method
+    ?? (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET');
+  const wrote = changesThings(method);
+  const ms = deadlineMsFor(bodyKind(init?.body));
+
+  const ac = new AbortController();
+  const caller = init?.signal ?? null;
+  // Already cancelled before we started: pass it straight through rather than
+  // arming a timer for a request that is not going to be made.
+  if (caller?.aborted) return fetch(input, init);
+  const onCallerAbort = () => ac.abort(caller?.reason);
+  caller?.addEventListener('abort', onCallerAbort, { once: true });
+
+  const work = fetch(input, { ...init, signal: ac.signal });
+  return withDeadline(work, ms, wrote, () => ac.abort())
+    .finally(() => caller?.removeEventListener('abort', onCallerAbort));
+};
+
 export const supabase = createClient(url, key, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  // Realtime is a WebSocket and is untouched by this; every read, every write
+  // and every storage upload this console makes goes through here.
+  global: { fetch: timedFetch },
 });
 
 export type Role = 'client' | 'trainer' | 'owner';

@@ -62,6 +62,8 @@ import {
   type Statement, type StatementInput, type StatementPeriod, type YearStart,
 } from '../../src/lib/coachStatement';
 import { fetchStatementInput } from '../../src/ui/coachStatement';
+import { DateSheet } from '../../src/ui/DateSheet';
+import { MIN_TARGET } from '../../src/lib/a11y';
 
 /**
  * A whole year, one quarter of it, or two dates the coach types.
@@ -131,6 +133,14 @@ export default function StatementOfRecord() {
   const [start, setStart] = useState<YearStart>(CALENDAR_YEAR_START);
   const [fromText, setFromText] = useState('');
   const [toText, setToText] = useState('');
+  /** Which end of a custom period has the month sheet open, if either.
+   *
+   *  One tri-state rather than two booleans, and that is the point: two
+   *  booleans can both be true, and two modals presented at once from the same
+   *  parent is the defect scripts/check-runtime-traps.mjs was written for — iOS
+   *  presents one and silently drops the other. A value that can only name one
+   *  end cannot get into that state. */
+  const [pick, setPick] = useState<null | 'from' | 'to'>(null);
   const [input, setInput] = useState<StatementInput | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -284,6 +294,15 @@ export default function StatementOfRecord() {
     backgroundColor: active ? t.brand : t.surface2,
   });
 
+  /** The two ends of a custom period, as boxes that open a month. `MIN_TARGET`
+   *  tall rather than padded to roughly that: the number is the reachability
+   *  floor and this control is used one-handed. */
+  const dayBox = {
+    flex: 1, flexDirection: 'row' as const, alignItems: 'center' as const,
+    minHeight: MIN_TARGET, paddingHorizontal: 12,
+    backgroundColor: t.surface2, borderRadius: radius.sm,
+  };
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
@@ -392,13 +411,31 @@ export default function StatementOfRecord() {
               <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>
                 Any two dates, for a period neither a calendar year nor your own year covers.
               </Text>
+              {/* ── two boxes that open a month, not two keyboards ────────
+                  Both were `TextInput`s and both were the reported fault: on a
+                  phone the soft keyboard comes up over the bottom of the window
+                  and sits on the field being typed into. They are now buttons
+                  and neither raises a keyboard; typing a period is still
+                  possible and lives inside the sheet, behind its own "Type a
+                  Date", so a coach pasting an accountant's two dates has a way
+                  in that does not cover the field. */}
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                <TextInput value={fromText} onChangeText={setFromText} autoCapitalize="none" autoCorrect={false}
-                  placeholder="From YYYY-MM-DD" placeholderTextColor={t.ink3} accessibilityLabel="Period start"
-                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, flex: 1 }} />
-                <TextInput value={toText} onChangeText={setToText} autoCapitalize="none" autoCorrect={false}
-                  placeholder="To YYYY-MM-DD" placeholderTextColor={t.ink3} accessibilityLabel="Period end"
-                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 10, flex: 1 }} />
+                <Pressable onPress={() => setPick('from')}
+                  accessibilityRole="button"
+                  accessibilityLabel={fromText
+                    ? 'The day the period starts. Currently ' + fromText + '. Opens a calendar.'
+                    : 'The day the period starts. Not set yet. Opens a calendar.'}
+                  style={dayBox}>
+                  <Text style={{ ...ty.body, color: fromText ? t.ink : t.ink3, flex: 1 }}>{fromText || 'From'}</Text>
+                </Pressable>
+                <Pressable onPress={() => setPick('to')}
+                  accessibilityRole="button"
+                  accessibilityLabel={toText
+                    ? 'The day the period ends. Currently ' + toText + '. Opens a calendar.'
+                    : 'The day the period ends. Not set yet. Opens a calendar.'}
+                  style={dayBox}>
+                  <Text style={{ ...ty.body, color: toText ? t.ink : t.ink3, flex: 1 }}>{toText || 'To'}</Text>
+                </Pressable>
               </View>
               {/* Never a silently corrected range. A statement built over a
                   period the coach did not ask for looks exactly like one they
@@ -542,6 +579,52 @@ export default function StatementOfRecord() {
           </>
         )}
       </ScrollView>
+
+      {/* ── the two ends of a custom period ──────────────────────────────────
+          Siblings of the ScrollView rather than children of it, and mutually
+          exclusive by construction — see `pick`.
+
+          ── why the second one opens on the first one's month ──
+          A custom period is chosen left to right in one sitting, and it is
+          usually a few months long. A coach who has just set the period to run
+          from 6 April 2025 is choosing its end somewhere near April 2025, and a
+          sheet that opened on the handset's own month would make them step back
+          seventeen times to reach it. `fallback` is symmetric because the coach
+          may fill either box first, and it costs nothing when the period is
+          recent: it only ever applies when the box being opened is empty.
+
+          ── and why only the END is bounded ──
+          `customRange` returns null for a backwards pair, refusing rather than
+          swapping — a statement for a period nobody asked for looks exactly
+          like one they did, and it is in an accountant's inbox by the time
+          anybody notices. So the To sheet greys out everything before From,
+          which is the same refusal made visible before the tap.
+
+          The From sheet is deliberately NOT bounded by To. A coach moving a
+          whole period later — April-to-June becoming July-to-September — sets
+          the new start first, and a ceiling at the old end would grey out
+          exactly the month they were reaching for. An out-of-order pair made
+          that way is caught by `rangeProblem` below the boxes, which is where a
+          mistake in the SECOND half of a decision belongs. */}
+      <DateSheet
+        visible={pick === 'from'}
+        value={fromText}
+        fallback={toText}
+        heading="Period Start"
+        note="The first day the statement covers."
+        onCancel={() => setPick(null)}
+        onPick={(iso) => { setFromText(iso); setPick(null); }}
+      />
+      <DateSheet
+        visible={pick === 'to'}
+        value={toText}
+        fallback={fromText}
+        range={{ min: fromText.trim() || null }}
+        heading="Period End"
+        note="The last day the statement covers. It cannot fall before the day it starts."
+        onCancel={() => setPick(null)}
+        onPick={(iso) => { setToText(iso); setPick(null); }}
+      />
     </SafeAreaView>
   );
 }

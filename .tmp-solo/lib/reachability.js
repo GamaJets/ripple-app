@@ -1,3 +1,4 @@
+"use strict";
 // Whether this phone can reach the backend right now.
 //
 // ── Why there is no NetInfo in here ────────────────────────────────────────
@@ -40,7 +41,18 @@
 // reads. "Check your connection and try again" is printed on four client
 // screens today for both halves of it, and on the refusal half it is a lie
 // that sends somebody to their router when the server has just told them no.
-
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.noteUnreachable = exports.noteReached = exports.currentReach = exports.reachState = exports.canAssertEmpty = exports.initialReach = void 0;
+exports.isTransportFailure = isTransportFailure;
+exports.reachAfter = reachAfter;
+exports.probeDelayMs = probeDelayMs;
+exports.retryLine = retryLine;
+exports.offlineBanner = offlineBanner;
+exports.subscribeReach = subscribeReach;
+exports.onReconnect = onReconnect;
+exports.noteThrown = noteThrown;
+exports.resetReach = resetReach;
+exports.observedFetch = observedFetch;
 /**
  * What we currently believe about reaching the backend.
  *
@@ -49,29 +61,9 @@
  * would be an invention. Every copy helper here treats it as "do not claim
  * either way".
  */
-import { isRequestTimeout, maxAttempts, methodOf, withRequestTimeout } from './requestTimeout';
-import type { TimeoutDeps } from './requestTimeout';
-
-export type Reach = 'unknown' | 'online' | 'offline';
-
-/** One request's verdict. 'reached' means bytes came back from our server —
- *  INCLUDING an error response, which is the server talking. 'unreachable'
- *  means the request never produced an answer at all. */
-export type ReachEvidence = 'reached' | 'unreachable';
-
-export interface ReachState {
-  reach: Reach;
-  /** ms since epoch of the last CHANGE, so a screen can say how long. 0 while
-   *  nothing has ever been observed. */
-  since: number;
-  /** Consecutive unreachable verdicts. Drives the probe's backoff, and is not
-   *  the same as "is offline" — the first failure flips `reach` and this keeps
-   *  counting so the probe stops hammering a radio that is switched off. */
-  failures: number;
-}
-
-export const initialReach = (): ReachState => ({ reach: 'unknown', since: 0, failures: 0 });
-
+const requestTimeout_1 = require("./requestTimeout");
+const initialReach = () => ({ reach: 'unknown', since: 0, failures: 0 });
+exports.initialReach = initialReach;
 /**
  * Is this thrown value a transport failure, or something we caused?
  *
@@ -93,18 +85,21 @@ export const initialReach = (): ReachState => ({ reach: 'unknown', since: 0, fai
  * which is the whole defect that ceiling exists to close, closed at one end
  * and left open at this one.
  */
-export function isTransportFailure(err: unknown): boolean {
-  if (err == null) return false;
-  if (isRequestTimeout(err)) return true;
-  const name = String((err as any)?.name ?? '');
-  if (name === 'AbortError' || name === 'CanceledError') return false;
-  const msg = String((err as any)?.message ?? '');
-  // A DOMException for an aborted request does not always carry the name on
-  // every runtime this app runs on, so the message is checked too.
-  if (/abort/i.test(msg)) return false;
-  return true;
+function isTransportFailure(err) {
+    if (err == null)
+        return false;
+    if ((0, requestTimeout_1.isRequestTimeout)(err))
+        return true;
+    const name = String(err?.name ?? '');
+    if (name === 'AbortError' || name === 'CanceledError')
+        return false;
+    const msg = String(err?.message ?? '');
+    // A DOMException for an aborted request does not always carry the name on
+    // every runtime this app runs on, so the message is checked too.
+    if (/abort/i.test(msg))
+        return false;
+    return true;
 }
-
 /**
  * Fold one verdict into the state.
  *
@@ -124,19 +119,18 @@ export function isTransportFailure(err: unknown): boolean {
  * `since` only moves when `reach` actually changes, so "offline for 4 minutes"
  * stays true across the fifteen further failures inside it.
  */
-export function reachAfter(prev: ReachState, ev: ReachEvidence, now: number): ReachState {
-  if (ev === 'reached') {
-    return { reach: 'online', since: prev.reach === 'online' ? prev.since : now, failures: 0 };
-  }
-  return {
-    reach: 'offline',
-    since: prev.reach === 'offline' ? prev.since : now,
-    // Capped so a phone left in a drawer overnight does not overflow the
-    // schedule into a number the probe can never come back from.
-    failures: Math.min(prev.failures + 1, 32),
-  };
+function reachAfter(prev, ev, now) {
+    if (ev === 'reached') {
+        return { reach: 'online', since: prev.reach === 'online' ? prev.since : now, failures: 0 };
+    }
+    return {
+        reach: 'offline',
+        since: prev.reach === 'offline' ? prev.since : now,
+        // Capped so a phone left in a drawer overnight does not overflow the
+        // schedule into a number the probe can never come back from.
+        failures: Math.min(prev.failures + 1, 32),
+    };
 }
-
 /**
  * How long to wait before probing again, after `failures` consecutive misses.
  *
@@ -149,12 +143,12 @@ export function reachAfter(prev: ReachState, ev: ReachEvidence, now: number): Re
  * things are working, traffic is doing this job for free and the probe is only
  * there to notice a silent drop on an idle screen.
  */
-export function probeDelayMs(failures: number): number {
-  if (failures <= 0) return 30_000;
-  const ladder = [2_000, 4_000, 8_000, 15_000, 30_000];
-  return failures - 1 < ladder.length ? ladder[failures - 1] : 60_000;
+function probeDelayMs(failures) {
+    if (failures <= 0)
+        return 30000;
+    const ladder = [2000, 4000, 8000, 15000, 30000];
+    return failures - 1 < ladder.length ? ladder[failures - 1] : 60000;
 }
-
 /**
  * The sentence to put in front of somebody whose write did not land.
  *
@@ -168,12 +162,13 @@ export function probeDelayMs(failures: number): number {
  * committed to saying something. Sentence case, no value interpolated, so it
  * is safe to append to any specific first half the caller has written.
  */
-export function retryLine(reach: Reach): string {
-  if (reach === 'offline') return 'Your phone is not reaching us at the moment, so nothing was sent. Try again once you have signal.';
-  if (reach === 'online') return 'We reached the server and it did not accept that, so nothing has changed. Try again, and let us know if it keeps happening.';
-  return 'Check your connection and try again.';
+function retryLine(reach) {
+    if (reach === 'offline')
+        return 'Your phone is not reaching us at the moment, so nothing was sent. Try again once you have signal.';
+    if (reach === 'online')
+        return 'We reached the server and it did not accept that, so nothing has changed. Try again, and let us know if it keeps happening.';
+    return 'Check your connection and try again.';
 }
-
 /**
  * The standing banner, or null when there is nothing to say.
  *
@@ -186,11 +181,11 @@ export function retryLine(reach: Reach): string {
  * owns saying so. This sentence only states what is true of everything: the app
  * is running on what it already had.
  */
-export function offlineBanner(reach: Reach): string | null {
-  if (reach !== 'offline') return null;
-  return 'No connection. You are seeing what was on this phone the last time it could reach us.';
+function offlineBanner(reach) {
+    if (reach !== 'offline')
+        return null;
+    return 'No connection. You are seeing what was on this phone the last time it could reach us.';
 }
-
 /**
  * Whether a screen may state, as a fact, that a read came back empty.
  *
@@ -199,8 +194,8 @@ export function offlineBanner(reach: Reach): string | null {
  * server at all, even a cached list that looks complete is a list from some
  * earlier moment, and "there are none" is not available as a sentence.
  */
-export const canAssertEmpty = (reach: Reach): boolean => reach !== 'offline';
-
+const canAssertEmpty = (reach) => reach !== 'offline';
+exports.canAssertEmpty = canAssertEmpty;
 /* ── the store ────────────────────────────────────────────────────────────
  *
  * A module singleton rather than React state, for one reason that decides it:
@@ -208,64 +203,68 @@ export const canAssertEmpty = (reach: Reach): boolean => reach !== 'offline';
  * which is not in a component and cannot be. A hook subscribes to this (see
  * src/ui/reachability.tsx); nothing subscribes the other way round.
  */
-
-let state: ReachState = initialReach();
-const listeners = new Set<(s: ReachState) => void>();
-
+let state = (0, exports.initialReach)();
+const listeners = new Set();
 /** What we believe right now. */
-export const reachState = (): ReachState => state;
-export const currentReach = (): Reach => state.reach;
-
+const reachState = () => state;
+exports.reachState = reachState;
+const currentReach = () => state.reach;
+exports.currentReach = currentReach;
 /** Called on every change, including a change of `failures` with the same
  *  `reach` — the probe schedules off that number. Returns an unsubscribe. */
-export function subscribeReach(fn: (s: ReachState) => void): () => void {
-  listeners.add(fn);
-  return () => { listeners.delete(fn); };
+function subscribeReach(fn) {
+    listeners.add(fn);
+    return () => { listeners.delete(fn); };
 }
-
-function apply(next: ReachState) {
-  if (next.reach === state.reach && next.since === state.since && next.failures === state.failures) return;
-  const wasOnline = state.reach === 'online';
-  state = next;
-  listeners.forEach((fn) => { try { fn(next); } catch { /* one bad listener must not stop the rest */ } });
-  // The reconnect edge, announced separately so the flush does not have to
-  // work it out from a stream of states. Only 'not online' → 'online' counts:
-  // 'unknown' → 'online' on a cold launch is a reconnect for our purposes,
-  // because a queue written by the previous run has been waiting for exactly
-  // this moment.
-  if (!wasOnline && next.reach === 'online') {
-    onlineListeners.forEach((fn) => { try { fn(); } catch { /* as above */ } });
-  }
+function apply(next) {
+    if (next.reach === state.reach && next.since === state.since && next.failures === state.failures)
+        return;
+    const wasOnline = state.reach === 'online';
+    state = next;
+    listeners.forEach((fn) => { try {
+        fn(next);
+    }
+    catch { /* one bad listener must not stop the rest */ } });
+    // The reconnect edge, announced separately so the flush does not have to
+    // work it out from a stream of states. Only 'not online' → 'online' counts:
+    // 'unknown' → 'online' on a cold launch is a reconnect for our purposes,
+    // because a queue written by the previous run has been waiting for exactly
+    // this moment.
+    if (!wasOnline && next.reach === 'online') {
+        onlineListeners.forEach((fn) => { try {
+            fn();
+        }
+        catch { /* as above */ } });
+    }
 }
-
-const onlineListeners = new Set<() => void>();
-
+const onlineListeners = new Set();
 /** Called once each time the app goes from not-reaching to reaching. This is
  *  the hook src/lib/offlineQueue.ts's flush is wired to. */
-export function onReconnect(fn: () => void): () => void {
-  onlineListeners.add(fn);
-  return () => { onlineListeners.delete(fn); };
+function onReconnect(fn) {
+    onlineListeners.add(fn);
+    return () => { onlineListeners.delete(fn); };
 }
-
 /** A request came back. Cheap enough to call on every response. */
-export const noteReached = (now: number = Date.now()): void => { apply(reachAfter(state, 'reached', now)); };
-
+const noteReached = (now = Date.now()) => { apply(reachAfter(state, 'reached', now)); };
+exports.noteReached = noteReached;
 /** A request produced no answer. */
-export const noteUnreachable = (now: number = Date.now()): void => { apply(reachAfter(state, 'unreachable', now)); };
-
+const noteUnreachable = (now = Date.now()) => { apply(reachAfter(state, 'unreachable', now)); };
+exports.noteUnreachable = noteUnreachable;
 /** A thrown value from a request, classified. Anything we aborted ourselves is
  *  ignored rather than reported as no signal. */
-export function noteThrown(err: unknown, now: number = Date.now()): void {
-  if (isTransportFailure(err)) noteUnreachable(now);
+function noteThrown(err, now = Date.now()) {
+    if (isTransportFailure(err))
+        (0, exports.noteUnreachable)(now);
 }
-
 /** Back to knowing nothing. For tests, and for a sign-out, where the next
  *  account's first request should decide this again from scratch. */
-export function resetReach(): void {
-  state = initialReach();
-  listeners.forEach((fn) => { try { fn(state); } catch { /* ignore */ } });
+function resetReach() {
+    state = (0, exports.initialReach)();
+    listeners.forEach((fn) => { try {
+        fn(state);
+    }
+    catch { /* ignore */ } });
 }
-
 /**
  * `fetch`, with every call reporting what it learnt — and a ceiling on how long
  * it may learn nothing for.
@@ -308,24 +307,23 @@ export function resetReach(): void {
  * written out there. A caller's own abort is not a timeout, so a screen that
  * unmounts mid-read is not chased with a second request.
  */
-export function observedFetch(
-  base: (input: any, init?: any) => Promise<Response>,
-  deps: TimeoutDeps = {},
-): (input: any, init?: any) => Promise<Response> {
-  const timed = withRequestTimeout(base, deps);
-  return async (input: any, init?: any) => {
-    const attempts = maxAttempts(methodOf(input, init));
-    for (let n = 1; ; n += 1) {
-      try {
-        const res = await timed(input, init);
-        noteReached();
-        return res;
-      } catch (e) {
-        // Filed here, inside the loop, on purpose. See above.
-        noteThrown(e);
-        if (n < attempts && isRequestTimeout(e)) continue;
-        throw e;
-      }
-    }
-  };
+function observedFetch(base, deps = {}) {
+    const timed = (0, requestTimeout_1.withRequestTimeout)(base, deps);
+    return async (input, init) => {
+        const attempts = (0, requestTimeout_1.maxAttempts)((0, requestTimeout_1.methodOf)(input, init));
+        for (let n = 1;; n += 1) {
+            try {
+                const res = await timed(input, init);
+                (0, exports.noteReached)();
+                return res;
+            }
+            catch (e) {
+                // Filed here, inside the loop, on purpose. See above.
+                noteThrown(e);
+                if (n < attempts && (0, requestTimeout_1.isRequestTimeout)(e))
+                    continue;
+                throw e;
+            }
+        }
+    };
 }

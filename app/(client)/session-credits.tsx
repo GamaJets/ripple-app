@@ -46,6 +46,7 @@ import { coachPackLines, gymPtLines, chooseRoute, routeReason, creditsLeft, payi
   buildLedger, expectedDraws, clientLedgerLine, shortfallLine,
   type CreditRoute, type CreditSession, type Entitlement, type Ledger, type LedgerRow } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
+import { withDeadline } from '../../src/lib/readDeadline';
 import { useToday } from '../../src/ui/today';
 
 // The day used to judge whether a gym pass is still live was a private copy of
@@ -83,8 +84,33 @@ export default function SessionCredits() {
   const [passes, setPasses] = useState<PtPassRow[] | null | undefined>(undefined);
   const [sessions, setSessions] = useState<CreditSession[] | null | undefined>(undefined);
 
+  // ── The read has an ending ────────────────────────────────────────────
+  //
+  // All three of these swallow their own failures and hand back null, so the
+  // only way this screen could stay on "Reading what pays for your sessions…"
+  // was a request that never SETTLED at all — and no request in this app
+  // carries a timeout (src/lib/readDeadline.ts). On a gym wifi behind a captive
+  // portal the socket is accepted and nothing comes back, `Promise.all` waits
+  // for ever, all three stay `undefined`, and a member trying to find out
+  // whether they have a session left before they book one is shown a sentence
+  // that never resolves — with the "Try Again" button below gated on
+  // `!loading`, so there is not even a way to ask again.
+  //
+  // A stall is `null`, which is the same three-state answer a refused read
+  // already produces, and the notice with the retry in it is already written.
   const load = useCallback(async () => {
-    const [p, g, s] = await Promise.all([sessionPacks(), myPtPasses(), mySessionCredits()]);
+    const got = await withDeadline(Promise.all([sessionPacks(), myPtPasses(), mySessionCredits()]));
+    if (!got.answered) {
+      // Only where there was nothing to lose. A pull-to-refresh that stalls over
+      // a balance already on screen must not blank it — src/lib/staleRead.ts
+      // makes that argument in full, and this is somebody's money: an unread
+      // refresh does not mean the credits stopped existing.
+      setPacks((v) => (v === undefined ? null : v));
+      setPasses((v) => (v === undefined ? null : v));
+      setSessions((v) => (v === undefined ? null : v));
+      return;
+    }
+    const [p, g, s] = got.value;
     setPacks(p); setPasses(g); setSessions(s);
   }, []);
   useEffect(() => { load(); }, [load]);
