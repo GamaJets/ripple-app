@@ -31,6 +31,8 @@ import { isoDate } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { readState, hasRows, canSayEmpty, staleNote, failedNote } from '../../src/lib/staleRead';
+// The one reader for a typed amount in this product. See commitPayment.
+import { readMinorAmount } from '../../src/lib/coachMoney';
 import {
   fetchPlans, fetchMemberships, fetchPayments, createMembership,
   setMembershipStatus, recordPayment, summarise, money,
@@ -121,6 +123,9 @@ export default function OwnerMembers() {
 
   // take-a-payment sheet
   const [payFor, setPayFor] = useState<Membership | null>(null);
+  // Why a typed amount was refused. It used to be nothing at all: a bad
+  // figure returned silently and the owner pressed Record again.
+  const [payErr, setPayErr] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('card');
 
@@ -286,8 +291,27 @@ export default function OwnerMembers() {
     // and the one thing that must never happen is this call site inventing one
     // to satisfy the type.
     if (!cur) return;
-    const major = parseFloat(amount.replace(/,/g, ''));
-    if (!Number.isFinite(major) || major <= 0) return;
+    // ── the hundred that is not a hundred everywhere ─────────────────────
+    //
+    // This was `parseFloat` and then `Math.round(major * 100)` on the write.
+    // Two decimal places is right for a sterling gym and wrong for a third of
+    // the currencies this product supports: a Tokyo gym taking ¥5,000 at the
+    // desk wrote 500,000 minor units — ¥500,000 — into its own ledger, and a
+    // Kuwaiti gym's 82.500 was stored as 8.250 KWD, wrong by a factor of ten in
+    // the direction nobody notices.
+    //
+    // `readMinorAmount` takes the decimal places from the currency, refuses a
+    // thousands separator rather than guessing which side of the Channel the
+    // typist grew up on, and refuses a third decimal place rather than rounding
+    // it. It is the one reader for a typed amount in this product; this was the
+    // last write that did its own arithmetic.
+    //
+    // Not a render bug. A figure drawn wrong is embarrassing and a figure
+    // WRITTEN wrong is a gym's takings, and nothing downstream can recover it.
+    const read = readMinorAmount(amount, cur);
+    if (!read.ok) { setPayErr(read.reason); return; }
+    const minorUnits = read.minorUnits;
+    if (minorUnits <= 0) { setPayErr('A payment has to be for more than nothing.'); return; }
     setBusy(true);
     try {
       // The currency goes with the amount, and it is the gym's own or nothing.
@@ -300,7 +324,7 @@ export default function OwnerMembers() {
       // label is what makes the owner confident.
       await recordPayment(supabase, tenant.id, {
         memberId: payFor.memberId,
-        amountCents: Math.round(major * 100),
+        amountCents: minorUnits,
         method,
         takenAt: new Date().toISOString(),
         currency: cur,
@@ -619,9 +643,17 @@ export default function OwnerMembers() {
             {cur ? (
               <>
                 <Text style={lab}>Amount ({cur})</Text>
-                <TextInput value={amount} onChangeText={setAmount} autoFocus keyboardType="decimal-pad"
+                <TextInput value={amount} onChangeText={(v) => { setAmount(v); setPayErr(null); }} autoFocus keyboardType="decimal-pad"
                   placeholder="0.00" placeholderTextColor={t.ink3} returnKeyType="done"
                   onSubmitEditing={() => { void commitPayment(); }} style={inp} accessibilityLabel={`Amount in ${cur}`} />
+                {/* The server's own words, or this screen's. A refused amount
+                    used to return silently, so an owner who typed 1,250.00 in a
+                    gym billing in yen pressed Record, watched nothing happen,
+                    and pressed it again. A status colour is a mark and never
+                    ink — the sentence carries the meaning. */}
+                {payErr ? (
+                  <View style={{ marginTop: sp.sm }}><Flag tone={t.warn}>{payErr}</Flag></View>
+                ) : null}
               </>
             ) : (
               <Text style={{ ...ty.body, color: t.ink2 }}>

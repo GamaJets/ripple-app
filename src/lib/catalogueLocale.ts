@@ -300,7 +300,7 @@ export function validateTranslations(
         + 'The foreign key would reject this when the part is applied, half way through the seed.',
       );
     }
-    const key = `${id} ${loc}`;
+    const key = `${id}\u0000${loc}`;
     if (seen.has(key)) {
       problems.push(
         `"${id}" is translated into "${loc}" twice in the same set. `
