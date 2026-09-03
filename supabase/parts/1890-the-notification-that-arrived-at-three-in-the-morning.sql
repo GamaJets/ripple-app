@@ -344,6 +344,22 @@ comment on function public.claim_notice_pass(text, uuid[], int) is
 -- Nothing else is different. No sentence, no threshold, no date comparison and
 -- no bookkeeping table. Read the diff and there should be two green lines and a
 -- declaration in each.
+--
+-- That claim was checked by a machine rather than by eye. Each body below was
+-- extracted from this file, the marked additions removed, all whitespace
+-- stripped and md5'd, and the same md5 taken of `pg_proc.prosrc` on the live
+-- database. All six matched:
+--
+--   run_overdue_client_notices     57085b56f3d9726bc7851b30a5064912
+--   run_credential_expiry_notices  a8611475d313398119827e86e7a9f4d1
+--   run_block_ended_notices        b5ec1af17be708d778de1d18a297a41f
+--   run_pack_expiry                91957d05b60a8b62086a82c442f1af88
+--   run_invoice_ageing_notices     702ae931d656f0a93677e93c6afde891
+--   run_open_slot_extension        17c9191eea4e4bc2c19320ee6ef9113a
+--
+-- Anybody re-checking this can reproduce it with
+--   select proname, md5(regexp_replace(prosrc, '\s', '', 'g')) from pg_proc …
+-- BEFORE this part is applied.
 -- ═════════════════════════════════════════════════════════════════════════
 
 -- ── 4.1 · A client past their usual gap (part 202) ───────────────────────
@@ -616,3 +632,359 @@ begin
 
   return jsonb_build_object('sent', v_sent);
 end $fn$;
+
+
+-- ── 4.4 · A session pack whose validity ran out (part 612) ───────────────
+--
+-- The one pass that writes data as well as sentences. See section 4 of the
+-- header for why the closure moving by up to half a day is safe, and why a
+-- purchase with no `trainer_id` is deliberately not gated.
+
+create or replace function public.run_pack_expiry()
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_closed integer := 0;
+  v_told   integer := 0;
+  v_lost   integer;
+  r        record;
+  v_due    uuid[];   -- part 1890
+begin
+  -- part 1890
+  select public.claim_notice_pass(
+    'pack-expiry',
+    (select coalesce(array_agg(distinct cp.trainer_id), '{}'::uuid[])
+       from public.client_purchases cp
+      where cp.trainer_id is not null
+        and cp.expires_on is not null
+        and cp.expired_at is null),
+    7) into v_due;
+  for r in
+    select cp.id, cp.client_id, cp.trainer_id, cp.expires_on
+      from public.client_purchases cp
+     where cp.expires_on is not null
+       and cp.expired_at is null
+       and cp.sessions_total is not null
+       -- The day AFTER the last day. `expires_on` is the last day the credits
+       -- can be used, so a pack is still live all of the day it names.
+       and cp.expires_on < current_date
+       and cp.status = 'paid'
+       -- part 1890. A pack with no coach on it has nobody to be told and
+       -- nobody to be timed against; gating it would leave its window open
+       -- forever, so it closes on the first tick of the day as it always did.
+       and (cp.trainer_id is null or cp.trainer_id = any(v_due))
+  loop
+    -- The count that goes in the message comes back out of the WRITE, not out
+    -- of the select above. A booking between the two would draw a credit the
+    -- select had already counted as lost, and the coach would be told a number
+    -- one too high about somebody's money.
+    v_lost := null;
+    update public.client_purchases cp
+       set sessions_total    = coalesce(cp.sessions_used, 0),
+           sessions_expired  = greatest(0, cp.sessions_total - coalesce(cp.sessions_used, 0)),
+           expired_at        = now()
+     where cp.id = r.id
+       and cp.expired_at is null
+    returning cp.sessions_expired into v_lost;
+    if v_lost is null then
+      continue;
+    end if;
+    v_closed := v_closed + 1;
+    -- Only when credits were actually lost. A pack that ran out of time with
+    -- nothing on it is not news: part 163 already told the coach on the day the
+    -- last session was used.
+    if v_lost > 0 and r.trainer_id is not null then
+      insert into public.notifications (user_id, title, body, icon, route)
+      values (
+        r.trainer_id,
+        'A session pack has run out of time',
+        left(
+          coalesce(
+            (select nullif(btrim(coalesce(p.full_name, '')), '') from public.profiles p where p.id = r.client_id),
+            'A client'
+          )
+          || ' had ' || v_lost || ' session' || case when v_lost = 1 then '' else 's' end
+          || ' left on a pack whose validity ran out on ' || to_char(r.expires_on, 'DD Mon YYYY') || '.'
+          || ' Those credits can no longer be booked against, and they paid for them.'
+          || ' Whether you extend it, sell them something else or leave it is yours to decide — but they will notice, and it is better that you raise it.'
+          || ' Payments & Packages has the pack and what it was worth.',
+          500),
+        'grid',
+        '/(trainer)/payments'
+      );
+      v_told := v_told + 1;
+    end if;
+  end loop;
+  return jsonb_build_object('closed', v_closed, 'told', v_told);
+end $fn$;
+
+
+-- ── 4.5 · An invoice ageing into a new band (part 613) ───────────────────
+
+create or replace function public.run_invoice_ageing_notices()
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_sent integer := 0;
+  r      record;
+  v_due  uuid[];   -- part 1890
+begin
+  -- part 1890
+  select public.claim_notice_pass(
+    'invoice-ageing-notices',
+    (select coalesce(array_agg(distinct i.coach_id), '{}'::uuid[])
+       from public.coach_invoices i
+      where i.coach_id is not null
+        and i.kind = 'requested'
+        and i.voided_at is null
+        and i.due_on is not null),
+    7) into v_due;
+  for r in
+    select i.id, i.coach_id, i.seq, i.bill_to, i.due_on, i.reminder_count,
+           (current_date - i.due_on) as days_late,
+           case
+             when (current_date - i.due_on) <= 7  then '1-7'
+             when (current_date - i.due_on) <= 30 then '8-30'
+             when (current_date - i.due_on) <= 60 then '31-60'
+             else '61+'
+           end as bucket
+      from public.coach_invoices i
+     where
+       -- Only what the coach is ASKING for. A 'received' invoice is their own
+       -- statement that the money came in, and `invoiceAge()` calls it settled.
+       i.kind = 'requested'
+       -- A voided invoice is on no list at all.
+       and i.voided_at is null
+       -- No due date is not "not due" — it is the coach never having stated one.
+       and i.due_on is not null
+       -- Past the day itself; the due date is 'due-today', not overdue.
+       and i.due_on < current_date
+       -- Nothing that fell due before this feature existed, so switching it on
+       -- does not produce an inbox of history. Ninety days, because the last
+       -- band opens at sixty-one and a shorter window could never reach it.
+       and i.due_on >= current_date - 90
+       and i.coach_id = any(v_due)   -- part 1890
+  loop
+    if exists (
+      select 1 from public.coach_invoice_ageing_notices n
+       where n.invoice_id = r.id and n.bucket = r.bucket
+    ) then
+      continue;
+    end if;
+    -- Written BEFORE the notification, per part 202: if the notification fails
+    -- the whole iteration rolls back and the coach is told tomorrow; the other
+    -- order would tell them again every night forever.
+    insert into public.coach_invoice_ageing_notices (invoice_id, bucket, notified_at)
+    values (r.id, r.bucket, now())
+    on conflict (invoice_id, bucket) do nothing;
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.coach_id,
+      case when r.bucket = '1-7' then 'An invoice has gone past its date'
+           else 'An invoice is still unpaid' end,
+      left(
+        'Invoice ' || r.seq || ' to ' || coalesce(nullif(btrim(coalesce(r.bill_to, '')), ''), 'a client')
+        || ' was due on ' || to_char(r.due_on, 'DD Mon YYYY') || ', which is '
+        || r.days_late || ' day' || case when r.days_late = 1 then '' else 's' end || ' ago.'
+        || case
+             when coalesce(r.reminder_count, 0) = 0 then ' You have not chased it yet.'
+             when r.reminder_count = 1 then ' You have chased it once.'
+             else ' You have chased it ' || r.reminder_count || ' times.'
+           end
+        || ' Nothing tells this app when a client pays you, so if they already have,'
+        || ' void this one or record what you were paid — otherwise it goes on ageing.'
+        || ' Invoices has the amount and the chase.',
+        500),
+      'grid',
+      '/(trainer)/invoices'
+    );
+    v_sent := v_sent + 1;
+  end loop;
+  delete from public.coach_invoice_ageing_notices n
+   where n.notified_at < now() - interval '400 days';
+  return jsonb_build_object('sent', v_sent);
+end $fn$;
+
+
+-- ── 4.6 · Topping the open-slot window back up (part 650) ────────────────
+--
+-- The one pass that wakes nobody. Moved with the other five for the reason in
+-- section 4 of the header: it already does its date arithmetic in the coach's
+-- own zone, so the coach's own morning is where it belongs, and six passes on
+-- one mechanism is a thing somebody can hold in their head.
+--
+-- `v_nozone` and `v_coaches` are deliberately still counted across the WHOLE
+-- table and not across `v_due`. They answer "how many coaches cannot be
+-- extended", which is a number that should be falling — an hourly figure of
+-- "how many were in this tick" would be a different and useless one.
+
+create or replace function public.run_open_slot_extension(p_horizon_days integer DEFAULT 28)
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_created  int := 0;
+  v_skipped  int := 0;
+  v_nozone   int := 0;
+  v_coaches  int := 0;
+  a          record;
+  v_today    date;
+  v_horizon  date;
+  v_date     date;
+  v_ts       timestamptz;
+  v_tenant   uuid;
+  v_due      uuid[];   -- part 1890
+begin
+  -- part 1890
+  select public.claim_notice_pass(
+    'open-slot-extension',
+    (select coalesce(array_agg(distinct ta.trainer_id), '{}'::uuid[])
+       from public.trainer_availability ta where ta.tz is not null),
+    7) into v_due;
+  -- Counted before the loop so the figure is "how many coaches cannot be
+  -- extended", which is the number that should be falling, rather than "how
+  -- many rows were skipped tonight".
+  select count(distinct trainer_id) into v_nozone
+    from public.trainer_availability where tz is null;
+  for a in
+    select ta.id, ta.trainer_id, ta.dow, ta.hour, coalesce(ta.minute, 0) as minute,
+           coalesce(ta.dur, 60) as dur, ta.tz
+      from public.trainer_availability ta
+     where ta.tz is not null
+       and ta.trainer_id = any(v_due)   -- part 1890
+     order by ta.trainer_id, ta.dow, ta.hour
+  loop
+    select t.tenant_id into v_tenant from public.trainers t where t.id = a.trainer_id;
+    -- The coach's own today, not the server's. A job running at 02:00 UTC is
+    -- still yesterday in Los Angeles, and generating from the server's date
+    -- would miss a day at one end of the world and duplicate one at the other.
+    v_today   := (now() at time zone a.tz)::date;
+    v_horizon := v_today + greatest(p_horizon_days, 0);
+    -- Forward to the first matching weekday. `extract(dow …)` is 0 = Sunday,
+    -- which is exactly what `trainer_availability.dow` has meant since part 24.
+    v_date := v_today + ((a.dow - extract(dow from v_today)::int + 7) % 7);
+    while v_date <= v_horizon loop
+      v_ts := (v_date + make_time(a.hour, a.minute, 0)) at time zone a.tz;
+      if v_ts > now()
+         and not exists (
+           select 1 from public.sessions s
+            where s.trainer_id = a.trainer_id
+              and s.starts_at = v_ts
+         )
+      then
+        begin
+          insert into public.sessions (trainer_id, client_id, starts_at, duration_min, status, tenant_id)
+          values (a.trainer_id, null, v_ts, a.dur, 'available', v_tenant);
+          v_created := v_created + 1;
+        exception when exclusion_violation then
+          -- The coach is already busy across this hour with something that does
+          -- not start exactly on it. Their diary, not ours to rearrange.
+          v_skipped := v_skipped + 1;
+        end;
+      else
+        v_skipped := v_skipped + 1;
+      end if;
+      v_date := v_date + 7;
+    end loop;
+  end loop;
+  select count(distinct trainer_id) into v_coaches
+    from public.trainer_availability where tz is not null;
+  return jsonb_build_object(
+    'created', v_created,
+    'skipped', v_skipped,
+    'coaches', v_coaches,
+    'coaches_without_a_zone', v_nozone);
+end $fn$;
+
+
+revoke all on function public.run_overdue_client_notices() from public, anon, authenticated;
+revoke all on function public.run_credential_expiry_notices() from public, anon, authenticated;
+revoke all on function public.run_block_ended_notices() from public, anon, authenticated;
+revoke all on function public.run_pack_expiry() from public, anon, authenticated;
+revoke all on function public.run_invoice_ageing_notices() from public, anon, authenticated;
+revoke all on function public.run_open_slot_extension(int) from public, anon, authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 5 · Nobody gets one at five in the afternoon on the day this ships
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The gate is `local hour between 7 and 9`, so if this part is applied at, say,
+-- 16:00 in Sydney, every Australian coach's very first hourly tick finds them
+-- past the window and does nothing — correct. But a coach whose local hour is
+-- 8 right now would fire within the minute, at a time they had no reason to
+-- expect anything.
+--
+-- So today is claimed in advance for every coach who is ALREADY past the start
+-- of their window. Coaches whose 07:00 has not happened yet are left alone and
+-- get their first properly-timed notification this morning. Nobody is claimed
+-- who would not otherwise have fired today, and nobody fires at an hour they
+-- would find strange.
+
+insert into public.notice_pass_runs (pass, coach_id, utc_day)
+select p.pass, c.coach_id, current_date
+  from (values
+        ('overdue-client-notices'),
+        ('credential-expiry-notices'),
+        ('block-ended-notices'),
+        ('pack-expiry'),
+        ('invoice-ageing-notices'),
+        ('open-slot-extension')) as p(pass)
+ cross join (
+   select distinct t.id as coach_id from public.trainers t
+ ) c
+ where case
+   when public.notice_local_tz(c.coach_id) is null
+     then extract(hour from (now() at time zone 'UTC'))::int > 7
+   else extract(hour from (now() at time zone public.notice_local_tz(c.coach_id)))::int > 9
+ end
+on conflict (pass, coach_id, utc_day) do nothing;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 6 · The schedule
+--
+-- Hourly, each on the minute it already used. The minutes are kept exactly as
+-- parts 202, 471, 612, 613 and 650 set them — seven apart, off the top of the
+-- hour — so the six still do not contend, and so that anybody reading
+-- `cron.job` sees the same six numbers they saw before with the hour opened up.
+-- ═════════════════════════════════════════════════════════════════════════
+
+create extension if not exists pg_cron;
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'overdue-client-notices') then
+    perform cron.unschedule('overdue-client-notices');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'credential-expiry-notices') then
+    perform cron.unschedule('credential-expiry-notices');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'block-ended-notices') then
+    perform cron.unschedule('block-ended-notices');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'pack-expiry') then
+    perform cron.unschedule('pack-expiry');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'invoice-ageing-notices') then
+    perform cron.unschedule('invoice-ageing-notices');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'open-slot-extension') then
+    perform cron.unschedule('open-slot-extension');
+  end if;
+end $$;
+
+select cron.schedule('overdue-client-notices',    '12 * * * *', $cron$ select public.run_overdue_client_notices(); $cron$);
+select cron.schedule('credential-expiry-notices', '19 * * * *', $cron$ select public.run_credential_expiry_notices(); $cron$);
+select cron.schedule('block-ended-notices',       '26 * * * *', $cron$ select public.run_block_ended_notices(); $cron$);
+select cron.schedule('pack-expiry',               '33 * * * *', $cron$ select public.run_pack_expiry(); $cron$);
+select cron.schedule('invoice-ageing-notices',    '40 * * * *', $cron$ select public.run_invoice_ageing_notices(); $cron$);
+select cron.schedule('open-slot-extension',       '48 * * * *', $cron$ select public.run_open_slot_extension(); $cron$);

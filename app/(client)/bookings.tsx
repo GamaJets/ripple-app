@@ -40,6 +40,10 @@ import { bookableCredits, ledgerStateOf,
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
 import { packDeadline, bookedBy } from '../../src/lib/packDeadline';
+// Whether a booking is still ahead of the member, and the hour of grace on the
+// answer. One copy of a comparison this file held three of, all three of them
+// against a clock that had stopped at mount — see the header of that file.
+import { isUpcoming } from '../../src/lib/upcomingWindow';
 import { bookingsGap, emptyBookingsLine } from '../../src/lib/bookingsRead';
 // One definition of "today, locally", shared with the membership screen and
 // with the pass code itself — see the note on `todayISO` below.
@@ -300,12 +304,21 @@ export default function Bookings() {
     // this list landed. A short diary counted as a whole one would report
     // coverage that is not there — `bookingsWhole` is the same gate the empty
     // state on this screen is already held to.
+    //
+    // `nowMs` and not `Date.now()`, and it is IN the dependency list. The bare
+    // call was evaluated in the memo body against a list holding no clock, on a
+    // screen `app/(client)/_layout.tsx` registers `href: null` — mounted once
+    // and never torn down — so the comparison was frozen at the moment the
+    // member first opened My Bookings. Every session that has been TAKEN since
+    // then went on counting as one still booked before the pack expires, and
+    // the line under this told the member their remaining credits were covered
+    // when they were not. See src/lib/upcomingWindow.ts.
     const booked = bookingsWhole
       ? bookedBy(sessions.filter((x) => x.clientId === cd.id && x.status === 'booked'
-          && Date.parse(x.startsAt) > Date.now() - 3600_000), soleWindow.expiresOn)
+          && isUpcoming(x.startsAt, nowMs)), soleWindow.expiresOn)
       : null;
     return packDeadline({ left: soleWindow.left, expiresOn: soleWindow.expiresOn, today: todayISO, bookedByThen: booked });
-  }, [soleWindow, sessions, cd.id, bookingsWhole, todayISO]);
+  }, [soleWindow, sessions, cd.id, bookingsWhole, todayISO, nowMs]);
   const creditById = useMemo(() => {
     const m = new Map<string, CreditSession>();
     for (const c of credits ?? []) m.set(c.id, c);
@@ -340,12 +353,12 @@ export default function Bookings() {
     const out: Item[] = [];
     for (const c of classes) {
       const st = myStatus[c.id];
-      if (st && Date.parse(c.startsAt) > Date.now() - 3600_000) {
+      if (st && isUpcoming(c.startsAt, nowMs)) {
         out.push({ id: 'c' + c.id, kind: 'class', title: c.title, sub: `${c.kind} · ${c.branch}${c.room ? ' · ' + c.room : ''}`, startsAt: c.startsAt, durationMin: c.durationMin ?? 45, location: [c.branch, c.room].filter(Boolean).join(' · ') || undefined, waitlist: st === 'waitlist', cancelled: isCancelled(c), onCancel: () => cancelClass(c.id) });
       }
     }
     for (const s of sessions) {
-      if (s.clientId === cd.id && s.status === 'booked' && Date.parse(s.startsAt) > Date.now() - 3600_000) {
+      if (s.clientId === cd.id && s.status === 'booked' && isUpcoming(s.startsAt, nowMs)) {
         // "PT session" rather than "PT with —". The title is the row's whole
         // identity and it is what the ICS export writes into the calendar, and
         // a booking named after a piece of punctuation is worse in both places
@@ -372,7 +385,17 @@ export default function Bookings() {
     // retriggered it. There is no sentence for that state because the code did
     // not know it was in it: the list is not short, it is confidently complete
     // and wrong.
-  }, [classes, myStatus, sessions, coachName, cd.id]);
+    //
+    // `nowMs` is in it for the same class of reason, found the same way. The two
+    // filters above compared against `Date.now()` evaluated in this body, and
+    // this list is the whole of Upcoming — on a screen registered `href: null`
+    // and therefore mounted once for the life of the app. So the window was
+    // frozen at whenever the member first opened it, and a class that finished
+    // six hours ago was still listed as upcoming with a live Cancel button on
+    // it. Cancelling a class you have already attended is not a no-op:
+    // src/lib/classCancel.ts says plainly that the gym decides whether a late
+    // cancellation is charged and that this app cannot see that policy.
+  }, [classes, myStatus, sessions, coachName, cd.id, nowMs]);
 
   // The session being moved, or null. Held whole because the picker below has
   // to know whose coach's slots to offer and what the old time was.
@@ -392,11 +415,14 @@ export default function Bookings() {
   const openSlots = useMemo(() => {
     const from = moveFor;
     if (!from) return [] as TrainingSession[];
-    const now = Date.now();
+    // `nowMs`, the same clock the rest of this screen reads. A bare `Date.now()`
+    // here was fixed at whichever render last changed `moveFor` — so a picker
+    // left open goes on offering a slot whose time has passed, and the move the
+    // member taps is one the server will refuse.
     return sessions
-      .filter((s) => s.status === 'available' && s.trainerId === from.trainerId && s.id !== from.id && Date.parse(s.startsAt) > now)
+      .filter((s) => s.status === 'available' && s.trainerId === from.trainerId && s.id !== from.id && Date.parse(s.startsAt) > nowMs)
       .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
-  }, [sessions, moveFor]);
+  }, [sessions, moveFor, nowMs]);
 
   /**
    * Move one session into one slot.

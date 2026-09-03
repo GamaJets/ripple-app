@@ -1703,10 +1703,22 @@ export default function TrainerPayments() {
                         that is the coach's to make. Both are null for a pack
                         with no window, which is every pack sold before part
                         612 — so nothing is added to the ninety-nine per cent of
-                        rows this does not concern. */}
-                    {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, todayKey) ? (
+                        rows this does not concern.
+
+                        `left` is passed now, and that is the whole of the fix
+                        for a refund that landed on a closed pack. Until it was,
+                        `strandedNote` keyed on `sessionsExpired` alone and
+                        returned null for exactly that case, so this fell
+                        through to `expiryLine` — and `expiryLine` is written
+                        voice-neutral BECAUSE it is read by both apps, which
+                        meant the coach's own screen was showing the client's
+                        sentence about the coach's own client. There was no
+                        sentence here telling the coach that a credit they
+                        refunded is sitting somewhere nothing can book it, and
+                        moving it is the one thing only they can do. */}
+                    {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, left, todayKey) ? (
                       <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>
-                        {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, todayKey)}
+                        {strandedNote(b.client_name, { expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, left, todayKey)}
                       </Text>
                     ) : expiryLine({ expiresOn: b.expires_on ?? null, expiredAt: b.expired_at ?? null, sessionsExpired: lost }, left, todayKey) ? (
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>

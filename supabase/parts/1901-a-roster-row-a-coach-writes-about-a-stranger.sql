@@ -114,8 +114,12 @@
 -- `profiles_trainer_r_clients` is then narrowed as well, and this half is belt
 -- and braces rather than the fix: with the write closed the roster row can no
 -- longer be forged, but a read policy whose whole basis is a row the reader can
--- write should not be the only thing standing there. It gains
--- `is_my_client()`, the same definer helper the rest of the coach surface uses.
+-- write should not be the only thing standing there. It gains `is_my_client()`,
+-- which is the corroboration `profiles_trainer_read` beside it already makes
+-- inline. `is_my_client()` is SECURITY INVOKER, so the `clients` read inside it
+-- is subject to `clients_trainer_read` — which is `trainer_id = auth.uid()`, the
+-- same condition, so the answer is unchanged — and it cannot recurse, because no
+-- `clients` policy reads `profiles`.
 -- Verified against the live catalogue on 4 Sep 2026: of the 2 roster rows that
 -- have a profile behind them, 0 lack a matching `clients` row, so this removes
 -- no read that anybody has today.

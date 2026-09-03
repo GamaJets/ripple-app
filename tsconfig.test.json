@@ -486,9 +486,15 @@
     "src/lib/zonePicker.test.ts",
     "src/lib/sharedRead.ts",
     "src/lib/sharedRead.test.ts",
+    "src/lib/whoAmI.ts",
+    "src/lib/whoAmI.test.ts",
     "src/lib/departureSection.ts",
     "src/lib/departureSection.test.ts",
     "src/lib/sumCurrency.ts",
-    "src/lib/sumCurrency.test.ts"
+    "src/lib/sumCurrency.test.ts",
+    "src/lib/goalDeadline.ts",
+    "src/lib/goalDeadline.test.ts",
+    "src/lib/upcomingWindow.ts",
+    "src/lib/upcomingWindow.test.ts"
   ]
 }

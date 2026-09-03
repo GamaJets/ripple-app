@@ -452,6 +452,175 @@ function checkProcessors() {
   }
 }
 
+/* ── G · the hosts THIS WEBSITE contacts ─────────────────────────────────── */
+//
+// Check D asks what the edge functions call. This asks what the twenty-two
+// static pages call, and until it was written the answer was nobody's job.
+//
+// The distinction is not academic. D is about a request made on a server, on
+// behalf of somebody who has already signed in and agreed to something. G is
+// about a request made by a STRANGER'S BROWSER, before they have agreed to
+// anything at all, on a page that may well be the privacy policy itself. The
+// data is thinner — an IP address, a user-agent, a referring page — but the
+// consent is nil and the audience is everyone who ever looks at the site.
+//
+// What it found on the day it was written:
+//
+//   · `fonts.googleapis.com` and `fonts.gstatic.com`, from `styles.css`'s
+//     `@import` plus a `preconnect` on every page. Every visitor to every page
+//     hands Google their IP and the page they are on. privacy.html did not
+//     mention it, and worse, it said Google was used "for coaches only, and
+//     only for a coach's own accounts" — a sentence the page contradicted while
+//     rendering it.
+//
+//   · `cdn.jsdelivr.net`, which serves an executable ES module to six pages,
+//     three of which are where a password gets typed. Undisclosed.
+//
+// Neither is exotic and neither is malicious. That is the point: this is the
+// class of dependency that arrives in a stylesheet, never gets written down,
+// and is entirely invisible to a policy that was drafted by thinking about the
+// apps. A gate is the only thing that connects the two.
+//
+// RESOURCE POSITIONS ONLY. A link to the App Store is a place a person may
+// choose to go; a `<script src>` is a request their browser makes whether they
+// like it or not. `<a href>` is therefore not scanned, which is why
+// apps.apple.com and play.google.com do not appear here.
+
+/** Who answers for a host the SITE contacts, over and above the app's list. */
+const SITE_HOST_OWNERS = new Map([
+  ['fonts.googleapis.com', 'Google'],
+  ['fonts.gstatic.com', 'Google'],
+  ['cdn.jsdelivr.net', 'jsDelivr'],
+]);
+
+/** Reached by the site, but not on anybody's behalf — each with its reason. */
+const SITE_NOT_PROCESSORS = new Map([
+  ['schema.org', 'a JSON-LD `@context` identifier. It is a string in a script tag that names a vocabulary; no request is made to it.'],
+  ['www.w3.org', 'the SVG namespace URI. An XML namespace is an identifier, not an address that is fetched.'],
+]);
+
+/**
+ * Every external host the pages under web/ cause a browser to CONTACT.
+ *
+ * Deliberately over-broad on the positions it reads and then narrowed by the
+ * two maps above, rather than the other way round: a new `<script src>` to an
+ * unclassified host has to stop this gate, and it only can if the scan sees
+ * positions nobody has thought about yet.
+ */
+function siteHosts() {
+  const hosts = new Map();                       // host → "rel:line" first seen
+  const add = (h, where) => {
+    h = h.toLowerCase();
+    if (!hosts.has(h)) hosts.set(h, where);
+  };
+  const files = [...PAGES, 'web/styles.css'];
+  for (const rel of files) {
+    if (!existsSync(join(ROOT, rel))) continue;
+    const raw = read(rel);
+    // Comments are documentation, not requests — the same rule check D uses.
+    // download.html and join.html both cite itunes.apple.com in a comment.
+    const body = raw.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '));
+    body.split('\n').forEach((line, i) => {
+      if (COMMENT.test(line)) return;
+      const where = `${rel}:${i + 1}`;
+      const patterns = [
+        /<script[^>]+src="(https?:\/\/[^"]+)"/gi,
+        /<(?:img|iframe|source|video|audio|embed|track)[^>]+src="(https?:\/\/[^"]+)"/gi,
+        /<link[^>]+href="(https?:\/\/[^"]+)"/gi,
+        /@import\s+url\(['"]?(https?:\/\/[^'")]+)/gi,
+        /\bimport\s*\(?\s*['"](https?:\/\/[^'"]+)/gi,
+        /\bfrom\s+['"](https?:\/\/[^'"]+)/gi,
+        /\bfetch\s*\(\s*['"`](https?:\/\/[^'"`]+)/gi,
+        /createClient\s*\(\s*['"](https?:\/\/[^'"]+)/gi,
+      ];
+      for (const re of patterns) {
+        for (const m of line.matchAll(re)) {
+          try { add(new URL(m[1]).hostname, where); } catch { /* not a URL we can read */ }
+        }
+      }
+    });
+  }
+  return hosts;
+}
+
+function checkSiteHosts(seen) {
+  const hosts = siteHosts();
+  // The empty-set guard, in the same spirit as check D's. styles.css imports
+  // three font families and six pages import a module from a CDN, so a run
+  // that finds nothing has stopped reading rather than found a clean site.
+  if (hosts.size < 3) {
+    fatal.push(`only ${hosts.size} external hosts found across web/ — the stylesheet alone contacts two, and six pages import a module from a third. The scan in siteHosts() has gone blind; refusing to pass.`);
+    return;
+  }
+  seen.siteHosts = hosts.size;
+  const privacy = 'web/privacy.html';
+  const disclosed = pageText(read(privacy));
+  for (const [host, where] of [...hosts].sort()) {
+    if (FIRST_PARTY.has(host) || SITE_NOT_PROCESSORS.has(host)) continue;
+    const owner = SITE_HOST_OWNERS.get(host) ?? HOST_OWNERS.get(host);
+    if (!owner) {
+      fatal.push(`${where} makes a browser contact ${host}, and nothing here says who that is.\n`
+        + `      This is a request a STRANGER'S browser makes before they have agreed to anything.\n`
+        + `      Decide, then record the decision in scripts/check-site-claims.mjs:\n`
+        + `        · it receives something about a visitor → add it to SITE_HOST_OWNERS *and* name that company on ${privacy}\n`
+        + `        · one of ours                          → FIRST_PARTY\n`
+        + `        · an identifier rather than an address → SITE_NOT_PROCESSORS, with the reason\n`
+        + `      Google Fonts sat in styles.css unmentioned by the privacy policy for the life of this site,\n`
+        + `      on a page that simultaneously said Google was used "for coaches only".`);
+      continue;
+    }
+    const named = new RegExp(`\\b${owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(disclosed);
+    if (!named) {
+      note(privacy, 1, `does not name ${owner}, which this website makes every visitor's browser contact: ${host} (${where})`,
+        `A host the site loads a resource from receives the visitor's IP address, user-agent and the page they are on, with no opportunity to decline. Name it — the section is "This website, separately from the apps" — or, if it is an identifier rather than a fetch, say so in SITE_NOT_PROCESSORS with the reason.`);
+    }
+  }
+}
+
+/* ── H · the Content-Security-Policy permits what the pages actually use ─── */
+//
+// `web/_headers` carries a CSP. Nothing else in this repo can notice when it
+// stops matching the site, and the failure mode is asymmetric in the worst way:
+// `npx serve web` does not read `_headers`, so a broken policy is invisible on
+// every local run and every preview, and shows up only in production — as a
+// blank page, a page with no styling, or a signup form whose submit button
+// silently does nothing because the module behind it was refused.
+//
+// So: every host check G found must be permitted by some directive in the
+// policy. This does not attempt to validate CSP semantics in general; it
+// answers one question — is a host the pages demonstrably use missing from the
+// policy that will be in front of them?
+
+function checkCsp(seen) {
+  const rel = 'web/_headers';
+  if (!existsSync(join(ROOT, rel))) {
+    fatal.push(`${rel} does not exist, so the security headers this gate checks have no home. If they were deliberately removed, remove check H with them rather than leaving a check that inspects nothing.`);
+    return;
+  }
+  const headers = read(rel);
+  const m = /^\s+Content-Security-Policy:\s*(.+)$/m.exec(headers);
+  if (!m) {
+    fatal.push(`${rel} declares no Content-Security-Policy. Six pages under web/ execute a module fetched from a third-party CDN and three of those are where a password is typed; the policy is what bounds that. Restore it, or delete check H and say here why the site no longer has one.`);
+    return;
+  }
+  const csp = m[1].trim();
+  seen.csp = csp.split(';').filter((d) => d.trim()).length;
+  const permitted = new Set();
+  for (const directive of csp.split(';')) {
+    for (const tok of directive.trim().split(/\s+/).slice(1)) {
+      if (/^https?:\/\//.test(tok)) { try { permitted.add(new URL(tok).hostname.toLowerCase()); } catch { /* ignore */ } }
+    }
+  }
+  for (const [host, where] of [...siteHosts()].sort()) {
+    if (SITE_NOT_PROCESSORS.has(host)) continue;      // never fetched
+    if (FIRST_PARTY.has(host)) continue;              // 'self' once deployed
+    if (!permitted.has(host)) {
+      note(rel, 1, `the Content-Security-Policy does not permit ${host}, which ${where} loads a resource from`,
+        `In production Cloudflare serves this policy and the browser refuses the request — a stylesheet that never arrives, or a sign-in module that never runs. Local \`npx serve web\` ignores _headers entirely, so this will not reproduce before it ships. Add the host to the right directive, or stop loading it.`);
+    }
+  }
+}
+
 /* ── E · the connectable wearables ───────────────────────────────────────── */
 //
 // Marker-anchored, and that is a considered choice rather than a shortcut.
@@ -646,7 +815,7 @@ function checkDeletionFigure() {
 
 /* ── run ─────────────────────────────────────────────────────────────────── */
 
-const seen = { count: 0, markers: 0 };
+const seen = { count: 0, markers: 0, siteHosts: 0, csp: 0 };
 if (PASSWORD_MIN !== null && FEE_PCT !== null && TRIAL_DAYS !== null) {
   for (const page of PAGES) {
     const raw = read(page);
@@ -662,6 +831,8 @@ if (PASSWORD_MIN !== null && FEE_PCT !== null && TRIAL_DAYS !== null) {
     fatal.push('check B found no platform-fee percentage anywhere under web/. pricing.html states one — so either the page stopped saying what Repple takes, or FEE_CUES no longer matches the way it says it. Both need a person.');
   }
   checkProcessors();
+  checkSiteHosts(seen);
+  checkCsp(seen);
   checkWearables(connectableVendors(), seen);
   checkDeletionFigure();
 }
@@ -713,5 +884,6 @@ if (shrunk.length) {
 console.log(`check-site-claims — ok, ${PAGES.length} public pages; password minimum ${PASSWORD_MIN}, `
   + `platform fee ${FEE_PCT}% (${seen.count} statement${seen.count === 1 ? '' : 's'}), trial ${TRIAL_DAYS} days, `
   + `every host contacted from supabase/functions named on privacy.html, `
+  + `${seen.siteHosts} host${seen.siteHosts === 1 ? '' : 's'} the site itself contacts, each disclosed and each permitted by the ${seen.csp}-directive CSP, `
   + `${seen.markers} wearables-connect claim${seen.markers === 1 ? '' : 's'} matching the connectable set, `
   + `deletion chart internally consistent and dated.`);

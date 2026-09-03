@@ -59,7 +59,7 @@ import { readNumber } from '../../src/lib/units';
 import { wholeFromMinor, NO_CURRENCY_CHECK_NOTE } from '../../src/lib/wholeUnits';
 // What money a SUM is in — the rule this screen held and breached six lines
 // apart. See the header of src/lib/sumCurrency.ts.
-import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '../../src/lib/sumCurrency';
+import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE, type TotalMoney } from '../../src/lib/sumCurrency';
 // `tenants.timezone`, and the one function that turns it into a calendar day.
 // The "joined this month" check compares against `memberships.started_on`,
 // which app/(owner)/members.tsx writes on the gym's own calendar.
@@ -170,15 +170,25 @@ export default function Financials() {
    * The register holds more than one currency, so there is no figure to check
    * against — for the recurring total, for the thirty-day takings, or for both.
    *
-   * A third silence, kept apart from the other two for the reason the second
-   * one exists. A null derived figure already means either "nothing recorded"
-   * or "the read failed"; this is a register that is full, was read, and states
-   * two moneys. Folding it into `no_record` tells an owner their register is
-   * empty when it is not, and folding it into the currency-blind sentence sends
-   * them to Ops to set a field that is already set.
+   * A third and a fourth silence, kept apart from the other two for the reason
+   * the second one exists. A null derived figure already means either "nothing
+   * recorded" or "the read failed"; a register that is full, was read, and
+   * states two moneys is neither. Folding it into `no_record` tells an owner
+   * their register is empty when it is not, and folding it into the
+   * currency-blind sentence sends them to Ops to set a field that is already
+   * set.
+   *
+   * The fourth is a register in ONE currency that is not the gym's. The form
+   * beside these checks is headed in the gym's own currency and that is what an
+   * owner types into it, so comparing the two would be arithmetic across two
+   * moneys — "your records show 43,000, which is 8,000 more than the 35,000
+   * entered here", where the two figures are dirhams and pounds. That is the
+   * same class of number this screen exists to refuse, arrived at one step
+   * later, and it is reachable at exactly the gyms `sharedCurrency` was written
+   * for: the ones that changed currency and still hold rows in the old one.
    */
-  const [mrrMixed, setMrrMixed] = useState(false);
-  const [revenueMixed, setRevenueMixed] = useState(false);
+  const [mrrCcy, setMrrCcy] = useState<TotalMoney | null>(null);
+  const [revCcy, setRevCcy] = useState<TotalMoney | null>(null);
 
   // Bumped by the Refresh control under the title. A counter, so two taps are
   // two reads.
@@ -242,7 +252,7 @@ export default function Financials() {
         // Cleared alongside the figures. A mixed-ledger sentence left standing
         // over a read that never happened is a claim about a register nobody
         // looked at, which is the same class of mistake as the one above it.
-        setMrrMixed(false); setRevenueMixed(false);
+        setMrrCcy(null); setRevCcy(null);
         setDerivedFailed(tenantStatus !== 'ready');
         return;
       }
@@ -309,8 +319,16 @@ export default function Financials() {
         const mrrCcy = sum.mrrCents == null
           ? emptyTotalMoney(cur)
           : totalMoney(sum.mrrCents, sum.mrrCurrency, cur);
-        setMrrMixed(mrrCcy.gap === 'unstated');
-        setDerivedMrr(wholeFromMinor(sum.mrrCents, mrrCcy.currency));
+        setMrrCcy(mrrCcy);
+        // No derived figure at all unless the register's money IS the gym's.
+        // Withholding here rather than at the render is what keeps the "your
+        // figures and your records disagree" notice further down honest: it
+        // fires on `state === 'differs'`, and a figure this screen cannot
+        // compare must never reach a comparison. `cur` null makes this false,
+        // which is the currency-blind case and was already a dash.
+        setDerivedMrr(mrrCcy.gap === 'ok' && mrrCcy.currency === cur
+          ? wholeFromMinor(sum.mrrCents, mrrCcy.currency)
+          : null);
         setDerivedMembers(memberships.length ? sum.activeMembers : null);
 
         // `since` above is thirty days back in whole days, so the window does
@@ -340,8 +358,10 @@ export default function Financials() {
         const revCcy = takenCents == null
           ? emptyTotalMoney(cur)
           : totalMoney(takenCents, sharedCurrency(recent), cur);
-        setRevenueMixed(revCcy.gap === 'unstated');
-        setDerivedRevenue(wholeFromMinor(takenCents, revCcy.currency));
+        setRevCcy(revCcy);
+        setDerivedRevenue(revCcy.gap === 'ok' && revCcy.currency === cur
+          ? wholeFromMinor(takenCents, revCcy.currency)
+          : null);
 
         /**
          * The cut-off day, on the GYM's calendar — not UTC's.
@@ -373,13 +393,19 @@ export default function Financials() {
         if (!live) return;
         setDerivedMrr(null); setDerivedMembers(null);
         setDerivedRevenue(null); setDerivedNew(null); setDerivedFailed(true);
-        setMrrMixed(false); setRevenueMixed(false);
+        setMrrCcy(null); setRevCcy(null);
       } finally {
         if (live) setBusy(false);
       }
     })();
     return () => { live = false; };
-  }, [tenant?.id, tenantStatus, again]);
+  // `cur` is in here now, and it was not before. It decides whether a derived
+  // figure exists at all — a register in a currency other than the gym's is
+  // withheld rather than compared — so an owner who sets the currency in Ops
+  // and comes back must get a re-read, not the answer computed when the field
+  // was still blank. The tenant id does not change on that edit, which is why
+  // the previous dependency list did not notice it.
+  }, [tenant?.id, tenantStatus, cur, again]);
 
   // `unreadable` rather than `reconcile(..., null)`: only this screen knows the
   // query threw, and it is the one piece of information that separates "your
@@ -569,9 +595,19 @@ export default function Financials() {
                   // field in Ops, this one is a ledger with two moneys in it,
                   // and the Ops sentence sends an owner to change a setting
                   // that is already right.
-                  const mixed = f.key === 'mrr' ? mrrMixed : f.key === 'revenue' ? revenueMixed : false;
+                  const reg = f.key === 'mrr' ? mrrCcy : f.key === 'revenue' ? revCcy : null;
+                  const mixed = reg?.gap === 'unstated';
+                  // One currency, and it is not the one this form is headed in.
+                  // Nothing is wrong with either figure; they are simply not
+                  // comparable, and a difference stated between them would be a
+                  // subtraction across two moneys.
+                  const otherMoney = !mixed && !!cur && !!reg?.currency && reg.currency !== cur;
                   const note = mixed
                     ? MIXED_CURRENCY_NOTE
+                    : otherMoney
+                    ? `The register records this in ${reg!.currency}, and this form is in ${cur}. `
+                      + 'Two currencies cannot be compared without a rate this app does not hold, so '
+                      + 'nothing here has been checked against what you typed.'
                     : currencyBlind
                     ? NO_CURRENCY_CHECK_NOTE
                     : reconcileNote(chk, f.label.toLowerCase(), fmtv);
@@ -591,7 +627,7 @@ export default function Financials() {
                           This button WRITES the derived figure into the owner's
                           own numbers, which is what made the scaling bug above
                           more than a display fault. */}
-                      {val != null && !currencyBlind && !mixed ? (
+                      {val != null && !currencyBlind && !mixed && !otherMoney ? (
                         <Ghost label="Use It" onPress={() => setDraft((d) => ({ ...d, [f.key]: String(val) }))} />
                       ) : null}
                     </View>

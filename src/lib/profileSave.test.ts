@@ -2,8 +2,8 @@
 // was a screen that could not tell a stored profile from a refused one.
 import {
   IDLE_SAVE, saveLine, hasUnsavedWork, leaveWarning, afterWrite, markPending,
-  profileWriteFailure,
-  type SaveStatus,
+  profileWriteFailure, profileFingerprint, isProfileEdit,
+  type SaveStatus, type ProfileValues,
 } from './profileSave';
 
 const errors: string[] = [];
@@ -141,6 +141,65 @@ for (const [a, b] of [[OK, { error: null, count: 0 }], [{ error: null }, OK], [{
   const why = profileWriteFailure(a, b);
   ok(!!why && !why.includes('undefined') && !why.includes('null'), 'no failure sentence leaks a field name');
 }
+
+
+/* ── the launch that wrote the whole profile back ─────────────────────────── */
+//
+// Seen on an iPhone: relaunch the coach app, type nothing, and the badge
+// already reads "Saved." The debounced write effect in src/ui/coachProfile.tsx
+// fires on any dependency change, and `synced` is a dependency, so the values
+// that had just been READ from the server were written straight back to it —
+// over both tables, including session_fee, listed and avatar. A write of
+// handset state over server state is the direction that loses work.
+
+const SERVER: ProfileValues = {
+  name: 'Dana Reyes', photo: 'https://cdn/x.jpg', tagline: 'Strength, patiently',
+  bio: 'Fifteen years.', offers: ['1:1', 'Online'], specialties: ['Powerlifting', 'Rehab'],
+  sessionFee: 4500, listed: true,
+};
+
+{
+  const base = profileFingerprint(SERVER);
+  eq(isProfileEdit(base, { ...SERVER }), false,
+    'the values that came from the server are not an edit, which is the whole of the launch defect');
+  eq(isProfileEdit(base, { ...SERVER, offers: ['1:1', 'Online'] }), false,
+    'and neither is a fresh array holding the same strings — a re-render allocates new ones every time');
+  eq(isProfileEdit(null, { ...SERVER }), false,
+    'and before a baseline has been taken nothing is an edit, because nothing is known to compare against');
+}
+
+{
+  const base = profileFingerprint(SERVER);
+  ok(isProfileEdit(base, { ...SERVER, bio: 'Sixteen years.' }), 'a changed bio is an edit');
+  ok(isProfileEdit(base, { ...SERVER, sessionFee: 5000 }), 'and so is a changed rate');
+  ok(isProfileEdit(base, { ...SERVER, sessionFee: null }), 'and so is a rate that was cleared');
+  ok(isProfileEdit(base, { ...SERVER, listed: false }), 'and so is coming off the directory');
+  ok(isProfileEdit(base, { ...SERVER, specialties: ['Rehab', 'Powerlifting'] }),
+    'and so is reordering the specialities, because the order is the order the coach chose to list them in');
+  ok(isProfileEdit(base, { ...SERVER, offers: ['1:1'] }), 'and so is dropping one');
+}
+
+// An absent text field and an empty one are the same statement — the coach has
+// not written one — so a launch must not turn the first into the second.
+{
+  const blank = profileFingerprint({ ...SERVER, tagline: null });
+  eq(blank, profileFingerprint({ ...SERVER, tagline: '' }), 'no tagline and an empty tagline fingerprint alike');
+  eq(blank, profileFingerprint({ ...SERVER, tagline: '   ' }), 'and so does one that is only spaces');
+  eq(isProfileEdit(blank, { ...SERVER, tagline: undefined }), false,
+    'so an absent one arriving as undefined is not an edit either');
+}
+
+// A rate, unlike a tagline, is a number where nothing and nought are already
+// one thing by the time they reach here — coachProfile maps a stored 0 to null
+// on read, because three production rows hold a 0 nobody typed.
+eq(profileFingerprint({ ...SERVER, sessionFee: null }), profileFingerprint({ ...SERVER, sessionFee: undefined }),
+  'an unset rate is an unset rate however it arrives');
+ok(profileFingerprint({ ...SERVER, sessionFee: 0 }) !== profileFingerprint({ ...SERVER, sessionFee: null }),
+  'but a literal 0 that did reach here is still its own value, and this file does not decide what it means');
+
+// The fingerprint has to be a string a ref can hold and compare with ===.
+eq(typeof profileFingerprint(SERVER), 'string', 'the fingerprint is a string');
+eq(profileFingerprint(SERVER), profileFingerprint({ ...SERVER }), 'and is stable for equal values');
 
 if (errors.length) {
   for (const e of errors) console.error('  ✗ ' + e);

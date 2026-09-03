@@ -64,7 +64,11 @@ import { useClientData } from '../../src/ui/clientData';
 import { sessionPacks, myPtPasses, type PtPassRow } from '../../src/lib/connect';
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
-import { useToday } from '../../src/ui/today';
+import { useToday, useNow } from '../../src/ui/today';
+// Whether a session's time has come and gone. One shared answer, argued in that
+// file, rather than a bare `Date.now()` in a memo whose dependency list holds no
+// clock — which is what this screen had.
+import { hasStarted } from '../../src/lib/upcomingWindow';
 // The routed balance, shared with app/(client)/session-credits.tsx and
 // app/(client)/packages.tsx so the three screens cannot answer "how many
 // sessions can I book" three ways. See its header for what they each used to
@@ -237,9 +241,27 @@ export default function PtSessions() {
     void refreshSessions(); void loadLeft(); c.reload();
   }, [refreshSessions, loadLeft, c.reload]));
 
+  /**
+   * The member's sessions that have actually happened — the set the three lists
+   * below are cut from, and therefore the set that can be approved or disputed.
+   *
+   * `nowMs` is a dependency, and its absence was a defect that cost the member
+   * their say. The filter used to read `Date.parse(s.startsAt) <= Date.now()`
+   * with the clock evaluated in the memo body and no clock in the list, on a
+   * screen `app/(client)/_layout.tsx` registers `href: null` — mounted once and
+   * never torn down. So the boundary was frozen at whenever Personal Training
+   * was first opened. A session that took place AFTER that moment did not
+   * appear under "Awaiting Your Approval" at all: the member could not see what
+   * their coach had recorded against it and could not dispute it, and an unread
+   * session is read by everything downstream as one nobody objected to.
+   *
+   * It self-healed only if `sessions` happened to change, which is precisely
+   * what does not happen on a quiet account.
+   */
+  const nowMs = useNow().getTime();
   const mine = useMemo(() => sessions
-    .filter((s) => s.clientId === c.id && s.status === 'booked' && Date.parse(s.startsAt) <= Date.now())
-    .sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt)), [sessions, c.id]);
+    .filter((s) => s.clientId === c.id && s.status === 'booked' && hasStarted(s.startsAt, nowMs))
+    .sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt)), [sessions, c.id, nowMs]);
   // `verdictOf`, not `!approvedAt`. A disputed session carries no approval
   // timestamp, so the old test would have shown it as still awaiting approval —
   // telling the member their objection went nowhere, and the coach that nobody

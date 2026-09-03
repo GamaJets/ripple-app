@@ -5,6 +5,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 import { observedFetch } from './reachability';
+import { shareGetUser } from './whoAmI';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const anon = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -42,6 +43,36 @@ export const supabase = createClient(url, anon, {
     flowType: 'pkce',
   },
 });
+
+// ── One "who is signed in?" per burst ────────────────────────────────────────
+//
+// `/auth/v1/user` was the busiest path in this project's edge logs by a factor
+// of four — 218 requests in three minutes of ordinary navigation, against 52
+// for the next one — and zero whenever the app was left alone. Not a poll: one
+// round trip per screen mount, per provider, per helper, and
+// `supabase.auth.getUser()` is written at 128 call sites.
+//
+// It is wrapped HERE, on the client, rather than at those 128 sites, and that
+// is a deliberate choice rather than a shortcut. `tenant`, `settings`,
+// `invites` and `clientData` each handle a missing session differently and
+// must go on doing so; every one of them still receives the same response
+// object it receives today and branches on it unchanged. There is no new thing
+// for a screen to remember to call, and no way to half-adopt it.
+//
+// Assigning over the method shadows the prototype's on this instance. The rule
+// itself, and what it costs, is in src/lib/whoAmI.ts under test — including
+// why an explicit `jwt` argument is never shared and why an errored response is
+// never held.
+const nativeGetUser = supabase.auth.getUser.bind(supabase.auth);
+const whoAmI = shareGetUser(nativeGetUser, (r) => r.error != null);
+supabase.auth.getUser = whoAmI.getUser as typeof supabase.auth.getUser;
+
+// Signing in, signing out and a token refresh all drop the held answer at
+// once, so the only case the few-second window widens is a session revoked
+// server-side with no client event. Registered here rather than in a provider
+// because a held identity that outlives a sign-out is the one failure of this
+// wrapper that would matter, and it must not depend on a screen being mounted.
+supabase.auth.onAuthStateChange(() => { whoAmI.forget(); });
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 // Thin wrappers so screens don't import the Supabase client directly.

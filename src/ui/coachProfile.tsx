@@ -41,7 +41,7 @@ import { reportError } from '../lib/reportError';
 // Whether the autosave actually landed. Until this module the write ended
 // `.then(() => {}, () => {})` and the screen could not tell a saved profile
 // from a refused one — see that file's header.
-import { IDLE_SAVE, markPending, afterWrite, profileWriteFailure, type SaveStatus } from '../lib/profileSave';
+import { IDLE_SAVE, markPending, afterWrite, profileWriteFailure, profileFingerprint, isProfileEdit, type SaveStatus } from '../lib/profileSave';
 // What may be stored in `profiles.avatar` at all. A device path is not a URL
 // anywhere but on the phone that chose it — see src/lib/avatarImage.ts.
 import { isDeviceAvatar } from '../lib/avatarImage';
@@ -242,6 +242,11 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
   // Whether there is an edit that has not reached the server. Cleared only by a
   // write that came back OK, so a failed one stays dirty and gets flushed again.
   const dirty = useRef(false);
+  // The fingerprint of what the server last confirmed, or null when no baseline
+  // has been taken. Declared beside `dirty` because `flush` below writes to it.
+  // See the effect further down, and `profileFingerprint` in
+  // src/lib/profileSave.ts, for what it is guarding against.
+  const baseline = useRef<string | null>(null);
 
   /**
    * Write, and report what happened.
@@ -291,6 +296,10 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
         return;
       }
       dirty.current = false;
+      // What the server now holds. Taken from the values that were actually
+      // sent, not from the current render, so an edit made DURING the write is
+      // still seen as an edit afterwards.
+      baseline.current = profileFingerprint(v);
       setSave((prev) => afterWrite(prev, true, Date.now()));
     } catch (e) {
       reportError('coachProfile.persist', e);
@@ -298,8 +307,42 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
     }
   }, [mine]);
 
+  // A re-read, or a different person signing in, invalidates the baseline. It
+  // is retaken on the first settled render afterwards.
+  useEffect(() => { if (!synced) baseline.current = null; }, [synced]);
+
+  // ── the write that fired on every launch ──────────────────────────────────
+  //
+  // This effect used to set `dirty` and schedule a PATCH whenever ANY of its
+  // dependencies changed, and `synced` is one of them. So the instant the
+  // server read settled — carrying the values that had just come FROM the
+  // server — it wrote them straight back. Every launch, for every coach, over
+  // both tables, including `session_fee`, `listed` and `avatar`. Confirmed on
+  // an iPhone: relaunch the app, type nothing, and the badge already reads
+  // "Saved."; scroll, and it re-fires. The comment further down this screen
+  // saying "Nothing is drawn before the first edit" was describing a screen
+  // this one had stopped being.
+  //
+  // The cost is not the round trip. It is that a launch wrote HANDSET-held
+  // state over SERVER-held state, which is the direction that loses work: a
+  // coach who edits their rate on one device and then opens the app on another
+  // has the second device quietly put the old rate back.
+  //
+  // `baseline` is the fingerprint of what the server last confirmed. Until it
+  // is taken, nothing is written; while it matches, nothing is written; a
+  // re-read retakes it and a successful write replaces it. See
+  // `profileFingerprint` in src/lib/profileSave.ts for why it is a fingerprint
+  // and not a flag per setter.
   useEffect(() => {
     if (!USE_SUPABASE || !uid || !hydrated || !synced || !mine) return;
+    const values = { name, photo, tagline, bio, offers, specialties, sessionFee, listed };
+    if (baseline.current === null) {
+      // The first settled render. This is what the server has; it is not an
+      // edit and there is nothing to save.
+      baseline.current = profileFingerprint(values);
+      return;
+    }
+    if (!isProfileEdit(baseline.current, values)) return;
     dirty.current = true;
     setSave(markPending);
     const timer = setTimeout(() => { void flush(); }, 600);

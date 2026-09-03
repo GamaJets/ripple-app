@@ -49,6 +49,8 @@
 // network dying. Every call below reads `.error`.
 import { supabase } from '../lib/supabase';
 import { reportError } from '../lib/reportError';
+import { capLimit, capped } from '../lib/rowCap';
+import type { LoadStatus } from './loadStatus';
 import { analyzeInBody, visionAvailable, type InBodyVision } from '../lib/vision';
 import { parseInBodySheet, type SheetRead } from '../lib/inbodySheet';
 import {
@@ -277,10 +279,31 @@ export interface SheetConsentRow {
  * that failed knows nothing about how many decisions exist, and drawing zero
  * would tell a member they had never been asked — which for anybody who has
  * been asked is a new false statement about the same subject.
+ *
+ * ── and 'partial' is not 'ready', which is the defect this paragraph is here
+ *    for ────────────────────────────────────────────────────────────────────
+ *
+ * This read took a bare `limit = 20` and reported every answer as 'ready'. The
+ * order is `decided_at desc`, so what a cut list loses is the OLDEST decisions —
+ * and the sentence the screen puts under an absent row is that the sheet went to
+ * both companies without anybody being asked. A member with twenty-one readings
+ * therefore read their own privacy record and was told, about a page they had
+ * explicitly consented to, that there was no record of it either way.
+ *
+ * That is the inverse of the mistake the whole consent feature exists to
+ * prevent, made by the one screen a member goes to in order to check. It is
+ * also exactly what `listInjuryDocConsents` in src/ui/injuryDocs.ts already
+ * guards against, in the same words, for the same table shape.
+ *
+ * So the read asks for one row past what it will accept, and a set that came
+ * back at the ceiling is 'partial': the rows are real and still shown, and the
+ * screen says the list is a prefix rather than a record.
  */
+export const SCAN_SHEET_CONSENT_LIST_CAP = 20;
+
 export async function listScanSheetConsents(
-  limit = 20,
-): Promise<{ status: 'ready' | 'error'; rows: SheetConsentRow[] }> {
+  cap = SCAN_SHEET_CONSENT_LIST_CAP,
+): Promise<{ status: LoadStatus; rows: SheetConsentRow[] }> {
   try {
     const uid = await requireUid();
     if (!uid) return { status: 'error', rows: [] };
@@ -289,15 +312,21 @@ export async function listScanSheetConsents(
       .select('read_id, decision, vendors, decided_at')
       .eq('client_id', uid)
       .order('decided_at', { ascending: false })
-      .limit(limit);
+      // `capLimit(cap)` — one past the ceiling, because a full page and a
+      // truncated one are otherwise the same answer. See src/lib/rowCap.ts.
+      .limit(capLimit(cap));
     if (error) { reportError('scanSheets.consent.read', error); return { status: 'error', rows: [] }; }
-    const rows = (data ?? []).map((r: Record<string, unknown>) => ({
+    // `capped` slices the probe row off AND says there was one. Doing those two
+    // separately is how the probe row gets rendered to the member as a real
+    // decision, or how the flag gets dropped and the prefix shown as the whole.
+    const page = capped(data ?? [], cap);
+    const rows = page.rows.map((r: Record<string, unknown>) => ({
       readId: String(r.read_id ?? ''),
       decision: (r.decision === 'granted' ? 'granted' : 'refused') as ScanSheetAnswer,
       vendors: Array.isArray(r.vendors) ? r.vendors.map(String) : [],
       decidedAt: String(r.decided_at ?? ''),
     }));
-    return { status: 'ready', rows };
+    return { status: page.truncated ? 'partial' : 'ready', rows };
   } catch (e) {
     reportError('scanSheets.consent.read', e);
     return { status: 'error', rows: [] };

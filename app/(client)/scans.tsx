@@ -73,7 +73,7 @@ import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
 import { fmtFullDay, monthNamesShort } from '../../src/lib/format';
 import { MIN_TARGET } from '../../src/lib/a11y';
-import { isWhole } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightLabel, weightToKg, weightDeltaIn, plain, convertedNote, readNumber } from '../../src/lib/units';
 import { readBodyFromDevices, hasBodyFigure, type BodyRead } from '../../src/lib/wearables/body';
@@ -95,7 +95,7 @@ import { Icon } from '../../src/ui/Icon';
 import { analyzePhysique, visionAvailable, lastVisionError, type PhysiqueVision } from '../../src/lib/vision';
 // A picture of the printout goes to two named companies. The camera permission
 // this screen asks for is about the hardware; these are about the destination.
-import { readScanSheet, listScanSheetConsents, type SheetConsentRow } from '../../src/ui/scanSheets';
+import { readScanSheet, listScanSheetConsents, SCAN_SHEET_CONSENT_LIST_CAP, type SheetConsentRow } from '../../src/ui/scanSheets';
 import {
   sheetSendLine,
   scanSheetRecipients, scanConsentWho, scanConsentRetention, scanScreenPromise,
@@ -605,7 +605,13 @@ export default function Scans() {
   // separate from an empty list, because an empty list under a failed read
   // would tell somebody they had never been asked.
   const [consentRows, setConsentRows] = useState<SheetConsentRow[]>([]);
-  const [consentStatus, setConsentStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  // Four states, not three. 'partial' arrived with the row cap on
+  // `listScanSheetConsents`: the read is newest-first, so a member with more
+  // decisions than it returns loses the OLDEST — and the sentence this screen
+  // puts under a missing decision is that the sheet was sent unasked. On a
+  // record whose whole purpose is that the member can check it, a prefix must
+  // not be shown as the record.
+  const [consentStatus, setConsentStatus] = useState<LoadStatus>('loading');
 
   // What the client's own watch already holds for their weight.
   //
@@ -2196,6 +2202,16 @@ export default function Scans() {
                   <Text style={{ ...ty.micro, color: t.ink3, marginTop: 1 }}>{consentWhen(r.decidedAt)}</Text>
                 </View>
               ))}
+              {/* The read is newest-first and it has a ceiling, so what a cut
+                  list drops is the OLDEST decisions — and a decision missing
+                  from this list is one the sentence above reads as never having
+                  been asked about. Saying the list is a prefix is the whole
+                  difference between a record and a page of one. */}
+              {consentStatus === 'partial' ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  Only your {SCAN_SHEET_CONSENT_LIST_CAP} most recent decisions are listed here, so this is not all of them. An older sheet missing from this list may have been asked about rather than sent unasked.
+                </Text>
+              ) : null}
             </View>
           </ScrollView>
         </View>

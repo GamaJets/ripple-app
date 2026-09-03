@@ -55241,6 +55241,664 @@ revoke all on function public.claim_notice_pass(text, uuid[], int) from public, 
 comment on function public.claim_notice_pass(text, uuid[], int) is
   'The coaches this tick may process: those for whom it is currently the intended local hour AND for whom no tick has already claimed today. The claim and the decision are one statement, so two ticks racing cannot both win. Returns an empty array rather than null.';
 
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 4 · The six passes
+--
+-- Each body below is `pg_get_functiondef` output taken off the live database,
+-- with exactly two additions marked `-- part 1890`:
+--
+--   · a `select public.claim_notice_pass(...) into v_due` before the loop, and
+--   · one `= any(v_due)` in the driving query.
+--
+-- Nothing else is different. No sentence, no threshold, no date comparison and
+-- no bookkeeping table. Read the diff and there should be two green lines and a
+-- declaration in each.
+--
+-- That claim was checked by a machine rather than by eye. Each body below was
+-- extracted from this file, the marked additions removed, all whitespace
+-- stripped and md5'd, and the same md5 taken of `pg_proc.prosrc` on the live
+-- database. All six matched:
+--
+--   run_overdue_client_notices     57085b56f3d9726bc7851b30a5064912
+--   run_credential_expiry_notices  a8611475d313398119827e86e7a9f4d1
+--   run_block_ended_notices        b5ec1af17be708d778de1d18a297a41f
+--   run_pack_expiry                91957d05b60a8b62086a82c442f1af88
+--   run_invoice_ageing_notices     702ae931d656f0a93677e93c6afde891
+--   run_open_slot_extension        17c9191eea4e4bc2c19320ee6ef9113a
+--
+-- Anybody re-checking this can reproduce it with
+--   select proname, md5(regexp_replace(prosrc, '\s', '', 'g')) from pg_proc …
+-- BEFORE this part is applied.
+-- ═════════════════════════════════════════════════════════════════════════
+
+-- ── 4.1 · A client past their usual gap (part 202) ───────────────────────
+
+create or replace function public.run_overdue_client_notices()
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  c_window_days   constant int  := 56;
+  c_min_active    constant int  := 4;
+  c_min_span      constant int  := 14;
+  c_max_gap       constant numeric := 21;
+  c_late_fraction constant numeric := 0.5;
+  c_min_late      constant int  := 3;
+  v_sent integer := 0;
+  r      record;
+  v_due  uuid[];   -- part 1890
+begin
+  -- part 1890. The coaches whose morning it is and who have not been run today.
+  -- Applied inside `book` rather than at the end so the percentile arithmetic
+  -- over fifty-six days of check-ins, workouts, sessions and gym visits is done
+  -- for one hour's worth of coaches and not for all of them, twenty-four times.
+  select public.claim_notice_pass(
+    'overdue-client-notices',
+    (select coalesce(array_agg(distinct c.trainer_id), '{}'::uuid[])
+       from public.clients c where c.trainer_id is not null),
+    7) into v_due;
+  for r in
+    with book as (
+      select c.id as client_id, c.trainer_id as coach_id
+        from public.clients c
+       where c.trainer_id is not null
+         and c.trainer_id = any(v_due)   -- part 1890
+    ),
+    acts as (
+      select b.coach_id, b.client_id, (ci.at at time zone 'UTC')::date as d
+        from book b join public.check_ins ci on ci.user_id = b.client_id
+       where ci.at >= now() - make_interval(days => c_window_days)
+      union
+      select b.coach_id, b.client_id, (w.performed_at at time zone 'UTC')::date
+        from book b join public.workouts w on w.user_id = b.client_id
+       where w.performed_at >= now() - make_interval(days => c_window_days)
+      union
+      select b.coach_id, b.client_id, (s.starts_at at time zone 'UTC')::date
+        from book b join public.sessions s on s.client_id = b.client_id
+       where s.starts_at >= now() - make_interval(days => c_window_days)
+         and s.outcome = 'completed'
+      union
+      select b.coach_id, b.client_id, (v.entered_at at time zone 'UTC')::date
+        from book b join public.gym_visits v on v.member_id = b.client_id
+       where v.entered_at >= now() - make_interval(days => c_window_days)
+    ),
+    days as (
+      select coach_id, client_id, d,
+             lag(d) over (partition by coach_id, client_id order by d) as prev
+        from acts
+    ),
+    gaps as (
+      select coach_id, client_id, (d - prev)::numeric as gap
+        from days
+       where prev is not null
+    ),
+    stats as (
+      select a.coach_id, a.client_id,
+             count(*)                                as active_days,
+             min(a.d)                                as first_day,
+             max(a.d)                                as last_day,
+             (current_date - max(a.d))               as since_last,
+             (select percentile_cont(0.5) within group (order by g.gap)
+                from gaps g
+               where g.coach_id = a.coach_id and g.client_id = a.client_id) as usual_gap
+        from acts a
+       group by a.coach_id, a.client_id
+    )
+    select s.*,
+           greatest(c_min_late::numeric, s.usual_gap * c_late_fraction) as tolerance
+      from stats s
+     where s.active_days >= c_min_active
+       and (s.last_day - s.first_day) >= c_min_span
+       and s.usual_gap is not null
+       and s.usual_gap > 0
+       and s.usual_gap <= c_max_gap
+       and (s.since_last::numeric - s.usual_gap)
+             > greatest(c_min_late::numeric, s.usual_gap * c_late_fraction)
+  loop
+    if exists (
+      select 1 from public.coach_overdue_notices n
+       where n.coach_id = r.coach_id
+         and n.client_id = r.client_id
+         and n.last_active_on = r.last_day
+    ) then
+      continue;
+    end if;
+    insert into public.coach_overdue_notices (coach_id, client_id, last_active_on, notified_at)
+    values (r.coach_id, r.client_id, r.last_day, now())
+    on conflict (coach_id, client_id)
+      do update set last_active_on = excluded.last_active_on, notified_at = now();
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.coach_id,
+      'A client is past their usual gap',
+      left(
+        coalesce(
+          (select nullif(btrim(coalesce(p.full_name, '')), '') from public.profiles p where p.id = r.client_id),
+          'A client'
+        )
+        || ' has not been in for ' || r.since_last || ' day' || case when r.since_last = 1 then '' else 's' end
+        || ', and they usually come about every ' || round(r.usual_gap, 1) || ' day'
+        || case when round(r.usual_gap, 1) = 1 then '' else 's' end || '.'
+        || ' That is what the app was told, not what they did — an injury, a fortnight away or simply not opening'
+        || ' the app all look exactly like this. Quiet Clients has the dates.',
+        500),
+      'bell',
+      '/(trainer)/nudges'
+    );
+    v_sent := v_sent + 1;
+  end loop;
+  delete from public.coach_overdue_notices n
+   where n.notified_at < now() - interval '400 days';
+  return jsonb_build_object('sent', v_sent);
+end $fn$;
+
+
+-- ── 4.2 · A credential or insurance policy expiring (part 202) ───────────
+
+create or replace function public.run_credential_expiry_notices()
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  c_soon_days constant int := 60;
+  v_sent integer := 0;
+  r      record;
+  v_due  uuid[];   -- part 1890
+begin
+  -- part 1890
+  select public.claim_notice_pass(
+    'credential-expiry-notices',
+    (select coalesce(array_agg(distinct cr.coach_id), '{}'::uuid[])
+       from public.coach_credentials cr
+      where cr.coach_id is not null and cr.expires_on is not null),
+    7) into v_due;
+  for r in
+    select cr.id, cr.coach_id, cr.kind, cr.title, cr.expires_on,
+           (cr.expires_on - current_date) as days_left,
+           case when cr.expires_on < current_date then 'expired' else 'expiring' end as stage
+      from public.coach_credentials cr
+     where cr.expires_on is not null
+       and cr.expires_on <= current_date + c_soon_days
+       and cr.expires_on >= current_date - 30
+       and cr.coach_id = any(v_due)   -- part 1890
+  loop
+    if exists (
+      select 1 from public.coach_credential_notices n
+       where n.credential_id = r.id and n.stage = r.stage
+    ) then
+      continue;
+    end if;
+    insert into public.coach_credential_notices (credential_id, stage, notified_at)
+    values (r.id, r.stage, now())
+    on conflict (credential_id, stage) do nothing;
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.coach_id,
+      case when r.stage = 'expired'
+        then (case when r.kind = 'insurance' then 'Your insurance has expired' else 'A qualification has expired' end)
+        else (case when r.kind = 'insurance' then 'Your insurance runs out soon' else 'A qualification runs out soon' end)
+      end,
+      left(
+        r.title || case when r.stage = 'expired'
+          then ' expired on ' || to_char(r.expires_on, 'DD Mon YYYY') || '.'
+               || case when r.kind = 'insurance'
+                    then ' If that is your public liability cover, you are working without it until you renew.'
+                    else ' It is still shown on your profile as your own statement, and it is no longer true.' end
+          else ' runs out on ' || to_char(r.expires_on, 'DD Mon YYYY') || ' — ' || r.days_left
+               || ' day' || case when r.days_left = 1 then '' else 's' end || ' from today.'
+               || ' Renewing takes longer than you think.'
+        end
+        || ' Update the date on Credentials once it is renewed.',
+        500),
+      'trophy',
+      '/(trainer)/credentials'
+    );
+    v_sent := v_sent + 1;
+  end loop;
+  return jsonb_build_object('sent', v_sent);
+end $fn$;
+
+
+-- ── 4.3 · A block that reached the end of its last week (part 471) ───────
+--
+-- This is the pass the claim table matters most for. Part 471 decided against a
+-- bookkeeping table because "the condition is true on exactly ONE day" — sound
+-- for a job that runs once a day, and false the moment it runs twenty-four
+-- times. `notice_pass_runs` is now that table.
+
+create or replace function public.run_block_ended_notices()
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_sent integer := 0;
+  r      record;
+  v_due  uuid[];   -- part 1890
+begin
+  -- part 1890
+  select public.claim_notice_pass(
+    'block-ended-notices',
+    (select coalesce(array_agg(distinct a.coach_id), '{}'::uuid[])
+       from public.assigned_programs a
+      where a.coach_id is not null and a.starts_on is not null),
+    7) into v_due;
+  for r in
+    select
+      a.client_id,
+      a.coach_id,
+      a.starts_on,
+      -- `weekCount` in src/lib/programBlock.ts, written out. No `weeks` array,
+      -- or an empty one, is ONE week: the week that `days` describes.
+      case
+        when jsonb_typeof(a.program -> 'weeks') = 'array'
+         and jsonb_array_length(a.program -> 'weeks') > 0
+        then jsonb_array_length(a.program -> 'weeks')
+        else 1
+      end as weeks
+      from public.assigned_programs a
+     where a.coach_id is not null
+       and a.starts_on is not null
+       and a.coach_id = any(v_due)   -- part 1890
+  loop
+    -- The first day of `'after'`. `blockPosition` says 'after' when
+    -- `floor(offset / 7) + 1 > weeks`, which is `offset >= weeks * 7`, so the
+    -- boundary day is exactly this one. Equality and not `<=`: the condition
+    -- being true for one day is what makes a bookkeeping table unnecessary.
+    if current_date <> (r.starts_on + (r.weeks * 7)) then
+      continue;
+    end if;
+
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.coach_id,
+      'A block has run out',
+      -- The name is theirs to give: the coach can already read it through
+      -- `profiles_trainer_r_clients`, so this states nothing the recipient
+      -- could not already see. A blank or missing name falls back to
+      -- "A client", never to an empty string that would render a sentence
+      -- starting with a space.
+      left(
+        coalesce(
+          (select nullif(btrim(coalesce(p.full_name, '')), '') from public.profiles p where p.id = r.client_id),
+          'A client'
+        )
+        || ' has reached the end of the ' || r.weeks || '-week block you gave them, which started on '
+        || to_char(r.starts_on, 'DD Mon YYYY') || '.'
+        || ' Nothing here says whether they did it — their Train tab is simply still showing them the last week,'
+        || ' and it will go on showing it until you write the next one.',
+        500),
+      'dumbbell',
+      '/(trainer)/builder'
+    );
+    v_sent := v_sent + 1;
+  end loop;
+
+  return jsonb_build_object('sent', v_sent);
+end $fn$;
+
+
+-- ── 4.4 · A session pack whose validity ran out (part 612) ───────────────
+--
+-- The one pass that writes data as well as sentences. See section 4 of the
+-- header for why the closure moving by up to half a day is safe, and why a
+-- purchase with no `trainer_id` is deliberately not gated.
+
+create or replace function public.run_pack_expiry()
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_closed integer := 0;
+  v_told   integer := 0;
+  v_lost   integer;
+  r        record;
+  v_due    uuid[];   -- part 1890
+begin
+  -- part 1890
+  select public.claim_notice_pass(
+    'pack-expiry',
+    (select coalesce(array_agg(distinct cp.trainer_id), '{}'::uuid[])
+       from public.client_purchases cp
+      where cp.trainer_id is not null
+        and cp.expires_on is not null
+        and cp.expired_at is null),
+    7) into v_due;
+  for r in
+    select cp.id, cp.client_id, cp.trainer_id, cp.expires_on
+      from public.client_purchases cp
+     where cp.expires_on is not null
+       and cp.expired_at is null
+       and cp.sessions_total is not null
+       -- The day AFTER the last day. `expires_on` is the last day the credits
+       -- can be used, so a pack is still live all of the day it names.
+       and cp.expires_on < current_date
+       and cp.status = 'paid'
+       -- part 1890. A pack with no coach on it has nobody to be told and
+       -- nobody to be timed against; gating it would leave its window open
+       -- forever, so it closes on the first tick of the day as it always did.
+       and (cp.trainer_id is null or cp.trainer_id = any(v_due))
+  loop
+    -- The count that goes in the message comes back out of the WRITE, not out
+    -- of the select above. A booking between the two would draw a credit the
+    -- select had already counted as lost, and the coach would be told a number
+    -- one too high about somebody's money.
+    v_lost := null;
+    update public.client_purchases cp
+       set sessions_total    = coalesce(cp.sessions_used, 0),
+           sessions_expired  = greatest(0, cp.sessions_total - coalesce(cp.sessions_used, 0)),
+           expired_at        = now()
+     where cp.id = r.id
+       and cp.expired_at is null
+    returning cp.sessions_expired into v_lost;
+    if v_lost is null then
+      continue;
+    end if;
+    v_closed := v_closed + 1;
+    -- Only when credits were actually lost. A pack that ran out of time with
+    -- nothing on it is not news: part 163 already told the coach on the day the
+    -- last session was used.
+    if v_lost > 0 and r.trainer_id is not null then
+      insert into public.notifications (user_id, title, body, icon, route)
+      values (
+        r.trainer_id,
+        'A session pack has run out of time',
+        left(
+          coalesce(
+            (select nullif(btrim(coalesce(p.full_name, '')), '') from public.profiles p where p.id = r.client_id),
+            'A client'
+          )
+          || ' had ' || v_lost || ' session' || case when v_lost = 1 then '' else 's' end
+          || ' left on a pack whose validity ran out on ' || to_char(r.expires_on, 'DD Mon YYYY') || '.'
+          || ' Those credits can no longer be booked against, and they paid for them.'
+          || ' Whether you extend it, sell them something else or leave it is yours to decide — but they will notice, and it is better that you raise it.'
+          || ' Payments & Packages has the pack and what it was worth.',
+          500),
+        'grid',
+        '/(trainer)/payments'
+      );
+      v_told := v_told + 1;
+    end if;
+  end loop;
+  return jsonb_build_object('closed', v_closed, 'told', v_told);
+end $fn$;
+
+
+-- ── 4.5 · An invoice ageing into a new band (part 613) ───────────────────
+
+create or replace function public.run_invoice_ageing_notices()
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_sent integer := 0;
+  r      record;
+  v_due  uuid[];   -- part 1890
+begin
+  -- part 1890
+  select public.claim_notice_pass(
+    'invoice-ageing-notices',
+    (select coalesce(array_agg(distinct i.coach_id), '{}'::uuid[])
+       from public.coach_invoices i
+      where i.coach_id is not null
+        and i.kind = 'requested'
+        and i.voided_at is null
+        and i.due_on is not null),
+    7) into v_due;
+  for r in
+    select i.id, i.coach_id, i.seq, i.bill_to, i.due_on, i.reminder_count,
+           (current_date - i.due_on) as days_late,
+           case
+             when (current_date - i.due_on) <= 7  then '1-7'
+             when (current_date - i.due_on) <= 30 then '8-30'
+             when (current_date - i.due_on) <= 60 then '31-60'
+             else '61+'
+           end as bucket
+      from public.coach_invoices i
+     where
+       -- Only what the coach is ASKING for. A 'received' invoice is their own
+       -- statement that the money came in, and `invoiceAge()` calls it settled.
+       i.kind = 'requested'
+       -- A voided invoice is on no list at all.
+       and i.voided_at is null
+       -- No due date is not "not due" — it is the coach never having stated one.
+       and i.due_on is not null
+       -- Past the day itself; the due date is 'due-today', not overdue.
+       and i.due_on < current_date
+       -- Nothing that fell due before this feature existed, so switching it on
+       -- does not produce an inbox of history. Ninety days, because the last
+       -- band opens at sixty-one and a shorter window could never reach it.
+       and i.due_on >= current_date - 90
+       and i.coach_id = any(v_due)   -- part 1890
+  loop
+    if exists (
+      select 1 from public.coach_invoice_ageing_notices n
+       where n.invoice_id = r.id and n.bucket = r.bucket
+    ) then
+      continue;
+    end if;
+    -- Written BEFORE the notification, per part 202: if the notification fails
+    -- the whole iteration rolls back and the coach is told tomorrow; the other
+    -- order would tell them again every night forever.
+    insert into public.coach_invoice_ageing_notices (invoice_id, bucket, notified_at)
+    values (r.id, r.bucket, now())
+    on conflict (invoice_id, bucket) do nothing;
+    insert into public.notifications (user_id, title, body, icon, route)
+    values (
+      r.coach_id,
+      case when r.bucket = '1-7' then 'An invoice has gone past its date'
+           else 'An invoice is still unpaid' end,
+      left(
+        'Invoice ' || r.seq || ' to ' || coalesce(nullif(btrim(coalesce(r.bill_to, '')), ''), 'a client')
+        || ' was due on ' || to_char(r.due_on, 'DD Mon YYYY') || ', which is '
+        || r.days_late || ' day' || case when r.days_late = 1 then '' else 's' end || ' ago.'
+        || case
+             when coalesce(r.reminder_count, 0) = 0 then ' You have not chased it yet.'
+             when r.reminder_count = 1 then ' You have chased it once.'
+             else ' You have chased it ' || r.reminder_count || ' times.'
+           end
+        || ' Nothing tells this app when a client pays you, so if they already have,'
+        || ' void this one or record what you were paid — otherwise it goes on ageing.'
+        || ' Invoices has the amount and the chase.',
+        500),
+      'grid',
+      '/(trainer)/invoices'
+    );
+    v_sent := v_sent + 1;
+  end loop;
+  delete from public.coach_invoice_ageing_notices n
+   where n.notified_at < now() - interval '400 days';
+  return jsonb_build_object('sent', v_sent);
+end $fn$;
+
+
+-- ── 4.6 · Topping the open-slot window back up (part 650) ────────────────
+--
+-- The one pass that wakes nobody. Moved with the other five for the reason in
+-- section 4 of the header: it already does its date arithmetic in the coach's
+-- own zone, so the coach's own morning is where it belongs, and six passes on
+-- one mechanism is a thing somebody can hold in their head.
+--
+-- `v_nozone` and `v_coaches` are deliberately still counted across the WHOLE
+-- table and not across `v_due`. They answer "how many coaches cannot be
+-- extended", which is a number that should be falling — an hourly figure of
+-- "how many were in this tick" would be a different and useless one.
+
+create or replace function public.run_open_slot_extension(p_horizon_days integer DEFAULT 28)
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_created  int := 0;
+  v_skipped  int := 0;
+  v_nozone   int := 0;
+  v_coaches  int := 0;
+  a          record;
+  v_today    date;
+  v_horizon  date;
+  v_date     date;
+  v_ts       timestamptz;
+  v_tenant   uuid;
+  v_due      uuid[];   -- part 1890
+begin
+  -- part 1890
+  select public.claim_notice_pass(
+    'open-slot-extension',
+    (select coalesce(array_agg(distinct ta.trainer_id), '{}'::uuid[])
+       from public.trainer_availability ta where ta.tz is not null),
+    7) into v_due;
+  -- Counted before the loop so the figure is "how many coaches cannot be
+  -- extended", which is the number that should be falling, rather than "how
+  -- many rows were skipped tonight".
+  select count(distinct trainer_id) into v_nozone
+    from public.trainer_availability where tz is null;
+  for a in
+    select ta.id, ta.trainer_id, ta.dow, ta.hour, coalesce(ta.minute, 0) as minute,
+           coalesce(ta.dur, 60) as dur, ta.tz
+      from public.trainer_availability ta
+     where ta.tz is not null
+       and ta.trainer_id = any(v_due)   -- part 1890
+     order by ta.trainer_id, ta.dow, ta.hour
+  loop
+    select t.tenant_id into v_tenant from public.trainers t where t.id = a.trainer_id;
+    -- The coach's own today, not the server's. A job running at 02:00 UTC is
+    -- still yesterday in Los Angeles, and generating from the server's date
+    -- would miss a day at one end of the world and duplicate one at the other.
+    v_today   := (now() at time zone a.tz)::date;
+    v_horizon := v_today + greatest(p_horizon_days, 0);
+    -- Forward to the first matching weekday. `extract(dow …)` is 0 = Sunday,
+    -- which is exactly what `trainer_availability.dow` has meant since part 24.
+    v_date := v_today + ((a.dow - extract(dow from v_today)::int + 7) % 7);
+    while v_date <= v_horizon loop
+      v_ts := (v_date + make_time(a.hour, a.minute, 0)) at time zone a.tz;
+      if v_ts > now()
+         and not exists (
+           select 1 from public.sessions s
+            where s.trainer_id = a.trainer_id
+              and s.starts_at = v_ts
+         )
+      then
+        begin
+          insert into public.sessions (trainer_id, client_id, starts_at, duration_min, status, tenant_id)
+          values (a.trainer_id, null, v_ts, a.dur, 'available', v_tenant);
+          v_created := v_created + 1;
+        exception when exclusion_violation then
+          -- The coach is already busy across this hour with something that does
+          -- not start exactly on it. Their diary, not ours to rearrange.
+          v_skipped := v_skipped + 1;
+        end;
+      else
+        v_skipped := v_skipped + 1;
+      end if;
+      v_date := v_date + 7;
+    end loop;
+  end loop;
+  select count(distinct trainer_id) into v_coaches
+    from public.trainer_availability where tz is not null;
+  return jsonb_build_object(
+    'created', v_created,
+    'skipped', v_skipped,
+    'coaches', v_coaches,
+    'coaches_without_a_zone', v_nozone);
+end $fn$;
+
+
+revoke all on function public.run_overdue_client_notices() from public, anon, authenticated;
+revoke all on function public.run_credential_expiry_notices() from public, anon, authenticated;
+revoke all on function public.run_block_ended_notices() from public, anon, authenticated;
+revoke all on function public.run_pack_expiry() from public, anon, authenticated;
+revoke all on function public.run_invoice_ageing_notices() from public, anon, authenticated;
+revoke all on function public.run_open_slot_extension(int) from public, anon, authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 5 · Nobody gets one at five in the afternoon on the day this ships
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The gate is `local hour between 7 and 9`, so if this part is applied at, say,
+-- 16:00 in Sydney, every Australian coach's very first hourly tick finds them
+-- past the window and does nothing — correct. But a coach whose local hour is
+-- 8 right now would fire within the minute, at a time they had no reason to
+-- expect anything.
+--
+-- So today is claimed in advance for every coach who is ALREADY past the start
+-- of their window. Coaches whose 07:00 has not happened yet are left alone and
+-- get their first properly-timed notification this morning. Nobody is claimed
+-- who would not otherwise have fired today, and nobody fires at an hour they
+-- would find strange.
+
+insert into public.notice_pass_runs (pass, coach_id, utc_day)
+select p.pass, c.coach_id, current_date
+  from (values
+        ('overdue-client-notices'),
+        ('credential-expiry-notices'),
+        ('block-ended-notices'),
+        ('pack-expiry'),
+        ('invoice-ageing-notices'),
+        ('open-slot-extension')) as p(pass)
+ cross join (
+   select distinct t.id as coach_id from public.trainers t
+ ) c
+ where case
+   when public.notice_local_tz(c.coach_id) is null
+     then extract(hour from (now() at time zone 'UTC'))::int > 7
+   else extract(hour from (now() at time zone public.notice_local_tz(c.coach_id)))::int > 9
+ end
+on conflict (pass, coach_id, utc_day) do nothing;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 6 · The schedule
+--
+-- Hourly, each on the minute it already used. The minutes are kept exactly as
+-- parts 202, 471, 612, 613 and 650 set them — seven apart, off the top of the
+-- hour — so the six still do not contend, and so that anybody reading
+-- `cron.job` sees the same six numbers they saw before with the hour opened up.
+-- ═════════════════════════════════════════════════════════════════════════
+
+create extension if not exists pg_cron;
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'overdue-client-notices') then
+    perform cron.unschedule('overdue-client-notices');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'credential-expiry-notices') then
+    perform cron.unschedule('credential-expiry-notices');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'block-ended-notices') then
+    perform cron.unschedule('block-ended-notices');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'pack-expiry') then
+    perform cron.unschedule('pack-expiry');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'invoice-ageing-notices') then
+    perform cron.unschedule('invoice-ageing-notices');
+  end if;
+  if exists (select 1 from cron.job where jobname = 'open-slot-extension') then
+    perform cron.unschedule('open-slot-extension');
+  end if;
+end $$;
+
+select cron.schedule('overdue-client-notices',    '12 * * * *', $cron$ select public.run_overdue_client_notices(); $cron$);
+select cron.schedule('credential-expiry-notices', '19 * * * *', $cron$ select public.run_credential_expiry_notices(); $cron$);
+select cron.schedule('block-ended-notices',       '26 * * * *', $cron$ select public.run_block_ended_notices(); $cron$);
+select cron.schedule('pack-expiry',               '33 * * * *', $cron$ select public.run_pack_expiry(); $cron$);
+select cron.schedule('invoice-ageing-notices',    '40 * * * *', $cron$ select public.run_invoice_ageing_notices(); $cron$);
+select cron.schedule('open-slot-extension',       '48 * * * *', $cron$ select public.run_open_slot_extension(); $cron$);
+
 -- ▶ the-fallback-that-was-the-bug.sql
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -55512,8 +56170,12 @@ create policy app_errors_owner on public.app_errors
 -- `profiles_trainer_r_clients` is then narrowed as well, and this half is belt
 -- and braces rather than the fix: with the write closed the roster row can no
 -- longer be forged, but a read policy whose whole basis is a row the reader can
--- write should not be the only thing standing there. It gains
--- `is_my_client()`, the same definer helper the rest of the coach surface uses.
+-- write should not be the only thing standing there. It gains `is_my_client()`,
+-- which is the corroboration `profiles_trainer_read` beside it already makes
+-- inline. `is_my_client()` is SECURITY INVOKER, so the `clients` read inside it
+-- is subject to `clients_trainer_read` — which is `trainer_id = auth.uid()`, the
+-- same condition, so the answer is unchanged — and it cannot recurse, because no
+-- `clients` policy reads `profiles`.
 -- Verified against the live catalogue on 4 Sep 2026: of the 2 roster rows that
 -- have a profile behind them, 0 lack a matching `clients` row, so this removes
 -- no read that anybody has today.
@@ -55700,3 +56362,372 @@ alter function public.coach_exercise_roster(p_slug text, p_from timestamp with t
 
 alter function public.money_text(p_amount_cents bigint, p_currency text)
   set search_path to 'public', 'pg_temp';
+
+-- ▶ seven-policies-that-ask-who-you-are-once-per-row.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Seven policies that ask who you are once per row.
+--
+-- Part 145 did fifteen of these. Seven were added afterwards and were written
+-- in the old form.
+--
+-- ── WHAT WAS WRONG ───────────────────────────────────────────────────────
+--
+-- `auth.uid()` written bare in a policy is STABLE, not a constant, so the
+-- planner re-evaluates it for every row it tests. Written `(select auth.uid())`
+-- it becomes an InitPlan: evaluated once, then compared. Supabase's linter
+-- names this `auth_rls_initplan`; part 145's header has the full argument and
+-- it does not need restating.
+--
+-- Seven policies still carry the bare call:
+--
+--     calendar_links.calendar_links_delete_own      user_id = auth.uid()
+--     coach_message_templates.cmt_self              coach_id = auth.uid()
+--     notify_channel_prefs.ncp_self                 user_id = auth.uid()
+--     owner_sites.owner_sites_self                  user_id = auth.uid()
+--     platform_admins.pa_self                       user_id = auth.uid()
+--     session_requests.session_requests_client_r    client_id = auth.uid()
+--     session_requests.session_requests_coach_r     trainer_id = auth.uid()
+--                                                     and is_my_client(client_id)
+--
+-- ── WHAT THIS COSTS ──────────────────────────────────────────────────────
+--
+-- Nothing that anybody can see today: these tables hold tens of rows. It costs
+-- at the size the product is being built for. `session_requests` is the one
+-- that will feel it first — a coach's requests screen scans the table and the
+-- second policy calls `is_my_client()`, a definer function, per row on top of
+-- the per-row `auth.uid()`.
+--
+-- This is a PERFORMANCE part. It is filed with the data-boundary audit because
+-- it came off the same advisor sweep, and because it is the only class on that
+-- sweep worth acting on: the other 823 performance advisories are 635
+-- `multiple_permissive_policies`, 95 `unindexed_foreign_keys` and 92
+-- `unused_index`, and none of those should be actioned here. See the closing
+-- section for why, one class at a time.
+--
+-- ── THE FIX ──────────────────────────────────────────────────────────────
+--
+-- Each policy is re-emitted with its name, command, roles and predicate
+-- unchanged except that `auth.uid()` becomes `(select auth.uid())`. This is a
+-- pure planner change: the two expressions return the same value for the same
+-- caller in every case, so no row that was visible becomes invisible and no row
+-- that was hidden becomes readable. `is_my_client()` in the last one is left
+-- exactly as it is — it is already a definer function and already evaluated the
+-- way part 145 wanted.
+--
+-- Both `cmt_self` and `ncp_self` are FOR ALL with a WITH CHECK, and both halves
+-- are re-emitted; a FOR ALL policy re-created with only its USING clause would
+-- silently take the USING as its check, which is the same expression here but
+-- is not a thing to leave to inference.
+--
+-- ── WHAT THIS DELIBERATELY DOES NOT DO ───────────────────────────────────
+--
+--   · `multiple_permissive_policies` (635, and 24 of them on a single table) is
+--     not touched. Those exist because this schema writes one policy per
+--     audience — an owner policy, a coach policy, a client policy — which is
+--     exactly what makes the boundary readable and reviewable. Collapsing them
+--     into one OR'd predicate per command would trade the property this whole
+--     audit depends on for a planner saving on tables with tens of rows. The
+--     one duplicate that is a genuine duplicate rather than a second audience,
+--     `coach_clients_trainer_rw`, is dropped by part 1901 on its own merits.
+--
+--   · `unindexed_foreign_keys` (95) and `unused_index` (92) are not touched.
+--     Both are measured against a database holding 20 profiles and 10 clients:
+--     every index here is "unused" because nothing has used anything, and an
+--     index chosen against no data is a guess. These want re-running against
+--     real traffic, and adding 95 indexes now would make that reading worse,
+--     not better.
+--
+--   · `auth_db_connections_absolute` is not touched because it cannot be: it is
+--     a setting on the Auth server, not SQL. It is real and it is named here so
+--     that it is not lost — the Auth server is pinned to at most 10 connections
+--     and will not benefit from a larger instance until that is changed to a
+--     percentage in the project's Auth settings.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+drop policy if exists calendar_links_delete_own on public.calendar_links;
+create policy calendar_links_delete_own on public.calendar_links
+  for delete
+  using (user_id = (select auth.uid()));
+
+drop policy if exists cmt_self on public.coach_message_templates;
+create policy cmt_self on public.coach_message_templates
+  for all
+  using (coach_id = (select auth.uid()))
+  with check (coach_id = (select auth.uid()));
+
+drop policy if exists ncp_self on public.notify_channel_prefs;
+create policy ncp_self on public.notify_channel_prefs
+  for all
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+drop policy if exists owner_sites_self on public.owner_sites;
+create policy owner_sites_self on public.owner_sites
+  for select
+  using (user_id = (select auth.uid()));
+
+drop policy if exists pa_self on public.platform_admins;
+create policy pa_self on public.platform_admins
+  for select
+  using (user_id = (select auth.uid()));
+
+drop policy if exists session_requests_client_r on public.session_requests;
+create policy session_requests_client_r on public.session_requests
+  for select
+  using (client_id = (select auth.uid()));
+
+drop policy if exists session_requests_coach_r on public.session_requests;
+create policy session_requests_coach_r on public.session_requests
+  for select
+  using (trainer_id = (select auth.uid()) and public.is_my_client(client_id));
+
+-- ▶ the-crashes-nobody-was-allowed-to-read.sql
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- The crashes nobody was allowed to read.
+--
+-- ── Measured against the live database, 4 September 2026 ────────────────
+--
+--     select count(*) total,
+--            count(*) filter (where user_id is null) orphans
+--       from app_errors;
+--
+--     total    800
+--     orphans  343
+--
+-- 343 of the 800 crash reports on this platform — 43% of them — are readable
+-- by NOBODY. Not by a gym owner, not by their author, not by Repple. They sit
+-- in the table accumulating and there is no session on earth that `select`
+-- returns them to.
+--
+-- ── Why, and why it was right at the time ───────────────────────────────
+--
+-- `app_errors_insert` (part 17) is:
+--
+--     with check (user_id = auth.uid() or user_id is null)
+--
+-- and the null arm is deliberate and load-bearing. src/lib/crashQueue.ts is
+-- the module built around it, and its header says why: a crash on the sign-in
+-- screen, or one flushed from the offline queue before auth has resolved, has
+-- no user to attribute — "and those are the ones anybody wants".
+--
+-- The read policy is scoped through the reporting user's gym. Part 39 wrote it
+-- and stated the consequence in the same breath:
+--
+--     "app_errors_insert allows a null user_id (an error caught before
+--      sign-in); those rows have no tenant to belong to and are now readable
+--      by nobody through RLS, which is the fail-closed side of the choice."
+--
+-- That was the correct call. A row with no tenant cannot be scoped to a gym,
+-- and the alternative on offer in 2025 was `my_role() = 'owner'` — the
+-- unscoped arm part 39 existed to remove, which would have shown every gym
+-- owner every other gym's stack traces. Fail closed was right because the only
+-- other door was fail open.
+--
+-- ── What changed: there is now a third answer ───────────────────────────
+--
+-- Part 252 added `platform_admins` and `is_platform_admin()`. That reader did
+-- not exist when part 39 chose between "one gym's owner" and "nobody", and it
+-- is precisely the reader an unattributed crash belongs to: a row with no
+-- tenant is not a gym's record, it is the PRODUCT's record.
+--
+-- So this is not a policy being loosened. It is the case part 39 had no
+-- answer for, answered.
+--
+-- ── What this widens, exactly ───────────────────────────────────────────
+--
+-- Rows where `user_id is null`, to accounts on the `platform_admins`
+-- allowlist. That is the whole of it, and the `user_id is null` clause is in
+-- the policy rather than left implicit for a reason worth stating: without it
+-- this would hand a platform admin every crash on the platform, including the
+-- 457 that are already attributed to a named person and already read by their
+-- own gym's owner. Those rows have an owner. They are not this part's problem,
+-- widening them is not needed to fix anything, and part 252's own reasoning —
+-- "no names", because a platform screen makes its argument about every person
+-- on the platform at once — applies with more force to a stack trace than to
+-- an invoice total.
+--
+-- A crash message and a stack trace can carry whatever happened to be in scope
+-- when the app fell over. src/lib/accountSecurity.ts already names that hazard
+-- ("an argument list attached is how a plaintext password ends up in
+-- app_errors"). The rows this opens are the ones written before anybody signed
+-- in, which is the population least likely to hold anybody's data — and the
+-- allowlist behind them has no INSERT policy for anyone, ships empty, and can
+-- only be added to with the service role.
+--
+-- ── Additive, and separate ──────────────────────────────────────────────
+--
+-- A new policy rather than an `or` bolted onto `app_errors_owner`, on the same
+-- two grounds part 252 gives: a re-run of part 39, 147, 1060, 1061 or 1900 —
+-- all five of which re-emit `app_errors_owner` — replaces that policy and
+-- leaves this one standing, so the parts converge whatever order they are
+-- applied in; and the reader set granted here shows up in `pg_policies` as its
+-- own named line rather than as a clause inside a policy about gym owners that
+-- somebody later tidies away.
+--
+-- Postgres OR's permissive policies for the same command, so this adds exactly
+-- one reader and takes none away. No gym owner's view of `app_errors` changes
+-- by a single row.
+--
+-- SELECT only. Nothing here may write, update or delete a crash report: an
+-- error log an operator can edit is not an error log.
+-- ═════════════════════════════════════════════════════════════════════════
+
+drop policy if exists app_errors_platform_orphans on public.app_errors;
+create policy app_errors_platform_orphans on public.app_errors
+  for select
+  using (user_id is null and public.is_platform_admin());
+
+-- ▶ two-rows-that-can-be-filed-under-a-gym-that-never-asked-for-them.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Two rows that can be filed under a gym that never asked for them.
+--
+-- Both are the same shape and it is the one part 38 named: a row whose
+-- `tenant_id` decides who reads it, written by somebody the schema lets choose
+-- that value. Neither is a read across the boundary. Both are a WRITE across it,
+-- which is the half that gets audited less and shows up on somebody's screen
+-- just the same.
+--
+-- ── ONE: a coach can file themselves onto a gym's staff ───────────────────
+--
+-- `trainers_self_rw` is `for all using (auth.uid() = id)` — the coach's own row,
+-- read and written. `trainers.tenant_id` is NOT NULL and no trigger guards it,
+-- which makes it the one identity column in this schema that its subject can
+-- set. `clients.tenant_id` has `guard_client_tenant` (part 38);
+-- `profiles.tenant_id` and `profiles.role` have `guard_profile_identity`;
+-- `sessions.tenant_id` has `guard_session_tenant`. `trainers` has nothing.
+--
+-- So any signed-in coach can run one ordinary PostgREST call:
+--
+--     PATCH /rest/v1/trainers?id=eq.<self>   { "tenant_id": "<any gym>" }
+--
+-- and two policies then act on the value they just chose:
+--
+--     trainers_owner_r   is_owner_of(tenant_id)
+--     trainers_peer_r    my_role() = 'trainer' and tenant_id = my_tenant()
+--
+-- The target gym's owner console and its coaches read a `trainers` row for
+-- somebody who has never worked there, carrying that person's session rate,
+-- cancellation policy, brand and logo. Nothing about it looks forged.
+--
+-- It grants the writer nothing — this is worth being precise about, because it
+-- would be easy to over-state. After parts 1060, 1061 and 1900 there is no
+-- policy left in this schema that resolves the CALLER's gym through
+-- `trainers.tenant_id`; every one of them goes through `staff_tenant_of()`,
+-- which reads `profiles`, which the coach cannot change. So this is a write
+-- into a gym's staff list and not a read out of it: the gym sees a stranger,
+-- the stranger sees nothing.
+--
+-- What it costs is what a wrong roster costs. `trainers` is what the owner
+-- console lists staff from, and a row on it is a person a payroll screen, a
+-- rota and a class assignment can all reach for.
+--
+-- ── TWO: anybody can post into any gym's feedback inbox ───────────────────
+--
+--     fb_insert   with check (user_id = auth.uid())
+--     fb_owner    for select using (is_owner_of(tenant_id))
+--
+-- `feedback.tenant_id` is nullable and unconstrained on insert. The app fills it
+-- from the writer's own profile (`src/ui/appFeedback.ts:24`), which is the
+-- correct value and is not enforced anywhere. A signed-in user who supplies a
+-- different gym's id has written a row into that gym's owner inbox
+-- (`app/(owner)/ops.tsx:494`) under a name and a role of their choosing.
+--
+-- ── LIVE OR LATENT ───────────────────────────────────────────────────────
+--
+-- Both LATENT, and for the same reason: they need the target gym's `tenants.id`,
+-- and a uuid is not guessable. A user can read their OWN gym's id
+-- (`tenants_client_r`, `tenants_trainer_r`) and nobody else's, so this is not a
+-- browse-and-choose attack — it is available to somebody who has been handed a
+-- gym id, and gym ids travel through join links, invitations and support
+-- threads. No forged row exists today: verified on 4 Sep 2026, all 8 `trainers`
+-- rows agree with their profile's tenant, and `feedback` holds nothing filed
+-- under a gym its author does not belong to.
+--
+-- Established by reading `pg_policy`, `pg_trigger` and `information_schema`, not
+-- by writing anything: this lane's database access is read only.
+--
+-- ── THE FIX ──────────────────────────────────────────────────────────────
+--
+-- `guard_trainer_tenant()` is `guard_profile_identity()` with the table changed,
+-- deliberately, down to the `current_user in ('authenticated', 'anon')` test and
+-- the reason for it: every legitimate way a coach's gym is set —
+-- `provision_profile()`, `join_by_code()`, `accept_trainer_invite()`,
+-- `accept_invite()` — is SECURITY DEFINER and runs as `postgres`, so the guard
+-- is invisible to all of them and refuses only a direct write from the app. The
+-- app has no such write: the five places that update `trainers`
+-- (`src/ui/coachProfile.tsx`, `src/ui/sessions.tsx`, `src/ui/coachLogo.ts` ×2,
+-- `src/ui/coachBrand.ts`) set rate, policy, logo and brand, and none of them
+-- names `tenant_id`.
+--
+-- On INSERT the rule is `= my_tenant()` rather than a flat refusal, because
+-- `trainers.tenant_id` is NOT NULL and a rule that no app insert can satisfy is
+-- a rule somebody eventually routes around. On UPDATE it is a flat refusal,
+-- because a coach's gym changes by joining or by being removed and never by
+-- editing the roster row.
+--
+-- `fb_insert` is re-emitted with the tenant tied to the writer's own, keeping
+-- its name, command and roles. `null` stays allowed: the column is nullable, the
+-- app leaves it null when a profile read fails, and a null-tenant row is read by
+-- nobody, since `is_owner_of(null)` is false.
+--
+-- ── WHAT THIS DELIBERATELY DOES NOT DO ───────────────────────────────────
+--
+--   · It does not constrain `feedback.role`, which the app also fills from the
+--     writer's profile and which a writer could equally lie about. That is a
+--     label on a row already correctly addressed to the writer's own gym, and
+--     tying it to `my_role()` would make an owner's console disagree with a
+--     record of what somebody's role was at the time they wrote. Named here so
+--     it is a decision rather than an oversight.
+--
+--   · It does not touch `trainers_owner_r` or `trainers_peer_r`. Both are
+--     correct policies about a column that is now guarded; the defect was never
+--     in the read.
+--
+--   · It does not backfill or reconcile `trainers.tenant_id` against
+--     `profiles.tenant_id`. Part 1900 says why the two are allowed to disagree
+--     for a coach who has left, and this must not undo that.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── One: the roster row's gym ────────────────────────────────────────────
+
+create or replace function public.guard_trainer_tenant()
+returns trigger
+language plpgsql
+set search_path to 'public', 'pg_temp'
+as $$
+begin
+  -- A SECURITY DEFINER function runs as its owner, so provisioning, join codes
+  -- and invitations — the legitimate ways a coach's gym is set — all pass. A
+  -- direct update from the app does not.
+  if current_user in ('authenticated', 'anon') then
+    if tg_op = 'INSERT' then
+      if new.tenant_id is distinct from public.my_tenant() then
+        raise exception 'A coach''s gym is not chosen from the app. It follows the staff record, and that is set by a join code or an invitation.'
+          using errcode = '42501';
+      end if;
+    elsif new.tenant_id is distinct from old.tenant_id then
+      raise exception 'A coach cannot move their own roster row between gyms. Joining a gym happens by invitation, and leaving one happens by the owner.'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end
+$$;
+
+drop trigger if exists guard_trainer_tenant_t on public.trainers;
+create trigger guard_trainer_tenant_t
+  before insert or update on public.trainers
+  for each row execute function public.guard_trainer_tenant();
+
+-- ── Two: the feedback row's gym ──────────────────────────────────────────
+
+drop policy if exists fb_insert on public.feedback;
+create policy fb_insert on public.feedback
+  for insert
+  with check (
+    user_id = (select auth.uid())
+    and (tenant_id is null or tenant_id = public.my_tenant())
+  );

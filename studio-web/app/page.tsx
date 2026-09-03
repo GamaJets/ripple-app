@@ -6,7 +6,7 @@
 // uses, reading the same rows through the same row-level policies. Nothing is
 // computed twice and nothing is estimated: where the gym has not recorded
 // something, this shows a dash and says what is missing.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { Kpi } from '@/components/Kpi';
@@ -14,6 +14,9 @@ import { DataTable, type Column } from '@/components/DataTable';
 import { PasswordField } from '@/components/PasswordField';
 import { ConsoleGate } from '@/components/Gate';
 import { failure } from '@/lib/read';
+// When this page last read the gym, and a way to ask again. See `load` below
+// for why the front page in particular could not go without one.
+import { useFetched, Fetched } from '@/components/Fetched';
 import { Banner as SharedBanner } from '@/components/Banner';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
@@ -181,16 +184,46 @@ export default function Overview() {
       if (!live) return;
       setSites(owned);
 
-      if (!who?.tenantId) { setTrainers([]); return; }
+      if (!who?.tenantId) setTrainers([]);
+    })();
+    return () => { live = false; };
+  }, []);
 
+  /* ── everything about the gym, read again ─────────────────────────────────
+   *
+   * This was the tail of the mount effect above, and it ran once. The console
+   * has no router — the rail is a plain `<a href>` — so the only way this page
+   * had of asking again was a full document reload, and nothing on it said
+   * which moment its figures were the age of.
+   *
+   * On this page that is not a staleness annoyance, it is a wrong figure with a
+   * label on it. Three of the tiles are cut on TODAY: "Through the door" is
+   * `gymTodayWindow(zone)` and the headcount is `Date.now()` minus
+   * OPEN_VISIT_HOURS, both computed inside this function. A console left open
+   * on a front desk overnight — which is what a console on a front desk does —
+   * came back in the morning still counting yesterday's arrivals under a tile
+   * that says today, with no way to correct it short of reloading the tab and
+   * nothing on the screen saying it needed correcting.
+   *
+   * `useFetched` (studio-web/components/Fetched.tsx) was built for exactly this
+   * and had six callers out of thirty-five routes; the front page was not one
+   * of them. It re-reads on a press and when the tab comes back to the front,
+   * which is the moment that matters here: the tab that has been behind a
+   * spreadsheet since yesterday is the one showing a stale day.
+   *
+   * The return value is what `useFetched` stamps on, and it is deliberately
+   * "did every read come back", not "did the request go out". A refresh that
+   * lost the door log leaves the stamp where it was and the banner below says
+   * which read is missing — the same rule as `assertWrote`, one layer up.
+   */
+  const load = useCallback(async (tenantId: string): Promise<boolean> => {
       // supabase-js RESOLVES with { data, error } rather than throwing, so
       // taking only `data` turns an RLS refusal into `t === null` — which used
       // to render as a gym with no name and no session fee. Both are then
       // stated as facts about the gym: the sidebar says no gym is linked, and
       // the payroll note below says no fee is set. Neither is known to be true.
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('id, name, session_fee, currency, timezone').eq('id', who.tenantId).single();
-      if (!live) return;
+        .from('tenants').select('id, name, session_fee, currency, timezone').eq('id', tenantId).single();
       setGymErr(tErr ? (tErr.message || 'The gym record could not be read.') : null);
       const zone = t && !tErr ? (((t.timezone ?? '') as string).trim() || null) : null;
       setGym(t && !tErr
@@ -203,15 +236,22 @@ export default function Overview() {
           }
         : null);
 
+      let rosterRead = false;
       try {
-        const rows = await fetchGymTrainers(supabase, who.tenantId);
-        if (live) setTrainers(rows);
+        const rows = await fetchGymTrainers(supabase, tenantId);
+        setTrainers(rows);
+        // Cleared on success. This used to run once, so a stale banner was not
+        // reachable; now that the page can be read again, a refusal followed by
+        // a good read would leave "Could not read the roster" in red over a
+        // roster that had just come back.
+        setError(null);
+        rosterRead = true;
       } catch (e: any) {
         // Null, not []. An empty roster is fed to `gymRollup`, which answers
         // 0 trainers, 0 clients, 0 sessions and 0 needing a look — six invented
         // figures — and the table below it says "No trainers in this gym yet.
         // Invite one." to an owner whose roster is full and whose read failed.
-        if (live) { setError(e?.message ?? 'Could not read the roster.'); setTrainers(null); }
+        setError(e?.message ?? 'Could not read the roster.'); setTrainers(null);
       }
 
       // allSettled, not all: one failing read must not take the others with it.
@@ -246,13 +286,12 @@ export default function Overview() {
       const openFrom = new Date(Date.now() - OPEN_VISIT_HOURS * 3600_000).toISOString();
       const doorSince = today.fromISO < openFrom ? today.fromISO : openFrom;
       const [mRes, pRes, plRes, cRes, vRes] = await Promise.allSettled([
-        fetchMemberships(supabase, who.tenantId),
-        fetchPayments(supabase, who.tenantId, from30),   // windowed: the tile says 30d
-        fetchPlans(supabase, who.tenantId),
-        fetchClasses(supabase, who.tenantId, from30, new Date().toISOString()),
-        fetchVisits(supabase, who.tenantId, { sinceIso: doorSince }),
+        fetchMemberships(supabase, tenantId),
+        fetchPayments(supabase, tenantId, from30),   // windowed: the tile says 30d
+        fetchPlans(supabase, tenantId),
+        fetchClasses(supabase, tenantId, from30, new Date().toISOString()),
+        fetchVisits(supabase, tenantId, { sinceIso: doorSince }),
       ]);
-      if (!live) return;
 
       const memberships = mRes.status === 'fulfilled' ? mRes.value : null;
       const payments = pRes.status === 'fulfilled' ? pRes.value : null;
@@ -301,8 +340,14 @@ export default function Overview() {
         planCount: plans === null ? null : plans.length,
         memberCount: memberships === null ? null : memberships.length,
       });
-    })();
-    return () => { live = false; };
+
+      // Whole means the gym row, the roster and all five hub reads came back.
+      // `tErr` is read off the result rather than caught, so it has to be part
+      // of this test by hand — a refused tenant read is what makes the name,
+      // the fee, the currency and the timezone unknown, and a stamp over that
+      // would claim the whole page had just been confirmed.
+      return !tErr && rosterRead
+        && [mRes, pRes, plRes, cRes, vRes].every((r) => r.status === 'fulfilled');
   }, []);
 
   /* ── the engagement figures, from owner-metrics ────────────────────────
@@ -326,11 +371,41 @@ export default function Overview() {
    * thing the function's own header records having gone wrong.
    */
   const [engage, setEngage] = useState<OwnerMetrics | null | undefined>(undefined);
-  useEffect(() => {
-    let live = true;
-    void fetchOwnerMetrics().then((m) => { if (live) setEngage(m); });
-    return () => { live = false; };
+  /** Read on the same gesture as everything else. It was its own mount-only
+   *  effect, so pressing "Read again" refreshed eight tiles and left the three
+   *  engagement ones from whenever the tab was opened — under one sentence
+   *  claiming an age for all of them. Null is the function's own word for "I
+   *  could not compute this whole", which is a failed read for stamping
+   *  purposes; a metric merely ABSENT from a non-null answer is the honest
+   *  partial the function is built to return, and still a whole read. */
+  const loadEngagement = useCallback(async (): Promise<boolean> => {
+    const m = await fetchOwnerMetrics();
+    setEngage(m);
+    return m !== null;
   }, []);
+
+  /* One stamp over both readers, because there is one sentence on the page.
+   * `Promise.all` rather than sequential: they touch nothing of each other's
+   * and a serial pair doubles the wait on the slowest screen in the console. */
+  const { at: readAt, busy: reading, refresh } = useFetched(
+    async () => {
+      const id = me?.tenantId;
+      if (!id) return false;
+      const [gymWhole, engageWhole] = await Promise.all([load(id), loadEngagement()]);
+      return gymWhole && engageWhole;
+    },
+  );
+
+  // The first read goes through `refresh` so it stamps exactly like every later
+  // one, keyed on the tenant id arriving in state rather than fired at the end
+  // of the effect above: `useFetched` holds the reader in a ref assigned during
+  // RENDER, so calling it in the same tick as `setMe(who)` would run the
+  // previous render's closure — the one where `me` is still undefined — and it
+  // would answer false without reading anything. /revenue records the same
+  // trap in the same words.
+  useEffect(() => {
+    if (me?.tenantId) refresh();
+  }, [me?.tenantId, refresh]);
 
   // Three sentences, not one div and a form. See components/Gate.tsx: a
   // question we could not ask is not the same fact as nobody being signed in.
@@ -440,6 +515,12 @@ export default function Overview() {
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         {gym?.name ? `${gym.name} · last 30 days` : 'Last 30 days'}
       </p>
+
+      {/* Under the title rather than beside a tile, because it is about every
+          figure on the page. The three door and "today" tiles are the ones this
+          was written for — see `load`. */}
+      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+               what="this gym" style={{ margin: '2px 0 18px' }} />
 
       {/* Which gym these figures are. Null — so nothing renders — for a settled
           read of one gym, which is every account on the platform today. Not

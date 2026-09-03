@@ -130,6 +130,85 @@ export function afterWrite(prev: SaveStatus, ok: boolean, at: number, error?: st
 
 /** An edit was made; a write is coming. Never clears `savedAt`, for the reason
  *  above — what is already on the server stays true while the next one flies. */
+/* ── what counts as an edit ───────────────────────────────────────────────── */
+
+/** The eight values `src/ui/coachProfile.tsx` writes back. */
+export interface ProfileValues {
+  name: string | null | undefined;
+  photo: string | null | undefined;
+  tagline: string | null | undefined;
+  bio: string | null | undefined;
+  offers: readonly string[] | null | undefined;
+  specialties: readonly string[] | null | undefined;
+  sessionFee: number | null | undefined;
+  listed: boolean | null | undefined;
+}
+
+/**
+ * A stable string for a set of profile values, so "did anything actually
+ * change" can be answered without comparing eight fields by hand at a call
+ * site.
+ *
+ * ── The defect this exists for ────────────────────────────────────────────
+ *
+ * The debounced write effect in `src/ui/coachProfile.tsx` fired on ANY change
+ * to its dependency array, and `synced` and `hydrated` are in that array. So
+ * the moment the server read settled — with the values that had just come FROM
+ * the server — the effect ran, set `dirty`, and 600ms later PATCHed `profiles`
+ * and `trainers` with them. Every launch. Seen on an iPhone: the app was
+ * relaunched, nothing was typed, and the badge already read "Saved."
+ *
+ * It is not only a wasted round trip per coach per launch. It is a write of
+ * handset-held state over server-held state, which is the direction that loses
+ * data: two devices, or one device with a stale cache, and the last one to open
+ * the app wins. The screen's own comment said "Nothing is drawn before the
+ * first edit", and the code disagreed with it.
+ *
+ * ── Why a fingerprint and not a dirty flag on each setter ─────────────────
+ *
+ * Because the values arrive through eight different setters, from two different
+ * sources (AsyncStorage then the server), across several awaits. A flag would
+ * have to be cleared correctly by every one of them and would be wrong the
+ * first time somebody added a ninth field. A fingerprint compared against the
+ * last known server state cannot drift: if it differs, a person changed
+ * something; if it does not, nothing needs writing whatever caused the render.
+ *
+ * Arrays are compared in order, because the order of a coach's specialities is
+ * the order they chose to list them in and reordering is an edit.
+ *
+ * Null, undefined and empty string all fingerprint the same for the text
+ * fields: they are the same statement — the coach has not written one — and a
+ * launch that turned an absent tagline into an empty one would be exactly the
+ * needless write this is here to stop. A session fee is NOT treated that way:
+ * `null` is "no rate set" and `0` is a legacy row, and `src/ui/coachProfile.tsx`
+ * maps the second to the first on read, so by the time a value reaches here the
+ * two are already one thing.
+ */
+export function profileFingerprint(v: ProfileValues): string {
+  const text = (x: string | null | undefined) => String(x ?? '').trim();
+  const list = (x: readonly string[] | null | undefined) =>
+    Array.isArray(x) ? x.map((s) => String(s ?? '').trim()) : [];
+  return JSON.stringify([
+    text(v.name), text(v.photo), text(v.tagline), text(v.bio),
+    list(v.offers), list(v.specialties),
+    v.sessionFee == null || !Number.isFinite(Number(v.sessionFee)) ? null : Number(v.sessionFee),
+    v.listed === true,
+  ]);
+}
+
+/**
+ * Has a person changed something since `baseline` was taken?
+ *
+ * `baseline` null means no baseline has been taken yet — the read has not
+ * settled — and the answer is NO. That is the first-run guard: the first
+ * settled render establishes what the server holds and writes nothing, and
+ * every render after it is compared against that.
+ */
+export function isProfileEdit(baseline: string | null, now: ProfileValues): boolean {
+  if (baseline == null) return false;
+  return baseline !== profileFingerprint(now);
+}
+
 export const markPending = (prev: SaveStatus): SaveStatus =>
   ({ state: 'pending', savedAt: prev.savedAt, error: null });
 

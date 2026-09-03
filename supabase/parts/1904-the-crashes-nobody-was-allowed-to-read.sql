@@ -1,0 +1,94 @@
+-- ═════════════════════════════════════════════════════════════════════════
+-- The crashes nobody was allowed to read.
+--
+-- ── Measured against the live database, 4 September 2026 ────────────────
+--
+--     select count(*) total,
+--            count(*) filter (where user_id is null) orphans
+--       from app_errors;
+--
+--     total    800
+--     orphans  343
+--
+-- 343 of the 800 crash reports on this platform — 43% of them — are readable
+-- by NOBODY. Not by a gym owner, not by their author, not by Repple. They sit
+-- in the table accumulating and there is no session on earth that `select`
+-- returns them to.
+--
+-- ── Why, and why it was right at the time ───────────────────────────────
+--
+-- `app_errors_insert` (part 17) is:
+--
+--     with check (user_id = auth.uid() or user_id is null)
+--
+-- and the null arm is deliberate and load-bearing. src/lib/crashQueue.ts is
+-- the module built around it, and its header says why: a crash on the sign-in
+-- screen, or one flushed from the offline queue before auth has resolved, has
+-- no user to attribute — "and those are the ones anybody wants".
+--
+-- The read policy is scoped through the reporting user's gym. Part 39 wrote it
+-- and stated the consequence in the same breath:
+--
+--     "app_errors_insert allows a null user_id (an error caught before
+--      sign-in); those rows have no tenant to belong to and are now readable
+--      by nobody through RLS, which is the fail-closed side of the choice."
+--
+-- That was the correct call. A row with no tenant cannot be scoped to a gym,
+-- and the alternative on offer in 2025 was `my_role() = 'owner'` — the
+-- unscoped arm part 39 existed to remove, which would have shown every gym
+-- owner every other gym's stack traces. Fail closed was right because the only
+-- other door was fail open.
+--
+-- ── What changed: there is now a third answer ───────────────────────────
+--
+-- Part 252 added `platform_admins` and `is_platform_admin()`. That reader did
+-- not exist when part 39 chose between "one gym's owner" and "nobody", and it
+-- is precisely the reader an unattributed crash belongs to: a row with no
+-- tenant is not a gym's record, it is the PRODUCT's record.
+--
+-- So this is not a policy being loosened. It is the case part 39 had no
+-- answer for, answered.
+--
+-- ── What this widens, exactly ───────────────────────────────────────────
+--
+-- Rows where `user_id is null`, to accounts on the `platform_admins`
+-- allowlist. That is the whole of it, and the `user_id is null` clause is in
+-- the policy rather than left implicit for a reason worth stating: without it
+-- this would hand a platform admin every crash on the platform, including the
+-- 457 that are already attributed to a named person and already read by their
+-- own gym's owner. Those rows have an owner. They are not this part's problem,
+-- widening them is not needed to fix anything, and part 252's own reasoning —
+-- "no names", because a platform screen makes its argument about every person
+-- on the platform at once — applies with more force to a stack trace than to
+-- an invoice total.
+--
+-- A crash message and a stack trace can carry whatever happened to be in scope
+-- when the app fell over. src/lib/accountSecurity.ts already names that hazard
+-- ("an argument list attached is how a plaintext password ends up in
+-- app_errors"). The rows this opens are the ones written before anybody signed
+-- in, which is the population least likely to hold anybody's data — and the
+-- allowlist behind them has no INSERT policy for anyone, ships empty, and can
+-- only be added to with the service role.
+--
+-- ── Additive, and separate ──────────────────────────────────────────────
+--
+-- A new policy rather than an `or` bolted onto `app_errors_owner`, on the same
+-- two grounds part 252 gives: a re-run of part 39, 147, 1060, 1061 or 1900 —
+-- all five of which re-emit `app_errors_owner` — replaces that policy and
+-- leaves this one standing, so the parts converge whatever order they are
+-- applied in; and the reader set granted here shows up in `pg_policies` as its
+-- own named line rather than as a clause inside a policy about gym owners that
+-- somebody later tidies away.
+--
+-- Postgres OR's permissive policies for the same command, so this adds exactly
+-- one reader and takes none away. No gym owner's view of `app_errors` changes
+-- by a single row.
+--
+-- SELECT only. Nothing here may write, update or delete a crash report: an
+-- error log an operator can edit is not an error log.
+-- ═════════════════════════════════════════════════════════════════════════
+
+drop policy if exists app_errors_platform_orphans on public.app_errors;
+create policy app_errors_platform_orphans on public.app_errors
+  for select
+  using (user_id is null and public.is_platform_admin());

@@ -668,6 +668,21 @@ export default function Invoices() {
           <Notice tone={t.crit} kicker="Nothing can be issued yet" title="No currency" note={currencyBlocker} />
         ) : null}
 
+        {/* ── one empty state, not two ────────────────────────────────────
+            Seen on an iPhone: "WHAT YOU HAVE ISSUED — You have not issued any
+            invoices yet. The first one you issue is number 0001.", then "OWED
+            TO YOU", then "NOTHING ISSUED YET — Nothing here yet…". Two
+            headings and two sentences, one section apart, both saying the
+            coach has issued nothing.
+
+            This one goes. A totals block over nothing has nothing to total,
+            and the sentence it was carrying — the first number in the sequence
+            — has moved down to the list's own empty state, which is the one
+            place a coach looks to find out what they have. The section is
+            still drawn whenever the read FAILED, because `book.reason` is the
+            only thing on this screen that says why. */}
+        {book.totals && !book.totals.pots.length ? null : (
+        <>
         <Rule />
 
         <Section>
@@ -702,15 +717,13 @@ export default function Invoices() {
                   </Flag>
                 ) : null}
               </View>
-            ) : (
-              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-                You have not issued any invoices yet. The first one you issue is number 0001.
-              </Text>
-            )
+            ) : null
           ) : (
             <Flag style={{ marginTop: sp.sm }}>{book.reason}</Flag>
           )}
         </Section>
+        </>
+        )}
 
         <Rule />
 
@@ -988,9 +1001,14 @@ export default function Invoices() {
               </View>
             );
           })}
+          {/* The screen's ONLY empty state. It carries the sequence fact that
+              used to be said again a section higher up, and it is said under a
+              whole read alone — "the first one is 0001" to a coach on their
+              thirty-second invoice is the same defect as "Nothing issued yet"
+              to the same coach. */}
           {!rows.length && status === 'ready' ? (
             <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-              Nothing here yet. An invoice you issue stays in this list for good — it can be voided, never edited and never deleted, because the copy your client is holding does not change.
+              Nothing here yet, so the first invoice you issue is number 0001. An invoice you issue stays in this list for good — it can be voided, never edited and never deleted, because the copy your client is holding does not change.
             </Text>
           ) : null}
         </Section>

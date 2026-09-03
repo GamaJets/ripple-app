@@ -22,6 +22,7 @@
 // and src/lib/readinessBreakdown.ts, both pure and both tested; this only
 // collects the provider state and hands it over.
 import { useMemo } from 'react';
+import { useNow } from './today';
 import { useWellness } from './wellness';
 import { useWearables } from './wearables';
 import { useDeviceSleep } from './deviceSleep';
@@ -65,6 +66,20 @@ export function useReadiness(): ReadinessView {
   const reads = devSleep.reads;
   const nights = devSleep.nights;
   const deviceStatus: LoadStatus = devSleep.status;
+  /**
+   * The instant the two-day training window is measured back from.
+   *
+   * `useNow()` rather than a `Date.now()` in the memo body, and it is IN the
+   * dependency list below. The bare call was evaluated once per memo run and the
+   * list held no clock, so on the home screen — a TAB, mounted for as long as
+   * the app is — the window was pinned to whenever the member first opened it.
+   * A session from four days ago went on counting as one from the last two, so
+   * readiness stayed suppressed and the app told a rested member to take it
+   * easy; and a member who trains without logging drifts the other way. It
+   * self-healed only when `log` happened to change, which is the one thing a
+   * member on a rest day does not do.
+   */
+  const nowMs = useNow().getTime();
 
   return useMemo(() => {
     const sleep = readinessSleep(nights, typed, READINESS_NIGHTS);
@@ -74,7 +89,7 @@ export function useReadiness(): ReadinessView {
     // only offered when the log was actually read; otherwise null travels, and
     // readinessScore withholds the score rather than scoring an unread log as
     // maximally rested and telling somebody to push.
-    const since = Date.now() - 2 * 86400000;
+    const since = nowMs - 2 * 86400000;
     // The LOCAL day of each session, not a slice of its ISO string. Its sibling
     // file states the rule where it does the same job for sleep: "Slicing the
     // ISO string would take the UTC day and file a 9pm entry under tomorrow for
@@ -160,5 +175,5 @@ export function useReadiness(): ReadinessView {
         workoutsLast2Days,
       }),
     };
-  }, [nights, typed, typedStatus, reads, deviceStatus, water, waterGoal, waterStatus, log, logStatus, deviceStates, deviceMetrics]);
+  }, [nights, typed, typedStatus, reads, deviceStatus, water, waterGoal, waterStatus, log, logStatus, deviceStates, deviceMetrics, nowMs]);
 }

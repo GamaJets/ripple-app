@@ -2207,56 +2207,6 @@ export default function Builder() {
           </View>
 
 
-          {rosterStatus === 'error' ? (
-            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
-              note="Nobody is listed here because the roster did not come back — it does not mean you have no clients. What you have built is untouched. Reopen this screen once you have signal." />
-          ) : rosterStatus === 'partial' ? (
-            <PartialRead what="clients on your book" shown={roster.length} />
-          ) : null}
-
-          {roster.length === 0 && rosterStatus === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              No clients yet — add or invite a client and they will appear here to assign to.
-            </Text>
-          ) : roster.length === 0 && rosterStatus === 'loading' ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Reading your roster…</Text>
-          ) : null}
-
-          {roster.map((c, i) => {
-            const on = !!picked[c.id];
-            // Only sayable off a whole read. Under any other status the absence
-            // of a programme means nothing was found out, and marking somebody
-            // "no program yet" on that basis is how a coach comes to overwrite
-            // one without realising.
-            const replaces = programStatus === 'ready' && !!getProgram(c.id);
-            const held = plan.blocked.find((b) => b.clientId === c.id);
-            return (
-              <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
-                accessibilityRole="button" accessibilityLabel={`${on ? 'Do not assign to' : 'Assign to'} ${c.name}`}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                  {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
-                  {/* The warning is a DOT, not the ink: warn as caption text
-                      measures under AA on the three light palettes, so the one
-                      sentence the coach most needs was the hardest to read.
-                      The words carry the meaning; the dot carries the tone. */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                    {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
-                    <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
-                      {c.goal}{replaces ? ' · replaces the program they are on' : ''}
-                    </Text>
-                  </View>
-                  {/* Their own sentence, on their own row. A count of how many
-                      are held tells the coach nothing about whose knee it is. */}
-                  {held ? <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag> : null}
-                </View>
-              </Pressable>
-            );
-          })}
-
           {/* The letter at the top of the week. Cues about ONE movement go on
               that movement — a tempo note is useless attached to a Tuesday —
               which is what the Notes field under each exercise below is for. */}
@@ -3285,6 +3235,20 @@ export default function Builder() {
               screens come to disagree about who a bulk assign wrote to. */}
           <SectionHead title="Assign To" note={rosterStatus === 'ready' && pickedIds.length ? `${num(pickedIds.length)} of ${num(roster.length)}` : undefined} />
 
+          {/* ── the rows, back under their own heading ──────────────────────
+              These lived four sections further up, orphaned between the STARTS
+              ON help text and "Note to client (optional)", with nothing on
+              screen saying what ticking one did. Seen on an iPhone: a bare
+              checkbox beside "Tamer / Fat loss" and no heading anywhere near
+              it. Meanwhile this heading, its `N of M` count and Select All sat
+              down here with NO ROWS UNDER THEM AT ALL, and the promise at the
+              top of the screen — "Who it goes to is further down" — had quietly
+              become false, because it was further up.
+
+              A count and a Select All are controls over a list. They belong
+              against the list, and the list belongs under the words that say
+              what ticking a box does. */}
+
           {/* "Select All" over a roster that came back at its row limit ticks a
               page of people and calls it everybody. Nothing on screen is false
               and the coach is still acting on a set they cannot see, so the
@@ -3306,6 +3270,56 @@ export default function Builder() {
               ) : null}
             </View>
           ) : null}
+
+          {rosterStatus === 'error' ? (
+            <Notice tone={t.warn} kicker="Roster" title="Your clients could not be read"
+              note="Nobody is listed here because the roster did not come back — it does not mean you have no clients. What you have built is untouched. Reopen this screen once you have signal." />
+          ) : rosterStatus === 'partial' ? (
+            <PartialRead what="clients on your book" shown={roster.length} />
+          ) : null}
+
+          {roster.length === 0 && rosterStatus === 'ready' ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
+              No clients yet — add or invite a client and they will appear here to assign to.
+            </Text>
+          ) : roster.length === 0 && rosterStatus === 'loading' ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Reading your roster…</Text>
+          ) : null}
+
+          {roster.map((c, i) => {
+            const on = !!picked[c.id];
+            // Only sayable off a whole read. Under any other status the absence
+            // of a programme means nothing was found out, and marking somebody
+            // "no program yet" on that basis is how a coach comes to overwrite
+            // one without realising.
+            const replaces = programStatus === 'ready' && !!getProgram(c.id);
+            const held = plan.blocked.find((b) => b.clientId === c.id);
+            return (
+              <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
+                accessibilityRole="button" accessibilityLabel={`${on ? 'Do not assign to' : 'Assign to'} ${c.name}`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                  {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.name}</Text>
+                  {/* The warning is a DOT, not the ink: warn as caption text
+                      measures under AA on the three light palettes, so the one
+                      sentence the coach most needs was the hardest to read.
+                      The words carry the meaning; the dot carries the tone. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                    {replaces ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn, flexShrink: 0 }} /> : null}
+                    <Text style={{ ...ty.caption, color: replaces ? t.ink2 : t.ink3, flex: 1 }}>
+                      {c.goal}{replaces ? ' · replaces the program they are on' : ''}
+                    </Text>
+                  </View>
+                  {/* Their own sentence, on their own row. A count of how many
+                      are held tells the coach nothing about whose knee it is. */}
+                  {held ? <Flag tone={t.warn} style={{ marginTop: 4 }}>{held.reason}</Flag> : null}
+                </View>
+              </Pressable>
+            );
+          })}
         </Section>
 
         <Rule />
