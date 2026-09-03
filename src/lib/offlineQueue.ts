@@ -327,6 +327,70 @@ let running: Promise<number> | null = null;
 let askedAgain = false;
 
 /**
+ * How many passes one flight may make, however many times it is asked again.
+ *
+ * ── The loop this bounds, and why it is not hypothetical ──────────────────
+ *
+ * `askedAgain` is unconditional: any call to `flushAll` while a pass is in
+ * flight books one more pass, and the pass after that may book another. There
+ * was no ceiling on that, and there is a path straight back into it from inside
+ * the flush itself:
+ *
+ *   a provider's write SUCCEEDS  →  `noteReached` (src/lib/reachability.ts)
+ *   →  the state goes not-online → online  →  the reconnect edge fires
+ *   →  src/ui/offlineFlush.tsx's subscriber calls `flushAll`  →  askedAgain.
+ *
+ * Every write in the app reports through `observedFetch`, so every flusher is a
+ * candidate. All it takes to keep the loop alive is a connection that keeps
+ * flipping — one write times out (`noteUnreachable`, offline), the next one
+ * lands (`noteReached`, online, edge, one more pass) — which is a stairwell out
+ * of a basement gym, i.e. the exact place this whole file is aimed at. A
+ * simulated flusher that re-enters `flushAll` runs for ever today; the test
+ * holds that it stops.
+ *
+ * Three, for the reason MAX_ATTEMPTS in src/lib/readRefresh.ts is three: past
+ * that a re-pass is no longer recovering from a moment that was missed, it is
+ * retrying a connection that is not working, on somebody's battery, with a
+ * queue whose ambiguous writes may already have committed. What is dropped by
+ * the ceiling is not work — the queue is untouched and the next foreground or
+ * reconnect flushes it.
+ */
+export const MAX_FLUSH_PASSES = 3;
+
+/**
+ * Wait for the flush that is already running, or start one.
+ *
+ * ── Why this exists next to `flushAll` ────────────────────────────────────
+ *
+ * `flushAll` treats a call made during a pass as NEWS — it books one more pass,
+ * because whatever prompted it may have arrived after a provider had already
+ * read its queue. That is right for a trigger.
+ *
+ * It is wrong for a second subscriber to the SAME trigger, and the app has one.
+ * src/ui/offlineFlush.tsx and src/lib/readRefresh.ts are both wired to the
+ * reconnect edge and both to AppState, and `refreshStale` flushes before it
+ * re-reads. So every reconnect and every return to the foreground raised two
+ * calls a few microseconds apart and ran every provider's queue TWICE, back to
+ * back, on the connection least able to afford it — measured, not inferred.
+ *
+ * The second of those two carries nothing the first has not got. It is the same
+ * event. And a doubled pass is not free: a write that timed out at the ceiling
+ * (src/lib/requestTimeout.ts) may have committed and lost only its reply, so
+ * offering it again is how one logged session becomes two — which is why
+ * `retryOnTimeout` refuses to resend a write at the transport layer and why
+ * `newRowId` exists in src/lib/outbox.ts. Doing it once per edge instead of
+ * twice halves that exposure for the two queues that still insert without a
+ * device-minted id.
+ *
+ * So a caller that only needs "the queue has been offered before I read" joins
+ * the pass in flight instead of booking another. Nothing is lost: the running
+ * pass has not finished, so it has not yet reported that anything is unsent.
+ */
+export function flushAllOrJoin(): Promise<number> {
+  return running ?? flushAll();
+}
+
+/**
  * Run every registered flush, once.
  *
  * SINGLE FLIGHT, and this is the part that has to be right. The two triggers
@@ -352,8 +416,10 @@ export function flushAll(): Promise<number> {
   running = pass;
   void (async () => {
     let ran = 0;
+    let passes = 0;
     do {
       askedAgain = false;
+      passes += 1;
       // A snapshot, so a provider registering mid-flush is picked up by the
       // next pass rather than being called while this list is being walked.
       const batch = [...flushers.values()];
