@@ -62,6 +62,10 @@ import { slotLabel, slotWhoName, unnamedSlotNote } from '../../src/lib/slotName'
 import {
   clientTap, clientTapLabel, trainingOnDay, dayTrainingCaveat, dayPlanHeading, dayPlanUnread,
 } from '../../src/lib/daySession';
+// The finish half of the hour — see the note on the control below.
+import { canFinish } from '../../src/lib/sessionFinish';
+import {
+} from '../../src/lib/daySession';
 // Which programme each client is on, and the day the coach said their block
 // begins. The same provider app/(trainer)/client-week.tsx resolves a week
 // from, read the same way — there is one answer to "which week" in this app.
@@ -125,6 +129,7 @@ import {
 // a coach turns writing on, and reaches only a calendar Repple itself made.
 import {
   combineBusy, linkState, missingSourceNote, plannedSyncEvents, pushLabel, pushSummaryLine,
+  syncClassesNote, type SyncTeaching,
   LINK_NOTES, NO_CALENDAR_LINK, REMOTE_SCOPE_NOTE, WRITE_PRIVACY_NOTE,
   type BusySourceState, type CalendarLink, type SyncSource,
 } from '../../src/lib/calendarSync';
@@ -1482,9 +1487,24 @@ export default function TrainerSchedule() {
     to.setDate(to.getDate() + PUSH_DAYS);
     return { fromMs: from.getTime(), toMs: to.getTime() };
   };
+  /**
+   * What this coach's Google calendar should contain.
+   *
+   * The fourth argument is the classes they TEACH, and it was missing from both
+   * call sites since `plannedSyncEvents` grew it. `calendarSync.ts` had the
+   * whole thing — `SyncTeaching`, `syncClassEventId` with its namespacing so a
+   * class can never overwrite a one-to-one, the cancelled-class filter, the
+   * not-mine filter — and it was asserted in its own suite. It was simply never
+   * passed anything, so a coach's exported calendar showed their one-to-ones
+   * and left every hour they were in front of a class looking free.
+   *
+   * `uid` is the coach's own id: a class attributed to nobody is not silently
+   * claimed as theirs, which is the same rule `classClashes` follows above.
+   */
+  const teachingForSync = (): SyncTeaching => ({ classes: gymClasses, uid: coachId ?? null });
   const plannedEvents = () => {
     const w = pushWindow();
-    return plannedSyncEvents(sessions, w.fromMs, w.toMs);
+    return plannedSyncEvents(sessions, w.fromMs, w.toMs, teachingForSync());
   };
 
   /**
@@ -1515,13 +1535,20 @@ export default function TrainerSchedule() {
       return;
     }
     const w = pushWindow();
-    const events = plannedSyncEvents(sessions, w.fromMs, w.toMs);
+    const events = plannedSyncEvents(sessions, w.fromMs, w.toMs, teachingForSync());
     setPushBusy(true);
     const out = await pushSessions(events, w.fromMs, w.toMs);
     setPushBusy(false);
     if (!announce) return;
     if (!out.ok) Alert.alert('Not sent', out.reason);
-    else Alert.alert('Sent to Google', pushSummaryLine(out.result));
+    else {
+      // A timetable that could not be read means the classes are missing from
+      // what was just sent, and the coach has no way to tell from a count of
+      // events. Said here rather than swallowed: somebody reading their
+      // calendar will see those hours as free.
+      const caveat = syncClassesNote(classesKnown);
+      Alert.alert('Sent to Google', [pushSummaryLine(out.result), caveat].filter(Boolean).join('\n\n'));
+    }
   };
 
   // The link is read on every visit to this tab, not once on mount. A coach who
@@ -2598,7 +2625,37 @@ export default function TrainerSchedule() {
                         do. Entering the exercises is one tap on from there,
                         and lands in the client's OWN record, so it reaches
                         their app rather than staying on the coach's screen. */}
-                    <View style={{ flex: 1 }}><Cta label="Check In" wide onPress={() => checkIn(s)} /></View>
+                    {/* ── the other end of the hour ──────────────────────
+                        Check In is the start; this is the finish, and it was
+                        the half that did not exist. Logging what happened and
+                        marking the session delivered were two screens with
+                        nothing joining them, and `workouts` had no column to
+                        say which session an hour of training belonged to — so
+                        "I ran this session" could not be written down as one
+                        fact.
+
+                        On the day sheet as well as the queue in sessions.tsx,
+                        because this is where a coach is standing the minute a
+                        session ends, and the queue is where they catch up on
+                        the ones they did not. */}
+                    {canFinish(s) ? (
+                      <View style={{ flex: 1 }}>
+                        <Cta label="Finish" wide onPress={() => router.push({
+                          pathname: '/(trainer)/log-session',
+                          params: {
+                            clientId: s.clientId ?? '',
+                            // Only a real name. `slotWhoName` can answer with a
+                            // noun phrase, and "PT with a client who has left
+                            // your book" is not a name to head a log with.
+                            ...(tapOf(s.clientId).name ? { name: tapOf(s.clientId).name as string } : null),
+                            sessionId: s.id,
+                            sessionAt: s.startsAt,
+                          },
+                        })} />
+                      </View>
+                    ) : (
+                      <View style={{ flex: 1 }}><Cta label="Check In" wide onPress={() => checkIn(s)} /></View>
+                    )}
                     {/* Between Check In and Cancel on purpose. Moving a session
                         is the commonest thing that happens to a diary and the
                         coach's only route to it was Cancel, which gave the hour

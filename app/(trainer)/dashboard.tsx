@@ -286,6 +286,15 @@ const IN_PERSON_SHORTCUTS: [IconName, string, string][] = [
 ];
 
 const SHORTCUTS: [IconName, string, string][] = [
+  // First, and first for a reason. Asked "where is the coach's code to give to
+  // clients? it should be readily available", the answer was: press Invite a
+  // Client below and read it off a modal sheet whose title is about adding one.
+  // Nothing on this screen — or any other — said the sheet held it. This chip is
+  // the whole fix on the navigation side: one tap from the coach's home tab to
+  // /(trainer)/join-code, which is the code, the link and the share sheet and
+  // nothing else. Not in IN_PERSON_SHORTCUTS: an online coach hands their code
+  // out more often than a coach who works in a room, not less.
+  ['share', 'Your Code', '/(trainer)/join-code'],
   ['bell', 'Broadcast', '/(trainer)/broadcast'],
   ['train', 'Programs', '/(trainer)/builder'],
   ...IN_PERSON_SHORTCUTS,

@@ -487,6 +487,19 @@ export const TRAINER_NAV: NavItem[] = [
   // 'discount' because they are what a coach searches, and the screen's whole
   // job is to say that this app has not decided any of them.
   { key: 'referrals', label: 'Who Brings You Clients', note: 'The clients bringing you other clients, and how far they got', route: '/(trainer)/referrals', icon: 'people', keywords: 'referral referrals referred refer a friend word of mouth recommend recommendation brought in introduced invite code who is sending me clients reward credit discount thank you loyalty advocate' },
+  // The answer to "where is my code?", which had none. The six characters lived
+  // on a modal sheet on the Clients tab titled Invite a Client, and nothing on
+  // any screen said the sheet held them; /(trainer)/money and /(trainer)/ad-spend
+  // show the same codes answering a different question — what each one returned.
+  //
+  // Keyworded with what a coach says out loud rather than what the field is
+  // called. "my code", "coach code", "trainer code", "join code" and "invite
+  // code" are the same thing to five different people; "how do clients find me"
+  // and "sign up with me" are what somebody types who does not know a code
+  // exists at all. 'qr' is deliberately here and the screen has none — landing
+  // that search on the screen that offers the link and the share sheet beats
+  // landing it nowhere.
+  { key: 'join-code', label: 'Your Code', note: 'The code and link you hand somebody standing in front of you', route: '/(trainer)/join-code', icon: 'share', keywords: 'code my code coach code coaching code trainer code join code invite code join link invite link share code give out hand out sign up with me add me how do clients find me how do they join onboard new client six characters qr' },
   // Searched for with the words a coach actually types when they are worried
   // about money — "how much did I make", "profit", "income" — none of which
   // matched anything before this screen existed. It carries 'profit' and 'net'

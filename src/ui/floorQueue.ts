@@ -122,7 +122,19 @@ async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
         // logged_by = auth.uid()`, so a queue flushed by a different account
         // must be refused rather than filed under the wrong name — and it is,
         // by the database, which is the only place that cannot be bypassed.
-        const rows = (a.entries as WorkoutEntry[]).map((e) => ({ ...entryToRow(a.clientId, e), logged_by: uid }));
+        //
+        // `session_id` is spread in the same way and for the same reason it is
+        // not part of `entryToRow`: it is a fact about THIS write, not about a
+        // workout entry, and putting it on the entry type would have every
+        // client-side log carrying a field it can never fill. Omitted entirely
+        // when there is no session, so the column is left null rather than
+        // written as one — supabase/parts/890 refuses a session that is not
+        // this client's, and an explicit null would be a value to check.
+        const rows = (a.entries as WorkoutEntry[]).map((e) => ({
+          ...entryToRow(a.clientId, e),
+          logged_by: uid,
+          ...(a.sessionId ? { session_id: a.sessionId } : {}),
+        }));
         const { data, error } = await supabase.from('workouts').insert(rows).select('id');
         const out = classifyWrite(error as never, data ? data.length : 0);
         // A partial insert is not a success. `logForClient` says the same thing

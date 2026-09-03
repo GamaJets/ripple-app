@@ -33,7 +33,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag, Ghost, Cta, Notice } from '../../src/ui/kit';
@@ -56,6 +56,23 @@ import { floorPendingNote, flushResultLine, keptOfflineLine } from '../../src/li
 import {
   pastSessions, pastVerdict, PAST_STATES, PAST_STATE_LABEL, PAST_STATE_NOTE, type PastState,
 } from '../../src/lib/sessionHistory';
+// ── Finishing a session, as opposed to merely marking it ──────────────────
+//
+// This screen was the ONLY way a session ever got an outcome, and it asks the
+// question in isolation: what happened, four buttons, done. The exercises that
+// were actually done in the hour were typed on a different screen, carried no
+// session, and were never joined to it — so a coach could close a session with
+// no record of what it contained, or write the record and leave the session
+// open holding a settlement up.
+//
+// "Finish This Session" is the way in from here: it opens the log with this
+// session in hand, and Save writes both. What the log then does about marking
+// the session delivered — and why that is one press rather than two — is
+// argued in src/lib/sessionFinish.ts.
+import {
+  canFinish, fetchSessionLogCounts, finishBlockedNote, loggedAgainstLine,
+  loggedExercisesLine, type SessionLogCounts,
+} from '../../src/lib/sessionFinish';
 import {
   NO_FILTER, clientOptions, emptyFilterLine, filterActive, filterLine, filterSessions,
   stateCounts, type SessionFilter,
@@ -467,6 +484,33 @@ export default function TrainerSessions() {
    * for why removing that evidence quietly improves every figure computed over
    * what is left. */
   const history = useMemo(() => pastSessions(all ?? []), [all]);
+
+  /* ── what was actually logged in each of these hours ──────────────────────
+   *
+   * A second read, deliberately its own: `workouts` is a different table with
+   * different policies from `sessions`, and one failing must not be reported as
+   * the other failing. It is also the read that must never be allowed to
+   * fabricate a zero — a coach shown "nothing was logged" about an hour they
+   * wrote up types it in again, and their client ends up with the same session
+   * twice. `loggedAgainstLine` is what holds that line; the status is carried
+   * rather than the map alone, because a map built from a failed read is an
+   * empty map and an empty map says "nothing" about every row in it.
+   */
+  const [logs, setLogs] = useState<SessionLogCounts>(
+    { status: 'loading', bySession: new Map(), namesBySession: new Map() });
+  const historyIds = useMemo(() => history.map((s) => s.id).join(','), [history]);
+  useEffect(() => {
+    const nothing: SessionLogCounts = { status: 'ready', bySession: new Map(), namesBySession: new Map() };
+    if (!USE_SUPABASE) { setLogs(nothing); return; }
+    const ids = historyIds ? historyIds.split(',') : [];
+    if (!ids.length) { setLogs(nothing); return; }
+    let live = true;
+    // The previous answer is kept while the next read is in flight, so widening
+    // the window does not blank every line that is already right.
+    setLogs((p) => ({ ...p, status: 'loading' }));
+    void fetchSessionLogCounts(supabase, ids).then((out) => { if (live) setLogs(out); });
+    return () => { live = false; };
+  }, [historyIds]);
   /* The state is `pastVerdict`'s and is passed in rather than re-derived, so
    * the chip a coach filters by and the label printed on the row can never come
    * from two different opinions about the same session. */
@@ -488,6 +532,43 @@ export default function TrainerSessions() {
   /** The instant the loaded window starts at — the edge of what this screen can
    *  answer for, named on screen rather than implied by a list that stops. */
   const windowFrom = useMemo(() => windowStart(loadedDays), [loadedDays]);
+
+  /* ── going off to finish one, and coming back ─────────────────────────────
+   *
+   * The log screen writes the entries AND marks the session delivered, so a
+   * session finished there is gone from this queue on the server and still
+   * drawn here until something re-reads. A coach who presses "Finish This
+   * Session", writes the hour up, comes back and sees the session still sitting
+   * in "waiting on an outcome" has been told the finish did not work — and the
+   * fix they reach for is to mark it a second time.
+   *
+   * So the return is re-read, and ONLY the return: a ref set on the way out and
+   * cleared on the way back in. A blanket reload on every focus would buy the
+   * same correctness and charge a read for every visit to the tab.
+   */
+  const wentToFinish = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (!wentToFinish.current) return;
+    wentToFinish.current = false;
+    void load(loadedDays);
+  }, [load, loadedDays]));
+
+  const finish = (s: PtSession) => {
+    if (!s.clientId) return;
+    wentToFinish.current = true;
+    router.push({
+      pathname: '/(trainer)/log-session',
+      params: {
+        clientId: s.clientId,
+        // The name is a label and may legitimately not have been read. Sent as
+        // an empty string rather than the word "Client", which would put a
+        // placeholder in the title of a screen that writes to a real person.
+        name: s.clientName ?? '',
+        sessionId: s.id,
+        sessionAt: s.startsAt,
+      },
+    });
+  };
 
   const mark = async (s: PtSession, outcome: SessionOutcome) => {
     // Unreachable in practice — with no uid the queue is `failed` and no row is
@@ -949,6 +1030,24 @@ export default function TrainerSessions() {
                         </Pressable>
                       ))}
                     </View>
+
+                    {/* The other half of the same act. The four buttons above
+                        close the session and say nothing about what was in it;
+                        this writes the hour up and closes it in one press. It
+                        is a Ghost and not a Cta: for a coach clearing a day of
+                        cancellations the four buttons are still the fast path,
+                        and this must not compete with them. */}
+                    {canFinish(s) ? (
+                      <View style={{ alignItems: 'flex-start', marginTop: sp.md }}>
+                        <Ghost label="Finish This Session"
+                          a11yLabel={`Write up and finish ${s.clientName ?? 'this client'}’s session`}
+                          onPress={() => finish(s)} />
+                      </View>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                        {finishBlockedNote(s)}
+                      </Text>
+                    )}
                   </View>
                 </View>
               ))}
@@ -1042,6 +1141,40 @@ export default function TrainerSessions() {
                         {v.state === 'unmarked' ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{PAST_STATE_NOTE.unmarked}</Text>
                         ) : null}
+                        {/* ── what was done in the hour ──────────────────
+                            Drawn where it changes what somebody should do: on
+                            a session recorded as DELIVERED, where "nothing is
+                            filed against this session" is a real gap in the
+                            client's record, and on any session that has
+                            something filed against it whatever its state. A
+                            cancelled hour with nothing in it needs no sentence
+                            saying so.
+
+                            Never a bare count: `loggedAgainstLine` is the one
+                            place that decides what may be said, and a read that
+                            failed says so rather than reading as an empty
+                            session. */}
+                        {(() => {
+                          const n = logs.bySession.get(s.id) ?? 0;
+                          if (v.state !== 'delivered' && !(isWhole(logs.status) && n > 0)) return null;
+                          const counted = isWhole(logs.status) || logs.status === 'partial';
+                          const what = counted ? loggedExercisesLine(logs.namesBySession.get(s.id) ?? []) : null;
+                          return (
+                            <>
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                                {loggedAgainstLine(logs.status, counted ? n : null)}
+                              </Text>
+                              {/* The movements themselves. A count says whether
+                                  the hour was written up; this says what was in
+                                  it, which is what a coach opening last Tuesday
+                                  came for. Withheld entirely when there is
+                                  nothing to name — never an empty sentence. */}
+                              {what ? (
+                                <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{what}</Text>
+                              ) : null}
+                            </>
+                          );
+                        })()}
                       </View>
                     );
                   })}

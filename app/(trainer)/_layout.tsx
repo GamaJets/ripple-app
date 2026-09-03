@@ -66,6 +66,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="my-register" options={{ href: null, title: 'Your Register' }} />
       <Tabs.Screen name="account" options={{ href: null, title: 'Account & Sign-in' }} />
       <Tabs.Screen name="referrals" options={{ href: null, title: 'Who Brings You Clients' }} />
+      <Tabs.Screen name="join-code" options={{ href: null, title: 'Your Code' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="chat" options={{ href: null, title: 'Chat' }} />
       <Tabs.Screen name="log-session" options={{ href: null, title: 'Log a Session' }} />

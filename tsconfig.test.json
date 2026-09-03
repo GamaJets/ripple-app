@@ -340,6 +340,8 @@
     "src/lib/calendarNames.ts",
     "src/lib/calendarNames.test.ts",
     "src/lib/daySession.ts",
-    "src/lib/daySession.test.ts"
+    "src/lib/daySession.test.ts",
+    "src/lib/sessionFinish.ts",
+    "src/lib/sessionFinish.test.ts"
   ]
 }

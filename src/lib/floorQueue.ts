@@ -63,8 +63,17 @@ export type FloorAct =
   /** An hour of training typed into a client's own record. The entries are the
    *  same shape the client's log writes; `coachId` is NOT stored, because the
    *  insert policy requires `logged_by = auth.uid()` and the queue is read back
-   *  by whoever is signed in when it flushes. */
-  | { kind: 'session-log'; clientId: string; clientName: string | null; entries: unknown[] }
+   *  by whoever is signed in when it flushes.
+   *
+   *  `sessionId` is the booked session this hour was, when the coach came here
+   *  from one (supabase/parts/890). Optional and usually absent: a client's own
+   *  workout and a coach's own training have no session, and neither does an
+   *  hour typed up from the coach's directory rather than from the queue. It is
+   *  stored on the act rather than resolved at flush time because the coach
+   *  said which session this was when they pressed Save, and re-deciding that
+   *  three hours later against whatever is nearest in the diary would file an
+   *  hour of training under the wrong booking. */
+  | { kind: 'session-log'; clientId: string; clientName: string | null; entries: unknown[]; sessionId?: string | null }
   /** A member ticked present or absent for a class. */
   | { kind: 'class-attendance'; classId: string; userId: string; memberName: string | null; present: boolean }
   /** What became of a PT session, and what it was worth at the moment of
@@ -134,7 +143,13 @@ export function supersedeKey(a: FloorAct): string | null {
       // there is nothing to key on. Falls back to the old behaviour — never
       // collapsed — which is the safe direction: a duplicate can be deleted,
       // and a session collapsed into another one cannot be got back.
-      return body == null ? null : `log:${a.clientId}:${body}`;
+      //
+      // The SESSION is part of the identity. Two offers of the same entries
+      // filed under two different bookings are two different writes and must
+      // not supersede each other — the empty segment is what an act with no
+      // session keys on, so an act queued by a build before supabase/parts/890
+      // keys exactly as it always did.
+      return body == null ? null : `log:${a.clientId}:${a.sessionId ?? ''}:${body}`;
     }
   }
 }
@@ -199,7 +214,14 @@ function usableAct(v: unknown): v is FloorAct {
   const a = v as Record<string, unknown>;
   switch (a.kind) {
     case 'session-log':
-      return typeof a.clientId === 'string' && !!a.clientId && Array.isArray(a.entries) && a.entries.length > 0;
+      // `sessionId` is optional, so absent is fine — but a value of the wrong
+      // SHAPE is not silently carried: it would reach the insert as a
+      // `session_id` PostgREST refuses, and take a whole hour of somebody's
+      // training down with it. Anything that is not a string is treated as an
+      // act this build cannot send, which is what this function is for.
+      return typeof a.clientId === 'string' && !!a.clientId
+        && Array.isArray(a.entries) && a.entries.length > 0
+        && (a.sessionId == null || (typeof a.sessionId === 'string' && !!a.sessionId));
     case 'class-attendance':
       return typeof a.classId === 'string' && !!a.classId
         && typeof a.userId === 'string' && !!a.userId

@@ -61,6 +61,35 @@
 // away. A client seeded from the param stays selectable through all of that,
 // because that id came from the person's own screen and does not depend on this
 // screen's read of anything.
+//
+// ── And it can now FINISH a session, not just log one ─────────────────────
+//
+// "You can start a session but you can't finish a session and have it marked
+// completed and save the information that was logged during the session."
+//
+// This screen wrote `workouts` rows and contained no session id anywhere, so
+// the hour that was booked and the hour that was written up were two records
+// with nothing joining them. Marking the session delivered happened later and
+// elsewhere, on app/(trainer)/sessions.tsx. A coach who wrote the session up
+// still had it in the marking queue holding a settlement up.
+//
+// Opened from a session (`sessionId`), Save now does both: the entries are
+// written carrying that session, and the session is marked delivered. Whether
+// that second write should happen on the same press at all is a real question
+// — supabase/parts/370 SPENDS A CLIENT'S CREDIT at delivery — and the argument
+// is written out in the header of src/lib/sessionFinish.ts rather than here.
+// The short of it: same press, but on a control that names what it does, with
+// the consequence stated above it, and the two answers reported apart.
+//
+// Two things this screen will not do with a session in hand:
+//
+//   · attempt the outcome after the SERVER REFUSED the log. A credit spent for
+//     an hour with no record of what was done in it is the worst ending
+//     available, and it is the one nobody would ever find.
+//   · let the client be changed. supabase/parts/890 requires the session to be
+//     FOR the person whose training this is, so a picker that could point an
+//     hour at somebody else's booking is a refused insert at best. With a
+//     session in hand the client is the session's, stated and not chosen.
 import { useCallback, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
@@ -86,6 +115,20 @@ import {
   hourLabel, logDayOptions, logStamp, logStampProblem, logWhenLine,
 } from '../../src/lib/sessionWhen';
 import { isoDay } from '../../src/lib/weekStart';
+// Finishing, as opposed to logging. The decision about whether Save may mark a
+// session delivered — and the sentences that report the two writes apart — live
+// there, tested, rather than in this file.
+import {
+  DELIVERED_MEANS, NOT_DELIVERED_MEANS, finishCta, finishReport,
+  type OutcomeAnswer,
+} from '../../src/lib/sessionFinish';
+// The rate to snapshot when this screen marks a session delivered. The same
+// figure app/(trainer)/sessions.tsx snapshots, from the same two places and by
+// the same currency-aware conversion — a session finished from here must not be
+// worth a different amount from one finished from the queue.
+import { useTenant } from '../../src/ui/tenant';
+import { useMyTrainerProfile } from '../../src/ui/coachProfile';
+import { minorFromWhole } from '../../src/lib/coachMoney';
 import { notifySuccess } from '../../src/ui/haptics';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -144,9 +187,27 @@ export default function LogSession() {
       if (line) Alert.alert('Sending finished', line);
     } finally { setSending(false); }
   };
-  const { clientId, name } = useLocalSearchParams<{ clientId?: string; name?: string }>();
+  const { clientId, name, sessionId: sessionParam, sessionAt } =
+    useLocalSearchParams<{ clientId?: string; name?: string; sessionId?: string; sessionAt?: string }>();
+  /**
+   * The session being finished, or null for the ordinary write-up.
+   *
+   * Requires the client id as well, and that is not belt-and-braces. Part 890's
+   * guard refuses a `session_id` whose session is not FOR the person whose
+   * workout it is, so a session arriving without the client it belongs to is a
+   * link this screen cannot make safely — and an insert refused for it takes
+   * the whole hour of typing down with it. Dropped to a plain log rather than
+   * risked; the coach can still mark the outcome from Mark Sessions.
+   */
+  const sessionId = sessionParam && clientId ? sessionParam : null;
   const coachEx = useCoachExercises();
   const r = useRoster();
+  // A gym's fee where there is a gym, and otherwise the coach's own — the same
+  // fallback app/(trainer)/sessions.tsx makes. Read unconditionally: hooks
+  // cannot be called behind a condition, and with no session in hand nothing
+  // below uses it.
+  const { tenant } = useTenant();
+  const { sessionFee: ownFee } = useMyTrainerProfile();
 
   /* ── pull to refresh ───────────────────────────────────────────────────
    *
@@ -184,8 +245,31 @@ export default function LogSession() {
    * them landed on the day they were typed. See src/lib/sessionWhen.ts for what
    * the stamp is made of and why the day is the part that matters.
    */
-  const [logDay, setLogDay] = useState(() => isoDay(new Date()));
-  const [logHour, setLogHour] = useState(() => new Date().getHours());
+  //
+  // Opened FROM a session, both are seeded from that session's own start
+  // instead of from now. A coach finishing the four o'clock at half past six
+  // would otherwise file it at half past six — in the client's log, their
+  // streak, their weekly report and plan-versus-actual — on the one path where
+  // the app knows exactly when the hour was. An unreadable start falls back to
+  // now rather than to nothing, and the day and hour stay editable either way.
+  const seededStart = (() => {
+    if (!sessionAt) return null;
+    const d = new Date(sessionAt);
+    return Number.isFinite(d.getTime()) ? d : null;
+  })();
+  const [logDay, setLogDay] = useState(() => isoDay(seededStart ?? new Date()));
+  const [logHour, setLogHour] = useState(() => (seededStart ?? new Date()).getHours());
+  /**
+   * Whether Save also marks the session delivered. On by default, and off in
+   * one tap.
+   *
+   * Default on because a coach who has just typed up an hour has told us the
+   * hour happened; default off would leave the queue exactly as full as it is
+   * today and the report unfixed. Off is for the coach who wants the record
+   * without the outcome — a session that ran short, or one they want to speak
+   * to the client about first. src/lib/sessionFinish.ts holds the argument.
+   */
+  const [markDelivered, setMarkDelivered] = useState(true);
 
   const [rows, setRows] = useState<Row[]>([]);
   const [picker, setPicker] = useState(false);
@@ -357,9 +441,71 @@ export default function LogSession() {
      * reported as saved; see rule 1 in src/lib/floorQueue.ts.
      */
     const out = await queue.attempt({
-      kind: 'session-log', clientId: picked, clientName: pickedName, entries,
+      kind: 'session-log', clientId: picked, clientName: pickedName, entries, sessionId,
     });
+
+    /* ── and then the session, which is a SECOND write with its own answer ──
+     *
+     * In this order on purpose. The entries are twenty minutes of typing that
+     * exists nowhere else; the outcome is one tap that can be made again from
+     * the Mark Sessions queue. So the log goes first, and a log the SERVER
+     * REFUSED stops the outcome dead — supabase/parts/370 spends a client's
+     * session credit at delivery, and spending it for an hour whose record was
+     * refused is the one ending nobody would ever find.
+     *
+     * A log the server never ANSWERED does not stop it. That is not the same
+     * event: the entries are on this phone and going up, the coach is standing
+     * in the same basement for both writes, and refusing to record the outcome
+     * because of the weather would put the session back in the queue for a
+     * reason that has nothing to do with the session. It is offered, it comes
+     * back queued too, and `finishReport` says so in as many words.
+     */
+    let outcomeAnswer: OutcomeAnswer = 'not-asked';
+    if (sessionId && markDelivered) {
+      if (out === 'refused') {
+        outcomeAnswer = 'not-attempted';
+      } else {
+        // Snapshotted here and carried into the queue rather than recomputed at
+        // flush time, exactly as the marking screen does it: a session finished
+        // on Tuesday and sent on Thursday is worth what it was worth on
+        // Tuesday. Converted by the gym's own currency and never by a factor of
+        // a hundred. Null converts to undefined, which is "do not touch the
+        // rate" — a coach with no fee recorded must not have a zero written
+        // into the column payroll is settled from.
+        const rateCents = minorFromWhole(tenant?.sessionFee ?? ownFee, tenant?.currency) ?? undefined;
+        outcomeAnswer = await queue.attempt({
+          kind: 'session-outcome', sessionId, clientName: pickedName,
+          outcome: 'completed', rateCents,
+        });
+      }
+    }
+
     setBusy(false);
+
+    // Nothing below is computed from what was SENT. Both writes returned their
+    // own answer and `finishReport` turns the pair into sentences that say
+    // different things — entries in with the outcome refused is a session that
+    // looks unrun, and an outcome in with the entries lost is worse.
+    if (sessionId) {
+      const notMineHere = picked && !pickedRow && r.status === 'ready';
+      const rep = finishReport({
+        entries: out, outcome: outcomeAnswer, entryCount: entries.length, first,
+        refusalCause: notMineHere
+          ? `${pickedName || 'That person'} is not on your roster, and a session can only be logged for somebody on your book. Add them as a client first, then log this again.`
+          : null,
+      });
+      if (rep.logged) notifySuccess();
+      // A refused log keeps the sets on screen: nothing else in this app is
+      // holding them, and the banner repeats the reason above the button.
+      if (!rep.mayLeave) {
+        setFailure(rep.lines.join('\n\n'));
+        Alert.alert(rep.title, rep.lines.join('\n\n'));
+        return;
+      }
+      Alert.alert(rep.title, rep.lines.join('\n\n'), [{ text: 'Done', onPress: () => router.back() }]);
+      return;
+    }
+
     if (out === 'stored') {
       notifySuccess();
       Alert.alert(
@@ -455,6 +601,29 @@ export default function LogSession() {
               to be right about and the one thing that used to be unanswerable
               here. Under a failed read the chips are not the book — that is
               said rather than left to be inferred from an empty row of pills. */}
+          {/* ── who this was with ──────────────────────────────────────────
+              With a session in hand it is STATED, not chosen. supabase/parts/890
+              requires the session to be for the person whose training this is,
+              so a picker here would offer the coach a choice whose only effect
+              is a refused insert. The way to log against somebody else is to go
+              back and open their record. */}
+          {sessionId ? (
+            <Section>
+              <SectionHead title="This Session" />
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                {pickedName || 'Your client'}
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                {seededStart
+                  ? `Booked for ${seededStart.toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`
+                  : 'You came here from this session, so what you type is filed against it.'}
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
+                What you type below is filed against this session, so it can be read back from it later.
+                To log an hour for somebody else, go back and open their record.
+              </Text>
+            </Section>
+          ) : (
           <Section>
             <SectionHead title="Client" note={picked ? undefined : 'Pick one'} />
 
@@ -534,6 +703,7 @@ export default function LogSession() {
               </Text>
             ) : null}
           </Section>
+          )}
 
           {/* ── when it happened ──────────────────────────────────────────
               Second, after who and before what: a coach writing up yesterday's
@@ -648,9 +818,42 @@ export default function LogSession() {
             </View>
           </Section>
 
+          {/* ── finishing it ──────────────────────────────────────────────
+              The one control on this screen that moves somebody else's money.
+              Marking a session delivered draws a credit off the client's pack
+              or gym pass (supabase/parts/370), so it is a switch that says what
+              it does with the consequence written under it — never a silent
+              side effect of a button labelled Save. The argument for doing it
+              on the same press at all is in src/lib/sessionFinish.ts. */}
+          {sessionId ? (
+            <Section>
+              <SectionHead title="Finish" />
+              <Pressable onPress={() => setMarkDelivered((v) => !v)}
+                accessibilityRole="switch" accessibilityState={{ checked: markDelivered }}
+                accessibilityLabel="Mark this session as delivered when you save"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, color: t.ink }}>Mark it delivered</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {markDelivered ? DELIVERED_MEANS : NOT_DELIVERED_MEANS}
+                  </Text>
+                </View>
+                <View style={{ width: 46, height: 27, borderRadius: radius.pill, backgroundColor: markDelivered ? t.brand : t.surface3, borderWidth: hairline, borderColor: markDelivered ? t.brand : t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
+                  <View style={{ width: 21, height: 21, borderRadius: radius.pill, backgroundColor: markDelivered ? t.brandInk : t.ink3, alignSelf: markDelivered ? 'flex-end' : 'flex-start' }} />
+                </View>
+              </Pressable>
+            </Section>
+          ) : null}
+
           <View style={{ marginTop: sp.xl }}>
             <View style={{ opacity: ready && !busy ? 1 : 0.4 }} pointerEvents={ready && !busy ? 'auto' : 'none'}>
-              <Cta wide label={busy ? 'Saving…' : `Log to ${first}'s record`} onPress={save} />
+              {/* The label says what the press does. With no session in hand it
+                  is the sentence this screen has always shown. */}
+              <Cta wide
+                label={busy
+                  ? 'Saving…'
+                  : sessionId ? finishCta(markDelivered, true) : `Log to ${first}'s record`}
+                onPress={save} />
             </View>
             {/* Two different reasons the button is held, and they need
                 different sentences. "Add a set" to somebody who added four and
