@@ -136,6 +136,12 @@ import { useChannelPrefs } from '../../src/ui/coachNotify';
 import { channelAllows } from '../../src/lib/coachNotify';
 import { fetchMyInvoices } from '../../src/ui/coachInvoices';
 import { ageingBook, type CoachInvoice } from '../../src/lib/coachInvoice';
+import { homeMoney, homeMoneyDrawn, homeMoneyNote, homeMoneyTitle } from '../../src/lib/homeMoney';
+import { minorMoney } from '../../src/lib/coachMoney';
+// The day every expiry and every overdue judgement below is made against, kept
+// current for as long as this tab is mounted — which, for a tab, is the life of
+// the app. See the note on `invoiceAgeing`.
+import { useToday } from '../../src/ui/today';
 import { FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
 /* ── local presentation ───────────────────────────────────────────────────── */
@@ -379,6 +385,72 @@ function UnmarkedSessions({ n, failed, hasGym }: { n: number | null; failed: boo
 }
 
 
+/**
+ * What the coach is owed, on the screen they open first.
+ *
+ * ── Why this card did not exist ────────────────────────────────────────────
+ *
+ * It is not that the data was not here. This screen has read the entire invoice
+ * book for as long as it has fired notifications from it — twenty-two columns,
+ * aged into overdue / upcoming / undated on every render — and exactly one
+ * number left that memo: `invoiceAgeing.overdue.length`, into `bookState`.
+ * `bookState` is not drawn either. It feeds `promptBookAlerts`, a local
+ * notification fired at most once a week, and `bookAlert` ranks the invoice
+ * line BELOW unmarked sessions — so a coach with three sessions waiting on an
+ * outcome was never told about their money at all, by the only thing that would
+ * have told them.
+ *
+ * There was also no route to /(trainer)/invoices anywhere on this screen. The
+ * question src/lib/coachInvoice.ts calls "the most common unanswered question
+ * in this app" had its answer sitting in this component's memory and no pixel
+ * and no tap.
+ *
+ * ── What it may say ───────────────────────────────────────────────────────
+ *
+ * Every judgement is src/lib/homeMoney.ts's, for the usual reason: the figure
+ * is over the OVERDUE rows alone so it is about the same invoices as the count
+ * beside it, a truncated read loses its number and keeps its rows, a failed one
+ * draws a card saying so — `UnmarkedSessions` above already makes that
+ * distinction, and an absent card here reads as a clear book — and the money is
+ * one line per currency, never a sum across them.
+ */
+function MoneyOwed({ m }: { m: HomeMoney }) {
+  const t = useTheme();
+  const router = useRouter();
+  if (!homeMoneyDrawn(m)) return null;
+  return (
+    <Card onPress={() => router.push('/(trainer)/invoices')} tone={m.failed ? t.crit : t.s3} style={{ marginBottom: sp.md }}>
+      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{homeMoneyTitle(m)}</Text>
+      {/* One row per currency. `minorMoney` is the one money formatter in this
+          codebase and it is the only thing here that knows what a minor unit is
+          worth; a null from it draws nothing rather than a bare number in a
+          currency nobody stated. */}
+      {(m.pots ?? []).map((p) => {
+        const amount = minorMoney(p.minorUnits, p.currency);
+        if (!amount) return null;
+        return (
+          <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: sp.sm }}>
+            <Text style={{ ...ty.caption, color: t.ink3 }}>
+              {p.count} in {p.currency}
+            </Text>
+            <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{amount}</Text>
+          </View>
+        );
+      })}
+      {/* Said once, and never added together. Two currencies are two amounts of
+          money — the same rule app/(trainer)/invoices.tsx states beside its own
+          per-currency rows. */}
+      {(m.pots?.length ?? 0) > 1 ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+          These are separate amounts of money and are deliberately not added together.
+        </Text>
+      ) : null}
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{homeMoneyNote(m)}</Text>
+    </Card>
+  );
+}
+
+
 // R3's select list, written out here on one line rather than imported. Same
 // reason every other screen in this group declares its own: check-schema.mjs
 // resolves a named select list only within the file that names it, so a shared
@@ -389,6 +461,10 @@ const ENDED_COLS = 'client_id, ended_at, end_reason';
 export default function TrainerClients() {
   const t = useTheme();
   const router = useRouter();
+  // Kept current for as long as this screen is mounted, which for a tab is the
+  // life of the app. NOT `useMemo(() => localDayKey(Date.now()), [])` and not a
+  // day captured inside another memo's body — see `invoiceAgeing`.
+  const today = useToday();
   const [trial, setTrial] = useState<{ daysLeft: number; expired: boolean } | null>(null);
   useEffect(() => { trialInfo().then((ti) => setTrial({ daysLeft: ti.daysLeft, expired: ti.expired })); }, []);
   // `status` was computed by the roster provider and read by nobody, so a
@@ -1007,10 +1083,27 @@ export default function TrainerClients() {
     })();
     return () => { live = false; };
   }, [coachId, authLoading, readNonce]);
+  /**
+   * The book, aged against TODAY — and today is a value that moves.
+   *
+   * This was `localDayKey(Date.now())` inside a memo keyed on `[invoices]`, so
+   * the day was fixed at whatever it was when the invoices last landed and no
+   * dependency could ever change it. This screen is a TAB: app/(trainer)/
+   * _layout.tsx mounts it once and backgrounding a phone does not tear it down,
+   * so a coach who opened the app on Sunday and came back on Wednesday had
+   * every due date judged against Sunday — and `promptBookAlerts` below fired
+   * off that stale copy. app/(trainer)/invoices.tsx already passes `useToday()`
+   * to this same call; the two screens could disagree about which invoices were
+   * overdue, which is exactly the defect src/ui/today.ts was written for.
+   */
   const invoiceAgeing = useMemo(
-    () => ageingBook(invoices.rows, invoices.status, localDayKey(Date.now())),
-    [invoices],
+    () => ageingBook(invoices.rows, invoices.status, today),
+    [invoices, today],
   );
+  /** What the card below may say about all that — src/lib/homeMoney.ts. The
+   *  whole ageing book was computed here already and nothing drew a pixel of
+   *  it. */
+  const owed = useMemo(() => homeMoney(invoiceAgeing, invoices.status), [invoiceAgeing, invoices.status]);
   const bookState = useMemo(() => ({
     unmarkedSessions: sessionsUnread ? null : unmarked,
     // Null under anything but a whole read: `ageingBook` withholds its own
@@ -1657,6 +1750,11 @@ export default function TrainerClients() {
             is what a push arriving while the app is open needs. */}
         <CoachRequests reload={readNonce} />
         <UnmarkedSessions n={unmarked} failed={sessionsUnread} hasGym={!!tenant?.id} />
+        {/* Below the unmarked queue and above everything else, which is
+            `bookAlert`'s own order arriving on a screen: a session waiting on
+            an outcome holds up somebody's pay, and money already earned and not
+            collected is the next most expensive thing to leave alone. */}
+        <MoneyOwed m={owed} />
 
         {/* What the band headings below actually mean. "At risk" is measured
             against each client's OWN earlier rate and not against a target, and

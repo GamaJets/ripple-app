@@ -442,6 +442,8 @@
     "src/lib/registerGaps.test.ts",
     "src/lib/awaitingReply.ts",
     "src/lib/awaitingReply.test.ts",
+    "src/lib/homeMoney.ts",
+    "src/lib/homeMoney.test.ts",
     "src/lib/blockPlan.ts",
     "src/lib/blockPlan.test.ts",
     "src/lib/templateUsage.ts",
@@ -457,6 +459,8 @@
     "src/lib/assignmentMerge.ts",
     "src/lib/assignmentMerge.test.ts",
     "src/lib/memberLookup.ts",
-    "src/lib/memberLookup.test.ts"
+    "src/lib/memberLookup.test.ts",
+    "src/lib/lastTime.ts",
+    "src/lib/lastTime.test.ts"
   ]
 }

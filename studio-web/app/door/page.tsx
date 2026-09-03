@@ -1313,7 +1313,11 @@ function MemberPicker({ members, value, onPick, unread, gymName }: {
               key={p.id}
               id={`${listId}-${p.id}`}
               role="option"
-              aria-selected={i === active}
+              // A resolved member number reads as chosen, because it is: Enter
+              // takes it whether or not an arrow key has been pressed, and a
+              // row that Enter will act on and that looks inert is how a desk
+              // presses Enter twice and checks somebody in on the second one.
+              aria-selected={i === active || (scan.kind === 'one' && i === 0)}
               // Not a tab stop. Focus stays in the input; the highlight is what
               // moves, and `aria-activedescendant` above is what says so.
               tabIndex={-1}
@@ -1323,7 +1327,7 @@ function MemberPicker({ members, value, onPick, unread, gymName }: {
               onClick={() => take(p.id)}
               style={{
                 display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
-                background: i === active ? 'var(--surface3)' : 'transparent',
+                background: i === active || (scan.kind === 'one' && i === 0) ? 'var(--surface3)' : 'transparent',
                 color: 'var(--ink2)', fontFamily: 'var(--sans)',
                 fontSize: 13, padding: '7px 11px', border: 'none',
                 borderBottom: '1px solid var(--ring2)',

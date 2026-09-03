@@ -94,6 +94,18 @@ export interface HomeMoney {
   /** Live invoices with no due date on them, which are on no list of what is
    *  late and in no figure here. Null when no count may be stated. */
   undated: number | null;
+  /**
+   * Whether anything overdue came back AT ALL, regardless of what may be
+   * counted.
+   *
+   * Separate from `overdue` on purpose, and it is the difference between "the
+   * rows are real" and "the count is a fact about the coach's book". Under a
+   * truncated read the rows that arrived are genuinely overdue invoices and the
+   * card must be drawn over them; the NUMBER is a subtotal and is withheld. A
+   * card gated on the count alone would vanish on exactly the read that already
+   * knows less than it should.
+   */
+  hasOverdue: boolean;
   /** Why nothing may be counted, or null when everything may. */
   withheld: string | null;
   /** True when the read did not answer. The one state that draws a card with no
@@ -124,6 +136,7 @@ export function homeMoney(book: AgeingBook, status: LoadStatus): HomeMoney {
     unlabelled: taken ? taken.unlabelled : 0,
     unpriced: taken ? taken.unpriced : 0,
     undated: whole ? book.undated.length : null,
+    hasOverdue: rows.length > 0,
     // `ageingBook` has already written the sentence for every status, in the
     // words the Invoices screen uses. A second wording here is how two screens
     // come to describe one failure differently.
@@ -154,8 +167,7 @@ export function homeMoney(book: AgeingBook, status: LoadStatus): HomeMoney {
  */
 export function homeMoneyDrawn(m: HomeMoney): boolean {
   if (m.failed) return true;
-  if (m.overdue === null) return false;
-  return m.overdue > 0;
+  return m.hasOverdue;
 }
 
 /**
@@ -167,11 +179,14 @@ export function homeMoneyDrawn(m: HomeMoney): boolean {
  */
 export function homeMoneyTitle(m: HomeMoney): string {
   if (m.failed) return 'Could not check what you are owed';
-  const n = m.overdue ?? 0;
+  // No figure over a book that came back short. "Some" rather than a number is
+  // the whole discipline of src/ui/loadStatus.ts arriving in a heading: the
+  // rows below are real and the count over them is not the coach's book.
+  if (m.overdue === null) return 'Some invoices are overdue';
   // "Overdue" and not "past their due date": some of these are past a chase
   // date the coach set and the client never saw, and the note below says how
   // many. See the header.
-  return n === 1 ? '1 invoice is overdue' : `${n} invoices are overdue`;
+  return m.overdue === 1 ? '1 invoice is overdue' : `${m.overdue} invoices are overdue`;
 }
 
 /**
@@ -204,11 +219,13 @@ export function homeMoneyNote(m: HomeMoney): string {
         ? '1 of these is past a chase date you set for yourself rather than a date the client was shown.'
         : `${own} of these are past chase dates you set for yourself rather than dates the clients were shown.`));
   }
-  if (m.worstDays != null && m.worstDays > 0) {
-    bits.push(m.worstDays === 1
-      ? 'The oldest is a day past.'
-      : `The oldest is ${m.worstDays} days past.`);
-  }
+  // The lead, and it is always one of these two. How old the worst one is is
+  // the fact a coach acts on; where the age cannot be stated — a read that came
+  // back short leaves `worstDays` null — the sentence says what the card is
+  // about instead, rather than leaving a heading with no line under it.
+  bits.push(m.worstDays != null && m.worstDays > 0
+    ? (m.worstDays === 1 ? 'The oldest is a day past.' : `The oldest is ${m.worstDays} days past.`)
+    : 'Money you have already earned and not been paid.');
   if (m.unlabelled > 0) {
     bits.push(m.unlabelled === 1
       ? 'One has an amount with no currency on it and is in no figure here.'
@@ -225,6 +242,5 @@ export function homeMoneyNote(m: HomeMoney): string {
       : `${m.undated} more you are still asking for have no due date, so they are on no list of what is late.`);
   }
   if (m.withheld) bits.push(m.withheld);
-  if (bits.length === 0) return 'Money you have already earned and not been paid.';
   return bits.join(' ');
 }
