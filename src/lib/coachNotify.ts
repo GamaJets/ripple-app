@@ -425,10 +425,22 @@ export interface BookState {
  */
 export const BOOK_FLOOR = 1;
 
-/** How this channel's banner reads. Title and body kept apart because the
- *  platform draws them differently and a body that repeats its title is the
- *  notification people swipe away without reading. */
-export interface BookAlert { title: string; body: string }
+/** How this channel's banner reads, and where tapping it lands.
+ *
+ *  Title and body kept apart because the platform draws them differently and a
+ *  body that repeats its title is the notification people swipe away without
+ *  reading.
+ *
+ *  `route` is here rather than at the caller because it is a property of WHICH
+ *  of the four this is, and the caller does not know which. src/ui/
+ *  coachReminders.ts passed `'/(trainer)/sessions'` for all four — so a banner
+ *  reading "3 invoices past their due date" opened Mark Sessions, one saying
+ *  "2 clients have gone quiet" opened Mark Sessions, and the one place in this
+ *  app that tells a coach their own money is sitting still took them to a
+ *  screen with none of it on. A notification whose tap lands on the wrong
+ *  screen is worse than one that lands nowhere: the coach concludes the app
+ *  does not have the thing it just told them about. */
+export interface BookAlert { title: string; body: string; route: string }
 
 const n = (x: number) => (x === 1 ? '' : 's');
 
@@ -473,6 +485,7 @@ export function bookAlert(s: BookState): BookAlert | null {
   if (unmarked) {
     return {
       title: `${unmarked} session${n(unmarked)} waiting on an outcome`,
+      route: '/(trainer)/sessions',
       // `backlogBody` and not a sentence written here. That wording — the
       // CONSEQUENCE rather than the chore, "counted nowhere until you mark
       // them" — is already argued at length in src/lib/coachReminders.ts and
@@ -489,6 +502,9 @@ export function bookAlert(s: BookState): BookAlert | null {
   if (overdue) {
     return {
       title: `${overdue} invoice${n(overdue)} past ${overdue === 1 ? 'its' : 'their'} due date`,
+      // The coach's own book, aged. Not Mark Sessions, which is where every one
+      // of these used to land.
+      route: '/(trainer)/invoices',
       body: 'Money you have already earned and not been paid.'
         + rest([
           packs ? `${packs} pack${n(packs)} running out` : '',
@@ -499,6 +515,10 @@ export function bookAlert(s: BookState): BookAlert | null {
   if (packs) {
     return {
       title: `${packs} pack${n(packs)} about to run out`,
+      // Where the server's own 'A session pack is nearly used up' already sends
+      // a coach — src/lib/notifyInbox.ts. Two notices about one fact must not
+      // land on two screens.
+      route: '/(trainer)/payments',
       body: `Worth a word before ${packs === 1 ? 'they turn' : 'anybody turns'} up with nothing left to draw on.`
         + rest([drifting ? `${drifting} client${n(drifting)} gone quiet` : ''].filter(Boolean)),
     };
@@ -507,6 +527,9 @@ export function bookAlert(s: BookState): BookAlert | null {
     return {
       title: `${drifting} client${n(drifting)} ${drifting === 1 ? 'has' : 'have'} gone quiet`,
       body: 'Nothing on their record for a while. Quiet Clients has who, and a draft you send yourself.',
+      // The screen the body names. It said "Quiet Clients has who" and then
+      // opened Mark Sessions.
+      route: '/(trainer)/nudges',
     };
   }
   return null;

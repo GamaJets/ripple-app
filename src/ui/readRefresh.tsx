@@ -30,8 +30,6 @@ import { onReconnect } from '../lib/reachability';
 import { refreshStale, registerRefresh } from '../lib/readRefresh';
 import type { LoadStatus } from './loadStatus';
 
-const DIAGNOSTIC_OFF = true; // TEMPORARY — reverted within the minute
-console.warn('REPPLE-LANE-PROBE readRefresh module evaluated ' + Date.now());
 let installed = 0;
 let offReconnect: (() => void) | null = null;
 let appStateSub: { remove: () => void } | null = null;
@@ -87,7 +85,6 @@ export function useRecoverRead(key: string, status: LoadStatus, refetch: () => v
   refetchRef.current = refetch;
 
   useEffect(() => {
-    if (DIAGNOSTIC_OFF) return;
     const off = registerRefresh(key, {
       status: () => statusRef.current,
       refetch: () => refetchRef.current(),

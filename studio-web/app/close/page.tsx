@@ -61,6 +61,10 @@ import {
 // assuming; see the note on it in src/lib/coachMoney.ts.
 import { minorFromWhole } from '@lib/coachMoney';
 import { gymLink, noGymNote } from '@lib/gymLink';
+// How many gyms this account owns. See `siteNotice` for why a month-end sheet
+// in particular is a screen that has to say it.
+import { fetchOwnedSites } from '@/lib/sites';
+import { siteNotice, type SiteScope } from '@lib/ownedSites';
 import { parseGymZone, gymDay } from '@lib/gymZone';
 // The reader's own calendar day — the fallback where the gym has set no zone,
 // and the SAME one `buildClose` falls back to, so the sheet cannot hold two.
@@ -137,6 +141,24 @@ export default function Close() {
   // a failed read is how a month gets closed twice.
   const [closes, setCloses] = useState<MonthCloseRow[] | null>(null);
   const [closesErr, setClosesErr] = useState<string | null>(null);
+
+  /*
+   * How many gyms this account owns.
+   *
+   * `siteNotice` in src/lib/ownedSites.ts was written for "a screen full of
+   * figures" and had one caller: the console's home page, which is mostly links.
+   * This is the screen that most needs it. A month-end close is signed, filed
+   * and handed to an accountant, and part 290 changed no policy — so an owner
+   * recorded against two gyms gets ONE gym's month here, complete, correct and
+   * silent about being half of the business.
+   *
+   * The failed-read arm is the one that earns its place rather than the
+   * two-site arm: a multi-site owner and a single-site owner are
+   * indistinguishable when `my_sites()` does not answer, and the difference is
+   * what every figure below MEANS. It renders nothing at all for a settled read
+   * of one gym, which is every account on the platform today.
+   */
+  const [sites, setSites] = useState<SiteScope>({ status: 'loading', sites: [] });
 
   // Default to the month that has actually finished. Opening on the running
   // month would greet an owner with a refusal about a month nobody claimed was
@@ -273,6 +295,10 @@ export default function Close() {
       setSessionFee(tErr ? null : t?.session_fee ?? null);
       setPolicyCode(tErr ? null : (((t as any)?.session_pay_policy ?? null) as string | null));
       setFeeRead(tErr ? 'failed' : 'ok');
+      // Not awaited with the tenant read: whether this account owns a second
+      // gym has no bearing on any figure below, so a slow or refused RPC must
+      // not hold up the month.
+      void fetchOwnedSites().then((s) => { if (live) setSites(s); });
       // Through `refresh`, so the first read stamps the same way every later
       // one does.
       if (w) refresh();
@@ -463,6 +489,10 @@ export default function Close() {
           comparison between a stored snapshot and THIS read, so the age of this
           read is part of the claim. */}
       <Fetched at={readAt} busy={reading} onRefresh={refresh} what="this month" />
+
+      {/* Above the figures, because it is about what all of them cover. Null,
+          and therefore nothing rendered, for a settled read of one gym. */}
+      {siteNotice(sites) ? <Banner tone="warn">{siteNotice(sites)}</Banner> : null}
 
       {!w || !close ? (
         <Banner tone="crit">{key} is not a month this console can open.</Banner>

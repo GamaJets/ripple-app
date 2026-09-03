@@ -59,6 +59,24 @@
 // thing that is hard about the unread chip lives: `unread` is nullable, and a
 // filter that dropped the rows whose count did not come back would hide exactly
 // the client who might be waiting, behind a shorter list that looks complete.
+//
+// ── The queue above them, and why the Unread chip is not it ───────────────
+//
+// src/lib/features.ts describes this screen, in the app's own search catalogue,
+// as "Every client conversation, and who is waiting on a reply". The second
+// half was not built. `CoachThread.lastSender` came back on every load and was
+// spent on the `You: ` prefix and an ink colour, and the chip that looked like
+// it answered the question is the one thing that structurally cannot: `unread`
+// counts what the coach has not OPENED, and src/ui/readReceipts.ts clears it
+// the moment the bottom of the thread is on screen. So the worst case in the
+// whole inbox — read on a train on Monday, meant to answer that evening, did
+// not — has an unread count of zero and sits wherever Monday lands by Thursday.
+//
+// "Waiting on a Reply" is that queue, and every decision in it is in
+// src/lib/awaitingReply.ts: the whole-day threshold that keeps a message sent
+// ninety minutes ago off it, the three sentences for whether the coach has even
+// opened it, and the rule that no row may accuse — the list can tell who wrote
+// last, not who is owed an answer, and the sentence under it says so.
 import { useCallback, useMemo, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable, Image, ActivityIndicator, TextInput } from 'react-native';
@@ -78,6 +96,10 @@ import {
   NO_THREAD_FILTER, filterThreads, knownUnread, threadFilterActive, threadFilterLine,
   unknownUnread, unreadChipLabel, withheldNames, type ThreadFilter,
 } from '../../src/lib/threadFilter';
+import {
+  WAITING_TITLE, hasWaiting, waitedLabel, waitingCountNote, waitingLine, waitingNote, waitingOn,
+  type Waiting,
+} from '../../src/lib/awaitingReply';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
@@ -156,6 +178,55 @@ function ThreadRow({ t, now, onPress }: { t: CoachThread; now: number; onPress: 
             We could not read how many of their messages are unopened.
           </Text>
         ) : null}
+      </View>
+      <Icon name={FORWARD_ICON} size={16} color={th.ink3} />
+    </Pressable>
+  );
+}
+
+/**
+ * One row of the queue at the top: who is waiting, and how long they have been.
+ *
+ * Deliberately NOT `ThreadRow`. That row is built for scanning a list — a
+ * preview of the last message and an unread badge — and both are the wrong
+ * facts here. The preview is the client's own words, which the coach is about
+ * to read anyway by tapping; the badge is zero for the case this section
+ * exists for, because opening a thread is what clears it. What this row carries
+ * instead is the wait, which is the only thing that puts these rows in this
+ * order.
+ *
+ * The same client appears again in Conversations below. That is on purpose:
+ * this is a short queue worked from the top, that is the whole book scanned by
+ * recency, and both taps land on the same conversation.
+ */
+function WaitingRow({ w, onPress }: { w: Waiting; onPress: () => void }) {
+  const th = useTheme();
+  const head = peerHeading(w.thread.name ? { kind: 'named', name: w.thread.name } : { kind: 'withheld' }, 'client');
+  const line = waitingLine(w);
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Open the conversation with ${head.isName ? head.text : 'this client'}. ${line}`}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
+    >
+      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: th.surface2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        {w.thread.avatar
+          ? <Image source={{ uri: w.thread.avatar }} style={{ width: 36, height: 36 }} accessibilityIgnoresInvertColors />
+          : <Text style={{ ...ty.caption, fontWeight: '600', color: head.isName ? th.brand : th.ink3 }}>{peerMonogram(head)}</Text>}
+      </View>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+          <Text numberOfLines={1}
+            style={{ ...ty.body, fontWeight: '600', flex: 1, color: head.isName ? th.ink : th.ink3, textTransform: head.isName ? 'capitalize' : 'none' }}>
+            {head.text}
+          </Text>
+          {/* The wait, as words rather than as a coloured dot. A queue ordered
+              by something the reader cannot see is one they have to take on
+              trust. */}
+          <Text style={{ ...ty.caption, color: th.ink2 }}>{waitedLabel(w.waitedMs)}</Text>
+        </View>
+        <Text style={{ ...ty.caption, color: th.ink3, marginTop: 2 }}>{line}</Text>
       </View>
       <Icon name={FORWARD_ICON} size={16} color={th.ink3} />
     </Pressable>
@@ -250,6 +321,21 @@ export default function Messages() {
    * statuses may state an absence at all.
    */
   const emptyNote = conversations.length === 0 && !narrowed ? threadsEmptyNote(status, roster) : null;
+  /**
+   * Who spoke last, and how long ago — src/lib/awaitingReply.ts.
+   *
+   * Built from `conversations`, which is the same read the list below is drawn
+   * from: no second round trip, and no chance of the two disagreeing about who
+   * is on the coach's book. It is deliberately NOT built from `shown`: a
+   * narrowed list is the coach asking a different question, and a queue drawn
+   * over their search results would be answering it with somebody else's.
+   *
+   * Not memoised, and not by oversight: `now` is read fresh on every render
+   * just above, so a dependency array containing it would never hit and would
+   * only read as though this were cached. It is one pass over the threads
+   * already in memory.
+   */
+  const waiting = waitingOn(conversations, now, status);
   const G = layout.gutter;
 
   return (
@@ -367,6 +453,37 @@ export default function Messages() {
               <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{filterLine}</Text>
             ) : null}
           </View>
+        ) : null}
+
+        {/* ── waiting on a reply ────────────────────────────────────────────
+            The queue this screen's own catalogue entry promises — see
+            src/lib/features.ts, "Every client conversation, and who is waiting
+            on a reply" — and did not draw. `lastSender` was already read on
+            every load and spent on a prefix and an ink colour.
+
+            Not drawn under an active filter: the coach has asked a narrower
+            question and a queue over their search results would be answering it
+            with somebody else's. Not drawn when nothing is waiting either — the
+            absence is the message, and a section congratulating a coach every
+            morning is one they scroll past on the day it matters. */}
+        {!narrowed && hasWaiting(waiting) ? (
+          <Section>
+            <SectionHead title={WAITING_TITLE} note={waitingCountNote(waiting, status) ?? undefined} />
+            {waiting.rows.map((w, i) => (
+              <View key={w.thread.clientId}>
+                {i > 0 ? <Rule inset={48} /> : null}
+                <WaitingRow w={w} onPress={() => open(w.thread)} />
+              </View>
+            ))}
+            {/* Said once, under the list. It carries the doubt about the read
+                first and then the rows that could not say who spoke last — and
+                where there is neither, it says what this list is and is not,
+                because a coach who reads it as a list of their own failures
+                stops opening it the first time a "thanks" lands on it. */}
+            {waitingNote(waiting) ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{waitingNote(waiting)}</Text>
+            ) : null}
+          </Section>
         ) : null}
 
         {shown.length ? (

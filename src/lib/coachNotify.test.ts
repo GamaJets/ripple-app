@@ -133,6 +133,32 @@ for (const st of [NOTHING, UNKNOWN]) {
   eq(bookAlert(st), null, 'nothing to say produces no banner rather than an all-clear');
 }
 
+// ── where the tap lands ──────────────────────────────────────────────────
+//
+// src/ui/coachReminders.ts passed '/(trainer)/sessions' for every one of these,
+// so three of the four opened a screen with nothing on it about what they had
+// just said. Asserted per branch rather than as "there is a route", because the
+// defect was not a missing route — it was the same right-for-one-case route on
+// all four.
+eq(bookAlert({ ...NOTHING, unmarkedSessions: BACKLOG_FLOOR })?.route, '/(trainer)/sessions',
+  'the unmarked queue opens the screen you clear it on');
+eq(bookAlert({ ...NOTHING, invoicesOverdue: 3 })?.route, '/(trainer)/invoices',
+  'money already earned opens the book it is aged in, not Mark Sessions');
+eq(bookAlert({ ...NOTHING, packsRunningOut: 2 })?.route, '/(trainer)/payments',
+  'a pack running out opens where the server’s own notice about the same fact sends a coach');
+eq(bookAlert({ ...NOTHING, clientsDrifting: 1 })?.route, '/(trainer)/nudges',
+  'and drift opens Quiet Clients, which is the screen its own body names');
+// The whole point: no two branches may share a destination by accident again.
+{
+  const routes = [
+    bookAlert({ ...NOTHING, unmarkedSessions: BACKLOG_FLOOR })!.route,
+    bookAlert({ ...NOTHING, invoicesOverdue: 3 })!.route,
+    bookAlert({ ...NOTHING, packsRunningOut: 2 })!.route,
+    bookAlert({ ...NOTHING, clientsDrifting: 1 })!.route,
+  ];
+  eq(new Set(routes).size, 4, 'four things to do, four screens to do them on');
+}
+
 /* ── the stored rows ───────────────────────────────────────────────────── */
 
 eq(mutedFromRows(null).size, 0, 'nothing read is nothing muted, as a SET — the status is what says whether that is known');

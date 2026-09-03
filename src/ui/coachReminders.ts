@@ -192,9 +192,14 @@ export async function promptBookAlerts(
     // to say and applied every floor, including the one this module owns; what
     // is left to ask is only "has this week already had its prompt".
     if (!backlogDue(1, seen, now)) return false;
+    // `alert.route` and not a literal. This was `'/(trainer)/sessions'` for all
+    // four of `bookAlert`'s banners, so three of the four opened a screen with
+    // nothing on it about what they had just said — see `BookAlert` in
+    // src/lib/coachNotify.ts, which now carries the route beside the words it
+    // belongs to.
     const id = await scheduleLocal(
       alert.title, alert.body,
-      new Date(now + 60_000), { route: '/(trainer)/sessions' }, 'reminders',
+      new Date(now + 60_000), { route: alert.route }, 'reminders',
     );
     // The week is recorded whether or not the banner was scheduled. A coach who
     // has muted the `reminders` category has said they do not want this, and

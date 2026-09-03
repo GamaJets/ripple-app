@@ -15,8 +15,10 @@
 // attempt to design the rail ended up inventing a container called "Mine" for
 // the odd three. So the rail shows one context at a time and says which, rather
 // than mixing "the gym" and "me" and leaving the reader to sort them out.
+import { useEffect, useState } from 'react';
 import type { Me } from '@/lib/supabase';
 import { supabase } from '@/lib/supabase';
+import { fetchOwnedSites } from '@/lib/sites';
 import { siteRailLine, type SiteScope } from '@lib/ownedSites';
 
 export type NavContext = 'gym' | 'mine';
@@ -278,9 +280,62 @@ export function Shell({
   // preference to drift out of step with the page being shown.
   const landing = (id: NavContext) => reachable.find((n) => n.context === id)?.href ?? '/';
   const who = me.fullName?.trim() || me.email || 'Signed in';
-  // Null unless this account owns more than one gym AND the read settled. See
-  // the note on the `sites` prop.
-  const railLine = sites ? siteRailLine(sites) : null;
+  /*
+   * The site list, asked for here when the page did not hand one over.
+   *
+   * ── What was wrong ───────────────────────────────────────────────────────
+   *
+   * `sites` had exactly ONE caller in the whole console: app/page.tsx. The
+   * other thirty routes render this same rail with the prop undefined, so
+   * `siteRailLine` was never called on any of them and the strip said nothing.
+   *
+   * The effect on an owner recorded against two gyms is precise and bad. They
+   * open the home page and are told they are looking at 1 of 2 sites. They then
+   * click Close, or Payroll, or Accounting — and from that click onwards every
+   * figure in the console is ONE gym's, with nothing anywhere on the page
+   * saying which one or that there is another. The screen where it matters most
+   * is the one they sign: a month-end close, handed to an accountant, of half a
+   * business, with a rail that looks exactly like a single-site owner's.
+   *
+   * ── Why the read moved here rather than onto thirty pages ────────────────
+   *
+   * Because thirty copies of a read is thirty places for the next one to be
+   * forgotten, which is the shape of the defect being fixed rather than a fix
+   * for it. This component is the one thing every route already renders.
+   *
+   * ── What it costs, and who pays it ───────────────────────────────────────
+   *
+   * One `my_sites()` per page load, for owners only. It is a single SECURITY
+   * DEFINER function returning one jsonb value (supabase/parts/290) and the
+   * home page has always paid it. A trainer does not: five of this console's
+   * screens are theirs, `owner_sites` is about owners, and an RPC per page for
+   * a line that can never render for them is not a trade worth making.
+   *
+   * ── What it still does not do ────────────────────────────────────────────
+   *
+   * Nothing renders for the overwhelming case. `siteRailLine` is null for one
+   * gym, for none, and for a read that did not settle — asserted in
+   * ownedSites.test.ts — so a single-site owner's rail is byte-identical to
+   * what it was. And this is a LABEL: part 290 changed no policy, so the second
+   * site is a name this console knows and a gym it cannot open. The sentence
+   * about what a failed site read means for the figures is `siteNotice`, and it
+   * belongs beside the figures rather than in a label strip.
+   */
+  const [own, setOwn] = useState<SiteScope>({ status: 'loading', sites: [] });
+  const askSites = !sites && me.role === 'owner';
+  useEffect(() => {
+    if (!askSites) return;
+    let live = true;
+    // No catch that turns a refusal into an empty list: `fetchOwnedSites`
+    // returns status 'error' with no sites, and `siteRailLine` renders nothing
+    // for that — which is right. A rail that said "1 of 1 sites" over a failed
+    // read would be this console telling somebody their business is one gym.
+    void fetchOwnedSites().then((s) => { if (live) setOwn(s); });
+    return () => { live = false; };
+  }, [askSites]);
+
+  const scope = sites ?? (askSites ? own : null);
+  const railLine = scope ? siteRailLine(scope) : null;
 
   // Headings in the order their first member appears in NAV, so there is no
   // second list of group names to fall out of step with the nav itself.
