@@ -4,7 +4,7 @@
 // support tickets and activity ("Daniel Reyes", "Sara Lindqvist", promo
 // redemptions), which shipped in the production bundle and showed up in a real
 // owner's portal as if they were real people and real events.
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useMemo, useRef, useCallback, useContext, useState, type ReactNode } from 'react';
 
 // The activity log is gone rather than left empty.
 //
@@ -46,6 +46,26 @@ export function OwnerOpsProvider({ children }: { children: ReactNode }) {
   const [tickets, setTickets] = useState<Ticket[]>(() => JSON.parse(JSON.stringify(seedTickets)));
   const resolveTicket = (id: string) => setTickets((p) => p.map((x) => (x.id === id ? { ...x, resolved: true } : x)));
   const openTickets = tickets.filter((x) => !x.resolved).length;
-  return <Ctx.Provider value={{ tickets, resolveTicket, openTickets }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useOwnerOps`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.resolveTicket(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ resolveTicket });
+  impl.current = { resolveTicket };
+  const resolveTicketStable = useCallback((...a: Parameters<typeof resolveTicket>) => impl.current.resolveTicket(...a), []);
+  const value = useMemo<OpsValue>(() => ({ tickets, resolveTicket: resolveTicketStable, openTickets }), [tickets, resolveTicketStable, openTickets]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useOwnerOps(): OpsValue { const v = useContext(Ctx); if (!v) throw new Error('useOwnerOps must be used inside <OwnerOpsProvider>'); return v; }

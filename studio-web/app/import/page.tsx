@@ -220,10 +220,11 @@ export default function ImportPage() {
   const preview = useMemo<ImportPreview<MemberRow | PaymentRow | PlanRow> | null>(() => {
     if (!text.trim()) return null;
     const o = order || undefined;
-    // Plans carry no dates, so previewPlans takes no order to apply.
-    if (kind === 'plans') return previewPlans(text);
-    return kind === 'payments' ? previewPayments(text, o) : previewMembers(text, o);
-  }, [text, kind, order]);
+    // Plans carry no dates, so previewPlans takes no order to apply. The gym's
+    // currency is the fallback for any row whose sheet does not state one.
+    if (kind === 'plans') return previewPlans(text, ccy);
+    return kind === 'payments' ? previewPayments(text, o, ccy) : previewMembers(text, o);
+  }, [text, kind, order, ccy]);
 
   /**
    * The plan rows that will be written, each still carrying its line number.

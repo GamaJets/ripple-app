@@ -26,7 +26,7 @@
 // screen has to remember to validate it and no two screens can validate it
 // differently. `parsePlan` returning null means the column held nothing this
 // build understands; `status` is still what says whether it was read at all.
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useMemo, useRef, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { CoachAdjust } from '../lib/nutrition';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -209,7 +209,30 @@ export function CoachNutritionProvider({ children }: { children: ReactNode }) {
     } catch (e) { reportError('coachNutrition.setPlan', e, { clientId }); return false; }
   };
 
-  return <Ctx.Provider value={{ get, status, setAdjust, clear, setPlan, reload }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useCoachNutrition`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.get(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ get, setAdjust, clear, setPlan });
+  impl.current = { get, setAdjust, clear, setPlan };
+  const getStable = useCallback((...a: Parameters<typeof get>) => impl.current.get(...a), []);
+  const setAdjustStable = useCallback((...a: Parameters<typeof setAdjust>) => impl.current.setAdjust(...a), []);
+  const clearStable = useCallback((...a: Parameters<typeof clear>) => impl.current.clear(...a), []);
+  const setPlanStable = useCallback((...a: Parameters<typeof setPlan>) => impl.current.setPlan(...a), []);
+  const value = useMemo<CoachNutritionValue>(() => ({ get: getStable, status, setAdjust: setAdjustStable, clear: clearStable, setPlan: setPlanStable, reload }), [getStable, status, setAdjustStable, clearStable, setPlanStable, reload]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useCoachNutrition(): CoachNutritionValue {

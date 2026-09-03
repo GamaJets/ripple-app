@@ -507,6 +507,8 @@
     "src/lib/sharedSecret.ts",
     "src/lib/sharedSecret.test.ts",
     "src/lib/redirectTarget.ts",
-    "src/lib/redirectTarget.test.ts"
+    "src/lib/redirectTarget.test.ts",
+    "src/lib/pickerMonth.ts",
+    "src/lib/pickerMonth.test.ts"
   ]
 }

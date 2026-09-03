@@ -15,7 +15,7 @@
 // Moving the categories to the server is the change that would let the
 // send-push edge function honour them too, which is what the 'coach' category
 // needs before it can become a switch at all.
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   DEFAULT_NOTIFY_PREFS, prefsFromStored, type NotifyCategory, type NotifyPrefs,
@@ -110,8 +110,16 @@ export function NotifyPrefsProvider({ children }: { children: ReactNode }) {
     });
   }, [write]);
 
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<Value>(() => ({ prefs, loaded, setCategory, setQuiet, setQuietHours }), [prefs, loaded, setCategory, setQuiet, setQuietHours]);
   return (
-    <Ctx.Provider value={{ prefs, loaded, setCategory, setQuiet, setQuietHours }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

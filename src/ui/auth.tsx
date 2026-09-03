@@ -3,7 +3,7 @@
 // account + profile row (via the on_auth_user_created trigger), sign-in
 // establishes a persisted session (AsyncStorage), and the session is rehydrated
 // on launch. Screens are unchanged — they just read { authed, user }.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useMemo, useRef, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { BRAND } from '../lib/brands';
 import { USE_SUPABASE } from '../lib/config';
 import { VARIANT } from '../lib/variant';
@@ -576,8 +576,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (refused) throw new Error(refused);
   };
 
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useAuth`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.signIn(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, confirmEmailCode, resendEmailCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset });
+  impl.current = { signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, confirmEmailCode, resendEmailCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset };
+  const signInStable = useCallback((...a: Parameters<typeof signIn>) => impl.current.signIn(...a), []);
+  const signUpStable = useCallback((...a: Parameters<typeof signUp>) => impl.current.signUp(...a), []);
+  const signInWithProviderStable = useCallback((...a: Parameters<typeof signInWithProvider>) => impl.current.signInWithProvider(...a), []);
+  const sendPhoneCodeStable = useCallback((...a: Parameters<typeof sendPhoneCode>) => impl.current.sendPhoneCode(...a), []);
+  const verifyPhoneCodeStable = useCallback((...a: Parameters<typeof verifyPhoneCode>) => impl.current.verifyPhoneCode(...a), []);
+  const confirmEmailCodeStable = useCallback((...a: Parameters<typeof confirmEmailCode>) => impl.current.confirmEmailCode(...a), []);
+  const resendEmailCodeStable = useCallback((...a: Parameters<typeof resendEmailCode>) => impl.current.resendEmailCode(...a), []);
+  const signOutStable = useCallback((...a: Parameters<typeof signOut>) => impl.current.signOut(...a), []);
+  const sendPasswordResetStable = useCallback((...a: Parameters<typeof sendPasswordReset>) => impl.current.sendPasswordReset(...a), []);
+  const beginPasswordRecoveryWithTokenHashStable = useCallback((...a: Parameters<typeof beginPasswordRecoveryWithTokenHash>) => impl.current.beginPasswordRecoveryWithTokenHash(...a), []);
+  const beginPasswordRecoveryWithCodeStable = useCallback((...a: Parameters<typeof beginPasswordRecoveryWithCode>) => impl.current.beginPasswordRecoveryWithCode(...a), []);
+  const beginPasswordRecoveryWithTokensStable = useCallback((...a: Parameters<typeof beginPasswordRecoveryWithTokens>) => impl.current.beginPasswordRecoveryWithTokens(...a), []);
+  const completePasswordResetStable = useCallback((...a: Parameters<typeof completePasswordReset>) => impl.current.completePasswordReset(...a), []);
+  const value = useMemo<AuthValue>(() => ({ authed: !!user, user, loading, brandNotice, signIn: signInStable, signUp: signUpStable, signInWithProvider: signInWithProviderStable, sendPhoneCode: sendPhoneCodeStable, verifyPhoneCode: verifyPhoneCodeStable, confirmEmailCode: confirmEmailCodeStable, resendEmailCode: resendEmailCodeStable, signOut: signOutStable, sendPasswordReset: sendPasswordResetStable, beginPasswordRecoveryWithTokenHash: beginPasswordRecoveryWithTokenHashStable, beginPasswordRecoveryWithCode: beginPasswordRecoveryWithCodeStable, beginPasswordRecoveryWithTokens: beginPasswordRecoveryWithTokensStable, completePasswordReset: completePasswordResetStable }), [!!user, user, loading, brandNotice, signInStable, signUpStable, signInWithProviderStable, sendPhoneCodeStable, verifyPhoneCodeStable, confirmEmailCodeStable, resendEmailCodeStable, signOutStable, sendPasswordResetStable, beginPasswordRecoveryWithTokenHashStable, beginPasswordRecoveryWithCodeStable, beginPasswordRecoveryWithTokensStable, completePasswordResetStable]);
   return (
-    <Ctx.Provider value={{ authed: !!user, user, loading, brandNotice, signIn, signUp, signInWithProvider, sendPhoneCode, verifyPhoneCode, confirmEmailCode, resendEmailCode, signOut, sendPasswordReset, beginPasswordRecoveryWithTokenHash, beginPasswordRecoveryWithCode, beginPasswordRecoveryWithTokens, completePasswordReset }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

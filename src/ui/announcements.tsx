@@ -497,8 +497,29 @@ export function AnnouncementsProvider({ children }: { children: ReactNode }) {
   // Re-run this read when the signal comes back, without the member having
   // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
   useRecoverRead('announcements', status, reload);
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useAnnouncements`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.addAnnouncement(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ addAnnouncement, addGymAnnouncement });
+  impl.current = { addAnnouncement, addGymAnnouncement };
+  const addAnnouncementStable = useCallback((...a: Parameters<typeof addAnnouncement>) => impl.current.addAnnouncement(...a), []);
+  const addGymAnnouncementStable = useCallback((...a: Parameters<typeof addGymAnnouncement>) => impl.current.addGymAnnouncement(...a), []);
+  const value = useMemo<AnnValue>(() => ({ announcements, latest, latestGym, mine, addAnnouncement: addAnnouncementStable, addGymAnnouncement: addGymAnnouncementStable, status, unsent, reload }), [announcements, latest, latestGym, mine, addAnnouncementStable, addGymAnnouncementStable, status, unsent, reload]);
   return (
-    <Ctx.Provider value={{ announcements, latest, latestGym, mine, addAnnouncement, addGymAnnouncement, status, unsent, reload }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

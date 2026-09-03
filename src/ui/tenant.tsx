@@ -18,7 +18,7 @@
 // down the happy path. Every owner screen then told a gym owner they do not
 // belong to a gym, and `role` came back null so some of them offered to set one
 // up. `status` distinguishes the two.
-import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -381,8 +381,16 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   // is felt on every screen at once. src/lib/readRefresh.ts.
   useRecoverRead('tenant', status, () => { void refresh(); });
 
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<TenantValue>(() => ({ tenant, role, loading, status, brandMismatch, refresh, updateTenant, setOwnCurrency }), [tenant, role, loading, status, brandMismatch, refresh, updateTenant, setOwnCurrency]);
   return (
-    <Ctx.Provider value={{ tenant, role, loading, status, brandMismatch, refresh, updateTenant, setOwnCurrency }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={value}>{children}</Ctx.Provider>
   );
 }
 

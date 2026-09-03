@@ -42,6 +42,8 @@ import {
   type MonthWindow,
 } from '@lib/monthEnd';
 import { isoDate } from '@lib/format';
+import { monthTickStart } from '@lib/pickerMonth';
+import { useMonthTick } from '@/lib/monthTick';
 import { assertWhole, capLimit, readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
 import { gymLink, noGymNote } from '@lib/gymLink';
@@ -258,8 +260,6 @@ export default function Accounting() {
   // reads as a gym with no members.
   const [members, setMembers] = useState<Membership[] | null>(null);
 
-  const months = useMemo(() => recentMonths(MONTHS_OFFERED), []);
-
   // Opens on the month that has finished, not the one running. A part-month is
   // not something anybody files, and offering it first invites a figure to be
   // copied out of here before the month has stopped moving.
@@ -416,6 +416,34 @@ export default function Accounting() {
   const { at: readAt, busy: reading, refresh } = useFetched(
     () => (me?.tenantId && w ? load(me.tenantId, w) : Promise.resolve(false)),
   );
+
+  /**
+   * The calendar month it is NOW — which is not the same question as when this
+   * screen last read.
+   *
+   * The picker below is keyed on this and on nothing else. It has to gain
+   * October at midnight on the 1st whether or not anything has been read since,
+   * and it must not be rebuilt by anything else: the read is fired by an effect
+   * keyed on the chosen period, so a picker rebuilt by every read would be a
+   * loop rather than a refresh. `useMonthTick` re-renders this screen exactly
+   * once a month and never otherwise — see studio-web/lib/monthTick.ts.
+   */
+  const tick = useMonthTick();
+
+  /**
+   * The periods this screen offers — built once a MONTH, not once a mount.
+   *
+   * This was keyed on `[]`, and neither clock gate could see it:
+   * `check-frozen-day` looks for a clock read on the line, and the clock is a
+   * `now = Date.now()` default one file away; `check-frozen-hook` follows
+   * exactly those defaults but skips empty dependency lists, which are the other
+   * gate's rule. So the newest period this picker offered was the one the tab
+   * was OPENED in. The console has no router — the rail is a plain `<a href>` —
+   * so that tab is a document that lives for days, and on the 1st the period
+   * that had just ended was not in the list at all. The only repair was the full
+   * page reload this console spent a wave learning not to need.
+   */
+  const months = useMemo(() => recentMonths(MONTHS_OFFERED, monthTickStart(tick).getTime()), [tick]);
 
   useEffect(() => {
     if (me?.tenantId && w) refresh();

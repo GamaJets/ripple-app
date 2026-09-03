@@ -42,7 +42,7 @@
 // nowhere else. `migrateLegacyTarget` below moves it up exactly once, and only
 // when the server has no weight goal to contradict it. After that the row is
 // the record and the key is never read again.
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useMemo, useRef, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
@@ -381,8 +381,31 @@ export function GoalTrackerProvider({ children }: { children: ReactNode }) {
   // Re-run this read when the signal comes back, without the member having
   // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
   useRecoverRead('goalTracker', status, reload);
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useGoalTracker`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.setMeasuredGoal(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ setMeasuredGoal, addCustomGoal, removeGoal, setAchieved });
+  impl.current = { setMeasuredGoal, addCustomGoal, removeGoal, setAchieved };
+  const setMeasuredGoalStable = useCallback((...a: Parameters<typeof setMeasuredGoal>) => impl.current.setMeasuredGoal(...a), []);
+  const addCustomGoalStable = useCallback((...a: Parameters<typeof addCustomGoal>) => impl.current.addCustomGoal(...a), []);
+  const removeGoalStable = useCallback((...a: Parameters<typeof removeGoal>) => impl.current.removeGoal(...a), []);
+  const setAchievedStable = useCallback((...a: Parameters<typeof setAchieved>) => impl.current.setAchieved(...a), []);
+  const value = useMemo<GoalValue>(() => ({ goals, status, setMeasuredGoal: setMeasuredGoalStable, addCustomGoal: addCustomGoalStable, removeGoal: removeGoalStable, setAchieved: setAchievedStable, reload }), [goals, status, setMeasuredGoalStable, addCustomGoalStable, removeGoalStable, setAchievedStable, reload]);
   return (
-    <Ctx.Provider value={{ goals, status, setMeasuredGoal, addCustomGoal, removeGoal, setAchieved, reload }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

@@ -441,7 +441,30 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
   // Re-run this read when the signal comes back, without the member having
   // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
   useRecoverRead('foodLog', status, reload);
-  return <Ctx.Provider value={{ entries, consumed, status, addFood, logFood, removeFood, updateFood, unsent, reload }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useFoodLog`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.addFood(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ addFood, logFood, removeFood, updateFood });
+  impl.current = { addFood, logFood, removeFood, updateFood };
+  const addFoodStable = useCallback((...a: Parameters<typeof addFood>) => impl.current.addFood(...a), []);
+  const logFoodStable = useCallback((...a: Parameters<typeof logFood>) => impl.current.logFood(...a), []);
+  const removeFoodStable = useCallback((...a: Parameters<typeof removeFood>) => impl.current.removeFood(...a), []);
+  const updateFoodStable = useCallback((...a: Parameters<typeof updateFood>) => impl.current.updateFood(...a), []);
+  const value = useMemo<FoodLogValue>(() => ({ entries, consumed, status, addFood: addFoodStable, logFood: logFoodStable, removeFood: removeFoodStable, updateFood: updateFoodStable, unsent, reload }), [entries, consumed, status, addFoodStable, logFoodStable, removeFoodStable, updateFoodStable, unsent, reload]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useFoodLog(): FoodLogValue {

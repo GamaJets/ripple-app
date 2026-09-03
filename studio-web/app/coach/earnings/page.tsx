@@ -39,6 +39,8 @@ import { type Unread, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { Fetched, useFetched } from '@/components/Fetched';
+import { monthTickStart } from '@lib/pickerMonth';
+import { useMonthTick } from '@/lib/monthTick';
 import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
@@ -101,8 +103,15 @@ interface Period {
  * the previous month — and a coach checking a payslip against this screen would
  * find an hour missing from one month and an extra hour in another.
  */
-function periodsBack(n: number): Period[] {
-  const now = new Date();
+function periodsBack(n: number, at: number = Date.now()): Period[] {
+  // The instant is an ARGUMENT. It was `new Date()` here, called from a
+  // `useMemo(..., [])` one screen down, so the list of months this screen
+  // offered was fixed at the moment the tab was opened — and this console has no
+  // router, so that tab is a document that lives for days. On the 1st, the month
+  // that had just ended was not in the picker and the run for it could not be
+  // opened at all. Neither clock gate could see it: the clock was in here, and
+  // the memo that froze it was down there.
+  const now = new Date(at);
   const out: Period[] = [];
   for (let i = 0; i < n; i++) {
     const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -392,7 +401,18 @@ export default function CoachEarnings() {
   // screen tells a coach to go and ask for a fee that is probably already set.
   const [gymError, setGymError] = useState<string | null>(null);
 
-  const periods = useMemo(() => periodsBack(PERIODS), []);
+  /**
+   * The months this screen offers — built once a MONTH, not once a mount.
+   *
+   * `useMonthTick` re-renders this screen when the calendar month turns over and
+   * at no other time, which is exactly how often a month picker should change.
+   * NOT the read stamp: the read here is fired by an effect keyed on `period`,
+   * so rebuilding this list from the read stamp would be a loop — the read
+   * stamps the instant, the instant rebuilds the period, the period fires the
+   * read. The chosen month is held separately below and survives the rebuild.
+   */
+  const tick = useMonthTick();
+  const periods = useMemo(() => periodsBack(PERIODS, monthTickStart(tick).getTime()), [tick]);
   const [periodKey, setPeriodKey] = useState(periods[0].key);
   const period = periods.find((p) => p.key === periodKey) ?? periods[0];
 

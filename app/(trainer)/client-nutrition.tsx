@@ -60,6 +60,9 @@
 // coach their client has nothing while a week sits on the server, and invite
 // them to overwrite it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// The instant the energy plan's deadline is measured against, recomputed at
+// local midnight, on foreground and on focus. See the memo below.
+import { useNow } from '../../src/ui/today';
 import { View, Text, ScrollView, Pressable, Modal, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -367,6 +370,10 @@ export default function ClientNutrition() {
   ]), [r, cn, picked, askable, load]));
   const who = client?.name.split(' ')[0] ?? 'They';
   const adjust = picked ? cn.get(picked) : null;
+  /** The instant the goal deadline below is measured against. State, not a
+   *  render-body read: this screen is registered `href: null`, so it mounts
+   *  once and does not redraw while nobody is touching it. */
+  const nowMs = useNow().getTime();
 
   /** Everything `buildPlan` needs, or null when the profile cannot support a
    *  plan. Never a placeholder body: a 70 kg / 20% stand-in presented as this
@@ -380,7 +387,17 @@ export default function ClientNutrition() {
       goal: openWeightGoal,
       weightSeries: series?.weight ?? [],
       tdeeKcal: maintenanceFor({ weightKg, bodyFatPct, activity }).tdee,
-      nowMs: Date.now(),
+      // `nowMs` from `useNow`, never a bare `Date.now()` in a memo body. This
+      // memo is keyed on the picked client, their profile, their goals and the
+      // coach's adjustments — five things that move when a read answers and
+      // none of which moves when time passes. `energyPlanFor` measures how long
+      // is left until the client's goal date off this instant, so the deadline
+      // stopped counting down at whatever moment the reads landed: a screen
+      // left open said the same "11 weeks to go" on Monday and on the following
+      // Monday, and the daily calorie target derived from it was a week's worth
+      // of deficit too gentle. `check:frozen-day` looks for an EMPTY dependency
+      // array and cannot see this shape; `check:frozen-hook` names it.
+      nowMs,
     });
     return {
       id: picked, weightKg, bodyFatPct, activity, goal, diet, mealsPerDay,
@@ -392,7 +409,7 @@ export default function ClientNutrition() {
       avoid: profile.avoid,
       energyPlan,
     };
-  }, [picked, profile, goals, series, adjust]);
+  }, [picked, profile, goals, series, adjust, nowMs]);
 
   // The stored plan, and the working copy. The draft is seeded once per client
   // and never re-seeded underneath an edit in progress.

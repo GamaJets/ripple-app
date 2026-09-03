@@ -53,11 +53,26 @@
 //
 // A few seconds: long enough to cover the providers that mount together on one
 // launch, short enough that it is not a session cache. Signing out, signing in
-// and a token refresh all invalidate it immediately through
-// `onAuthStateChange`, so the only case the window widens at all is a session
-// revoked SERVER-side with no client event — which stays honoured for at most
-// those few seconds longer than it otherwise would. That is the whole of the
-// cost, and it is stated here so nobody has to work it out from the code.
+// and a token refresh all invalidate it through `onAuthStateChange`.
+//
+// TWO cases widen, not one, and the second was missed when this was written:
+//
+//   · A session revoked SERVER-side with no client event stays honoured for
+//     at most those few seconds longer than it otherwise would.
+//
+//   · A read that overlaps a sign-out. The real `getUser()` takes GoTrue's
+//     internal lock, and `_signOut` holds that lock while it runs — so an
+//     unwrapped call arriving between `_removeSession()` and the `SIGNED_OUT`
+//     notification BLOCKS, and then answers `AuthSessionMissingError`. A held
+//     answer is served from a bare `Promise.resolve` and takes no lock, so for
+//     that window it says "signed in" where the library would have said
+//     "signed out".
+//
+// Both are bounded by the freshness window and neither grants access to
+// anything: what a signed-out caller may then READ is decided by RLS, which
+// this cannot touch. The second is written down because a lane checking this
+// file against auth-js found it, and an argument that names only the case its
+// author thought of is worth less than one that names the case they missed.
 import { createSharedRead, SAME_LAUNCH_MS } from './sharedRead';
 
 /** How long a landed answer is reused. See the note above on what it widens. */
@@ -95,9 +110,14 @@ export function shareGetUser<R>(
 
   return {
     async getUser(jwt?: string): Promise<R> {
-      // Not `if (jwt)`: an empty-string token is still somebody ASKING about a
-      // specific token, and answering it from the current session's flight
-      // would be the same mistake as answering a real one.
+      // `!== undefined`, deliberately stricter than the library — and NOT for the
+      // reason first written here. auth-js's own `getUser` opens with `if (jwt)`,
+      // so it treats an empty string as "no token given" and falls through to the
+      // session path anyway; passing `''` straight down would change nothing about
+      // what comes back. The strictness is there so that ANY explicit argument —
+      // including one that arrived empty because a header was missing — is a
+      // question about a token rather than about this session, and cannot be
+      // answered out of a flight started for somebody else.
       if (jwt !== undefined) return native(jwt);
 
       const outcome = await shared.read(ME, async () => {

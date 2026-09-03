@@ -6,11 +6,12 @@
 import { Linking } from 'react-native';
 import { appLink } from './deepLink';
 import { supabase } from './supabase';
-// The single copy of "which currencies have no minor unit". It lives in
-// coachMoney.ts because that is where it was first needed and it is tested
-// there; coachStatement.ts and coachInvoice.ts already import it from there
-// rather than keeping their own, and so does this file now.
-import { ZERO_DECIMAL, currencyDecimals } from './coachMoney';
+// `currencyDecimals` is the one place that answers "how many minor units make a
+// whole one", and it answers **null** rather than 2 when nobody said which
+// money it is. This file used to import the zero-decimal LIST and branch on it
+// by hand, which is how it stayed wrong for the five three-decimal currencies
+// while looking swept.
+import { currencyDecimals } from './coachMoney';
 import { capLimit, capped } from './rowCap';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -134,9 +135,20 @@ export async function fetchFailedInvoices(): Promise<{ rows: Invoice[]; status: 
  * and for those the amount Stripe sends IS the whole-unit figure. A \u00a55,000
  * subscription was therefore printed as "JPY 50.00": a hundredth of what the
  * customer is actually being charged, on the screen they check to see what they
- * are being charged. `ZERO_DECIMAL` is the list, it is imported rather than
- * copied, and the division now happens only when the currency in hand says it
- * should.
+ * are being charged.
+ *
+ * \u2500\u2500 AND THE FOURTH, WHICH THE THIRD FIX HID \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+ *
+ * That fix imported `ZERO_DECIMAL` and branched on it, which is right for the
+ * sixteen and still wrong for the five currencies with THREE places. BHD, JOD,
+ * KWD, OMR and TND hold thousandths, so dividing by a hundred printed a
+ * subscription at TEN TIMES what the gym is charged \u2014 and the import of the
+ * zero-decimal list is precisely what made it invisible, because the file
+ * looked as though it had been through the currency sweep. It had, for one of
+ * the two lists.
+ *
+ * So the division is `currencyDecimals` and nothing else: one function, which
+ * knows about both lists and returns null rather than a default.
  *
  * With NO currency the scale is unknown as well as the unit, because whether
  * this integer is hundredths or whole units is precisely what the currency

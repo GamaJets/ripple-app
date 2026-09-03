@@ -9,7 +9,7 @@
 // reaches. A coach picking "comp prep" over an unread tag map sends to nobody,
 // or to a subset, and the screen reports it sent. `status` is what lets the
 // broadcast screen refuse to target a segment it could not actually read.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useRef, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
@@ -147,7 +147,29 @@ export function ClientTagsProvider({ children }: { children: ReactNode }) {
 
   const tagsFor = (clientId: string) => map[clientId] || [];
 
-  return <Ctx.Provider value={{ tagsFor, allTags, status, addTag, removeTag, reload }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useClientTags`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.tagsFor(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ tagsFor, addTag, removeTag });
+  impl.current = { tagsFor, addTag, removeTag };
+  const tagsForStable = useCallback((...a: Parameters<typeof tagsFor>) => impl.current.tagsFor(...a), []);
+  const addTagStable = useCallback((...a: Parameters<typeof addTag>) => impl.current.addTag(...a), []);
+  const removeTagStable = useCallback((...a: Parameters<typeof removeTag>) => impl.current.removeTag(...a), []);
+  const value = useMemo<TagsValue>(() => ({ tagsFor: tagsForStable, allTags, status, addTag: addTagStable, removeTag: removeTagStable, reload }), [tagsForStable, allTags, status, addTagStable, removeTagStable, reload]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useClientTags(): TagsValue {

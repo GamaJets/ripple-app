@@ -321,84 +321,96 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(timer);
   }, [syncAll, sync, liveMode]);
 
-  // The connected providers WITH their ids, so a figure can say which device it
-  // came from. It used to be the metrics alone, which is why nothing
-  // downstream could answer that question and the screen guessed.
-  const connectedPairs = PROVIDERS
-    .filter((p) => states[p.meta.id] === 'connected')
-    .map((p) => ({ id: p.meta.id as string, m: metrics[p.meta.id] }))
-    .filter((x): x is { id: string; m: DailyMetrics } => !!x.m);
-  const connectedMetrics = connectedPairs.map((x) => x.m);
+  // ── `today` and `todayFrom`, memoised ─────────────────────────────────────
+  //
+  // Everything in this block is a pure function of `states` and `metrics`, and
+  // both objects used to be rebuilt on every render of this provider. That put
+  // two fresh objects into the context value every time anything at all
+  // changed, which is the defect src/ui/roster.tsx documents at length: a
+  // consumer that keys an effect on the whole context value can then never
+  // settle. Keyed on their real inputs, the pair changes identity exactly when
+  // a device has answered — which is the only moment either figure can move.
+  const { today, todayFrom } = useMemo(() => {
+    // The connected providers WITH their ids, so a figure can say which device it
+    // came from. It used to be the metrics alone, which is why nothing
+    // downstream could answer that question and the screen guessed.
+    const connectedPairs = PROVIDERS
+      .filter((p) => states[p.meta.id] === 'connected')
+      .map((p) => ({ id: p.meta.id as string, m: metrics[p.meta.id] }))
+      .filter((x): x is { id: string; m: DailyMetrics } => !!x.m);
+    const connectedMetrics = connectedPairs.map((x) => x.m);
 
-  const pick = (key: keyof DailyMetrics) => {
-    const vals = connectedMetrics.map((m) => m[key]).filter((v) => typeof v === 'number') as number[];
-    return vals.length ? vals : null;
-  };
-  /** The highest value for this field and the device that reported it. Ties go
-   *  to the first in registry order, which is stable and arbitrary — but the id
-   *  it returns is always a device that really published that number. */
-  const highest = (key: keyof DailyMetrics): { v: number; id: string } | null => {
-    let best: { v: number; id: string } | null = null;
-    for (const { id, m } of connectedPairs) {
-      const v = m[key];
-      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
-      if (!best || v > best.v) best = { v, id };
-    }
-    return best;
-  };
-  const kcals = pick('activeKcal');
-  const totals = pick('totalKcal');
-  const steps = pick('steps');
-  const hrs = pick('heartRateAvg');
-  const hrl = pick('heartRateLatest');
-  const kcalTop = highest('activeKcal');
-  const totalTop = highest('totalKcal');
-  const stepTop = highest('steps');
-  const hrTop = highest('heartRateAvg');
-  // The LAST reading rather than the highest, so its source is the last device
-  // in the list that published one — the same one `heartRateLatest` takes.
-  const hrlLast = (() => {
-    let last: string | null = null;
-    for (const { id, m } of connectedPairs) if (typeof m.heartRateLatest === 'number') last = id;
-    return last;
-  })();
-  const today = {
-    activeKcal: kcals ? Math.max(...kcals) : null,
-    // Kept apart from activeKcal rather than folded into it. WHOOP publishes
-    // only this one, and storing it as "active" is what put 1,309 kcal of
-    // mostly-resting energy on a screen that meant exercise.
-    totalKcal: totals ? Math.max(...totals) : null,
-    steps: steps ? Math.max(...steps) : null,
-    // One device's figure, like every other field on this row — NOT the mean of
-    // two.
-    //
-    // This line used to average them, and app/(client)/devices.tsx renders the
-    // result four rows under a paragraph promising the opposite: "Where two
-    // disagree, Recovery shows the figure one device actually reported and
-    // names it — it never averages them into a number no device recorded." A
-    // member wearing an Apple Watch all day and a WHOOP overnight was shown a
-    // day's average heart rate that neither had measured and neither app would
-    // agree with, on the screen whose whole job is explaining where the figures
-    // come from.
-    //
-    // `Math.max`, for the same reason steps and calories take it: two devices
-    // measuring the same body disagree mostly by COVERAGE — the one that was on
-    // the wrist through the session recorded the session, the one in a drawer
-    // recorded the drawer — so the higher figure is the more complete
-    // measurement rather than the more flattering one. And whatever else is
-    // true of it, it is a number a device really reported.
-    heartRateAvg: hrs ? Math.round(Math.max(...hrs)) : null,
-    heartRateLatest: hrl && hrl.length ? Math.round(hrl[hrl.length - 1]) : null,
-  };
-  // Computed from the same pass that chose each figure, so the name beside a
-  // number and the number cannot come from two different devices.
-  const todayFrom = {
-    activeKcal: kcalTop?.id ?? null,
-    totalKcal: totalTop?.id ?? null,
-    steps: stepTop?.id ?? null,
-    heartRateAvg: hrTop?.id ?? null,
-    heartRateLatest: hrlLast,
-  };
+    const pick = (key: keyof DailyMetrics) => {
+      const vals = connectedMetrics.map((m) => m[key]).filter((v) => typeof v === 'number') as number[];
+      return vals.length ? vals : null;
+    };
+    /** The highest value for this field and the device that reported it. Ties go
+     *  to the first in registry order, which is stable and arbitrary — but the id
+     *  it returns is always a device that really published that number. */
+    const highest = (key: keyof DailyMetrics): { v: number; id: string } | null => {
+      let best: { v: number; id: string } | null = null;
+      for (const { id, m } of connectedPairs) {
+        const v = m[key];
+        if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+        if (!best || v > best.v) best = { v, id };
+      }
+      return best;
+    };
+    const kcals = pick('activeKcal');
+    const totals = pick('totalKcal');
+    const steps = pick('steps');
+    const hrs = pick('heartRateAvg');
+    const hrl = pick('heartRateLatest');
+    const kcalTop = highest('activeKcal');
+    const totalTop = highest('totalKcal');
+    const stepTop = highest('steps');
+    const hrTop = highest('heartRateAvg');
+    // The LAST reading rather than the highest, so its source is the last device
+    // in the list that published one — the same one `heartRateLatest` takes.
+    const hrlLast = (() => {
+      let last: string | null = null;
+      for (const { id, m } of connectedPairs) if (typeof m.heartRateLatest === 'number') last = id;
+      return last;
+    })();
+    const today = {
+      activeKcal: kcals ? Math.max(...kcals) : null,
+      // Kept apart from activeKcal rather than folded into it. WHOOP publishes
+      // only this one, and storing it as "active" is what put 1,309 kcal of
+      // mostly-resting energy on a screen that meant exercise.
+      totalKcal: totals ? Math.max(...totals) : null,
+      steps: steps ? Math.max(...steps) : null,
+      // One device's figure, like every other field on this row — NOT the mean of
+      // two.
+      //
+      // This line used to average them, and app/(client)/devices.tsx renders the
+      // result four rows under a paragraph promising the opposite: "Where two
+      // disagree, Recovery shows the figure one device actually reported and
+      // names it — it never averages them into a number no device recorded." A
+      // member wearing an Apple Watch all day and a WHOOP overnight was shown a
+      // day's average heart rate that neither had measured and neither app would
+      // agree with, on the screen whose whole job is explaining where the figures
+      // come from.
+      //
+      // `Math.max`, for the same reason steps and calories take it: two devices
+      // measuring the same body disagree mostly by COVERAGE — the one that was on
+      // the wrist through the session recorded the session, the one in a drawer
+      // recorded the drawer — so the higher figure is the more complete
+      // measurement rather than the more flattering one. And whatever else is
+      // true of it, it is a number a device really reported.
+      heartRateAvg: hrs ? Math.round(Math.max(...hrs)) : null,
+      heartRateLatest: hrl && hrl.length ? Math.round(hrl[hrl.length - 1]) : null,
+    };
+    // Computed from the same pass that chose each figure, so the name beside a
+    // number and the number cannot come from two different devices.
+    const todayFrom = {
+      activeKcal: kcalTop?.id ?? null,
+      totalKcal: totalTop?.id ?? null,
+      steps: stepTop?.id ?? null,
+      heartRateAvg: hrTop?.id ?? null,
+      heartRateLatest: hrlLast,
+    };
+    return { today, todayFrom };
+  }, [states, metrics]);
 
   // How much of that row is current. A provider that is connected and has never
   // answered is 'loading' rather than absent, because a roll-up missing one of
@@ -410,7 +422,15 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     return worstStatus(...live.map((p) => syncStatus[p.meta.id] ?? 'loading'));
   }, [states, syncStatus]);
 
-  return <Ctx.Provider value={{ states, metrics, busy, lastSync, syncStatus, todayStatus, connect, disconnect, sync, syncAll, today, todayFrom, liveMode, setLiveMode }}>{children}</Ctx.Provider>;
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<Value>(() => ({ states, metrics, busy, lastSync, syncStatus, todayStatus, connect, disconnect, sync, syncAll, today, todayFrom, liveMode, setLiveMode }), [states, metrics, busy, lastSync, syncStatus, todayStatus, connect, disconnect, sync, syncAll, today, todayFrom, liveMode, setLiveMode]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useWearables(): Value {

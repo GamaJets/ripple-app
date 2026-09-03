@@ -49,6 +49,8 @@ import {
   monthWindow, recentMonths, monthKeyOf, buildClose, isOverdue, closeHeadline, monthEnded,
   type CloseRecord, type MonthClose, type GymInvoice, type Line, type Blocker,
 } from '@lib/monthEnd';
+import { monthTickStart } from '@lib/pickerMonth';
+import { useMonthTick } from '@/lib/monthTick';
 import {
   fetchCloses, closeMonth, reopenMonth, snapshotOf, liveCloseFor,
   closeBlocker, reopenBlocker, driftSince,
@@ -163,7 +165,6 @@ export default function Close() {
   // Default to the month that has actually finished. Opening on the running
   // month would greet an owner with a refusal about a month nobody claimed was
   // over, and train them to skip the refusals.
-  const months = useMemo(() => recentMonths(MONTHS_OFFERED + 1), []);
   const [key, setKey] = useState<string>(() => {
     const all = recentMonths(2);
     return all[1] ?? monthKeyOf();
@@ -283,6 +284,29 @@ export default function Close() {
    * landed, where there are no rows to judge yet anyway.
    */
   const nowMs = readAt ?? Date.now();
+
+  /**
+   * The months this sheet offers — built once a MONTH, not once a mount.
+   *
+   * This was `useMemo(() => recentMonths(MONTHS_OFFERED + 1), [])` and neither
+   * clock gate could see it: `check-frozen-day` looks for a clock read on the
+   * line, and the clock is `recentMonths`'s own `now = Date.now()` default one
+   * file away; `check-frozen-hook` follows exactly those defaults but skips
+   * empty dependency lists, which are the other gate's rule.
+   *
+   * The console has no router, so a close tab is a document that lives for days.
+   * Keyed on `[]`, the newest month this picker offered was the month the tab
+   * was OPENED in — so an owner who left it open over the 1st could not select
+   * the month that had just ended, on the screen whose entire purpose is to
+   * close the month that has just ended. The initial selection above is
+   * deliberately still a one-time read: which month the sheet OPENS on is a
+   * decision made once, and moving it under somebody would be a different bug.
+   */
+  const tick = useMonthTick();
+  const months = useMemo(
+    () => recentMonths(MONTHS_OFFERED + 1, monthTickStart(tick).getTime()),
+    [tick],
+  );
 
   useEffect(() => {
     let live = true;

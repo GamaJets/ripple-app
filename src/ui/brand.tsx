@@ -37,7 +37,7 @@
 // answer, and AsyncStorage is where it belongs. `adoptGymName` is how the gym's
 // real name gets into that cache once somebody has signed in and an owner
 // screen has read it.
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useMemo, useRef, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VARIANT, VARIANT_LABEL } from '../lib/variant';
 import { supabase } from '../lib/supabase';
@@ -124,7 +124,28 @@ export function BrandProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <Ctx.Provider value={{ appName, adoptGymName, setAppName }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useBrand`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.adoptGymName(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ adoptGymName, setAppName });
+  impl.current = { adoptGymName, setAppName };
+  const adoptGymNameStable = useCallback((...a: Parameters<typeof adoptGymName>) => impl.current.adoptGymName(...a), []);
+  const setAppNameStable = useCallback((...a: Parameters<typeof setAppName>) => impl.current.setAppName(...a), []);
+  const value = useMemo<BrandValue>(() => ({ appName, adoptGymName: adoptGymNameStable, setAppName: setAppNameStable }), [appName, adoptGymNameStable, setAppNameStable]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useBrand(): BrandValue {

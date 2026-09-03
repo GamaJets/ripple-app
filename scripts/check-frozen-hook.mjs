@@ -245,12 +245,24 @@ const CLOCK_DEFAULT = /=\s*(?:Date\s*\.\s*now\s*\(\s*\)|new\s+Date\s*\(\s*\))/;
  * tonight, so a drop here is somebody doing the work — and failing their build
  * for it is how a gate gets a `--force` written next to it. A drop prints and
  * passes. Lower the number when you see the line.
+ *
+ * ── EMPTY, AND THAT IS THE POINT ──────────────────────────────────────────
+ *
+ * All eighteen have been fixed. The last four were app/(trainer)/sessions.tsx
+ * (two: `pastSessions` and `windowStart`, so a session that ended while the
+ * screen was open never joined the record), client-training.tsx (`historySpan`,
+ * so how long a client had been training stopped growing when the read landed),
+ * client-nutrition.tsx (`energyPlanFor`, so a goal deadline stopped counting
+ * down and the calorie target derived from it drifted with it) and
+ * share-kit.tsx (both bounds of the window a coach PUBLISHES a session count
+ * over).
+ *
+ * With nothing left to ratchet this gate is in `check:all`, which is what its
+ * package.json note said it was waiting for. Anything added below is a
+ * regression with a name, not a backlog — the header above says why the shape
+ * is invisible to check:frozen-day, and the fix is always the same two lines.
  */
 const KNOWN = new Map([
-  ['app/(trainer)/client-nutrition.tsx', { count: 1, fix: 'line 374: `nowMs: Date.now()` into `energyPlanFor` inside a memo keyed [picked, profile, goals, series, adjust]. Take `const nowMs = useNow().getTime()` and put `nowMs` in the dependency list.' }],
-  ['app/(trainer)/client-training.tsx', { count: 1, fix: 'line 505: `historySpan(log ?? [])` defaults its second argument to Date.now(). The memo five lines above it already carries `nowMs` in its dependency list — pass the same `nowMs` here and add it.' }],
-  ['app/(trainer)/sessions.tsx', { count: 2, fix: 'line 525 `pastSessions(all ?? [])` and line 573 `windowStart(loadedDays)` both default their last argument to Date.now(). Take `const nowMs = useNow().getTime()`, pass it to both, and add it to both dependency lists.' }],
-  ['app/(trainer)/share-kit.tsx', { count: 1, fix: 'line 367: `sinceMs`/`untilMs` from two `Date.now()` reads inside the card memo. `const nowMs = useNow().getTime()`, both bounds from it, and `nowMs` in the dependency list.' }],
 ]);
 
 /* ── which library functions read the clock from a defaulted parameter ────── */

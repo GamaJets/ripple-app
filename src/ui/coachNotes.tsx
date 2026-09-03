@@ -36,7 +36,7 @@
 // On failure the caller is told `false` and keeps what the coach typed, so the
 // text is still in the box to try again with. See the Save handler in
 // app/(trainer)/dashboard.tsx.
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useMemo, useRef, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
@@ -215,8 +215,30 @@ export function CoachNotesProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useCoachNotes`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.getNotes(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ getNotes, addNote, removeNote });
+  impl.current = { getNotes, addNote, removeNote };
+  const getNotesStable = useCallback((...a: Parameters<typeof getNotes>) => impl.current.getNotes(...a), []);
+  const addNoteStable = useCallback((...a: Parameters<typeof addNote>) => impl.current.addNote(...a), []);
+  const removeNoteStable = useCallback((...a: Parameters<typeof removeNote>) => impl.current.removeNote(...a), []);
+  const value = useMemo<NotesValue>(() => ({ getNotes: getNotesStable, status, addNote: addNoteStable, removeNote: removeNoteStable, reload }), [getNotesStable, status, addNoteStable, removeNoteStable, reload]);
   return (
-    <Ctx.Provider value={{ getNotes, status, addNote, removeNote, reload }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={value}>{children}</Ctx.Provider>
   );
 }
 

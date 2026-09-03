@@ -8,7 +8,7 @@
 // whose coach had written them three notes was told their coach had said
 // nothing — and on the other side the coach saw their own notes vanish from the
 // client detail and wrote them again.
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useMemo, useRef, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
@@ -127,7 +127,28 @@ export function CoachFeedbackProvider({ children }: { children: ReactNode }) {
     } catch { return false; }
   };
 
-  return <Ctx.Provider value={{ getFeedback, status, addFeedback, reload }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useCoachFeedback`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.getFeedback(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ getFeedback, addFeedback });
+  impl.current = { getFeedback, addFeedback };
+  const getFeedbackStable = useCallback((...a: Parameters<typeof getFeedback>) => impl.current.getFeedback(...a), []);
+  const addFeedbackStable = useCallback((...a: Parameters<typeof addFeedback>) => impl.current.addFeedback(...a), []);
+  const value = useMemo<FeedbackValue>(() => ({ getFeedback: getFeedbackStable, status, addFeedback: addFeedbackStable, reload }), [getFeedbackStable, status, addFeedbackStable, reload]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useCoachFeedback(): FeedbackValue {

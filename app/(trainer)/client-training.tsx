@@ -502,7 +502,13 @@ export default function ClientTraining() {
   const best = useMemo(() => bestMonth(cells), [cells]);
   const trainedCells = useMemo(() => trainedMonths(cells), [cells]);
   const worstGap = useMemo(() => longestGap(cells), [cells]);
-  const stage = useMemo(() => stageOf(longWhole ? historySpan(log ?? []) : null), [longWhole, log]);
+  // `nowMs`, not `historySpan`'s defaulted `Date.now()`. The memo three lines
+  // up already carries it; this one read the clock in its own body under a
+  // dependency list of rows that move when the server answers and never when
+  // time passes, so how long this client has been training stopped growing at
+  // whatever moment the read landed. Two facts about the same history, cut on
+  // two different instants, on one screen. `check:frozen-hook`'s entry.
+  const stage = useMemo(() => stageOf(longWhole ? historySpan(log ?? [], nowMs) : null), [longWhole, log, nowMs]);
 
   const pva = useMemo(() => planVsActual({
     days: compareWeek?.days ?? null,

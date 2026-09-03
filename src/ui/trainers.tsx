@@ -20,7 +20,7 @@
 // genuinely has no trainers on the books — so an owner whose read was refused
 // saw an empty roster, a payroll of nothing and zero sessions delivered, all
 // presented as this month's figures. `status` is the third state.
-import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { fetchGymTrainers, payroll30For, type GymTrainer } from '../lib/gymTrainers';
@@ -111,8 +111,16 @@ export function PlatformTrainersProvider({ children }: { children: ReactNode }) 
   const sessions30 = unread ? null : trainers.reduce((a, t) => a + t.sessions30, 0);
   const payroll30 = unread ? null : payroll30For(trainers, tenant?.sessionFee ?? null);
 
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<TrainersValue>(() => ({ trainers, loading, status, sessions30, payroll30, refresh }), [trainers, loading, status, sessions30, payroll30, refresh]);
   return (
-    <Ctx.Provider value={{ trainers, loading, status, sessions30, payroll30, refresh }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={value}>{children}</Ctx.Provider>
   );
 }
 

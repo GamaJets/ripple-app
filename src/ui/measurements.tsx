@@ -7,7 +7,7 @@
 // showed its "log your first measurement" empty state to a client with months of
 // history — inviting them to start again from nothing and lose the trend the
 // screen exists to show. `status` separates the two.
-import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useMemo, useRef, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import type { LoadStatus } from './loadStatus';
@@ -412,7 +412,29 @@ export function MeasurementsProvider({ children }: { children: ReactNode }) {
   // Re-run this read when the signal comes back, without the member having
   // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
   useRecoverRead('measurements', status, reload);
-  return <Ctx.Provider value={{ entries, status, addEntry, updateMetric, removeMetric, reload }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useMeasurements`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.addEntry(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ addEntry, updateMetric, removeMetric });
+  impl.current = { addEntry, updateMetric, removeMetric };
+  const addEntryStable = useCallback((...a: Parameters<typeof addEntry>) => impl.current.addEntry(...a), []);
+  const updateMetricStable = useCallback((...a: Parameters<typeof updateMetric>) => impl.current.updateMetric(...a), []);
+  const removeMetricStable = useCallback((...a: Parameters<typeof removeMetric>) => impl.current.removeMetric(...a), []);
+  const value = useMemo<MeasureValue>(() => ({ entries, status, addEntry: addEntryStable, updateMetric: updateMetricStable, removeMetric: removeMetricStable, reload }), [entries, status, addEntryStable, updateMetricStable, removeMetricStable, reload]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useMeasurements(): MeasureValue {

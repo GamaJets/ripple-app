@@ -382,6 +382,27 @@ export function WellnessProvider({ children }: { children: ReactNode }) {
   // Re-run this read when the signal comes back, without the member having
   // to know the app is stuck and think to pull down. src/lib/readRefresh.ts.
   useRecoverRead('wellness', status, reload);
-  return <Ctx.Provider value={{ sleep, addSleep, removeSleep, status, unsent, reload }}>{children}</Ctx.Provider>;
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useWellness`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.addSleep(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ addSleep, removeSleep });
+  impl.current = { addSleep, removeSleep };
+  const addSleepStable = useCallback((...a: Parameters<typeof addSleep>) => impl.current.addSleep(...a), []);
+  const removeSleepStable = useCallback((...a: Parameters<typeof removeSleep>) => impl.current.removeSleep(...a), []);
+  const value = useMemo<WellnessValue>(() => ({ sleep, addSleep: addSleepStable, removeSleep: removeSleepStable, status, unsent, reload }), [sleep, addSleepStable, removeSleepStable, status, unsent, reload]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useWellness(): WellnessValue { const v = useContext(Ctx); if (!v) throw new Error('useWellness must be used inside <WellnessProvider>'); return v; }

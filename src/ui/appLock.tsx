@@ -8,7 +8,7 @@
 // Shared by all three apps. It sits inside the auth provider in the root
 // layout, so it can ask whether anybody is signed in — a lock over a sign-in
 // screen protects nothing and would only teach people to dismiss it.
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useMemo, useState, type ReactNode } from 'react';
 import { BRAND } from '../lib/brands';
 import { AppState, Platform, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -187,8 +187,16 @@ export function AppLockProvider({ signedIn, children }: { signedIn: boolean; chi
     }
   }, [unlock]);
 
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<AppLockValue>(() => ({ enabled, available, label, state, unlock, setEnabled }), [enabled, available, label, state, unlock, setEnabled]);
   return (
-    <Ctx.Provider value={{ enabled, available, label, state, unlock, setEnabled }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

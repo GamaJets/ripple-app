@@ -62,7 +62,7 @@
 //    `cacheable` off so the next write cannot overwrite an unread queue with an
 //    empty one. That single line is the difference between a corrupt cache
 //    costing a session and a corrupt cache costing every session on the phone.
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { WorkoutEntry } from '../lib/mockData';
 import { rowToEntry, entryToRow } from '../lib/workoutRow';
@@ -653,11 +653,36 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   // back already contain the session they just logged in the basement.
   useRecoverRead('workoutLog', status, reload);
 
+  // ── Why the implementations below are handed out through a ref ────────────
+  //
+  // This provider used to publish an inline object literal, so `useWorkoutLog`
+  // returned a different value on every render — and every function on it was a
+  // different function again. The consumer that writes the obvious thing,
+  // `useFocusEffect(useCallback(() => { x.addWorkout(); }, [x]))`, then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, the call re-runs the fetch, the fetch ends in a setState, the
+  // provider re-renders, and both identities are new again. src/ui/roster.tsx
+  // documents that at length and is the pattern this follows.
+  //
+  // The wrappers are created once and read the current implementations out of a
+  // ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze that state with them, which is the same bug one
+  // level down.
+  const impl = useRef({ addWorkout, addWorkouts, logWorkouts, retryWorkouts, flushWorkouts, updateWorkout, removeWorkout, setSessionMins, reload });
+  impl.current = { addWorkout, addWorkouts, logWorkouts, retryWorkouts, flushWorkouts, updateWorkout, removeWorkout, setSessionMins, reload };
+  const addWorkoutStable = useCallback((...a: Parameters<typeof addWorkout>) => impl.current.addWorkout(...a), []);
+  const addWorkoutsStable = useCallback((...a: Parameters<typeof addWorkouts>) => impl.current.addWorkouts(...a), []);
+  const logWorkoutsStable = useCallback((...a: Parameters<typeof logWorkouts>) => impl.current.logWorkouts(...a), []);
+  const retryWorkoutsStable = useCallback((...a: Parameters<typeof retryWorkouts>) => impl.current.retryWorkouts(...a), []);
+  const flushWorkoutsStable = useCallback((...a: Parameters<typeof flushWorkouts>) => impl.current.flushWorkouts(...a), []);
+  const updateWorkoutStable = useCallback((...a: Parameters<typeof updateWorkout>) => impl.current.updateWorkout(...a), []);
+  const removeWorkoutStable = useCallback((...a: Parameters<typeof removeWorkout>) => impl.current.removeWorkout(...a), []);
+  const setSessionMinsStable = useCallback((...a: Parameters<typeof setSessionMins>) => impl.current.setSessionMins(...a), []);
+  const reloadStable = useCallback((...a: Parameters<typeof reload>) => impl.current.reload(...a), []);
+  const value = useMemo<WorkoutLogValue>(() => ({ log, status, unsent, addWorkout: addWorkoutStable, addWorkouts: addWorkoutsStable, logWorkouts: logWorkoutsStable, retryWorkouts: retryWorkoutsStable, flushWorkouts: flushWorkoutsStable, updateWorkout: updateWorkoutStable, removeWorkout: removeWorkoutStable, setSessionMins: setSessionMinsStable, reload: reloadStable }), [log, status, unsent, addWorkoutStable, addWorkoutsStable, logWorkoutsStable, retryWorkoutsStable, flushWorkoutsStable, updateWorkoutStable, removeWorkoutStable, setSessionMinsStable, reloadStable]);
   return (
-    <Ctx.Provider value={{
-      log, status, unsent, addWorkout, addWorkouts, logWorkouts,
-      retryWorkouts, flushWorkouts, updateWorkout, removeWorkout, setSessionMins, reload,
-    }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={value}>{children}</Ctx.Provider>
   );
 }
 

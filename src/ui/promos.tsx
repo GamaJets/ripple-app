@@ -27,7 +27,7 @@
 // 'ready'; under 'error' it means the read did not answer, and the Growth
 // screen must not offer to create the first code to somebody who may already
 // have six.
-import { createContext, useContext, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { capLimit, capped } from '../lib/rowCap';
@@ -182,8 +182,16 @@ export function PromosProvider({ children }: { children: ReactNode }) {
     return true;
   }, [refresh]);
 
+  // Memoised, not an inline literal. See the long note in src/ui/roster.tsx
+  // (search "handed out through a ref"): a provider that hands out
+  // `value={{ … }}` returns a different object on every render, and a consumer
+  // that keys an effect on it — `useFocusEffect(useCallback(() => { x.reload();
+  // }, [x]))` — builds a read loop that cannot settle. Everything below is
+  // already stable for the life of the provider, so the value changes identity
+  // only when something a consumer can actually see has changed.
+  const value = useMemo<PromosValue>(() => ({ promos, status, addPromo, toggleActive, removePromo, refresh }), [promos, status, addPromo, toggleActive, removePromo, refresh]);
   return (
-    <Ctx.Provider value={{ promos, status, addPromo, toggleActive, removePromo, refresh }}>
+    <Ctx.Provider value={value}>
       {children}
     </Ctx.Provider>
   );

@@ -103,6 +103,9 @@
 // still owed by another change; it has since landed, and `check:tabs` and
 // `check:reachable` both hold it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// The instant the published window is cut on, recomputed at local midnight, on
+// foreground and on focus. See the card memo below.
+import { useNow } from '../../src/ui/today';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 // React Native's own <Image>, which is in every binary ever built. The
 // thumbnails here are still photographs and nothing needs an animated format,
@@ -363,6 +366,10 @@ export default function ShareKit() {
   const brandKnown = tenantStatus === 'ready';
   const brand = brandKnown ? (tenant?.name || authUser?.name || '').trim() : '';
   const span = SPANS.find((s) => s.days === days) ?? SPANS[0];
+  /** Both ends of the window the week card counts over. State, not a render-body
+   *  read: this screen is registered `href: null` and does not redraw while
+   *  nobody is touching it. */
+  const nowMs = useNow().getTime();
 
   const build: CardBuild = useMemo(() => {
     // Before anything else, and it applies to both card kinds: a card is not
@@ -390,8 +397,20 @@ export default function ShareKit() {
 
     if (rows === null) return weekCard({ brand, spanLabel: span.label, sessions: null, minutes: null, clients: null, logo: logo.dataUri });
 
-    const sinceMs = Date.now() - days * 86_400_000;
-    const untilMs = Date.now();
+    // `nowMs` from `useNow`, and ONE read of it rather than two. Both bounds of
+    // the window this card publishes come from here, and the memo's dependency
+    // list moves when a read answers, when the coach picks a span and never
+    // when time passes — so a screen left open composed "last 7 days" against
+    // the seven days before whenever it mounted, and a card posted on Friday
+    // could be counting Monday to Sunday of the week before. `check:frozen-day`
+    // looks for an EMPTY dependency array and cannot see this shape;
+    // `check:frozen-hook` names it, and this is its entry.
+    //
+    // Two `Date.now()` calls also gave the two bounds two different instants —
+    // harmless at this width and wrong in principle, on the pair that decides
+    // which sessions a coach publishes a number about.
+    const sinceMs = nowMs - days * 86_400_000;
+    const untilMs = nowMs;
     const sessions = deliveredBetween(rows, sinceMs, untilMs);
     // The same predicate, written a second time to get the ROWS rather than the
     // count — and then checked against the count, because two definitions of
@@ -408,7 +427,7 @@ export default function ShareKit() {
     const clients = agrees ? new Set(delivered.map((s) => s.clientId).filter(Boolean)).size : null;
 
     return weekCard({ brand, spanLabel: span.label, sessions, minutes, clients, logo: logo.dataUri });
-  }, [mode, rows, days, span.label, brand, brandKnown, clientName, spanText, figures, note, okFigures, okName,
+  }, [mode, rows, days, nowMs, span.label, brand, brandKnown, clientName, spanText, figures, note, okFigures, okName,
       logo.dataUri, pickedId, pickedUri, photoConsent]);
 
   const size = cardSize(shape);
