@@ -60,6 +60,7 @@ import { runCurrency, totalNote } from '@lib/gymRateCurrency';
 import { payPolicyOf, PAY_POLICY_LABEL, type PayPolicyCode } from '@lib/gymPolicy';
 import { isoDate } from '@lib/format';
 import { assertWhole, capLimit, capped, readAll, type CappedRead } from '@lib/rowCap';
+import { readByIds } from '@lib/idLookup';
 // The reader's locale, the GYM's zone. A coach checking a payslip abroad was
 // shown their own laptop's day for every session and every payment run.
 import { gymDateText, gymDateTimeText, calendarDateText } from '@lib/gymWhen';
@@ -160,22 +161,43 @@ interface ClientNames {
  * not truncation and is not treated as it.
  */
 async function clientNames(ids: string[]): Promise<ClientNames> {
+  /*
+   * CHUNKED, and it was one bare `.in('id', unique)` with a `capLimit()` on it.
+   *
+   * The comment that stood here said the list "cannot truncate in practice"
+   * because it is bounded by one coach's sessions in one month, and that is
+   * true of the ROW CAP and irrelevant to the failure that actually reaches a
+   * coach. A uuid costs about 39 bytes inside an `in.("…","…")` list, so past
+   * roughly two hundred distinct people the REQUEST LINE goes over the 8KB
+   * nginx and most CDNs allow: PostgREST answers 414, supabase-js hands back
+   * `data: null`, and — because a 414 is not a row-cap hit — `assertWhole` sees
+   * nothing wrong with it. Every row on the screen would render with the "not
+   * named" dash and the reason given would be a refusal that never happened.
+   *
+   * Two hundred distinct clients in a month is a group coach with a full
+   * timetable, not a hypothetical: src/lib/idLookup.ts sets ID_CHUNK at 150 for
+   * exactly this and `readByIds` pages inside each chunk, so no chunk can
+   * truncate either — 150 primary keys cannot answer with more than 150 rows.
+   *
+   * A throw is still caught and still reported as one sentence, because the
+   * rule above has not changed: losing a name must not black out a figure that
+   * is perfectly readable without it.
+   */
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return { names: new Map(), unread: null };
-  // Capped, though it cannot truncate in practice: `unique` is bounded by one
-  // coach's sessions in one month. If it ever did come back at the ceiling,
-  // half the rows would be named and half would show the "not named" dash,
-  // which is the one outcome this whole function is being rewritten to avoid.
-  const { data, error } = await supabase
-    .from('profiles').select('id, full_name').in('id', unique).limit(capLimit());
-  if (error) {
-    return { names: new Map(), unread: error.message || 'the names could not be read' };
-  }
   let rows: Array<{ id: string; full_name: string | null }>;
   try {
-    rows = assertWhole(data, 'the names of your clients');
+    rows = await readByIds<{ id: string; full_name: string | null }>(
+      unique,
+      (chunk, from, to) => supabase.from('profiles').select('id, full_name')
+        // Ordered by the primary key, which `readAll` inside `readByIds`
+        // requires and which `profiles.id` satisfies: it IS the primary key, so
+        // it cannot tie and no page can drop a row.
+        .in('id', chunk).order('id', { ascending: true }).range(from, to),
+      'the names of your clients',
+    );
   } catch (e: any) {
-    return { names: new Map(), unread: e?.message ?? 'the names could not be read whole' };
+    return { names: new Map(), unread: e?.message ?? 'the names could not be read' };
   }
   const m = new Map<string, string>();
   for (const p of rows) {

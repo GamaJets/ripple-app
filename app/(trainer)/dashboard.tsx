@@ -87,7 +87,8 @@ import {
   type JoinCodeRow,
 } from '../../src/lib/joinCodes';
 import {
-  LAST_TOUCH_NOTE, codeFigures, enoughToTell, parseSpend, returnLine, spendFieldValue, stayedLine,
+  LAST_TOUCH_NOTE, codeFigures, enoughToTell, parseSpend, returnLine, spendCurrency, spendFieldValue,
+  stayedLine,
   type CodeReturnRow,
 } from '../../src/lib/codeReturn';
 import { useTrainerInvites } from '../../src/ui/trainerInvites';
@@ -836,13 +837,23 @@ export default function TrainerClients() {
   const codeTell = enoughToTell(returns.status, returns.rows);
   const saveSpend = async (row: CodeReturnRow) => {
     const key = row.id ?? '';
-    const parsed = parseSpend(spendDraft[key]);
+    // The currency travels WITH the figure, both here and to the server. It
+    // used to be scaled by a flat hundred here while `set_code_spend` resolved
+    // a currency of its own to stamp on the result, so on a yen account the
+    // number was a hundred times the money AND the label agreed with it. What
+    // the coach typed is now scaled in a currency somebody actually stated, and
+    // that same currency is what gets stored.
+    const parsed = parseSpend(spendDraft[key], spendCurrency(row));
     if (parsed.kind === 'bad') { Alert.alert('Not saved', parsed.reason); return; }
     setSpendBusy(key);
     // A cleared field sends null, which DELETES the record. Sending 0 would
     // tell Repple the campaign was free, and a free campaign has a perfect
     // return and wins every comparison on this screen.
-    const r = await saveCodeSpend(row.id, parsed.kind === 'clear' ? null : parsed.cents);
+    const r = await saveCodeSpend(
+      row.id,
+      parsed.kind === 'clear' ? null : parsed.cents,
+      parsed.kind === 'clear' ? null : parsed.currency,
+    );
     setSpendBusy(null);
     if (!r.ok) { Alert.alert('Not saved', r.reason); return; }
     await loadCodes();

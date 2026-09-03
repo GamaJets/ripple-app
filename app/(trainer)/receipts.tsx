@@ -53,7 +53,7 @@ import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead } fro
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { isoToday } from '../../src/lib/dayPlan';
+import { useToday } from '../../src/ui/today';
 import { isQueryableId } from '../../src/lib/clientDrift';
 import { minorMoney } from '../../src/lib/coachMoney';
 import { invoiceDayLabel, plusDays } from '../../src/lib/coachInvoice';
@@ -116,9 +116,29 @@ export default function Receipts() {
     [load, roster],
   ));
 
-  // The date the DEVICE is on, not the server's UTC date. A coach in Auckland
-  // recording a payment at 10am would otherwise date it yesterday.
-  const today = isoToday(new Date());
+  // ── the day this screen stamps on a payment ─────────────────────────
+  //
+  // `useToday()`, not `isoToday(new Date())`. This is not a label: `receivedOn`
+  // below is `dayText.trim() || today`, so when the coach does not type a date
+  // this value is WRITTEN as the day money arrived. And a bare read in the render body
+  // is only ever as fresh as the last render — this screen is registered
+  // `href: null` in app/(trainer)/_layout.tsx, so it mounts once, is never torn
+  // down, and does not re-render while nobody is touching it.
+  //
+  // So a coach who opened this screen on Sunday, went to another tab, and came
+  // back on Wednesday to write something up got it dated SUNDAY — under a
+  // placeholder that says "leave it for today". The record is the thing this
+  // screen exists to keep, the date is the part of it that decides which month
+  // it lands in, and nothing on screen would have shown the coach it was
+  // wrong.
+  //
+  // `check:frozen-day` looks for `useMemo(…, [])` and cannot see this shape.
+  // `useToday` re-reads at the next local midnight and on foreground, compares
+  // before it sets, and is still the DEVICE's day rather than the server's UTC
+  // one — which is the point the comment this replaces was making, and it is
+  // preserved: a coach in Auckland recording at 10am must not date it
+  // yesterday.
+  const today = useToday();
   const receivedOn = dayText.trim() || today;
 
   const taken = useMemo(() => receiptsTaken(rows), [rows]);

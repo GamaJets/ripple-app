@@ -75,6 +75,8 @@ import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy,
 // cheaper answer is offered first. See src/lib/reschedule.ts.
 import { canOfferMove } from '../../src/lib/reschedule';
 import { feeAmountLine } from '../../src/lib/booking';
+import { isUpcoming } from '../../src/lib/upcomingWindow';
+import { useNow } from '../../src/ui/today';
 import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -369,11 +371,22 @@ export default function Calendar() {
   // into their real diary — where, unlike everything else in this app, nothing
   // here can ever take them out again.
   //
-  // The same hour of grace the sibling screen uses (app/(client)/bookings.tsx)
-  // and the coach-side helper in src/lib/booking.ts: a session that started
-  // fifty minutes ago is one you are in, not one that has gone.
-  const UPCOMING_FROM = Date.now() - 3600_000;
-  const upcoming = (s: { startsAt: string }) => Date.parse(s.startsAt) > UPCOMING_FROM;
+  // The same hour of grace the sibling screen uses (app/(client)/bookings.tsx):
+  // a session that started fifty minutes ago is one you are in, not one that
+  // has gone. It is `isUpcoming` from src/lib/upcomingWindow.ts and no longer a
+  // constant written out here — that header counts four copies of the hour
+  // across three files, and this was the fourth.
+  //
+  // `useNow()` and not a `Date.now()` in the render body. A bare read is right
+  // on every redraw and this screen does not redraw: Calendar is reached from a
+  // tab registered `href: null`, so it mounts once and nothing tears it down,
+  // and nothing at all redraws it at the hour a session stops being ahead of
+  // the member. The figures under it — "Booked with Your Coach", "Open Slots" —
+  // and the Add to Calendar export are all bounded by this, and the export is
+  // the one thing on this screen the app can never take back out of somebody's
+  // real diary. See src/ui/today.ts.
+  const nowMs = useNow().getTime();
+  const upcoming = (s: { startsAt: string }) => isUpcoming(s.startsAt, nowMs);
   // The grid below still draws every booked session at any date, through
   // `visible`; it is the FIGURES and the export that are bounded.
   const mine = sessions.filter((s) => s.clientId === cd.id && s.status === 'booked' && upcoming(s));

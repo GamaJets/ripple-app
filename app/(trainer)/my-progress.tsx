@@ -82,7 +82,8 @@ import {
   lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote,
   readNumber,
 } from '../../src/lib/units';
-import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
+import { agoLabel, dayLabel, shortDayLabel, daysBetween, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
+import { useToday } from '../../src/ui/today';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { num1 } from '../../src/lib/format';
 import { END_ALIGN } from '../../src/ui/direction';
@@ -144,7 +145,24 @@ export default function MyProgress() {
   ]), [ci, ms, cd]));
   const wu = settings.weightUnit;
   const lu = settings.lengthUnit;
-  const today = todayISO();
+  // ── the day a scan gets stamped with ──────────────────────────────────
+  //
+  // `useToday()`, not `todayISO()`. This is not only a label: `addScan` below
+  // writes `takenAt: today`, so this value becomes the date on a body-
+  // composition reading, and a reading filed on the wrong day is a point in the
+  // wrong place on a trend the coach is reading their own progress off.
+  //
+  // A bare call in the render body is not frozen the way `useMemo(…, [])` is,
+  // but it is only ever as fresh as the last render — and `my-progress` is
+  // registered `href: null` in app/(trainer)/_layout.tsx, so it mounts once, is
+  // never torn down, and does not re-render while nobody is touching it. Open
+  // it on Sunday, come back on Wednesday, type in the numbers off the machine,
+  // and the scan is dated Sunday. `check:frozen-day` looks for an empty
+  // dependency array and cannot see this shape.
+  //
+  // Same format and same local timezone: `todayKey` and `todayISO` both build
+  // `YYYY-MM-DD` off getFullYear/getMonth/getDate.
+  const today = useToday();
 
   // Each provider answers for its own section, and the header answers for the
   // screen. An empty list under 'error' is "we could not read it", never "you

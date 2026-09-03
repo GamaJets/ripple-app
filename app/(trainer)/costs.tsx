@@ -58,7 +58,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
-import { isoToday } from '../../src/lib/dayPlan';
+import { useToday } from '../../src/ui/today';
 import { minorMoney } from '../../src/lib/coachMoney';
 import { invoiceDayLabel, plusDays } from '../../src/lib/coachInvoice';
 import {
@@ -107,7 +107,29 @@ export default function Costs() {
 
   // The date the DEVICE is on, not the server's UTC date. A coach in Auckland
   // recording a payment at 10am would otherwise date it yesterday.
-  const today = isoToday(new Date());
+  // ── the day this screen stamps on a cost ─────────────────────────
+  //
+  // `useToday()`, not `isoToday(new Date())`. This is not a label: `paidOn`
+  // below is `dayText.trim() || today`, so when the coach does not type a date
+  // this value is WRITTEN as the day money went out. And a bare read in the render body
+  // is only ever as fresh as the last render — this screen is registered
+  // `href: null` in app/(trainer)/_layout.tsx, so it mounts once, is never torn
+  // down, and does not re-render while nobody is touching it.
+  //
+  // So a coach who opened this screen on Sunday, went to another tab, and came
+  // back on Wednesday to write something up got it dated SUNDAY — under a
+  // placeholder that says "leave it for today". The record is the thing this
+  // screen exists to keep, the date is the part of it that decides which month
+  // it lands in, and nothing on screen would have shown the coach it was
+  // wrong.
+  //
+  // `check:frozen-day` looks for `useMemo(…, [])` and cannot see this shape.
+  // `useToday` re-reads at the next local midnight and on foreground, compares
+  // before it sets, and is still the DEVICE's day rather than the server's UTC
+  // one — which is the point the comment this replaces was making, and it is
+  // preserved: a coach in Auckland recording at 10am must not date it
+  // yesterday.
+  const today = useToday();
   const paidOn = dayText.trim() || today;
 
   const taken = useMemo(() => costsTaken(rows), [rows]);

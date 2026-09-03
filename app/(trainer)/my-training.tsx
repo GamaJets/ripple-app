@@ -62,7 +62,7 @@ import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { trainingDays, setsSummary } from '../../src/lib/ownTraining';
 import { tonnageNote, type BodyweightHistory } from '../../src/lib/bodyweightSets';
 import { useCheckIns } from '../../src/ui/checkins';
-import { dayKeyOfDate } from '../../src/lib/entryEdit';
+import { useToday } from '../../src/ui/today';
 import { readLift, volumeIn, convertedNote, type WeightUnit } from '../../src/lib/units';
 import { weekStats } from '../../src/lib/streaks';
 import { num } from '../../src/lib/format';
@@ -102,7 +102,23 @@ export default function MyTraining() {
   const whole = isWhole(status);
 
   const days = trainingDays(log);
-  const todayKey = dayKeyOfDate(new Date());
+  // ── the day this screen thinks it is ──────────────────────────────────
+  //
+  // `useToday()`, not `dayKeyOfDate(new Date())`. A bare read in the render
+  // body is not frozen the way `useMemo(…, [])` is, but it is only ever as
+  // fresh as the last render — and `my-training` is registered `href: null` in
+  // app/(trainer)/_layout.tsx, so it mounts once and is never torn down, and a
+  // screen nobody is touching does not render. A coach who opened their own
+  // training log on Sunday, went to another tab and came back on Wednesday had
+  // a "Today" section still showing Sunday, and the entries they logged since
+  // filed under `recent` as though they belonged to somebody else's week.
+  //
+  // `check:frozen-day` looks for `useMemo(…, [])` and cannot see this shape at
+  // all. `useToday` re-reads at the next local midnight and on foreground, and
+  // compares before it sets, so an open screen costs nothing until the day
+  // actually turns. Same day format, same local timezone: `todayKey` and
+  // `dayKeyOfDate` both build `YYYY-MM-DD` off the same three local getters.
+  const todayKey = useToday();
   const today = days.find((d) => d.day === todayKey) ?? null;
   const recent = days.filter((d) => d.day !== todayKey).slice(0, RECENT_DAYS);
   /* ── the coach's own weight, so their bodyweight sets are worth something ──
