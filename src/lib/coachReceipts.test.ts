@@ -14,9 +14,16 @@
 //     that evening's month;
 //   · a confident "you have recorded nothing" over a read that failed, which on
 //     THIS screen means telling a coach the cash they took last week is gone.
+// `since` and `monthStart` are the actual windows a receipt has to survive.
+// Asserting against them rather than against a formatted day is what makes the
+// timezone claim testable at all: a hard-coded 'Z' string would put the first
+// of the month on the wrong side of the boundary in half the zones the suite
+// runs in.
+import { since, monthStart } from './coachMoney';
 import {
   receiptBlockers,
   receiptsTaken,
+  receiptTakenRows,
   receiptsEmptyLine,
   methodLabel,
   RECEIPT_METHODS,
@@ -168,6 +175,47 @@ eq(methodLabel(null), 'Not stated', 'and a missing one says so rather than rende
   const rows = [rec({ receivedOn: '' })];
   const t = receiptsTaken(rows);
   eq(t.pots[0]?.count, 1, 'an undated payment still has its amount counted in the whole-of-time figure');
+}
+
+/* ── 5b. and dated as a DAY, not as UTC midnight ────────────────────────── */
+//
+// `receivedOn` is a Postgres `date`. It reaches these rows as a bare
+// `YYYY-MM-DD`, and every window it goes through afterwards — `since()` here,
+// `splitByPeriod()` on the statement — reads it with `Date.parse`, which is UTC
+// midnight, while every month bound in this app is LOCAL midnight. West of
+// Greenwich UTC midnight on the 1st is EARLIER than local midnight on the 1st,
+// so a payment received on the first of the month tested `false` against its
+// own month's start and fell out of the figure — not counted, not `unlabelled`,
+// not `unpriced`, just gone, under a 'ready' status.
+//
+// Both ends are asserted, because a mapping that simply pushed every day
+// forward would pass the first line and fail the second. `monthStart` is given
+// a mid-month instant built from LOCAL parts, so the boundary it produces is
+// the reader's own 1 September wherever the suite runs — `npm run test:zones`
+// runs it in Los Angeles and Kiritimati as well as Dubai.
+{
+  const mid = new Date(2026, 8, 15, 12, 0, 0, 0);
+  const from = monthStart(mid);
+  const first = receiptTakenRows([rec({ receivedOn: '2026-09-01' })]);
+  const dayBefore = receiptTakenRows([rec({ receivedOn: '2026-08-31' })]);
+  eq(since(first, from).length, 1, 'a payment received on the first of the month is in that month, in every timezone');
+  eq(since(dayBefore, from).length, 0, 'and one received the day before it is not');
+}
+// The all-time figure and the monthly one read the same day off the same row.
+// `receiptsTaken` used to build its own rows, so the two could have disagreed
+// about which day a payment was on without anything comparing them.
+{
+  const rows = [rec({ receivedOn: '2026-09-01' })];
+  eq(
+    receiptsTaken(rows).pots[0]?.count,
+    since(receiptTakenRows(rows), monthStart(new Date(2026, 8, 15, 12, 0, 0, 0))).length,
+    'the whole-of-time figure and the month it falls in count the same payment',
+  );
+}
+// A day that will not read is in no period rather than swept into this one.
+{
+  const rows = receiptTakenRows([rec({ receivedOn: '' })]);
+  eq(since(rows, monthStart(new Date(2026, 8, 15, 12, 0, 0, 0))).length, 0, 'an unreadable day puts the payment in no month');
 }
 
 /* ── 6. an empty list means two different things ────────────────────────── */

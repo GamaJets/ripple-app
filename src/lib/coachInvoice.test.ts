@@ -21,6 +21,7 @@ import {
   draftMinorUnits,
   invoiceBook,
   invoiceShareBlurb,
+  voidBlocker,
   escapeHtml,
   money,
   kindLabel,
@@ -322,6 +323,44 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
   ok(d.text.includes('Its number has not been reused'), 'and states that the number is not reused');
   ok(invoiceShareBlurb(d, { ...INV, voidedAt: '2026-08-31T09:00:00Z' }).includes('VOIDED'),
     'the share sheet warns before a voided document leaves the phone');
+}
+
+/* ── 6b. and there are two invoices a void may not touch ──────────────────
+   `voidBlocker` is the screen's copy of the rule part 2100 puts in
+   `void_coach_invoice()`. Both refusals exist because the database will refuse
+   anyway: part 660's `coach_invoices_not_both_chk` will not let a row say both
+   that it was cancelled and that it was paid, and the function had no guard for
+   it — so the tap reached the UPDATE, tripped the CHECK, and handed the coach
+   'new row for relation "coach_invoices" violates check constraint
+   "coach_invoices_not_both_chk"' inside an Alert.
+
+   The state is the one a coach reaches by making a mistake: a settlement is
+   written once, there is no un-settle, and the immutable guard's own message
+   sends them to "void it and issue another". So the refusal has to say what is
+   left to do, not only that the answer is no. */
+
+{
+  eq(voidBlocker(INV), null, 'an ordinary open invoice can be voided');
+  eq(voidBlocker({ ...INV, kind: 'received' }), null,
+    'and so can one stating the money was received — the document is still a document, and voiding is how a wrong one is withdrawn');
+
+  const settled = voidBlocker({ ...INV, settledOn: '2026-09-02', settledAt: '2026-09-02T10:00:00Z' });
+  ok(settled !== null, 'an invoice recorded as settled cannot also be voided');
+  ok(!/constraint|relation|coach_invoices/.test(settled ?? ''),
+    'and the refusal is a sentence about the invoice, never a database one');
+  ok((settled ?? '').includes(invoiceDayLabel('2026-09-02')),
+    'it names the day the coach said the money arrived, so they can see which claim is in the way');
+  ok(/new document/i.test(settled ?? ''), 'and names what is left to do, because the number still stands');
+
+  const already = voidBlocker({ ...INV, voidedAt: '2026-08-31T09:00:00Z', voidReason: 'issued twice' });
+  ok(already !== null, 'and a voided one is not voided twice');
+  ok(already !== settled, 'the two refusals are different sentences about different states');
+
+  // Voided wins when a row somehow carries both. The screen reads the first
+  // refusal it is given, and "already voided" is the one that is actionable —
+  // there is nothing to correct on a number already withdrawn.
+  ok(voidBlocker({ ...INV, voidedAt: '2026-08-31T09:00:00Z', settledOn: '2026-09-02' }) === already,
+    'a row carrying both states reads as voided, which is the sentence with nothing left to do');
 }
 
 /* ── 7. read honesty: a document built from a failed read says so ─────────

@@ -319,7 +319,13 @@ export default function Members() {
   // the member was standing at the turnstile with hours left on it. `isoDate`
   // is kept for the gym that has not set a timezone, where the reader's clock
   // is the only clock there is.
-  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
+  //
+  // And judged at the INSTANT this page read, like every dossier beside it.
+  // `dossiers` above is built at `nowMs`; a bare `Date.now()` here is a second
+  // clock on one screen, and the two disagree for as long as the tab has been
+  // open — a pass whose last day is today reading as expired in the Status
+  // column while the dossier around it is still answering about the read.
+  const today = gymDay(nowMs, zone) ?? isoDate(new Date(nowMs));
   const chosen = sel && dossiers ? dossiers.find((d) => d.memberId === sel) ?? null : null;
 
   // The headline this page exists to produce: members whose classes stopped but

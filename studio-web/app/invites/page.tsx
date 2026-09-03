@@ -303,6 +303,7 @@ export default function Invites() {
       />
       <TheList
         invites={invites} readErr={invitesErr} gymName={gymName} zone={zone}
+        nowMs={nowMs}
         tenantId={tenantId} onChange={refresh}
       />
     </Shell>
@@ -554,11 +555,22 @@ function InviteMany({ tenantId, me, plans, plansErr, openTo, listRead, onChange 
 
 /* ── the list ──────────────────────────────────────────────────────────────── */
 
-function TheList({ invites, readErr, gymName, zone, tenantId, onChange }: {
+function TheList({ invites, readErr, gymName, zone, nowMs, tenantId, onChange }: {
   invites: MemberInvite[] | null; readErr: string | null;
   gymName: string | null;
   /** `tenants.timezone`, or null when the gym has not set one. */
   zone: string | null;
+  /**
+   * The instant these invitations were read, and the one every expiry below is
+   * judged against — the same instant the counts above the table are judged at.
+   *
+   * Passed rather than read here. `inviteState` and `daysUntilExpiry` both
+   * default their `now` to `Date.now()`, which in a render body is fresh but is
+   * a DIFFERENT moment from the one the summary tiles used; an invitation that
+   * expired since the last read would show "Expired" in this table while the
+   * tile above went on counting it as sent. One screen has to make one claim.
+   */
+  nowMs: number;
   tenantId: string; onChange: () => void;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
@@ -665,11 +677,11 @@ function TheList({ invites, readErr, gymName, zone, tenantId, onChange }: {
     }
   };
 
-  const shown = searchRows(invites ?? [], q, (i) => [i.email, i.fullName, i.planName, inviteState(i)]);
+  const shown = searchRows(invites ?? [], q, (i) => [i.email, i.fullName, i.planName, inviteState(i, nowMs)]);
   const note = searchNote(q, shown.length, invites?.length ?? 0);
   // Only the ones still open. A batch mail to everybody would include people
   // who joined last month and people the gym withdrew.
-  const waiting = (invites ?? []).filter((i) => inviteState(i) === 'pending');
+  const waiting = (invites ?? []).filter((i) => inviteState(i, nowMs) === 'pending');
   const waitingLink = waiting.length ? bulkInviteMailto(waiting, opts) : null;
   /** Still waiting, and long enough to be worth a second message. Counted off
    *  the handoff when this browser made one and off the row's own date when it
@@ -704,23 +716,23 @@ function TheList({ invites, readErr, gymName, zone, tenantId, onChange }: {
         const text = handoffNote(h, now);
         return h ? <span style={{ color: 'var(--ink2)' }}>{text}</span> : <span className="dash">{text}</span>;
       } },
-    { key: 'left', header: 'Days left', value: (i) => daysUntilExpiry(i), numeric: true,
+    { key: 'left', header: 'Days left', value: (i) => daysUntilExpiry(i, nowMs), numeric: true,
       render: (i) => {
-        if (inviteState(i) !== 'pending') return <span className="dash">—</span>;
-        const d = daysUntilExpiry(i);
+        if (inviteState(i, nowMs) !== 'pending') return <span className="dash">—</span>;
+        const d = daysUntilExpiry(i, nowMs);
         // Null is "no expiry was recorded", which is not 0 — and 0 reads as
         // "today", which would have the desk chasing somebody with no deadline.
         if (d == null) return <span className="dash">no expiry recorded</span>;
         return <span style={{ color: d <= 3 ? 'var(--crit)' : 'var(--ink)' }}>{d}</span>;
       } },
-    { key: 'state', header: 'State', value: (i) => inviteState(i),
+    { key: 'state', header: 'State', value: (i) => inviteState(i, nowMs),
       render: (i) => {
-        const s = inviteState(i);
+        const s = inviteState(i, nowMs);
         return <span style={{ color: STATE_COLOUR[s] }}>{STATE_LABEL[s]}</span>;
       } },
     { key: 'act', header: '', value: () => '', align: 'right',
       render: (i) => {
-        const s = inviteState(i);
+        const s = inviteState(i, nowMs);
         // Only the two states a decision can still be made about. An accepted
         // invitation is a member now, and a withdrawn one stays withdrawn —
         // reopening either by overwriting the row would rewrite what happened.

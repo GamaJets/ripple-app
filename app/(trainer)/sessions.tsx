@@ -39,6 +39,10 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag, Ghost, Cta, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
+// The instant `pastSessions` and `windowStart` are judged against, recomputed
+// at local midnight, on foreground and on focus — never frozen at the moment a
+// read happened to land. See src/ui/today.ts, and the two call sites below.
+import { useNow } from '../../src/ui/today';
 import { useTenant } from '../../src/ui/tenant';
 import { useAuth } from '../../src/ui/auth';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
@@ -522,7 +526,17 @@ export default function TrainerSessions() {
    * the evidence the hour was booked, and supabase/parts/195 is the argument
    * for why removing that evidence quietly improves every figure computed over
    * what is left. */
-  const history = useMemo(() => pastSessions(all ?? []), [all]);
+  // `nowMs` from `useNow`, not `pastSessions`'s defaulted `Date.now()`. The
+  // default is read when the memo BODY runs, and this memo is keyed on `all` —
+  // a list that moves when the server answers and never when time passes. So
+  // "has this hour finished yet" was decided at whatever moment the read landed
+  // and then held: a session that ended while the screen was open stayed in the
+  // queue above and never appeared in the record below, and the coach's own
+  // count of what they had delivered was short by it. `check:frozen-day` looks
+  // for an EMPTY dependency array and cannot see this shape;
+  // `check:frozen-hook` names it, and this is its entry.
+  const nowMs = useNow().getTime();
+  const history = useMemo(() => pastSessions(all ?? [], nowMs), [all, nowMs]);
 
   /* ── what was actually logged in each of these hours ──────────────────────
    *
@@ -570,7 +584,11 @@ export default function TrainerSessions() {
     () => who.find((c) => c.clientId === filter.clientId)?.name ?? null, [who, filter.clientId]);
   /** The instant the loaded window starts at — the edge of what this screen can
    *  answer for, named on screen rather than implied by a list that stops. */
-  const windowFrom = useMemo(() => windowStart(loadedDays), [loadedDays]);
+  //  The same `nowMs` the record above is cut on, so the edge this screen NAMES
+  //  and the edge it actually applies cannot drift apart across a midnight.
+  //  `windowStart` defaults its second argument to `Date.now()`, read in a memo
+  //  keyed on a day count that never changes on its own.
+  const windowFrom = useMemo(() => windowStart(loadedDays, nowMs), [loadedDays, nowMs]);
 
   /* ── going off to finish one, and coming back ─────────────────────────────
    *

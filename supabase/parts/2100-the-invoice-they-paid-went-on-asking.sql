@@ -324,3 +324,22 @@ begin
   end if;
   return out_row;
 end $fn$;
+
+-- ── who may call these ────────────────────────────────────────────────────
+--
+-- `create or replace` keeps an existing function's ACL, so these are restating
+-- what parts 138, 188 and 613 already granted rather than changing anything.
+-- Restated because that is only true of a REPLACE: on a database built from
+-- setup.sql in one pass the three definitions above are the ones that survive,
+-- and a permission that depends on an earlier part having been read first is a
+-- permission nobody can see when they read this file.
+--
+-- The pass is nobody's to call from a client. It is a cron job, and part 613's
+-- own line revokes it from `authenticated` as well.
+revoke all on function public.run_invoice_ageing_notices() from public, anon, authenticated;
+
+revoke all on function public.void_coach_invoice(uuid, text) from public, anon;
+grant execute on function public.void_coach_invoice(uuid, text) to authenticated;
+
+revoke all on function public.remind_coach_invoice(uuid) from public, anon;
+grant execute on function public.remind_coach_invoice(uuid) to authenticated;

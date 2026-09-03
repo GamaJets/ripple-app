@@ -1965,7 +1965,7 @@ function plansTable(rows: MembershipPlan[]): Table {
       p.id,
       p.priceCents,
     ]),
-    note: 'Re-importable by previewPlans. price_cents is the stored figure; price is the same value for the importer.',
+    note: 'Re-importable by previewPlans. price_cents is the stored figure; price is the same value for the importer, written to the number of decimal places the row\u2019s own currency has \u2014 none in a yen, three in a Kuwaiti dinar \u2014 which is why the currency column has to travel beside it.',
   };
 }
 
@@ -2070,7 +2070,7 @@ function paymentsTable(rows: GymPayment[]): Table {
       p.currency,
       p.takenAt,
     ]),
-    note: 'Re-importable by previewPayments. amount_cents and taken_at are the stored values; amount and date are the same values in the shapes the importer reads.',
+    note: 'Re-importable by previewPayments. amount_cents and taken_at are the stored values; amount and date are the same values in the shapes the importer reads. `amount` is written to the number of decimal places `currency` has, so a file re-imported into a gym set to a DIFFERENT currency would be read at a different factor \u2014 previewPayments refuses any row whose currency column disagrees with the one it is importing in, rather than converting at par. `date` is the UTC day of `taken_at`, which is the day the gym recorded for every payment this product imported (they are stamped at midday UTC) but can be a day either side for one taken near midnight at a desk far from UTC; `taken_at` beside it is the stored instant and is the one to believe.',
   };
 }
 

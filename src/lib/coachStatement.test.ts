@@ -280,6 +280,39 @@ eq(splitByPeriod([packRow()], (r) => r.created_at, null).inside.length, 0,
   eq(sec(s, 'invoices').lines[0].amount, 'GBP 300.00', 'and the figure is those two and only those two');
 }
 
+{
+  // The same claim for RECEIPTS, which was the one date-only column on this
+  // document still going through `splitByPeriod`.
+  //
+  // `coach_receipts.received_on` is a Postgres `date` and reaches this module
+  // as a bare `YYYY-MM-DD` in `created_at`. Read as an instant it is UTC
+  // midnight, which is before local midnight everywhere west of Greenwich — so
+  // every cash payment a coach recorded as received on the FIRST day of the
+  // period was dropped from the section, from its count and from its total,
+  // with 'ready' beside it and nothing on the page where the money had been.
+  // Not `undated` (the date parsed) and not `noPeriod` (there was a period):
+  // it fell between the two.
+  //
+  // The existing fixture dates its one receipt 2026-05-20, mid-period, which
+  // is inside the year in every zone — so the whole suite stayed green while
+  // the statement was short. Both boundary days and both neighbours are here,
+  // with four different amounts so the count and the total cannot agree by
+  // accident on the wrong pair.
+  const s = coachStatement(input({
+    receipts: {
+      status: 'ready',
+      rows: [
+        packRow({ created_at: '2026-01-01', amount_cents: 10000 }),
+        packRow({ created_at: '2026-12-31', amount_cents: 20000 }),
+        packRow({ created_at: '2025-12-31', amount_cents: 40000 }),
+        packRow({ created_at: '2027-01-01', amount_cents: 80000 }),
+      ],
+    },
+  }));
+  eq(sec(s, 'receipts').count, 2, 'a payment recorded on either boundary day is in the period and neither neighbour is');
+  eq(sec(s, 'receipts').lines[0].amount, 'GBP 300.00', 'and the figure is those two and only those two');
+}
+
 /* ── 4. minor units into a spreadsheet, currency-aware ────────────────────
    gymExport's minorToDecimal always divides by a hundred. There are no sen in
    a yen: ¥50,000 written as 500.00 understates a coach's year by a factor of a

@@ -24,6 +24,7 @@
 // every card, and for every other network.
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { authNonce } from '../lib/authNonce';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { appLink } from '../lib/deepLink';
@@ -236,7 +237,12 @@ export async function connectInstagram(): Promise<ConnectResult> {
   }
   if (WB.maybeCompleteAuthSession) { try { WB.maybeCompleteAuthSession(); } catch { /* ignore */ } }
 
-  const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  // A CSPRNG where the runtime has one — see src/lib/authNonce.ts for why this
+  // is not the same call the scan ids make, and why it is not expo-crypto.
+  // `strong` is deliberately not a gate: refusing to let somebody connect an
+  // account on an older runtime is a worse trade than a weaker nonce, and a
+  // weak nonce is still far better than none.
+  const nonce = authNonce().value;
   const returnUrl = instagramReturnUrl();
   const state = instagramOauthState(nonce, returnUrl);
 

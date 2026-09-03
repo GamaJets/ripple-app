@@ -490,6 +490,8 @@
     "src/lib/sharedRead.test.ts",
     "src/lib/whoAmI.ts",
     "src/lib/whoAmI.test.ts",
+    "src/lib/authNonce.ts",
+    "src/lib/authNonce.test.ts",
     "src/lib/readLanded.ts",
     "src/lib/readLanded.test.ts",
     "src/lib/consoleNext.ts",

@@ -28,6 +28,7 @@
 // supabase/functions/ocr-scan/index.ts for the key that shipped readable in the
 // bundle and is why the rule is absolute.
 import { supabase } from '../lib/supabase';
+import { authNonce } from '../lib/authNonce';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { appLink } from '../lib/deepLink';
@@ -540,7 +541,12 @@ export async function connectAdChannel(c: AdChannel): Promise<ConnectResult> {
   }
   if (WB.maybeCompleteAuthSession) { try { WB.maybeCompleteAuthSession(); } catch { /* ignore */ } }
 
-  const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  // A CSPRNG where the runtime has one — see src/lib/authNonce.ts for why this
+  // is not the same call the scan ids make, and why it is not expo-crypto.
+  // `strong` is deliberately not a gate: refusing to let somebody connect an
+  // account on an older runtime is a worse trade than a weaker nonce, and a
+  // weak nonce is still far better than none.
+  const nonce = authNonce().value;
   const returnUrl = adReturnUrl();
   const state = adOauthState(nonce, returnUrl);
 
