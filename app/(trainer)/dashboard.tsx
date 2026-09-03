@@ -136,7 +136,7 @@ import { useChannelPrefs } from '../../src/ui/coachNotify';
 import { channelAllows } from '../../src/lib/coachNotify';
 import { fetchMyInvoices } from '../../src/ui/coachInvoices';
 import { ageingBook, type CoachInvoice } from '../../src/lib/coachInvoice';
-import { homeMoney, homeMoneyDrawn, homeMoneyNote, homeMoneyTitle } from '../../src/lib/homeMoney';
+import { homeMoney, homeMoneyDrawn, homeMoneyNote, homeMoneyTitle, type HomeMoney } from '../../src/lib/homeMoney';
 import { minorMoney } from '../../src/lib/coachMoney';
 // The day every expiry and every overdue judgement below is made against, kept
 // current for as long as this tab is mounted — which, for a tab, is the life of

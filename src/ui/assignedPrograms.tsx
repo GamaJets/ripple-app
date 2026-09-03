@@ -23,7 +23,7 @@
 // src/lib/programCache.ts with a test. The two that shape this file: the copy
 // is layered UNDER a live read rather than merged into `programs`, and the
 // SERVER's answer is what gets written, including when that answer is empty.
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Program } from '../lib/programs';
 import { supabase } from '../lib/supabase';
@@ -126,6 +126,22 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    *  survive without calling a setter from inside another setter's updater. */
   const programsRef = useRef<Record<string, Program>>(programs);
   programsRef.current = programs;
+  /**
+   * The other two things the write paths read at CALL time, held as refs.
+   *
+   * Not an optimisation dressed up: the four write functions below are handed
+   * to every screen through the context, and a function that closes over
+   * `startsOn` or `uid` as values has to be rebuilt whenever either changes —
+   * which rebuilds the context value, which re-renders every consumer of this
+   * provider whether or not it cares. Reading them through a ref at the moment
+   * the coach taps is also the more correct of the two: what a write needs to
+   * put back on failure is the map as it is NOW, not the map as it was on the
+   * render that produced the handler.
+   */
+  const startsOnRef = useRef<Record<string, string>>(startsOn);
+  startsOnRef.current = startsOn;
+  const uidRef = useRef<string | null>(uid);
+  uidRef.current = uid;
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   // Bumped by `reload`. Beside `authRev` in the read's dependency array so a
   // refresh runs the one read this provider has.
@@ -295,12 +311,12 @@ export function AssignedProgramsProvider({ children }: { children: ReactNode }) 
    * 'ready', and app/(client)/week.tsx's `programUnknown` still reads a null
    * under a non-'ready' status as "we could not find out".
    */
-  const getProgram = (clientId: string): Program | null => {
+  const getProgram = useCallback((clientId: string): Program | null => {
     const held = programs[clientId];
     if (held) return held;
     if (cached && mayServeCached(live, cached.found)) return cached.programs[clientId] ?? null;
     return null;
-  };
+  }, [programs, cached, live]);
   /**
    * Put a programme on one client, and say what happened.
    *

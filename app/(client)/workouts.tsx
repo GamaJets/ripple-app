@@ -9,7 +9,13 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 // The clock this screen judges "today" by, kept live across the midnight a
 // late session runs past. See the note at `useNow()` below.
-import { useNow } from '../../src/ui/today';
+import { useNow, useToday } from '../../src/ui/today';
+// What this member did the last time they did the movement on screen, and how
+// the number sitting in the load box compares to it. The runner has held the
+// log and its status since it was written and used them for one thing — the PR
+// confetti — so four different reasons for a blank box all looked the same
+// from the gym floor. See src/lib/lastTime.ts.
+import { lastTime } from '../../src/lib/lastTime';
 import { BRAND } from '../../src/lib/brands';
 import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
@@ -3179,6 +3185,14 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
 function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; /** Replace one movement for the rest of the plan, through the same `swaps` map the plan screen writes. Optional so a caller with no plan to write to still gets a runner. */ onSwap?: (e: ProgramExercise, alt: string) => void; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
+  // The day the recap below dates its outing against.
+  //
+  // `useToday()` rather than a `todayKey()` in the render body, for the reason
+  // the note at the top of this screen already gives: a runner is on screen for
+  // an hour, evening sessions run past midnight, and "1 day ago" over a session
+  // done six hours earlier is the sort of small wrongness that costs the whole
+  // line its credibility.
+  const runnerToday = useToday();
   // A session can be put down and picked up.
   //
   // It could not before. There was no pause anywhere in this runner, so a phone
@@ -4085,6 +4099,29 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
   const nextIntensity = nextSet ? nextSet.intensity : intensityOf(ex, null);
   const nextIntensityLine = intensityLine(nextIntensity);
   const nextIntensityWords = intensityMeaning(nextIntensity);
+  /**
+   * What they did last time on this movement, and what the load box holds
+   * next to it.
+   *
+   * `boxKg` is read off the box AS IT IS, not off the suggestion that seeded
+   * it, so the comparison keeps up with what the member types. It is also why
+   * the sentence is arithmetic rather than advice — see src/lib/lastTime.ts:
+   * the claim is about two figures on this screen, and it stays true whether
+   * the number came from `suggestForExercise` or from a thumb.
+   *
+   * A load the reader refuses — "16,5" on a German keyboard, a stray letter —
+   * is passed as null rather than as a guess. There is nothing to compare and
+   * the recap says so by staying quiet about it.
+   */
+  const boxRead = readLift(load, unit);
+  const recall = lastTime({
+    log,
+    status: logStatus,
+    exercise: nameOf(ex),
+    today: runnerToday,
+    unit,
+    boxKg: boxRead.ok ? boxRead.kg : null,
+  });
 
   const liveCols: { label: string; value: string; dot?: string }[] = [
     { label: 'Time', value: `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}` },
@@ -4389,6 +4426,57 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
                 : s.bw ? bodyweightSetLabel(s.reps, s.kg, s.kg ? `${fig(liftIn(s.kg, unit))} ${unit}` : null) : `${s.reps}×${fig(liftIn(s.kg || null, unit))} ${unit}`}</Text>{/* The marker of the set that was actually logged — set 1 can be a warm-up and set 4 a drop set inside one movement, so this is read per chip rather than once for the exercise. */}{(() => { const cb = badgeFor(methodAt(i)); return cb ? <Text accessibilityLabel={cb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{cb.short}</Text> : null; })()}</View>); })}
           </View>
         ) : null}
+
+        {/* ── the last time they did this ────────────────────────────────
+            The runner has always held the log. It used it to seed the load box
+            from `suggestForExercise` and to check for a personal record at the
+            end, and told the member neither — so a number appeared in a text
+            field with no provenance, and a member who had done pull-ups on
+            Tuesday got a blank box on Thursday because a bodyweight movement
+            produces no suggestion at all.
+
+            The five sentences are five different states and are drawn as one
+            block deliberately: whichever it is, this is the line the member
+            looks at before they pick the weight up, and it is never empty. The
+            comparison under the chips moves as they type, because it is about
+            the box rather than about the suggestion that seeded it. */}
+        <View style={{ marginTop: sp.xl }}>
+          {recall.kind === 'outing' ? (
+            <>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: sp.sm }}>
+                <Icon name="clock" size={14} color={t.ink3} />
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Last time{recall.when ? ` · ${recall.when}` : ''}</Text>
+              </View>
+              <View
+                accessibilityRole="text"
+                accessibilityLabel={`Last time${recall.when ? `, ${recall.when}` : ''}: ${recall.sets.map((s) => s.label).join(', ')}${recall.more > 0 ? `, and ${recall.more} more` : ''}`}
+                style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
+                {recall.sets.map((s, i) => (
+                  <View key={i} style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6 }}>
+                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{s.label}</Text>
+                  </View>
+                ))}
+                {/* Stated, not silently trimmed. A strip that simply stops is a
+                    strip the member reads as the whole session. */}
+                {recall.more > 0 ? (
+                  <View style={{ borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 6 }}>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>and {recall.more} more</Text>
+                  </View>
+                ) : null}
+              </View>
+              {recall.boxNote ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{recall.boxNote}</Text>
+              ) : null}
+            </>
+          ) : recall.kind === 'error' ? (
+            /* A read that failed is marked, and the mark is a dot rather than
+               coloured words — the sentence already says it, and colour is
+               never the only channel. */
+            <Flag tone={t.warn}>{recall.note}</Flag>
+          ) : (
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{recall.note}</Text>
+          )}
+        </View>
 
         {/* The ramp is worked out from the working load in kilograms — its
             percentages are of the bar, not of a converted figure — and each
