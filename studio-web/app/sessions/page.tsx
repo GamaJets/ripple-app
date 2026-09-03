@@ -202,6 +202,19 @@ export default function Sessions() {
     () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
   );
 
+  /**
+   * The instant this screen's rows are of, and the one every "has it finished
+   * yet" question below is asked at.
+   *
+   * `readAt` rather than `Date.now()`. Four values on this page were derived
+   * inside memos whose dependencies are rows, a policy and a fee — none of which
+   * moves when time does — so all four were pinned to the render that first
+   * produced them: the Awaiting queue, the payroll lines, the Outstanding panel
+   * and the month the history opens on. The read instant is both the live answer
+   * and the honest one, since it is the moment the rows themselves came from.
+   */
+  const nowMs = readAt ?? Date.now();
+
   // The first read. Keyed on the tenant id rather than fired at the end of the
   // effect above: `useFetched` holds the reader in a ref assigned during
   // RENDER, so calling `refresh()` in the same tick as `setMe(who)` would run
@@ -232,7 +245,12 @@ export default function Sessions() {
   // an empty list. `sessions ?? []` was doing the same damage as the swallowed
   // catch one level up: it handed every table below a confident, empty answer
   // built out of a read that never returned.
-  const awaiting = useMemo(() => sessions && sessions.filter((s) => isAwaitingOutcome(s)), [sessions]);
+  // `nowMs` is passed and is in the dependency list: `isAwaitingOutcome` defaults
+  // its second argument to the clock, and keyed on `sessions` alone this queue
+  // asked "which sessions had finished without an outcome" as of the moment the
+  // tab was opened. A session that ended an hour later stayed out of the queue
+  // the desk works from.
+  const awaiting = useMemo(() => sessions && sessions.filter((s) => isAwaitingOutcome(s, nowMs)), [sessions, nowMs]);
   const settled = useMemo(() => sessions && sessions.filter((s) => s.outcome !== null), [sessions]);
 
   // The gym's session fee is in whole units; payroll works in minor units.
@@ -247,8 +265,8 @@ export default function Sessions() {
   const feeCents = useMemo(() => minorFromWhole(sessionFee, ccy), [sessionFee, ccy]);
 
   const lines = useMemo(
-    () => sessions && payrollByTrainer(sessions, policy, feeCents),
-    [sessions, policy, feeCents],
+    () => sessions && payrollByTrainer(sessions, policy, feeCents, nowMs),
+    [sessions, policy, feeCents, nowMs],
   );
   // Totalling nothing gives zeros, which is fine here only because every place
   // that renders one of them checks `sessions` first and shows a dash instead.
@@ -268,12 +286,17 @@ export default function Sessions() {
     for (const s of sessions) {
       const e = byTrainer.get(s.trainerId)
         ?? { name: s.trainerName, rows: [] as PtSession[], unmarked: 0 };
-      if (isAwaitingOutcome(s)) e.unmarked += 1;
+      if (isAwaitingOutcome(s, nowMs)) e.unmarked += 1;
       byTrainer.set(s.trainerId, e);
     }
     // The same fee `lines` was priced with, or this panel offers to settle a
-    // smaller number than the payroll table above it is showing.
-    for (const s of settleableSessions(sessions, policy, undefined, feeCents)) {
+    // smaller number than the payroll table above it is showing — and the same
+    // INSTANT, which the `undefined` here used to decline to state. Both halves
+    // of this memo turn on "has it finished": the unmarked count that blocks a
+    // settlement, and the list of sessions the settlement would cover. Read from
+    // two different clocks they can disagree, and the disagreement is a button
+    // that pays for a period one of them still calls unfinished.
+    for (const s of settleableSessions(sessions, policy, nowMs, feeCents)) {
       const e = byTrainer.get(s.trainerId);
       if (e) e.rows.push(s);
     }
@@ -293,7 +316,7 @@ export default function Sessions() {
           ?? settleCurrencyBlocker(e.rows, ccy),
       }))
       .filter((x) => x.rows.length > 0 || x.unmarked > 0);
-  }, [sessions, policy, feeCents, ccy]);
+  }, [sessions, policy, feeCents, ccy, nowMs]);
 
   /* ── the record, one month at a time ──────────────────────────────────────
    *
@@ -323,12 +346,33 @@ export default function Sessions() {
   // cannot end the tap disagreeing about the same session.
   const [histNonce, setHistNonce] = useState(0);
 
+  /**
+   * The calendar month this page last read in, as one comparable number.
+   *
+   * The window below was built from a bare `new Date()` inside a memo keyed on
+   * the offset alone, so its base month was whichever month the tab happened to
+   * be opened in. A console tab left open across a month boundary — this rail is
+   * a plain `<a href>`, so that is the normal case and not the exotic one —
+   * showed September under a picker that said offset 0 is this month, and every
+   * label on the record was one month out.
+   *
+   * Reduced to year*12 + month rather than kept as the instant so that the
+   * window (and the read it triggers) re-settles when the month turns over and
+   * at no other time. Deriving it straight from `nowMs` would rebuild two Date
+   * objects, and re-fire the history read, on every refresh of the page.
+   */
+  const histMonth = useMemo(() => {
+    const d = new Date(nowMs);
+    return d.getFullYear() * 12 + d.getMonth();
+  }, [nowMs]);
+
   const histWindow = useMemo(() => {
-    const n = new Date();
-    const from = new Date(n.getFullYear(), n.getMonth() + histOffset, 1, 0, 0, 0, 0);
-    const to = new Date(n.getFullYear(), n.getMonth() + histOffset + 1, 1, 0, 0, 0, 0);
+    const y = Math.floor(histMonth / 12);
+    const m = histMonth % 12;
+    const from = new Date(y, m + histOffset, 1, 0, 0, 0, 0);
+    const to = new Date(y, m + histOffset + 1, 1, 0, 0, 0, 0);
     return { from, to };
-  }, [histOffset]);
+  }, [histMonth, histOffset]);
 
   const histTenant = me?.tenantId ?? null;
   const histOwner = me?.role === 'owner';

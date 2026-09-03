@@ -840,6 +840,42 @@ export function settleBlocker(inv: CoachInvoice): string | null {
 }
 
 /**
+ * Whether this invoice can be voided, and the reason when it cannot. Null means
+ * it can go.
+ *
+ * ── The control that raised a database error at a customer ────────────────
+ *
+ * Part 138 gave `void_coach_invoice` one guard — an invoice already voided —
+ * because when it was written that was the only state it could be in. Part 660
+ * then added `settled_on` and, with it, the constraint
+ * `coach_invoices_not_both_chk`: a document may say it was cancelled or that it
+ * was paid, never both. It did not add the matching refusal to the function.
+ *
+ * So voiding a settled invoice reached the UPDATE, tripped the CHECK, and came
+ * back to the coach as an Alert headed "That invoice was not voided" carrying
+ * the raw Postgres sentence about a relation and a constraint name. A dead
+ * control and a developer's error message, both of which this codebase bans.
+ *
+ * The state it happens in is not exotic — it is the one a coach reaches by
+ * making a mistake. "They paid it" sits next to "Send" on every row of the
+ * whole-book list; a settlement is written once and there is no un-settle, so a
+ * coach who taps the wrong row looks for the other way out, and the immutable
+ * guard's own message tells them what it is: "void it and issue another".
+ *
+ * The refusal says what actually happened and what is left to do, because there
+ * IS something left to do — the number stands, and a correcting document is how
+ * a paper ledger has always handled this.
+ */
+export function voidBlocker(inv: CoachInvoice): string | null {
+  if (inv.voidedAt) return 'This one is already voided. A number is cancelled once and never uncancelled — somebody has been told it was.';
+  if (inv.settledOn) {
+    return `You recorded this one as settled on ${invoiceDayLabel(inv.settledOn)}, and a document cannot say both that it was paid and that it was cancelled. `
+      + 'A settlement is written once, so if that was the wrong invoice the way to correct it is a new document for the difference, not a void on this one.';
+  }
+  return null;
+}
+
+/**
  * Whether the day the coach typed can be recorded as the day it was settled.
  *
  * `today` is the DEVICE's own day, passed in for the reason every date function

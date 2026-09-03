@@ -62,6 +62,10 @@ import { sumTaken, type Taken, type TakenRow } from './coachMoney';
 // not get two different amounts out, and getting the zero-decimal rule wrong
 // charges somebody a hundred times too much.
 import { draftAmount } from './coachInvoice';
+// A date-only column read as the day it says rather than as UTC midnight. See
+// `receiptTakenRows` below for what going without it costs a coach in the
+// Americas on the first of every month.
+import { localDate } from './localDate';
 
 /* ── how the money arrived ────────────────────────────────────────────────── */
 
@@ -215,11 +219,45 @@ export function receiptBlockers(d: ReceiptDraft): string[] {
  * Sunday's month, and `since()` and `splitByPeriod()` both read this field.
  */
 export function receiptsTaken(rows: readonly CoachReceipt[]): Taken {
-  return sumTaken(rows.map((r): TakenRow => ({
+  return sumTaken(receiptTakenRows(rows));
+}
+
+/**
+ * Receipts as summable rows, dated at LOCAL midnight on the day the coach says
+ * they were paid.
+ *
+ * ── Why this is a function and not three lines at each call site ──────────
+ *
+ * `receivedOn` is a Postgres `date` and arrives as a bare `YYYY-MM-DD`. It
+ * means a calendar day. Everything downstream that WINDOWS these rows —
+ * `since()` in coachMoney.ts, `splitByPeriod()` in coachStatement.ts — reads
+ * `created_at` with `Date.parse`, and `Date.parse('2026-09-01')` is UTC
+ * midnight while every month bound in this app (`monthStart`, `monthToDate`,
+ * `periodRange`) is LOCAL midnight. West of Greenwich the first is EARLIER than
+ * the second, so `t >= fromMs` is false and every cash payment a coach recorded
+ * as received on the FIRST of the month falls out of the month that names it.
+ *
+ * It does not fall out loudly. `sumTaken` never sees the row, so it is in no
+ * `unlabelled` and no `unpriced` count either — the figure is simply short, and
+ * the status beside it still says 'ready'. Invisible in the UTC+4 gym this was
+ * written for; present every month for every coach in the Americas.
+ *
+ * app/(trainer)/money.tsx found this and fixed it in its own memo. Then
+ * app/(trainer)/analytics.tsx composed the same three strands through the same
+ * `since()` and did not — which is what a rule written at a call site looks
+ * like just before it becomes two rules. It lives here now, once, and
+ * `receiptsTaken` above goes through it so the all-time figure and the monthly
+ * one cannot disagree about which day a payment was on.
+ *
+ * A day that will not read passes a value that will not parse, which keeps the
+ * payment out of every period rather than sweeping it into this one.
+ */
+export function receiptTakenRows(rows: readonly CoachReceipt[]): TakenRow[] {
+  return rows.map((r): TakenRow => ({
     amount_cents: r.amountCents,
     currency: r.currency,
-    created_at: r.receivedOn,
-  })));
+    created_at: localDate(r.receivedOn)?.toISOString() ?? 'unknown',
+  }));
 }
 
 /* ── the sentences that keep the screen honest ────────────────────────────── */

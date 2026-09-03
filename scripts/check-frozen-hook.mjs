@@ -251,14 +251,6 @@ const KNOWN = new Map([
   ['app/(trainer)/client-training.tsx', { count: 1, fix: 'line 505: `historySpan(log ?? [])` defaults its second argument to Date.now(). The memo five lines above it already carries `nowMs` in its dependency list — pass the same `nowMs` here and add it.' }],
   ['app/(trainer)/sessions.tsx', { count: 2, fix: 'line 525 `pastSessions(all ?? [])` and line 573 `windowStart(loadedDays)` both default their last argument to Date.now(). Take `const nowMs = useNow().getTime()`, pass it to both, and add it to both dependency lists.' }],
   ['app/(trainer)/share-kit.tsx', { count: 1, fix: 'line 367: `sinceMs`/`untilMs` from two `Date.now()` reads inside the card memo. `const nowMs = useNow().getTime()`, both bounds from it, and `nowMs` in the dependency list.' }],
-  ['studio-web/app/close/page.tsx', { count: 2, fix: 'line 367 `gymDay(Date.now(), zone)` and line 1307 `isAwaitingOutcome(s)`. The console has no useNow — compute the instant where the page already re-reads, as studio-web/app/revenue/page.tsx does, or hold it in state that the existing refresh moves.' }],
-  ['studio-web/app/coach/earnings/page.tsx', { count: 1, fix: 'line 534: `payrollByTrainer(sessions, policy, fallbackCents)` stops one argument short of `now`. Pass the instant the page last read at.' }],
-  ['studio-web/app/import/page.tsx', { count: 1, fix: 'line 275: `inviteState(inv)` defaults its second argument to Date.now(). Pass the read instant.' }],
-  ['studio-web/app/invites/page.tsx', { count: 2, fix: 'lines 148 and 154: `summariseInvites(invites)` and `inviteState(inv)` both default `now`. Pass the read instant to both.' }],
-  ['studio-web/app/members/page.tsx', { count: 1, fix: 'line 232: `buildDossiers(rec)` defaults `now`. Pass the read instant.' }],
-  ['studio-web/app/orders/page.tsx', { count: 1, fix: 'line 189: `orderTrouble(rows ?? [])` defaults `now`, and the memo already depends on `readAt` — pass `readAt` through as the instant and the two agree.' }],
-  ['studio-web/app/payroll/page.tsx', { count: 1, fix: 'line 487: `payrollByTrainer(priced, policy)` stops two arguments short of `now`. Pass the read instant.' }],
-  ['studio-web/app/sessions/page.tsx', { count: 4, fix: 'lines 235, 249, 265 and 326: three defaulted `now` arguments (isAwaitingOutcome twice, payrollByTrainer once) and one `new Date()` for the history month base. Pass the read instant to the three; for `histWindow`, derive the base month from a value the page re-settles.' }],
 ]);
 
 /* ── which library functions read the clock from a defaulted parameter ────── */

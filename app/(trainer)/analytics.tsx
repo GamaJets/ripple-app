@@ -77,7 +77,7 @@ import { deliveryNote, showsInPerson, HIDDEN_NOT_GONE } from '../../src/lib/coac
 import { fetchClientPurchases, type CoachPurchase } from '../../src/lib/connect';
 import { fetchMySubscriptionPayments, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import { fetchMyReceipts } from '../../src/ui/coachReceipts';
-import type { CoachReceipt } from '../../src/lib/coachReceipts';
+import { receiptTakenRows, type CoachReceipt } from '../../src/lib/coachReceipts';
 import { END_ALIGN } from '../../src/ui/direction';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
@@ -364,7 +364,16 @@ export default function TrainerAnalytics() {
   const takenRows = useMemo(() => ({
     sale: sales.rows.map((r): TakenRow => ({ amount_cents: r.amount_cents, currency: r.currency, created_at: r.created_at })),
     renewal: renewals.rows.map((r): TakenRow => ({ amount_cents: r.amount_cents, currency: r.currency, created_at: r.paid_at ?? 'unknown' })),
-    receipt: receipts.rows.map((r): TakenRow => ({ amount_cents: r.amountCents, currency: r.currency, created_at: r.receivedOn })),
+    // `receiptTakenRows`, not a fourth copy of the mapping. `receivedOn` is a
+    // Postgres `date` and arrives as a bare `YYYY-MM-DD`; `since()` reads
+    // `created_at` with `Date.parse`, which is UTC midnight, while `monthFrom`
+    // is LOCAL midnight — so west of Greenwich this dropped every cash payment
+    // a coach recorded as received on the FIRST of the month out of the hero
+    // figure on this screen, silently, under a 'ready' status. app/(trainer)/
+    // money.tsx already fixed this in its own memo; the rule now lives in
+    // src/lib/coachReceipts.ts so the two screens cannot disagree about which
+    // month somebody's cash was in.
+    receipt: receiptTakenRows(receipts.rows),
   }), [sales.rows, renewals.rows, receipts.rows]);
   const takingsReads = useMemo(
     () => ({ sales: sales.status, renewals: renewals.status, receipts: receipts.status }),

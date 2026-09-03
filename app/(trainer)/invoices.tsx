@@ -53,7 +53,7 @@ import { chaseGroups, chaseMessage, chaseMessageCaveat, type ChaseGroup } from '
 import {
   coachInvoiceDoc, invoiceShareBlurb, invoiceBlockers, invoiceNumber, invoiceDayLabel,
   invoiceBook, money, kindLabel, ageingBook, invoiceAge, chaseBlocker, chaseHistoryLine,
-  settleBlocker, settleDayBlocker, chaseFromBlocker, chaseFromDayBlocker,
+  settleBlocker, settleDayBlocker, voidBlocker, chaseFromBlocker, chaseFromDayBlocker,
   BUCKET_TITLE, AGEING_IS_YOUR_OWN_RECORD, INVOICE_DUE_NOT_A_TERM, CHASE_FROM_IS_NOT_A_DUE_DATE, plusDays,
   type AgeBucket,
   type CoachInvoice, type InvoiceDraft, type InvoiceKind,
@@ -359,6 +359,12 @@ export default function Invoices() {
     if (!voidTarget) return;
     const reason = voidReason.trim();
     if (!reason) return;
+    // Checked here as well as on the control, for `settleBlocker`'s reason: the
+    // sheet can be open when the state underneath it changes, and the
+    // alternative to this line is a raw CHECK-constraint message from Postgres
+    // reaching a coach. See `voidBlocker`.
+    const blocked = voidBlocker(voidTarget);
+    if (blocked) { Alert.alert('Not voided', blocked); return; }
     setBusy(true);
     const res = await voidInvoice(voidTarget.id, reason);
     setBusy(false);
@@ -991,7 +997,17 @@ export default function Invoices() {
                       <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
                     </Pressable>
                   ) : null}
-                  {!inv.voidedAt ? (
+                  {/* `voidBlocker`, not `!inv.voidedAt`. An invoice the coach
+                      has recorded as settled cannot be voided — part 660's
+                      `coach_invoices_not_both_chk` refuses a document that says
+                      both that it was paid and that it was cancelled — and
+                      part 138's function has no matching guard, so the tap
+                      reached the UPDATE, tripped the CHECK, and came back as an
+                      Alert carrying the raw Postgres sentence about a relation
+                      and a constraint name. The same reader the sheet uses, so
+                      the control is absent exactly where the act would be
+                      refused. */}
+                  {!voidBlocker(inv) ? (
                     <Pressable onPress={() => { setVoidTarget(inv); setVoidReason(''); }} hitSlop={8} accessibilityRole="button"
                       accessibilityLabel={`Void invoice ${invoiceNumber(inv.seq)}`} style={{ paddingVertical: sp.xs }}>
                       <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Void</Text>
@@ -1241,8 +1257,27 @@ export default function Invoices() {
             <Text style={{ ...ty.title, color: t.ink }}>
               Invoice {settleTarget ? invoiceNumber(settleTarget.seq) : ''} was paid?
             </Text>
+            {/* WHO and HOW MUCH, under the number.
+                This sheet named the sequence number alone, and the number is
+                the one thing on the row a coach does not know by heart. "They
+                paid it" sits beside "Send" on every row of the whole-book list
+                below, the rows are number-name-amount at a glance, and this is
+                the only act on the screen that cannot be undone or worked
+                around: a settlement is written once, there is no un-settle, and
+                part 660's `coach_invoices_not_both_chk` means a mis-settled
+                invoice cannot be voided either. It leaves every chase list and
+                the outstanding figure for good.
+                So the confirmation restates the two facts a coach would use to
+                notice they were on the wrong row. `money()` returns null rather
+                than a bare figure when the currency is missing, and a dash is
+                drawn instead — the same rule the rows themselves keep. */}
+            {settleTarget ? (
+              <Text style={{ ...ty.body, color: t.ink, marginTop: 4 }}>
+                {money(settleTarget) ?? DASH} from {settleTarget.billTo}
+              </Text>
+            ) : null}
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
-              This records your own statement that the money arrived. Nothing about the document changes — it still says what it said when you issued it — and this is written once: if the money later goes back out, that is a refund or a chargeback and it happened on its own day.
+              This records your own statement that the money arrived. Nothing about the document changes — it still says what it said when you issued it — and this is written once: if the money later goes back out, that is a refund or a chargeback and it happened on its own day. It cannot be undone, and a settled invoice cannot be voided either.
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day it arrived</Text>
             {/* A box that opens a month, not a box that raises a keyboard over

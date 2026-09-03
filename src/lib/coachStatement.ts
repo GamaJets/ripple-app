@@ -1260,7 +1260,34 @@ export function coachStatement(input: StatementInput): Statement {
   // the other is what the coach typed. Neither is checked against a bank, but
   // only one of them has a Stripe record sitting behind it to be checked
   // against, and the accountant is the person who needs to know which is which.
-  const recSplit = splitByPeriod(input.receipts.rows, (r) => r.created_at, range);
+  //
+  // ── `splitByDay`, not `splitByPeriod` ─────────────────────────────────
+  //
+  // `coach_receipts.received_on` is a Postgres `date` and reaches this module
+  // as a bare `YYYY-MM-DD` in `created_at` (see the mapper in
+  // src/ui/coachStatement.ts). It means a calendar day — the day the coach says
+  // cash was handed over, in the room both people were standing in — and
+  // `splitByPeriod` reads it as an INSTANT: `Date.parse('2026-01-01')` is UTC
+  // midnight, which is eight hours BEFORE local midnight in Los Angeles, so
+  // `t >= range.fromMs` was false for every payment received on the FIRST day
+  // of the period.
+  //
+  // Those payments were not counted, and they were not reported missing
+  // either. `undated` counts rows whose date will not parse and this one parses
+  // perfectly; `noPeriod` counts rows with no period to compare against and
+  // there was one. The row simply fell out between the two, and the section
+  // printed a shorter count and a smaller total under a 'ready' status with a
+  // tick beside it, on the one document in this app that gets copied into
+  // somebody else's spreadsheet. Invisible in Dubai, where the statement was
+  // written; present in every period, for every coach in the Americas.
+  //
+  // The server read is already a calendar-day comparison — `.gte('received_on',
+  // period.from).lte('received_on', period.to)` — so the row was fetched and
+  // then dropped here. Every other date-only column on this document
+  // (`issued_on`, `arrival_on`, `paid_on`) already goes through `splitByDay`;
+  // this was the one that did not, and `splitByDay`'s own header names exactly
+  // this trap.
+  const recSplit = splitByDay(input.receipts.rows, (r) => r.created_at, input.period);
   const recTaken = sumTaken(recSplit.inside);
   const recReady = input.receipts.status === 'ready' && readable;
   const recNotes = [RECEIPTS_ARE_YOUR_WORD];

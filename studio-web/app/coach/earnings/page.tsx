@@ -560,8 +560,14 @@ export default function CoachEarnings() {
   // payrollByTrainer an empty array produces a confident, complete-looking month
   // in which nothing is owed, built out of a read that never returned.
   const lines = useMemo(
-    () => sessions && payrollByTrainer(sessions, policy, fallbackCents),
-    [sessions, policy, fallbackCents],
+    // The fourth argument is `now`, and it defaulted. Nothing in this dependency
+    // list moves when time does, so `unmarked` — the count that tells a coach a
+    // session they delivered has no outcome recorded against it yet — was frozen
+    // at the moment the tab was opened. A session finished since then simply did
+    // not appear, and a coach reading a complete-looking month has no reason to
+    // go and ask about it.
+    () => sessions && payrollByTrainer(sessions, policy, fallbackCents, nowMs),
+    [sessions, policy, fallbackCents, nowMs],
   );
   const total = useMemo(() => payrollTotal(lines ?? []), [lines]);
 

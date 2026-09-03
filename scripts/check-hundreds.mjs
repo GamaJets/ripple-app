@@ -205,34 +205,25 @@ const EXCUSE = /(?:currency|unit)-ok:\s*\S/;
  * (or the list quietly stops describing the tree). "It is fine" is not a
  * reason; each entry says what makes the hundred right.
  *
- * One entry, and it is open work rather than an exemption. The distinction
- * matters: a `currency-ok:` marker says "this hundred is right", and this list
- * says "this hundred is wrong, it is written down, and it cannot spread".
+ * EMPTY, and it held one entry until the spreadsheet importer was fixed.
+ *
+ * That entry was `src/lib/csvImport.ts`, and it was written down as OPEN WORK
+ * rather than as an exemption: `parseMoneyCents` read a gym's migration
+ * spreadsheet at two decimal places flat, so it refused a legitimate
+ * three-place Kuwaiti figure and read a Japanese "50000" as five million yen,
+ * into `gym_payments.amount_cents`, permanently, on the one import a gym does
+ * once and never checks again. It is now currency-aware end to end — the
+ * currency is threaded through `parseMoneyCents`, `previewPayments` and
+ * `previewPlans` and the scaling is done on the digits — and `minorToDecimal`
+ * in src/lib/gymExport.ts moved with it, because an exporter at a flat two
+ * places and a currency-aware importer would produce a bundle that does not
+ * re-import as the same figures. src/lib/importRoundTrip.test.ts is what holds
+ * both ends: export and re-import in GBP, JPY and KWD, compared as integers.
+ *
+ * Kept as an empty Map rather than deleted, because the mechanism above is
+ * what makes a future offence recordable without being excused.
  */
-const KNOWN = new Map([
-  ['src/lib/csvImport.ts', {
-    count: 1,
-    // `parseMoneyCents` reads a money column out of a gym's migration
-    // spreadsheet at two decimal places flat: it refuses a legitimate
-    // three-place Kuwaiti figure ("has 3 decimal places; money takes at most
-    // 2") and reads a Japanese "50000" as five million yen, into
-    // gym_payments.amount_cents, permanently, on the one import a gym does
-    // once and never checks again.
-    //
-    // The currency is available at the call site — studio-web/app/import/page
-    // .tsx already refuses the whole import for a gym that has not set one —
-    // so the fix is to thread it through `parseMoneyCents`, `previewPayments`
-    // and `previewPlans` and scale by `currencyDecimals`. That is three
-    // signatures in this file and two lines in studio-web/app/import/page.tsx
-    // (207 and 208), and studio-web belongs to another lane tonight.
-    //
-    // `minorToDecimal` in src/lib/gymExport.ts is the same defect on the way
-    // OUT — it pads to three digits and slices two — and the two have to move
-    // together or an exported file stops re-importing. This gate cannot see
-    // that one at all: it has no factor in it, only a `slice(-2)`.
-    reason: 'the spreadsheet importer is two-place end to end; the fix needs studio-web/app/import/page.tsx and src/lib/gymExport.ts to move with it',
-  }],
-]);
+const KNOWN = new Map([]);
 
 function walk(dir, out = []) {
   for (const e of readdirSync(dir)) {

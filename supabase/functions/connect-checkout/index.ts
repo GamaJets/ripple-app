@@ -91,6 +91,7 @@ import {
 import {
   modelForAccount, optionsForObject, platformFeePct, applicationFeeCents, canTakeDirectCharges,
 } from '../../../src/lib/directCharges.ts';
+import { checkRedirect, parseRedirectAllow } from '../../../src/lib/redirectTarget.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -152,6 +153,17 @@ Deno.serve(async (req) => {
 
   const action = String(body.action || 'checkout');
 
+  // Every return address this function hands Stripe — two portals and the
+  // checkout pair — comes out of the request body, and each used to be
+  // `String(body.x || 'repple://…')` with nothing between a body and a payments
+  // API. src/lib/redirectTarget.ts holds the rule and is honest about what it
+  // is and is not: an unset REDIRECT_ALLOW still refuses the four schemes that
+  // are never a redirect target, and setting it makes the list closed.
+  const redirectAllow = parseRedirectAllow(Deno.env.get('REDIRECT_ALLOW'));
+  /** One line at each of the four sites. A refusal is a 400 carrying the
+   *  module's own sentence, which already says nothing has been charged. */
+  const backTo = (offered: unknown, fallback: string) => checkRedirect(offered, fallback, redirectAllow);
+
   // ── the billing portal for a ONE-OFF sale ─────────────────────────────────
   //
   // Somebody who has only ever bought session packs had no route to an invoice,
@@ -203,9 +215,11 @@ Deno.serve(async (req) => {
     // `accountForObject` reads the object's own column rather than the coach's
     // current setting.
     try {
+      const back = backTo(body.return_url, 'repple://packages');
+      if (!back.ok) return json({ error: back.reason }, 400);
       const portal = await stripe.billingPortal.sessions.create({
         customer: row.stripe_customer_id,
-        return_url: String(body.return_url || 'repple://packages'),
+        return_url: back.url,
       }, optionsForObject(row));
       return json({ url: portal.url });
     } catch (e) { return stripeError('billing portal', e); }
@@ -276,9 +290,11 @@ Deno.serve(async (req) => {
       // own card to update it and cannot cancel from Stripe's side at all.
       if (!row.stripe_customer_id) return json({ error: 'no billing account on this subscription yet' }, 404);
       try {
+        const back = backTo(body.return_url, 'repple://packages');
+        if (!back.ok) return json({ error: back.reason }, 400);
         const portal = await stripe.billingPortal.sessions.create({
           customer: row.stripe_customer_id,
-          return_url: String(body.return_url || 'repple://packages'),
+          return_url: back.url,
         }, acctOpts);
         return json({ url: portal.url });
       } catch (e) { return stripeError('billing portal', e); }
@@ -401,8 +417,12 @@ Deno.serve(async (req) => {
   // ── buying ────────────────────────────────────────────────────────────────
   const packageId = String(body.package_id || '');
   if (!packageId) return json({ error: 'missing package_id' }, 400);
-  const successUrl = String(body.success_url || 'repple://purchase/success');
-  const cancelUrl = String(body.cancel_url || 'repple://purchase/cancel');
+  const okBack = backTo(body.success_url, 'repple://purchase/success');
+  if (!okBack.ok) return json({ error: okBack.reason }, 400);
+  const cancelBack = backTo(body.cancel_url, 'repple://purchase/cancel');
+  if (!cancelBack.ok) return json({ error: cancelBack.reason }, 400);
+  const successUrl = okBack.url;
+  const cancelUrl = cancelBack.url;
 
   // Load the package and the trainer's connected account.
   //

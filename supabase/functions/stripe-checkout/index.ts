@@ -32,6 +32,7 @@
 // secret.
 import Stripe from 'npm:stripe@^16';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { checkRedirect, parseRedirectAllow } from '../../../src/lib/redirectTarget.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -57,8 +58,19 @@ Deno.serve(async (req) => {
   let body: any = {};
   try { body = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
   const priceId = String(body.price_id || '');
-  const successUrl = String(body.success_url || 'repple://billing/success');
-  const cancelUrl = String(body.cancel_url || 'repple://billing/cancel');
+  // The return addresses, checked rather than passed straight through. Each
+  // used to be `String(body.x || 'default')` with nothing between a request
+  // body and a payments API. src/lib/redirectTarget.ts holds the rule and
+  // says what it is and is not: an unset REDIRECT_ALLOW still refuses the
+  // four schemes that are never a redirect target, and setting it makes the
+  // list closed.
+  const redirectAllow = parseRedirectAllow(Deno.env.get('REDIRECT_ALLOW'));
+  const okBack = checkRedirect(body.success_url, 'repple://billing/success', redirectAllow);
+  if (!okBack.ok) return json({ error: okBack.reason }, 400);
+  const cancelBack = checkRedirect(body.cancel_url, 'repple://billing/cancel', redirectAllow);
+  if (!cancelBack.ok) return json({ error: cancelBack.reason }, 400);
+  const successUrl = okBack.url;
+  const cancelUrl = cancelBack.url;
   if (!priceId) return json({ error: 'missing price_id' }, 400);
 
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);

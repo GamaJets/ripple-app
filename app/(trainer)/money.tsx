@@ -134,7 +134,7 @@ import {
   payoutSummary, payoutStateLabel, payoutFailureLine, payoutsEmptyLine,
   PAYOUT_IS_NOT_A_SALE, PAYOUT_STRIPE_IS_THE_RECORD, type CoachPayout,
 } from '../../src/lib/coachPayouts';
-import { receiptsTaken, receiptsEmptyLine, RECEIPT_MAY_DOUBLE_COUNT, type CoachReceipt } from '../../src/lib/coachReceipts';
+import { receiptsTaken, receiptTakenRows, receiptsEmptyLine, RECEIPT_MAY_DOUBLE_COUNT, type CoachReceipt } from '../../src/lib/coachReceipts';
 import { fetchMyCosts } from '../../src/ui/coachCosts';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { costsTaken, costsEmptyLine, COSTS_ARE_NEVER_NETTED, type CoachCost } from '../../src/lib/coachCosts';
@@ -145,7 +145,6 @@ import {
 } from '../../src/lib/clientValue';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { isWhole } from '../../src/ui/loadStatus';
-import { localDate } from '../../src/lib/localDate';
 
 /** The month a period figure covers, in the words a person uses for it. */
 const monthName = (d: Date): string => d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
@@ -276,17 +275,18 @@ export default function CoachMoney() {
   // month for every coach in the Americas.
   //
   // `localDate` is the module written for exactly this and its header names
-  // the same trap; src/ui/coachStatement.ts already compares these rows as
-  // days for the same reason. A day that does not parse becomes 'unknown',
-  // which keeps it out of every period rather than sweeping it into this one.
-  const receiptRows = useMemo<TakenRow[]>(
-    () => receipts.rows.map((r) => ({
-      amount_cents: r.amountCents,
-      currency: r.currency,
-      created_at: localDate(r.receivedOn)?.toISOString() ?? 'unknown',
-    })),
-    [receipts.rows],
-  );
+  // the same trap; src/lib/coachStatement.ts compares these rows as days for
+  // the same reason. A day that does not parse becomes 'unknown', which keeps
+  // it out of every period rather than sweeping it into this one.
+  //
+  // The mapping was written out here and app/(trainer)/analytics.tsx then
+  // composed the same three strands through the same `since()` without it, so
+  // the two screens gave a coach two different answers about the same cash on
+  // the first of the month. It is `receiptTakenRows` in
+  // src/lib/coachReceipts.ts now — one rule, beside `receiptsTaken`, which goes
+  // through it too so the all-time figure cannot date a payment differently
+  // from the monthly one.
+  const receiptRows = useMemo<TakenRow[]>(() => receiptTakenRows(receipts.rows), [receipts.rows]);
 
   /* ── what each client has paid, all time ──────────────────────────────
    *

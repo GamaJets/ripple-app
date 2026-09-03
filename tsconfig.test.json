@@ -295,6 +295,7 @@
     "src/lib/gymClassFill.test.ts",
     "src/lib/gymPolicy.test.ts",
     "src/lib/gymImports.test.ts",
+    "src/lib/importRoundTrip.test.ts",
     "src/lib/blockRange.test.ts",
     "src/lib/classRegister.test.ts",
     "src/lib/coachRegister.test.ts",
@@ -502,6 +503,8 @@
     "src/lib/upcomingWindow.ts",
     "src/lib/upcomingWindow.test.ts",
     "src/lib/sharedSecret.ts",
-    "src/lib/sharedSecret.test.ts"
+    "src/lib/sharedSecret.test.ts",
+    "src/lib/redirectTarget.ts",
+    "src/lib/redirectTarget.test.ts"
   ]
 }

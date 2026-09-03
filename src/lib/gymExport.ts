@@ -81,6 +81,14 @@ import type { SignatureAttribution } from './gymSigning';
 import {
   type ExportWindow, isBounded, placeInWindow, windowSlug, describeWindow,
 } from './exportWindow';
+// The second runtime import, and the header above says there is one. It is now
+// two, and the reason is worth the amendment: how many minor units a currency
+// has is a question this file was answering wrongly, and coachMoney.ts is the
+// single place in the product that answers it. A second copy of the list is
+// the copy that drifts. The purity the header is actually about is intact —
+// coachMoney touches no Supabase, no browser and no clock, and evaluates
+// nothing at module scope.
+import { currencyDecimals } from './coachMoney';
 
 // Re-exported so a caller building a GymExportInput — a screen, or a test —
 // can name every row type from here rather than importing six modules to do it.
@@ -163,20 +171,49 @@ export function toCsv(header: string[], rows: Cell[][], bom = true): string {
  *
  * Deliberately string arithmetic. `(cents / 100).toFixed(2)` is a float
  * division and this is a ledger; the answer here is the same digits the
- * database holds with a point pushed two places left, which is a text
- * operation, not a numeric one.
+ * database holds with the point pushed left, which is a text operation, not a
+ * numeric one.
+ *
+ * ── And the point is not always two places left ───────────────────────────
+ *
+ * This padded to three digits and sliced two, for every currency there is. A
+ * gym in Tokyo exported ¥50,000 as "500.00" — an understatement of a hundred
+ * times, in the file it hands an accountant — and a gym in Kuwait exported
+ * KWD 12.340 as "123.40", ten times the sale. The readable half of the same
+ * bundle was right the whole way through, because `money()` asks
+ * `currencyDecimals`, so the two artefacts disagreed and neither said which to
+ * believe.
+ *
+ * It also broke the round trip in both directions at once. `parseMoneyCents`
+ * in src/lib/csvImport.ts is currency-aware now, so a file written at a flat
+ * two places would re-import as a different amount — which is worse than
+ * either fault alone, because an export that does not re-import is an export a
+ * gym cannot move on.
+ *
+ * `currencyDecimals` in src/lib/coachMoney.ts is the one answer to how many
+ * places this money has. Every caller below hands it the row's own currency,
+ * and there is no row in this bundle that carries an amount without one.
  *
  * Null is empty rather than "0.00" — a pass with no recorded price is not a
  * free pass, and that distinction is the whole reason `paidCents` is nullable.
+ * An UNKNOWN CURRENCY is empty for the same reason: `client_purchases` carries
+ * none for a sale whose package has been deleted, and "45.00" of nothing is a
+ * figure somebody would add up.
  */
-export function minorToDecimal(cents: number | null | undefined): string {
+export function minorToDecimal(cents: number | null | undefined, currency?: string | null): string {
   if (cents === null || cents === undefined) return '';
   if (!Number.isFinite(cents) || !Number.isInteger(cents)) return '';
+  // How many places this money has, asked rather than assumed. Null — not 2 —
+  // when nobody said which money it is, and an unstateable figure is an empty
+  // cell beside the stored integer rather than a number in no currency at all.
+  const dp = currencyDecimals(currency);
+  if (dp == null) return '';
+  if (dp === 0) return String(cents);
   const neg = cents < 0;
-  const digits = String(Math.abs(cents)).padStart(3, '0');
-  const whole = digits.slice(0, -2);
-  const frac = digits.slice(-2);
-  return (neg ? '-' : '') + whole + '.' + frac;
+  // Padded to dp + 1 so a figure smaller than one whole unit keeps its leading
+  // nought — 5 fils is "0.005", never ".005", which a spreadsheet reads as text.
+  const digits = String(Math.abs(cents)).padStart(dp + 1, '0');
+  return (neg ? '-' : '') + digits.slice(0, -dp) + '.' + digits.slice(-dp);
 }
 
 /**
@@ -1708,7 +1745,7 @@ function invoicesTable(rows: ExportInvoice[]): Table {
     header: ['invoice_number', 'issued_on', 'due_on', 'member_name', 'member_id', 'amount', 'currency', 'amount_cents', 'status', 'note', 'invoice_id'],
     rows: rows.map((i) => [
       i.number, i.issuedOn, i.dueOn, i.memberName, i.memberId,
-      minorToDecimal(i.amountCents), i.currency, i.amountCents,
+      minorToDecimal(i.amountCents, i.currency), i.currency, i.amountCents,
       i.status, i.note, i.id,
     ]),
     note: 'What the gym billed. A blank amount is an invoice that records none — it is not a free one. `status` is the register\u2019s own word; overdue is computed from due_on and is not stored.',
@@ -1721,7 +1758,7 @@ function settlementsTable(rows: ExportSettlement[]): Table {
     header: ['settled_at', 'trainer_name', 'trainer_id', 'period_from', 'period_to', 'amount', 'currency', 'amount_cents', 'sessions', 'method', 'reversed_at', 'reverse_reason', 'settlement_id'],
     rows: rows.map((r) => [
       r.settledAt, r.trainerName, r.trainerId, r.periodFrom, r.periodTo,
-      minorToDecimal(r.amountCents), r.currency, r.amountCents,
+      minorToDecimal(r.amountCents, r.currency), r.currency, r.amountCents,
       r.sessionsCount, r.method, r.reversedAt, r.reverseReason, r.id,
     ]),
     note: 'Amounts are snapshots of what was handed over and are never recomputed. A row with reversed_at set was TAKEN BACK — it is kept because a settlement that was recorded and then withdrawn is two facts, and it must not be counted as money out.',
@@ -1782,7 +1819,7 @@ function purchasesTable(rows: ExportPurchase[]): Table {
     header: ['created_at', 'trainer_name', 'trainer_id', 'client_id', 'amount', 'currency', 'amount_cents', 'sessions_total', 'sessions_used', 'status', 'purchase_id'],
     rows: rows.map((p) => [
       p.createdAt, p.trainerName, p.trainerId, p.clientId,
-      minorToDecimal(p.amountCents), p.currency, p.amountCents,
+      minorToDecimal(p.amountCents, p.currency), p.currency, p.amountCents,
       p.sessionsTotal, p.sessionsUsed, p.status, p.id,
     ]),
     note: '`client_purchases` carries no tenant column, so these rows are scoped by the trainers on this gym\u2019s roster — a purchase against a coach who has since left the roster is not here. A blank currency means the package it was sold from has been deleted and the unit is unrecoverable; it is never guessed.',
@@ -1811,7 +1848,7 @@ function ordersTable(rows: ExportOrder[]): Table {
     ],
     rows: rows.map((o) => [
       o.createdAt, o.paidAt, o.status, o.memberName, o.memberId, o.kind, o.intent,
-      minorToDecimal(o.amountCents), o.currency, o.amountCents,
+      minorToDecimal(o.amountCents, o.currency), o.currency, o.amountCents,
       o.termStartsOn, o.termEndsOn, o.usesTotal, o.expiresOn,
       o.planId, o.passTypeId, o.membershipId, o.passId,
       o.stripeAccountId, o.stripeSessionId, o.stripePaymentIntent, o.failureNote, o.id,
@@ -1844,8 +1881,8 @@ function closesTable(rows: ExportClose[]): Table {
     ],
     rows: rows.map((c) => [
       c.monthKey, c.closedAt, c.closedByName, c.closedById,
-      minorToDecimal(c.takenCents), minorToDecimal(c.invoicedCents),
-      minorToDecimal(c.outstandingCents), minorToDecimal(c.payrollCents), c.currency,
+      minorToDecimal(c.takenCents, c.currency), minorToDecimal(c.invoicedCents, c.currency),
+      minorToDecimal(c.outstandingCents, c.currency), minorToDecimal(c.payrollCents, c.currency), c.currency,
       c.takenCents, c.invoicedCents, c.outstandingCents, c.payrollCents,
       c.unmarkedSessions, c.blockersAtClose, c.note,
       c.reopenedAt, c.reopenedByName, c.reopenedById, c.reopenReason, c.id,
@@ -1865,7 +1902,7 @@ function adjustmentsTable(rows: ExportAdjustment[]): Table {
     header: ['applies_on', 'trainer_name', 'trainer_id', 'kind', 'amount', 'currency', 'amount_cents', 'note', 'settlement_id', 'created_at', 'created_by', 'created_by_id', 'adjustment_id'],
     rows: rows.map((a) => [
       a.appliesOn, a.trainerName, a.trainerId, a.kind,
-      minorToDecimal(a.amountCents), a.currency, a.amountCents,
+      minorToDecimal(a.amountCents, a.currency), a.currency, a.amountCents,
       a.note, a.settlementId, a.createdAt, a.createdByName, a.createdById, a.id,
     ]),
     note:
@@ -1882,7 +1919,7 @@ function equipmentLogTable(rows: ExportEquipmentLog[]): Table {
     header: ['happened_on', 'kind', 'equipment_label', 'equipment_id', 'performed_by', 'findings', 'cost', 'currency', 'cost_cents', 'reported_to', 'document_id', 'recorded_by', 'recorded_by_id', 'created_at', 'entry_id'],
     rows: rows.map((e) => [
       e.happenedOn, e.kind, e.equipmentLabel, e.equipmentId, e.performedBy, e.findings,
-      minorToDecimal(e.costCents), e.currency, e.costCents,
+      minorToDecimal(e.costCents, e.currency), e.currency, e.costCents,
       e.reportedTo, e.documentId, e.recordedByName, e.recordedById, e.createdAt, e.id,
     ]),
     note:
@@ -1921,7 +1958,7 @@ function plansTable(rows: MembershipPlan[]): Table {
     header: ['name', 'price', 'interval', 'currency', 'active', 'plan_id', 'price_cents'],
     rows: rows.map((p) => [
       p.name,
-      minorToDecimal(p.priceCents),
+      minorToDecimal(p.priceCents, p.currency),
       p.interval,
       p.currency,
       p.active,
@@ -2023,7 +2060,7 @@ function paymentsTable(rows: GymPayment[]): Table {
     rows: rows.map((p) => [
       p.memberName,
       null,
-      minorToDecimal(p.amountCents),
+      minorToDecimal(p.amountCents, p.currency),
       isoDatePart(p.takenAt),
       p.method,
       p.note,
@@ -2063,7 +2100,7 @@ function sessionsTable(rows: PtSession[]): Table {
     rows: rows.map((s) => [
       s.id, s.trainerId, s.trainerName, s.clientId, s.clientName,
       s.startsAt, s.durationMin, s.status, s.outcome, s.outcomeAt,
-      s.rateCents, minorToDecimal(s.rateCents), s.settlementId,
+      s.rateCents, minorToDecimal(s.rateCents, s.rateCurrency), s.settlementId,
     ]),
     note: 'An empty outcome means nobody has said what happened. It is not a no-show, and it was never treated as one.',
   };
@@ -2072,7 +2109,7 @@ function sessionsTable(rows: PtSession[]): Table {
 function passTypesTable(rows: PassType[]): Table {
   return {
     header: ['pass_type_id', 'name', 'kind', 'price_cents', 'price', 'currency', 'uses', 'valid_days', 'active'],
-    rows: rows.map((t) => [t.id, t.name, t.kind, t.priceCents, minorToDecimal(t.priceCents), t.currency, t.uses, t.validDays, t.active]),
+    rows: rows.map((t) => [t.id, t.name, t.kind, t.priceCents, minorToDecimal(t.priceCents, t.currency), t.currency, t.uses, t.validDays, t.active]),
     note: 'An empty valid_days means the pass does not expire.',
   };
 }
@@ -2087,7 +2124,7 @@ function passesTable(rows: GymPass[]): Table {
     rows: rows.map((p) => [
       p.id, p.passTypeId, p.passTypeName, p.kind, p.holderId, p.holderName,
       p.hostMemberId, p.issuedOn, p.expiresOn, p.usesTotal, p.usesSpent,
-      p.paidCents, minorToDecimal(p.paidCents), p.currency, p.note,
+      p.paidCents, minorToDecimal(p.paidCents, p.currency), p.currency, p.note,
     ]),
     note: 'uses_total and uses_spent are exported raw and never differenced here — a clamped "uses left" would hide a counter that is out of step. An empty paid_cents means no price was recorded, not that it was free.',
   };

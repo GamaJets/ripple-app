@@ -159,6 +159,11 @@ export default function Orders() {
     { everyMs: 60_000 },
   );
 
+  /** The instant these orders were read, and the one "how long has this been
+   *  pending" is measured from. Named rather than left to a default so the
+   *  clock is visible on the line and in the dependency list below. */
+  const nowMs = readAt ?? Date.now();
+
   useEffect(() => {
     let live = true;
     (async () => {
@@ -182,11 +187,17 @@ export default function Orders() {
     // not a filter over rows that were never fetched.
   }, [load, span.days, refresh]);
 
-  // Keyed on `readAt` as well as the rows: `orderTrouble`'s stale-pending
-  // clock is a defaulted `now = Date.now()` evaluated once per memo, so without
-  // this an order that crosses the stale threshold while the tab is open never
-  // appears in the banner. Every re-read moves it.
-  const trouble = useMemo(() => orderTrouble(rows ?? []), [rows, readAt]);
+  // The instant is PASSED, not left to `orderTrouble`'s default and inferred
+  // from the fact that this memo happens to re-run.
+  //
+  // Keying on `readAt` was already enough to unfreeze the value — the memo
+  // re-runs on every re-read, and the default clock is read again when it does.
+  // What it was not enough for is saying what the answer is ABOUT: the figure
+  // was measured from whenever React last chose to run the body, while the rows
+  // it judges are from `nowMs`. Passing the read instant makes the banner's
+  // claim and the table under it the same claim, and puts the clock somewhere a
+  // reviewer can see it rather than in a default two files away.
+  const trouble = useMemo(() => orderTrouble(rows ?? [], nowMs), [rows, nowMs]);
   const pots = useMemo(() => paidPots(rows ?? []), [rows]);
   const statuses = useMemo(() => countByStatus(rows ?? []), [rows]);
 

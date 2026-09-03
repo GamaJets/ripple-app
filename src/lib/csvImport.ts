@@ -459,6 +459,8 @@ export function previewMembers(text: string, order?: DateOrder): ImportPreview<M
     missingRequired,
     unmatchedColumns: unmatched,
     dateOrder: order ?? detected,
+    // A member sheet carries no money column, so there is no currency to state.
+    currency: null,
     rows,
     ready: missingRequired.length ? [] : rows.filter((r) => r.errors.length === 0).map((r) => r.value!),
     rejected,
@@ -601,6 +603,8 @@ export function previewCoachRoster(text: string): ImportPreview<CoachClientRow> 
     // No dates are read, so there is no convention to settle and nothing to
     // ask the coach about. Stated rather than left as a stale 'ambiguous'.
     dateOrder: 'unknown',
+    // And no money either — a coach's roster is a name, a goal and a mode.
+    currency: null,
     rows,
     ready: missingRequired.length ? [] : rows.filter((r) => r.errors.length === 0).map((r) => r.value!),
     rejected,
@@ -610,12 +614,20 @@ export function previewCoachRoster(text: string): ImportPreview<CoachClientRow> 
 /* ── payment import ────────────────────────────────────────────────────────── */
 
 export const PAYMENT_ALIASES: Record<string, string[]> = {
-  member: ['member', 'name', 'customer', 'paid by', 'client'],
-  email:  ['email', 'e-mail', 'email address'],
-  amount: ['amount', 'total', 'paid', 'value', 'gross', 'sum'],
-  date:   ['date', 'paid on', 'payment date', 'taken', 'received'],
-  method: ['method', 'type', 'payment method', 'via'],
-  note:   ['note', 'notes', 'reference', 'description', 'memo'],
+  member:   ['member', 'name', 'customer', 'paid by', 'client'],
+  email:    ['email', 'e-mail', 'email address'],
+  amount:   ['amount', 'total', 'paid', 'value', 'gross', 'sum'],
+  date:     ['date', 'paid on', 'payment date', 'taken', 'received'],
+  method:   ['method', 'type', 'payment method', 'via'],
+  note:     ['note', 'notes', 'reference', 'description', 'memo'],
+  // Read, and read only to CONTRADICT. A payments sheet does not set the
+  // currency — every imported row is written in the gym's, because
+  // `gym_payments.currency` is one column and `importPayments` fills it from
+  // one value — but a sheet that names a different one is a sheet from
+  // somewhere else, and importing it silently restates a GBP ledger as
+  // dirhams at par. Repple's own payments.csv carries this column, so the
+  // check costs nothing on the file it matters most for.
+  currency: ['currency', 'ccy', 'cur'],
 };
 
 export interface PaymentRow {
@@ -634,7 +646,21 @@ const METHODS: Record<string, PaymentRow['method']> = {
   directdebit: 'direct_debit', dd: 'direct_debit', gocardless: 'direct_debit', standingorder: 'direct_debit',
 };
 
-export function previewPayments(text: string, order?: DateOrder): ImportPreview<PaymentRow> {
+/**
+ * Read a payment spreadsheet without writing anything.
+ *
+ * `currency` is the gym's, from `tenants.currency`, and it is what the amount
+ * column is denominated in — a payments sheet has no currency column, so every
+ * row inherits it. It is not optional in spirit: with none, every amount is
+ * refused with a reason rather than read at two decimal places, because two is
+ * wrong for twenty-one currencies and silently so. The screen that calls this
+ * already refuses the import outright for a gym with no currency set, so the
+ * refusals are a belt beside that brace rather than the only thing standing
+ * between a yen sheet and a hundredfold error in `gym_payments.amount_cents`.
+ */
+export function previewPayments(
+  text: string, order?: DateOrder, currency?: string | null,
+): ImportPreview<PaymentRow> {
   const sheet = parseSheet(text);
   const { index, unmatched } = mapColumns(sheet.header, PAYMENT_ALIASES);
 
@@ -644,6 +670,9 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
 
   const at = (r: string[], f: string): string =>
     index[f] === undefined ? '' : (r[index[f]] ?? '');
+
+  // What every row of this file is being written in.
+  const importIn = (currency ?? '').trim().toUpperCase() || null;
 
   const detected = detectDateOrder(
     index.date !== undefined ? sheet.rows.map((r) => at(r, 'date')) : [],
@@ -655,7 +684,7 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
     const line = i + 2;
     const errors: string[] = [];
 
-    const amt = parseMoneyCents(at(r, 'amount'));
+    const amt = parseMoneyCents(at(r, 'amount'), currency);
     if (!amt.ok) errors.push(`amount: ${amt.reason}`);
     // A zero payment is a real thing (a comped month, a correction). A negative
     // one is a refund, which is not what this importer is for.
@@ -674,6 +703,17 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
     const memberName = at(r, 'member').trim() || null;
     if (!memberName && !email) {
       errors.push('no member name or email — this payment cannot be attributed');
+    }
+
+    // A stated currency that is not the one this import writes. Refused per row
+    // rather than for the file, because a mixed sheet is a real thing and the
+    // rows in the gym's own currency are still importable.
+    const stated = at(r, 'currency').trim().toUpperCase();
+    if (stated && importIn && stated !== importIn) {
+      errors.push(
+        `this row is in ${stated} and the import is writing ${importIn} — `
+        + 'the figures are not the same money and are not converted here',
+      );
     }
 
     const rawMethod = at(r, 'method').trim().toLowerCase().replace(/[^a-z]/g, '');
@@ -696,6 +736,7 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
     missingRequired,
     unmatchedColumns: unmatched,
     dateOrder: order ?? detected,
+    currency: importIn,
     rows,
     ready: missingRequired.length ? [] : rows.filter((r) => r.errors.length === 0).map((r) => r.value!),
     rejected,
@@ -772,7 +813,7 @@ const ACTIVE_WORDS = new Set([
  * thing a gym sells at nothing on purpose. The distinction is between an
  * absent cell and a deliberate 0.
  */
-export function previewPlans(text: string): ImportPreview<PlanRow> {
+export function previewPlans(text: string, currency?: string | null): ImportPreview<PlanRow> {
   const sheet = parseSheet(text);
   const { index, unmatched } = mapColumns(sheet.header, PLAN_ALIASES);
 
@@ -787,6 +828,9 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
   // 'unknown' rather than omitted, because ImportPreview is shared and a
   // missing field would read as a bug in the caller.
   const seen = new Map<string, number>();
+
+  // The gym's own currency, used for any row whose sheet does not state one.
+  const fallback = (currency ?? '').trim().toUpperCase() || null;
 
   const rows: RowResult<PlanRow>[] = sheet.rows.map((r, i) => {
     const line = i + 2; // +1 for zero-index, +1 for the header
@@ -805,12 +849,29 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
       else seen.set(key, line);
     }
 
+    // The currency is read BEFORE the price, because it decides how the price
+    // is read. An absent currency column is not an error — most sheets do not
+    // have one — but it is not 'AED' either. Null means "the sheet does not
+    // say", and the gym's own currency is what the row is then priced in. A
+    // present column that is not a 3-letter code IS an error.
+    let stated: string | null = null;
+    const rawCurrency = at(r, 'currency').trim().toUpperCase();
+    if (rawCurrency) {
+      if (/^[A-Z]{3}$/.test(rawCurrency)) stated = rawCurrency;
+      else errors.push(`currency "${at(r, 'currency').trim()}" is not a three-letter code`);
+    }
+    // What this row's price is denominated in: the sheet's own code where it
+    // has one, and the gym's otherwise. A price book exported from a British
+    // gym's old system with a GBP column belongs in GBP whatever the gym in
+    // front of it trades in, which is why the sheet outranks the fallback.
+    const priceIn = stated ?? fallback;
+
     let priceCents = 0;
     const rawPrice = at(r, 'price').trim();
     if (!rawPrice) {
       errors.push('no price — a blank price is an unfinished row, not a free plan');
     } else {
-      const m = parseMoneyCents(rawPrice);
+      const m = parseMoneyCents(rawPrice, priceIn);
       if (m.ok) {
         if (m.value < 0) errors.push('price is negative');
         else priceCents = m.value;
@@ -825,16 +886,12 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
       else errors.push(`billing period "${at(r, 'interval').trim()}" is not month, year or one-off`);
     }
 
-    // An absent currency column is not an error — most sheets do not have one
-    // — but it is not 'AED' either. Null means "the sheet does not say", and
-    // the import screen fills it from the gym before anything is written. A
-    // present column that is not a 3-letter code IS an error.
-    let currency: string | null = null;
-    const rawCurrency = at(r, 'currency').trim().toUpperCase();
-    if (rawCurrency) {
-      if (/^[A-Z]{3}$/.test(rawCurrency)) currency = rawCurrency;
-      else errors.push(`currency "${at(r, 'currency').trim()}" is not a three-letter code`);
-    }
+    // `PlanRow.currency` stays what the SHEET said and not what the row was
+    // priced in. The import screen writes `plan.currency ?? gymCurrency`, so
+    // filling this from the fallback here would say the file stated a currency
+    // it never mentioned — and the whole point of the null is that it is
+    // honest about what the file contains.
+    const currency = stated;
 
     let active = true;
     const rawActive = at(r, 'active').trim().toLowerCase();
@@ -858,6 +915,9 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
     missingRequired,
     unmatchedColumns: unmatched,
     dateOrder: 'unknown',
+    // The fallback, not a row's own code: a price book may name three
+    // currencies down its own column and no single one describes the file.
+    currency: fallback,
     rows,
     ready,
     rejected,

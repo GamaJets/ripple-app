@@ -21,7 +21,7 @@
 // addSession's `{ ok }` shape is untouched — screens destructure it — but it now
 // also carries `saved`, a promise that resolves to whether the row reached the
 // server.
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   overlaps, insideNoticeWindow, noticeHoursOf, lateCancelFee, cancelWarningLine,
@@ -751,7 +751,71 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   // know the app is stuck and think to pull down. src/lib/readRefresh.ts.
   useRecoverRead('sessions', status, () => { void hydrate(); });
 
-  return <Ctx.Provider value={{ sessions, status, cachedNote, refresh: () => hydrate(), addSession, bookSession, releaseSession, cancelMyBooking, removeSession, approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession }}>{children}</Ctx.Provider>;
+  // ── why this is not an inline object ──────────────────────────────────────
+  //
+  // It was one, and it cost 782 requests in five IDLE minutes on a single
+  // handset — a ~2/second lap of getUser → sessions → session_approvals, read
+  // off this project's own edge logs. An inline literal makes `useSessions()`
+  // return a different value on every render of this provider, and `refresh`
+  // a different function again. A consumer writing the obvious thing —
+  // `useFocusEffect(useCallback(() => { s.refresh(); }, [s]))` — then builds a
+  // machine that cannot stop: the effect re-runs when its callback's identity
+  // changes, `refresh` re-runs `hydrate`, `hydrate` ends in a `setSessions`
+  // with a freshly-built array, the provider re-renders, and both identities
+  // are new again.
+  //
+  // src/ui/roster.tsx:596 documents this exact defect and fixes it there; the
+  // reasoning is worth reading and is not repeated here. This provider never
+  // got the same treatment, and it is read by more screens than roster is —
+  // app/(client)/calendar.tsx and app/(client)/standing.tsx were both looping
+  // on it.
+  //
+  // The wrappers are created once and read the current implementations out of
+  // a ref, so they are stable for the life of the provider while still closing
+  // over this render's state. Freezing the implementations themselves in a
+  // `useCallback` would freeze the state they close over with them, which is
+  // the bug one level down.
+  const impl = useRef({
+    hydrate, addSession, bookSession, releaseSession, cancelMyBooking, removeSession,
+    approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession,
+  });
+  impl.current = {
+    hydrate, addSession, bookSession, releaseSession, cancelMyBooking, removeSession,
+    approveSession, disputeSession, rescheduleMyBooking, rescheduleClientSession,
+  };
+
+  const refreshStable = useCallback(() => impl.current.hydrate(), []);
+  const addStable = useCallback<SessionsValue['addSession']>((...a) => impl.current.addSession(...a), []);
+  const bookStable = useCallback<SessionsValue['bookSession']>((...a) => impl.current.bookSession(...a), []);
+  const releaseStable = useCallback<SessionsValue['releaseSession']>((...a) => impl.current.releaseSession(...a), []);
+  const cancelStable = useCallback<SessionsValue['cancelMyBooking']>((...a) => impl.current.cancelMyBooking(...a), []);
+  const removeStable = useCallback<SessionsValue['removeSession']>((...a) => impl.current.removeSession(...a), []);
+  const approveStable = useCallback<SessionsValue['approveSession']>((...a) => impl.current.approveSession(...a), []);
+  const disputeStable = useCallback<SessionsValue['disputeSession']>((...a) => impl.current.disputeSession(...a), []);
+  const rescheduleMineStable = useCallback<SessionsValue['rescheduleMyBooking']>((...a) => impl.current.rescheduleMyBooking(...a), []);
+  const rescheduleClientStable = useCallback<SessionsValue['rescheduleClientSession']>((...a) => impl.current.rescheduleClientSession(...a), []);
+
+  // Identity now changes only when something a consumer can actually see has:
+  // the calendar, how much of it we trust, or whether it came off this device.
+  const value = useMemo<SessionsValue>(() => ({
+    sessions, status, cachedNote,
+    refresh: refreshStable,
+    addSession: addStable,
+    bookSession: bookStable,
+    releaseSession: releaseStable,
+    cancelMyBooking: cancelStable,
+    removeSession: removeStable,
+    approveSession: approveStable,
+    disputeSession: disputeStable,
+    rescheduleMyBooking: rescheduleMineStable,
+    rescheduleClientSession: rescheduleClientStable,
+  }), [
+    sessions, status, cachedNote,
+    refreshStable, addStable, bookStable, releaseStable, cancelStable, removeStable,
+    approveStable, disputeStable, rescheduleMineStable, rescheduleClientStable,
+  ]);
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export function useSessions(): SessionsValue {

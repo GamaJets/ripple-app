@@ -229,7 +229,14 @@ export default function Members() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.tenantId]);
 
-  const dossiers = useMemo(() => buildDossiers(rec), [rec]);
+  /** The instant these eight reads landed, and the one every dossier is judged
+   *  at. `buildDossiers` defaults its `now`, and this memo is keyed on the rows
+   *  alone — so "last in 41 days ago" and every unmarked-session count under it
+   *  were frozen at the render that first built them, on a roster screen that is
+   *  left open all day at a front desk. */
+  const nowMs = readAt ?? Date.now();
+
+  const dossiers = useMemo(() => buildDossiers(rec, nowMs), [rec, nowMs]);
   const active = doorLogActive(rec);
 
   /**

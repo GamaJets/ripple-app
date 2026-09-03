@@ -114,6 +114,13 @@ export default function ImportPage() {
   // had been told two hundred were about to go out.
   const [invites, setInvites] = useState<MemberInvite[] | null>(null);
   const [invitesError, setInvitesError] = useState<string | null>(null);
+  /** ms of the last invitations read that came back, or null if none has. See
+   *  where it is stamped in `loadGym`, and where it is spent in `inviteDrafts`. */
+  const [invitesAt, setInvitesAt] = useState<number | null>(null);
+  /** The instant an invitation's expiry is judged against: the read that
+   *  produced the list. `?? Date.now()` covers the render before the first read
+   *  has landed, where `invites` is null and the panel draws nothing anyway. */
+  const nowMs = invitesAt ?? Date.now();
 
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ text: string; outcome: Outcome } | null>(null);
@@ -157,6 +164,16 @@ export default function ImportPage() {
     try {
       setInvites(await fetchInvites(supabase, tenant));
       setInvitesError(null);
+      // When these invitations were read. The duplicate screen below asks
+      // whether each one is still open, which is a question about a clock: an
+      // invitation expires with nobody touching it. This page has no `useFetched`
+      // and no poll, so without a stamp that moves with the read the screen was
+      // judging expiry against the moment the tab was opened — and this console
+      // has no router, so an import tab left open on a desk is one document that
+      // lives for days. Stamped only on a read that came back: a failed read
+      // leaves the previous stamp where it is, because the rows on screen are
+      // still the ones it produced.
+      setInvitesAt(Date.now());
     } catch (e: any) {
       setInvites(null);
       setInvitesError(e?.message ?? 'Could not read the invitations already sent.');
@@ -307,7 +324,14 @@ export default function ImportPage() {
       }));
     // Screened against the open invitations, which by here have been read —
     // the guard at the top of this memo is what makes that true.
-    const openTo = invites.filter((i) => inviteState(i) === 'pending').map((i) => i.email);
+    // Judged at the instant the invitations were READ, not at whatever moment
+    // this memo first happened to run. `inviteState` defaults its second
+    // argument to the clock, and nothing in this dependency list moves when time
+    // does — so an invitation that expired while the file sat on screen still
+    // counted as open, and the row it belongs to was rejected as a duplicate of
+    // an invitation that no longer exists. That is the silent direction: the
+    // person is simply left out of the batch.
+    const openTo = invites.filter((i) => inviteState(i, nowMs) === 'pending').map((i) => i.email);
     const { send, rejected } = screenInvites(drafts, openTo);
     return {
       send,
@@ -319,7 +343,7 @@ export default function ImportPage() {
       planned: priceBook === null ? null : send.filter((d) => d.planId !== null).length,
       named: send.filter((d) => (d.planName ?? '').trim() !== '').length,
     };
-  }, [preview, kind, invites, priceBook]);
+  }, [preview, kind, invites, priceBook, nowMs]);
 
   /**
    * Plan names in the file that the gym already sells.

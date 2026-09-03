@@ -167,15 +167,22 @@ export default function Invites() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.tenantId]);
 
-  const summary = useMemo(() => (invites ? summariseInvites(invites) : null), [invites]);
+  /** When this list was read, and therefore the instant an expiry is judged
+   *  against. An invitation expires without anybody touching it, so a clock
+   *  frozen at the moment the tab was opened goes on calling a dead invitation
+   *  "pending" — on the screen an owner uses to decide who still needs chasing,
+   *  and to decide that an address already has an invitation out. */
+  const nowMs = readAt ?? Date.now();
+
+  const summary = useMemo(() => (invites ? summariseInvites(invites, nowMs) : null), [invites, nowMs]);
 
   // The addresses this gym already has an open invitation for. Only ever from a
   // list that was actually read: [] on a failed read would tell the form there
   // are no open invitations, and the duplicate would then be refused by the
   // partial unique index instead — after the owner had typed it.
   const openTo = useMemo(
-    () => (invites ?? []).filter((i) => inviteState(i) === 'pending').map((i) => i.email),
-    [invites],
+    () => (invites ?? []).filter((i) => inviteState(i, nowMs) === 'pending').map((i) => i.email),
+    [invites, nowMs],
   );
 
   // Four states, not two: still reading, nobody signed in, a question this

@@ -121,6 +121,43 @@ async function advertisers(token: string, ids: string[]): Promise<Res<Acct[]>> {
   return { ok: true, body: out };
 }
 
+/**
+ * The advertisers this ACCESS TOKEN is authorised for, asked of TikTok.
+ *
+ * ── why this exists, when `advertisers()` is right there ─────────────────
+ *
+ * Because they answer two different questions, and `choose` was asking the
+ * wrong one.
+ *
+ * Meta and Google both verify a chosen account the same way: fetch the list the
+ * login can REACH and look for the id in it (`/me/adaccounts` in ads-oauth,
+ * `listAccessibleCustomers` in ads-google). TikTok's `choose` instead called
+ * `/advertiser/info/` with the id the coach had just named, which asks TikTok
+ * to DESCRIBE that advertiser rather than to say whether this login may have
+ * it. Whether that is also an authorisation check depends on behaviour TikTok
+ * documents nowhere, and "probably scoped" is not a sentence to leave standing
+ * in the one place a coach names an id from a request body.
+ *
+ * `/oauth2/advertiser/get/` is TikTok's own answer to the question actually
+ * being asked. It is the same list the token exchange returns in
+ * `advertiser_ids`, which is why it is trustworthy and why `connect` needs no
+ * second call — that path already has it.
+ *
+ * It is the one endpoint here that does NOT take `Access-Token` as a header:
+ * app id, secret and token all go in the query string, because it is an
+ * authorisation endpoint rather than an Ads API one. Nothing logs the URL.
+ */
+async function reachableAdvertiserIds(token: string, appId: string, secret: string): Promise<Res<string[]>> {
+  const q = `app_id=${encodeURIComponent(appId)}&secret=${encodeURIComponent(secret)}`
+    + `&access_token=${encodeURIComponent(token)}`;
+  const r = await tt<{ list?: unknown[] }>(`${API}/oauth2/advertiser/get/?${q}`, { method: 'GET' });
+  if (!r.ok) return r;
+  const ids = (Array.isArray(r.body?.list) ? r.body.list : [])
+    .map((a) => String((a as { advertiser_id?: unknown })?.advertiser_id ?? ''))
+    .filter(Boolean);
+  return { ok: true, body: ids };
+}
+
 /** Every page of a TikTok list endpoint. A page that fails aborts the whole
  *  read: a partial total filed as a total is the failure this feature exists
  *  to prevent. */
@@ -233,6 +270,19 @@ Deno.serve(async (req) => {
     // Verified against TikTok rather than trusted from the body. Without this a
     // coach could name any advertiser id and Repple would try to read it every
     // check, reporting a stranger's spend or a permanent permission error.
+    //
+    // Two calls, in this order, and the order is the point. The first asks
+    // TikTok which advertisers this LOGIN may have and looks for the named id
+    // in that list — the same intersection ads-oauth and ads-google do, and the
+    // check `/advertiser/info/` alone was standing in for. Only then is the
+    // advertiser described, because a name and a currency are worth having and
+    // are not an authorisation.
+    const reachable = await reachableAdvertiserIds(conn.body.token, appId, secret);
+    if (!reachable.ok) return fail(`TikTok would not say which ad accounts your login can reach: ${reachable.error}`);
+    if (!reachable.body.includes(wanted)) {
+      return fail('That ad account is not one this TikTok login can see. Pick one from the list.');
+    }
+
     const one = await advertisers(conn.body.token, [wanted]);
     if (!one.ok) return fail(`TikTok refused to describe that ad account: ${one.error}`);
     const chosen = one.body.find((a) => a.id === wanted);
