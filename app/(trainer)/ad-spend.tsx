@@ -210,12 +210,18 @@ export default function TrainerAdSpend() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
+        {/* Back leads the row and carries a label. Seen on an iPhone 17 Pro:
+            it trailed, which put the one control that leaves this screen in the
+            top-RIGHT corner — where iOS has never put it and where the rest of
+            this app does not put it — and without `a11yLabel` a screen reader
+            announced it as "button". The house form is in
+            src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What your ads cost</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Ad Spend</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Connect Meta, Google Ads or TikTok and Repple reads what each campaign cost, matching ads to your join codes by

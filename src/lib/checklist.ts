@@ -246,5 +246,26 @@ export function donePercent(doneCount: number, total: number): number | null {
   if (!Number.isFinite(total) || total <= 0) return null;
   const pct = (doneCount / total) * 100;
   if (!Number.isFinite(pct)) return null;
-  return Math.round(Math.max(0, Math.min(100, pct)));
+  const rounded = Math.round(Math.max(0, Math.min(100, pct)));
+  // ── The endpoints, held to the same rule as src/lib/sharePercent.ts ──────
+  //
+  // A rounded percentage may print 0 ONLY when nothing is ticked, and 100 ONLY
+  // when everything is. `Math.round` does not know that: at 201 items one tick
+  // rounds to 0, and at 200 items one item outstanding rounds to 100 — so the
+  // hero would read "0%" over a day the client had started, or "100%" over a
+  // list with a box still open, in the same breath as the count beside it
+  // saying otherwise. That is the sentence sharePercent.ts was written for,
+  // seen on the coach's Schedule screen: "Booked · 1 session … 0% of your slots
+  // are filled".
+  //
+  // It is not currently reachable here — it needs about two hundred habits in
+  // one day, and a real list is three targets and a handful of coach items —
+  // which is exactly why it is worth closing now rather than after somebody
+  // ships a habit library. The clamp is to 1 and 99 rather than to a string
+  // because the caller draws an ARC from this number as well as printing it
+  // (app/(client)/habits.tsx), and one percentage point of arc is invisible
+  // where a wrong endpoint is not.
+  if (rounded === 0 && doneCount > 0) return 1;
+  if (rounded === 100 && doneCount < total) return 99;
+  return rounded;
 }

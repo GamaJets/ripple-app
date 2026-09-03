@@ -24,7 +24,7 @@
 //     clients.
 // Both providers are still mounted (they are shared context) but nothing on this
 // screen renders one person's data as another's.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
 import { num } from '../../src/lib/format';
@@ -42,8 +42,9 @@ import { useClientDrift } from '../../src/ui/clientDrift';
 import { reportError } from '../../src/lib/reportError';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, Image, KeyboardAvoidingView, Platform, ActivityIndicator, Share, Switch, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { trialInfo } from '../../src/lib/trial';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { trialCard } from '../../src/lib/trialGate';
+import { useTrialReading } from '../../src/ui/trialReading';
 import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
 import { weightDeltaIn, type WeightUnit } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
@@ -59,7 +60,7 @@ import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
 import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
 import { type RosterClient } from '../../src/lib/trainerMock';
-import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, type CoachedMode } from '../../src/lib/types';
+import { COACHED_MODES, COACHED_MODE_SHORT, COACHED_MODE_NOTE_COACH, booksInPerson, type CoachedMode } from '../../src/lib/types';
 import { areaLabel } from '../../src/lib/injuries';
 import { supabase } from '../../src/lib/supabase';
 import { askAboutClient } from '../../src/lib/coach';
@@ -120,7 +121,7 @@ import {
 } from '../../src/lib/rosterImport';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useCoachSetup } from '../../src/ui/coachSetup';
-import { coachSetupRows, coachSetupLeft, coachSetupNext, showCoachSetup } from '../../src/lib/coachFirstRun';
+import { coachSetupRows, coachSetupCardLine, coachSetupNext, showCoachSetup } from '../../src/lib/coachFirstRun';
 import { useDeliveryFact } from '../../src/ui/coachDelivery';
 import { deliveryNote, showsInPerson, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
 import { EndReasonSheet, UnexplainedDepartures, DEPARTURE_WINDOW_DAYS } from '../../src/ui/EndReasonSheet';
@@ -452,8 +453,21 @@ export default function TrainerClients() {
   // life of the app. NOT `useMemo(() => localDayKey(Date.now()), [])` and not a
   // day captured inside another memo's body — see `invoiceAgeing`.
   const today = useToday();
-  const [trial, setTrial] = useState<{ daysLeft: number; expired: boolean } | null>(null);
-  useEffect(() => { trialInfo().then((ti) => setTrial({ daysLeft: ti.daysLeft, expired: ti.expired })); }, []);
+  // The trial, from the ACCOUNT, through the same read Billing uses.
+  //
+  // This was `trialInfo()` — the AsyncStorage counter in src/lib/trial.ts,
+  // whose own header says in capitals that it is no longer the authority on
+  // anything and which starts again from zero on reinstall. It was rendered
+  // here as a flat fact ("12 days left in your free trial") while Billing, one
+  // tap away and on the same account, said the start date could not be read.
+  // Both were doing what their own code said, and neither knew the other
+  // existed. src/ui/trialReading.ts is now the one read and the one clock, so
+  // the two screens cannot disagree without that file disagreeing with itself.
+  //
+  // Read once at mount and never again was also a bug on its own: a tab is
+  // never unmounted, so the figure was frozen at launch. `reloadEverything`
+  // below re-runs it on focus and on a pull down.
+  const { reading: trialReading, reload: reloadTrial } = useTrialReading();
   // `status` was computed by the roster provider and read by nobody, so a
   // refused read reached this screen as an empty list and was announced as
   // "No clients yet" — to a coach who has clients.
@@ -831,6 +845,54 @@ export default function TrainerClients() {
     // failed save cannot sit on screen looking like the recorded figure.
     setSpendDraft(Object.fromEntries(r.rows.map((x) => [x.id ?? '', spendFieldValue(x)])));
   };
+  /**
+   * Open the Invite sheet, with the coach's code and their named codes loaded.
+   *
+   * Lifted out of the "Invite a Client" button because it is now reached two
+   * ways. The second is Getting Started: two of its steps — "Add Your First
+   * Client" and "Name a Join Code" — are done in THIS sheet and nowhere else,
+   * and both of them used to route to `/(trainer)/dashboard` with no
+   * instruction about what to do once they arrived.
+   *
+   * That is the failure mode the card exists to avoid. A coach tapping "add
+   * your first client" landed back on the Clients tab, looking at the same
+   * card that had just sent them, with the control that completes the step
+   * behind a button they were never told about. A checklist whose items lead
+   * nowhere is worse than no checklist, because it teaches the reader to
+   * ignore it — and then it is ignored on the row that mattered.
+   */
+  const openInvite = useCallback(async () => {
+    setInvEmail(''); setInvMode('online'); setInvOpen(true);
+    setMyCode(null); setMyCodeErr(null);
+    const r = await fetchMyJoinCode();
+    if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
+    await loadCodes();
+    // `loadCodes` is redeclared on every render and is not a dependency on
+    // purpose: it reads no state, only writes it. Listing it would rebuild
+    // this callback every render and re-fire the effect below on each one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ── landing on the control, not merely on the screen ──────────────────
+   *
+   * `?start=invite`, set by src/lib/coachFirstRun.ts on the two steps that
+   * are completed in the sheet above. Consumed once and cleared, so returning
+   * to this tab later does not reopen a sheet the coach has already closed —
+   * a tab keeps its params, and without the clear the sheet would spring open
+   * every time they came back to Clients for the rest of the session.
+   *
+   * Anything else in `start` is ignored rather than reported: a stale or
+   * hand-edited link is not something to put an error in front of a coach
+   * about, and the screen it names is the right screen either way. */
+  const startParam = useLocalSearchParams<{ start?: string }>().start;
+  const startedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!startParam || startedFor.current === startParam) return;
+    startedFor.current = startParam;
+    if (startParam === 'invite') void openInvite();
+    router.setParams({ start: '' });
+  }, [startParam, openInvite, router]);
+
   // The verdict on ranking, computed once for the sheet. enoughToTell refuses
   // outright under anything but a completed read, and refuses again when the
   // two busiest codes cannot be told apart from a coin toss.
@@ -1641,10 +1703,15 @@ export default function TrainerClients() {
       Promise.resolve(reloadInvites()), Promise.resolve(reloadTrainerInvites()),
       Promise.resolve(reloadTags()), Promise.resolve(reloadTemplates()),
       Promise.resolve(reloadPrograms()), Promise.resolve(channels.reload()),
+      // The trial too. It is a countdown: read once at mount on a tab that is
+      // never unmounted, it is a figure from whenever the app was last cold
+      // started, and a coach who leaves Repple open over a weekend was being
+      // shown Friday's number on Monday.
+      reloadTrial(),
     ]);
   }, [refreshRoster, refreshTenant, reloadProfile, reloadFeedback, reloadNutri, reloadNotes,
       reloadNotices, reloadInvites, reloadTrainerInvites, reloadTags, reloadTemplates,
-      reloadPrograms, channels]);
+      reloadPrograms, channels, reloadTrial]);
   const pull = usePullToRefresh(reloadEverything);
 
   /* ── and the same fourteen when the coach comes back ─────────────────────
@@ -1730,63 +1797,57 @@ export default function TrainerClients() {
 
         {/* ── interrupts: things that need a decision now ─────────────────── */}
         <View style={{ marginTop: sp.lg }}>
-          {/* ── the trial card, and the condition that was exactly backwards ──
-              This read `trial && !billingAvailable()`.
+          {/* ── the trial card ───────────────────────────────────────────
+              Two defects, and the second is the one a coach saw.
 
+              ONE. The condition was `trial && !billingAvailable()`.
               `billingAvailable()` (src/lib/billing.ts) is true when at least
               one plan has a Stripe price id — i.e. when subscribing is
-              actually possible. So the negation meant the card appeared ONLY
+              actually possible — so the negation meant the card appeared ONLY
               on builds where checkout cannot be started, and vanished on the
-              builds where it can. Both halves are wrong and they are wrong in
-              opposite directions: a coach who could have upgraded was never
-              asked, and a coach who could not was shown "Upgrade ›", sent to
-              the billing screen, and left there with nothing to buy — which is
-              the worse of the two, because it happens at the moment their
-              trial has just expired and they are trying to keep working.
+              builds where it can. It is now two states rather than one
+              condition: the trial is worth telling a coach about either way,
+              and what changes is whether this card may promise them a way out
+              of it. Where billing is not configured it does not offer a door
+              that opens onto a wall.
 
-              It is now two states rather than one condition. The trial is
-              worth telling a coach about either way; what changes is whether
-              this card is allowed to promise them a way out of it. Where
-              billing is not configured it says what is true — their trial is
-              running, or has ended — and does not offer a door that opens onto
-              a wall. */}
-          {trial ? (
-            billingAvailable() ? (
-              <Card onPress={() => router.push('/(trainer)/billing')} tone={trial.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  <Icon name="sparkle" size={20} color={trial.expired ? t.ink3 : t.brand} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{trial.expired ? 'Your free trial has ended' : `${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial`}</Text>
-                    {/* Two sentences replaced here, and both were claims about
-                        what the money buys that nothing in this codebase
-                        enforces. `trialInfo` (src/lib/trial.ts) is a date in
-                        AsyncStorage on this device: it gates nothing, no screen
-                        reads it but this card, and the plan features in `PLANS`
-                        ("Up to 3 clients") are not checked anywhere either.
-                        "Upgrade to keep coaching your clients" told a coach
-                        their roster stops without a payment, and "unlock
-                        everything" told them something was locked. Neither is
-                        true, and a false claim about what a subscription is for
-                        is exactly what a store reviewer opens the paid screen
-                        to check. What is left says what the trial is and offers
-                        the plans without asserting a consequence. */}
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{trial.expired ? 'Nothing has been switched off. Subscribe when you are ready.' : 'Subscribe any time — see what each plan includes.'}</Text>
-                  </View>
-                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Upgrade {FORWARD_CHAR}</Text>
+              TWO. The figure came from `trialInfo()` — AsyncStorage on this
+              handset, restarted by a reinstall, gating nothing, and read by
+              no other screen. It was printed here as a flat fact while
+              Billing said, of the same account, that the start date could not
+              be read. `trialCard` in src/lib/trialGate.ts now decides, from
+              the account's reading, whether there is a printable figure at
+              all — and returns null when there is not, which is why there is
+              no `unknown` branch here. The argument for silence over an
+              apology is in that function's header; the short of it is that
+              nothing is gated on the trial, so a card that cannot state a
+              number has nothing to warn anybody about, and Billing carries
+              all four states in full one tap away. */}
+          {(() => {
+            const card = trialCard(trialReading, billingAvailable());
+            if (!card) return null;
+            const body = (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                <Icon name="sparkle" size={20} color={card.expired ? t.ink3 : t.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{card.title}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{card.note}</Text>
                 </View>
+                {billingAvailable() ? (
+                  <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>Upgrade {FORWARD_CHAR}</Text>
+                ) : null}
+              </View>
+            );
+            return billingAvailable() ? (
+              <Card onPress={() => router.push('/(trainer)/billing')} tone={card.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
+                {body}
               </Card>
             ) : (
-              <Card tone={trial.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                  <Icon name="sparkle" size={20} color={trial.expired ? t.ink3 : t.brand} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{trial.expired ? 'Your free trial has ended' : `${trial.daysLeft} day${trial.daysLeft === 1 ? '' : 's'} left in your free trial`}</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Subscriptions are not open yet — keep coaching, and we will be in touch before anything changes.</Text>
-                  </View>
-                </View>
+              <Card tone={card.expired ? t.crit : t.brand} style={{ marginBottom: sp.md }}>
+                {body}
               </Card>
-            )
-          ) : null}
+            );
+          })()}
 
           {trainerInvites.length > 0 ? (
             <View>
@@ -2099,13 +2160,7 @@ export default function TrainerClients() {
                 don't see a trainer's code", which is the only reasonable
                 reading of that pair. The sheet's own failure text already
                 called it "Invite a client"; the button label had drifted. */}
-            <View style={{ flex: 1 }}><Ghost label="Invite a Client" onPress={async () => {
-                setInvEmail(''); setInvMode('online'); setInvOpen(true);
-                setMyCode(null); setMyCodeErr(null);
-                const r = await fetchMyJoinCode();
-                if (r.ok) setMyCode(r.code); else setMyCodeErr(r.reason);
-                await loadCodes();
-              }} /></View>
+            <View style={{ flex: 1 }}><Ghost label="Invite a Client" onPress={() => { void openInvite(); }} /></View>
             {/* Import sits beside Add rather than under a menu, because the
                 moment a coach needs it is their first hour in the product —
                 and the alternative to finding it is typing forty clients. */}
@@ -2954,7 +3009,17 @@ export default function TrainerClients() {
           <Pressable style={SCRIM} onPress={() => setAddOpen(false)} />
           <View style={sheet(t)}>
             <Text style={{ ...ty.title, color: t.ink }}>Add Client</Text>
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>They join your roster and become bookable in your schedule.</Text>
+            {/* Conditional on the coaching type, because the flat sentence was
+                contradicted by this sheet's own caption four rows further down.
+                Seen on an iPhone 17 Pro with the sheet at its defaults: the
+                header promised "become bookable in your schedule" while the
+                note under the selected Online chip said "They get no booking
+                calendar" — and Online is the default, so the two sentences
+                disagreed on first open, every time. `booksInPerson` is the same
+                predicate the calendar uses to decide who has slots to book. */}
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>
+              They join your roster{booksInPerson(newMode) ? ' and become bookable in your schedule' : ''}.
+            </Text>
             <SheetHead t={t} title="Name" />
             <TextInput value={newName} onChangeText={setNewName} placeholder="Client name" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.lg }} />
             <SheetHead t={t} title="Email · optional, records an invite" />
@@ -3761,7 +3826,6 @@ function CoachSetupRow() {
   if (status === 'loading') return null;
   const rows = coachSetupRows(facts, delivery.shape);
   if (!showCoachSetup(rows)) return null;
-  const left = coachSetupLeft(rows);
   const next = coachSetupNext(rows);
   return (
     <View style={{ marginTop: sp.lg }}>
@@ -3769,8 +3833,13 @@ function CoachSetupRow() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
           <Icon name="sparkle" size={20} color={t.brand} />
           <View style={{ flex: 1 }}>
+            {/* Not a bare `${left} left`. That count deliberately excludes
+                rows whose read did not answer, so on its own it understates —
+                a coach with two refused reads was told "3 left" for a list
+                with five rows they had not done. src/lib/coachFirstRun.ts
+                holds the wording and the argument. */}
             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
-              {left > 0 ? `Setting up · ${left} left` : 'Setting up'}
+              {coachSetupCardLine(rows)}
             </Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
               {next

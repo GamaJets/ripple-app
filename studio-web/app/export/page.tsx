@@ -315,12 +315,22 @@ export default function ExportPage() {
           gymName,
           tenantId: me?.tenantId ?? null,
           generatedAt: readAt ?? new Date(0).toISOString(),
+          // The calendar the date-only columns are written on. Already read
+          // above for the period presets, and it was needed twice: `date` in
+          // payments.csv is what previewPayments reads and what gymImports
+          // re-stamps at midday, so a bundle written on UTC's day RE-IMPORTS
+          // on the wrong day for a gym far from UTC — the money moves to the
+          // neighbouring day, and on a month boundary to the neighbouring
+          // month, in the file an accountant is handed. Null is passed as null
+          // rather than defaulted: gymExport falls back to UTC and the bundle
+          // says in three places that it did.
+          timezone: zone,
           from: window.from,
           to: window.to,
           ...reads,
         }
       : null
-  ), [me, gymName, readAt, reads, window]);
+  ), [me, gymName, zone, readAt, reads, window]);
 
   const blocker = input ? exportBlocker(input) : 'Loading.';
   // Built even while blocked, so the screen can show what the bundle WOULD

@@ -803,7 +803,13 @@ export default function TrainerSettings() {
               not been read draws in neither position and says so, because a
               coach who taps a guessed switch has just saved the guess. */}
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>What you are told about</Text>
+            {/* marginBottom, because the row under this one is drawn with
+                `first` and `first` means paddingTop: 0. Seen on an iPhone 17
+                Pro at the default text size: this heading and the words
+                "Client Messages" had no gap at all between them and read as one
+                two-line title, with the first switch apparently belonging to
+                nothing. The same is true of the heading below. */}
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginBottom: sp.md }}>What you are told about</Text>
             {channelNote ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{channelNote}</Text>
             ) : null}
@@ -848,7 +854,7 @@ export default function TrainerSettings() {
               which they will not trust the switches above either. Three states,
               three sentences: available, not yet, and could-not-find-out. */}
           <View style={{ marginTop: sp.xl }}>
-            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>When you will not be buzzed</Text>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginBottom: sp.md }}>When you will not be buzzed</Text>
 
             {quiet.status === 'loading' ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Reading your quiet hours…</Text>
@@ -928,20 +934,31 @@ export default function TrainerSettings() {
                   : (rateFieldNote(cooldownStatus === 'loading' ? 'loading' : 'error') ?? '')}
               </Text>
             </View>
-            <TextInput
-              value={cooldownBox}
-              onChangeText={(v) => { setCooldownBox(v); setCooldownMsg(null); }}
-              onBlur={() => { void saveCooldown(); }}
-              keyboardType="number-pad"
-              maxLength={3}
-              accessibilityLabel="Shortest number of days between two approaches to the same client"
-              placeholder="days"
-              placeholderTextColor={t.ink3}
-              style={{
-                ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
-                paddingHorizontal: sp.md, paddingVertical: 10, minWidth: 84, textAlign: END_ALIGN,
-              }}
-            />
+            {/* The unit is a LABEL beside the box, not the placeholder inside
+                it. Seen on an iPhone 17 Pro: unset, this control was a grey
+                pill containing the single word "days" and nothing else — no
+                number, no caret, nothing saying it could be typed in — and the
+                moment a coach typed 10 the word "days" vanished, taking the
+                unit away at exactly the point it started to matter. Now the
+                box says what is stored (or that nothing is) and the unit
+                stands next to it in both states. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm }}>
+              <TextInput
+                value={cooldownBox}
+                onChangeText={(v) => { setCooldownBox(v); setCooldownMsg(null); }}
+                onBlur={() => { void saveCooldown(); }}
+                keyboardType="number-pad"
+                maxLength={3}
+                accessibilityLabel="Shortest number of days between two approaches to the same client"
+                placeholder="Not set"
+                placeholderTextColor={t.ink3}
+                style={{
+                  ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm,
+                  paddingHorizontal: sp.md, paddingVertical: 10, minWidth: 84, textAlign: END_ALIGN,
+                }}
+              />
+              <Text style={{ ...ty.body, color: t.ink3 }}>days</Text>
+            </View>
           </View>
           {cooldownMsg ? (
             <Flag tone={/did not save|not a number/.test(cooldownMsg) ? t.crit : t.good}>{cooldownMsg}</Flag>

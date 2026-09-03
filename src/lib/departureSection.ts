@@ -67,7 +67,7 @@ export function departureSectionNote(tally: DepartureTally | null, windowDays: n
   if (tally.unrecorded === 0) return base;
 
   // Nothing explained at all. `departureLine` already ends "Every one of those
-  // answers is still gettable, and none of them will be in March", which is
+  // answers is still gettable, and none of them will be in six months", which is
   // statement 3; what it has never carried is statement 2.
   if (tally.counts.length === 0) {
     return `${base} It is the cheapest thing you will ever learn about your own business.`;
@@ -76,5 +76,5 @@ export function departureSectionNote(tally: DepartureTally | null, windowDays: n
   // Some explained, some not. Here `departureLine` ends on the distinction
   // between nothing recorded and "they did not say" and stops — so both the
   // deadline and the reason to care have to be added.
-  return `${base} Those answers are still gettable today in a way they will not be in March, and they are the cheapest thing you will ever learn about your own business.`;
+  return `${base} Those answers are still gettable today in a way they will not be in six months, and they are the cheapest thing you will ever learn about your own business.`;
 }

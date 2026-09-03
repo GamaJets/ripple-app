@@ -74,9 +74,31 @@ export interface CoachSetupItem {
    *  when it is outstanding, because "why should I?" is the question a
    *  checklist item that only nags cannot answer. */
   breaks: string;
-  /** The screen that does it. Pushed with NO params, so every route here must
-   *  open on its own — the same rule TRAINER_NAV keeps for Explore, and the
-   *  reason none of these is a per-client screen. */
+  /**
+   * The screen that does it — and, where the control is not the screen, WHICH
+   * control.
+   *
+   * ── Why two of these carry a query string ─────────────────────────────
+   *
+   * The rule was "pushed with NO params, so every route here must open on its
+   * own", and it is still the rule for the screen: none of these is a
+   * per-client route and every one of them opens standing up. What the rule
+   * did not cover is the two steps whose control is not on a screen at all.
+   *
+   * "Add Your First Client" and "Name a Join Code" are both completed in one
+   * bottom sheet on the Clients tab, behind a button called "Invite a
+   * Client". Routed at `/(trainer)/dashboard`, a coach tapping either one
+   * arrived back on the Clients tab looking at the same Setting-up card that
+   * had just sent them, with nothing on screen naming the thing they had been
+   * asked to do. That is the failure this whole file is written against: a
+   * checklist whose rows lead nowhere teaches the reader to ignore it, and
+   * then it is ignored on the row that mattered.
+   *
+   * `?start=invite` is consumed once by app/(trainer)/dashboard.tsx and
+   * cleared, and an unrecognised value is ignored rather than reported — the
+   * screen it names is the right screen either way, so a stale link degrades
+   * to exactly the behaviour these two rows had before.
+   */
   route: string;
 }
 
@@ -129,7 +151,10 @@ export const COACH_SETUP: readonly CoachSetupItem[] = [
     title: 'Add Your First Client',
     note: 'invite somebody, or write them down by hand',
     breaks: 'every screen in the app is empty, and an empty screen looks the same as a broken one',
-    route: '/(trainer)/dashboard',
+    // Opens the Invite sheet rather than merely the Clients tab. It carries
+    // the coach's own code, a link to send, and an email invitation; the "Add
+    // Client" button that writes somebody down by hand is directly behind it.
+    route: '/(trainer)/dashboard?start=invite',
   },
   {
     id: 'availability',
@@ -159,7 +184,9 @@ export const COACH_SETUP: readonly CoachSetupItem[] = [
     title: 'Name a Join Code',
     note: 'one code per flyer, post or referral card',
     breaks: 'every client arrives from an unnamed source, so nothing can tell you which of your channels works',
-    route: '/(trainer)/dashboard',
+    // "Codes You Have Named" is a section of the same sheet, and the only
+    // place in the app a named code can be made.
+    route: '/(trainer)/dashboard?start=invite',
   },
   {
     id: 'document',
@@ -337,6 +364,42 @@ export function coachSetupHeading(rows: readonly CoachSetupRow[]): string {
   // the end, which is the arithmetic equivalent of nagging.
   const applicable = rows.length - coachSetupNa(rows);
   return coachSetupUnknown(rows) > 0 ? `${done} done` : `${done} of ${applicable} done`;
+}
+
+/**
+ * The one line on the Clients-tab card, above the "Next: …" sentence.
+ *
+ * ── The number that was quietly made of two things ────────────────────────
+ *
+ * The card printed `Setting up · ${coachSetupLeft(rows)} left`, and
+ * `coachSetupLeft` counts only rows KNOWN to be outstanding — which is right,
+ * and is the rule that stops a failed read becoming a nag. But it means the
+ * figure UNDERSTATES whenever anything is unread, and the card said nothing
+ * about that: a coach whose Stripe and paperwork reads were refused was told
+ * "3 left" for a list with five rows they had not done.
+ *
+ * `coachSetupHeading` already refuses to print a denominator over a partly
+ * unread list, for exactly this reason — the card was the one surface that
+ * had not learnt it. Two counts, never folded: "5 left" and "5 left, 2 not
+ * checked" are different statements about somebody's setup, and the second is
+ * the one that survives the coach going to look.
+ *
+ * Called only where `showCoachSetup` is true, so at least one of the two is
+ * non-zero; the both-zero case returns the bare kicker rather than throwing,
+ * because a card that renders "Setting up · 0 left" is a smaller failure than
+ * one that crashes the coach's home screen.
+ */
+export function coachSetupCardLine(rows: readonly CoachSetupRow[]): string {
+  const left = coachSetupLeft(rows);
+  const unknown = coachSetupUnknown(rows);
+  if (left === 0 && unknown === 0) return 'Setting up';
+  if (left === 0) {
+    return unknown === 1
+      ? 'Setting up · 1 could not be checked'
+      : `Setting up · ${unknown} could not be checked`;
+  }
+  if (unknown === 0) return `Setting up · ${left} left`;
+  return `Setting up · ${left} left, ${unknown} not checked`;
 }
 
 /**

@@ -280,8 +280,22 @@ addEventListener('DOMContentLoaded', function () {
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
             <span><strong>Your coach's clip, on the exercise</strong> — anything they have uploaded plays against the matching movement, in the session, rather than in a folder somewhere.</span></li>
           <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
-            <span><strong>And a demonstration when they haven't filmed one</strong> &mdash; the catalogue carries 604 movements, 489 of them as a looping animation with the working muscles picked out, and 601 illustrated. A lift you have never done still shows you what it looks like. Your coach's own clip wins wherever they have made one.</span></li>
+            <!-- site-claim: catalogue-figures -->
+            <span><strong>And a demonstration when they haven't filmed one</strong> &mdash; the catalogue carries 608 movements, 601 of them illustrated and 489 of those as a looping animation with the working muscles picked out. A lift you have never done still shows you what it looks like. Your coach's own clip wins wherever they have made one.</span></li>
         </ul>
+        <!-- The three figures come from one query over `public.exercises` and cannot
+             be read offline, so they are stamped rather than gated on their values.
+             check-site-claims' check I holds the parts a hand-edit breaks: the three
+             numbers must nest (animated within illustrated within the total), every
+             page stating the total must state the SAME total, and this stamp must
+             stay a real date that is not in the future. Re-count with:
+               select count(*),
+                      count(*) filter (where image_paths is not null
+                                       and array_length(image_paths,1) > 0),
+                      count(*) filter (where animation_path is not null)
+                 from public.exercises;
+             then move all three figures, here and on /trainer, and move this date. -->
+        <p class="tiny after-sm">Counted from the live catalogue, 4 September 2026. A movement with no illustration still logs and still holds your history &mdash; it shows a name rather than a picture, which is the honest version of not having one.</p>
       </div>
 
       <div class="surface">
@@ -1269,6 +1283,7 @@ addEventListener('DOMContentLoaded', function () {
         <h2 class="fh">Getting started</h2>
         <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/coach-setup">Setting up as a coach</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
           <li><a href="/forgot-password">Reset password</a></li>

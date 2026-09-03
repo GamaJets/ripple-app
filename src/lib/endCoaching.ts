@@ -693,8 +693,15 @@ export function departureTally(rows: readonly EndedRelationship[] | null): Depar
 export function departureLine(tally: DepartureTally | null, windowDays: number): string | null {
   if (tally == null || tally.total === 0) return null;
   const people = `${tally.total} ${tally.total === 1 ? 'person has' : 'people have'} left your book in the last ${windowDays} days`;
+  // "in six months", not "in March". The deadline was written as a named month
+  // and the sentence is read all year: seen on an iPhone 17 Pro on 4 September,
+  // where a coach was told the answers "will not be in March" — a month six
+  // months behind them and six months ahead of them at once, and one no reader
+  // can place against today without doing the arithmetic the sentence was
+  // supposed to save them. A duration is the same claim and is true in every
+  // month it is read in.
   if (tally.counts.length === 0) {
-    return `${people}, and nothing is recorded about why any of them did. Every one of those answers is still gettable, and none of them will be in March.`;
+    return `${people}, and nothing is recorded about why any of them did. Every one of those answers is still gettable, and none of them will be in six months.`;
   }
   const top = tally.counts[0];
   const lead = `${people}. The commonest reason recorded is ${END_REASON_LABEL[top.reason].toLowerCase()}, against ${top.n} of them.`;

@@ -28,7 +28,7 @@ const WINDOW = 90;
 const saysHowMany = (s: string, n: number) => s.includes(String(n));
 const saysThePeriod = (s: string) => s.includes(`${WINDOW} days`);
 const saysWhatItIsWorth = (s: string) => /cheapest thing you will ever learn/.test(s);
-const saysWhyNow = (s: string) => /in March/.test(s);
+const saysWhyNow = (s: string) => /in six months/.test(s);
 
 /* ── nothing to say ───────────────────────────────────────────────────────── */
 //
@@ -57,7 +57,7 @@ eq(departureSectionNote(departureTally([]), WINDOW), null,
   // And it says it ONCE. The defect being fixed is a screen that made the same
   // claim twice in two voices, so the merged sentence may not do it either.
   eq(line.split('cheapest').length - 1, 1, 'the value of the answer is stated once');
-  eq(line.split('in March').length - 1, 1, 'and so is the deadline');
+  eq(line.split('in six months').length - 1, 1, 'and so is the deadline');
 }
 
 {
@@ -100,7 +100,7 @@ eq(departureSectionNote(departureTally([]), WINDOW), null,
   ok(/not the same as/.test(s), 'and are distinguished from a client who declined to say');
   ok(saysWhatItIsWorth(s), 'the reason to bother survives into this branch too');
   ok(saysWhyNow(s), 'and so does the deadline');
-  eq(s.split('in March').length - 1, 1, 'once each, still');
+  eq(s.split('in six months').length - 1, 1, 'once each, still');
   eq(s.split('cheapest').length - 1, 1, 'once each, still');
 }
 

@@ -507,9 +507,16 @@ addEventListener('DOMContentLoaded', function () {
       <figcaption class="chart-note">
         <strong>The middle bar is the one to read carefully.</strong> Those rows survive with you
         detached from them &mdash; payments taken, door visits and guest passes, which a gym has
-        tax and legal reasons to keep. Invoices and memberships are <em>not</em> in that set: they
-        point at the person and go when the person does. A gym with a retention obligation needs
-        to know that before it presses the button, so it is stated rather than assumed.
+        tax and legal reasons to keep. <strong>Invoices and memberships are in that set too</strong>,
+        and this page said the opposite until the schema was read again: all three of
+        <span class="mono">memberships</span>, <span class="mono">gym_invoices</span> and
+        <span class="mono">gym_payments</span> point at a person with <em>set null</em> rather than
+        <em>cascade</em>, so the row outlives the account. What goes with the account is the link to
+        it. One thing does not: immediately before the profile is deleted, the name the invoice was
+        billed to, the name a payment was taken from and the name on a membership are copied onto
+        those rows, because an invoice for an unnamed party does not balance anybody's books. A gym
+        with a retention obligation needs to know both halves of that before it presses the button,
+        so both are stated rather than assumed.
         These are not estimates: they come from one query over the database&rsquo;s own foreign keys &mdash;
         every table whose rows are deleted when the account is, then every table reached by following
         those deletions down. That means they move whenever a table is added, and they have moved
@@ -744,6 +751,7 @@ addEventListener('DOMContentLoaded', function () {
         <h2 class="fh">Getting started</h2>
         <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/coach-setup">Setting up as a coach</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
           <li><a href="/forgot-password">Reset password</a></li>

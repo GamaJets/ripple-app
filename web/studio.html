@@ -1097,6 +1097,11 @@ addEventListener('DOMContentLoaded', function () {
             <td>Owner</td>
             <td>Paste a spreadsheet, see exactly what would be written, then decide.</td>
           </tr>
+          <tr>
+            <th scope="row"><strong>Export</strong></th>
+            <td>Owner</td>
+            <td>The other direction, deliberately next to Import in the console's own menu: the gym's whole record out as a folder of spreadsheets. What is in it, and what it is for, is the next section.</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -1104,6 +1109,156 @@ addEventListener('DOMContentLoaded', function () {
       Open a page your role does not cover and it says so plainly — the money is owner-only, the
       door is for gym staff — rather than showing an empty screen you would have to interpret.
     </p>
+    <!-- The eight rows above are the eight this PAGE explains. The console's own
+         menu carries thirty, and saying "seven console pages" — which this page
+         did — sold a gym a quarter of what it was getting. The count and the five
+         group names are read out of studio-web/components/Shell.tsx by check K in
+         scripts/check-site-claims.mjs, so a page added to that rail fails this
+         sentence rather than quietly ageing it. -->
+    <!-- site-claim: console-rail -->
+    <p class="tiny after-sm">
+      Those are the eight this page explains, and they are not the whole console. Its menu carries
+      <strong>thirty pages</strong> in five groups &mdash; Floor, Delivery, Money, My book and
+      System &mdash; because a gym is not eight jobs. Floor is the members, the invitations, the
+      retention list, the passes and the door; Delivery is the staff, the classes, the timetable
+      and the one-to-ones; Money runs from the price book through online orders, revenue, costs,
+      the accountant's month, tax and payroll to signing a month off; System holds the equipment
+      register, the gym's own settings, compliance, the activity log, the erasure queue, and the
+      import and export. My book is the fifth, and it is there because an owner who still takes
+      clients is one person: their own roster and their own earnings sit in the same console,
+      kept separate from the gym's.
+    </p>
+  </div>
+</section>
+
+<!-- ── leaving ────────────────────────────────────────────────────────── -->
+<!--
+     Why this section exists.
+
+     A gym owner reading this page has four fears, and the page answered three
+     of them at length: their staff, their members' data and their money. The
+     fourth — what happens if we want to leave — was one line in an FAQ, "ask
+     and we export everything we hold for your gym", which reads as a favour
+     somebody does you and is the exact shape of an answer a person about to
+     migrate does not believe.
+
+     It was also a wild understatement of the product. `studio-web/app/export`
+     is a console page an owner opens themselves, and `src/lib/gymExport.ts`
+     builds twenty-eight named parts out of it. Every figure below is read from
+     that file rather than described from memory:
+
+       · EXPORT_PARTS (src/lib/gymExport.ts:350)  — the twenty-eight
+       · EXPORT_LABEL (:634)                      — the words in column one
+       · EXPORT_COST  (:667)                      — the words in column two,
+                                                    which are the product's own
+                                                    sentences about what a gym
+                                                    would be leaving behind
+       · the INCOMPLETE naming rule               — :1431
+       · manifest.json + README.txt               — :1559, :1567
+       · PRESET_IDS                               — src/lib/exportWindow.ts:236
+       · MEMBER_PARTS                             — src/lib/gymExport.ts:1175
+       · gym_export_runs                          — studio-web/app/export/page.tsx:984
+
+     check L in scripts/check-site-claims.mjs holds the count and the labels
+     against EXPORT_PARTS and EXPORT_LABEL, so a part added or renamed in the
+     code fails this section rather than leaving it a year out of date.
+-->
+<section class="band tint" id="leaving">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Leaving</div>
+      <h2 class="hd">A gym you cannot export<br><span class="serif">is a gym that cannot leave.</span></h2>
+      <p class="lede">
+        So Export sits directly beside Import in the console's menu, and it is a page you open
+        yourself rather than a request you send us. It writes the gym's whole record as a folder
+        of spreadsheets &mdash; one file per part, a manifest and a plain-text README saying what
+        is in it and what is not. Nothing about this is a retention feature: the point of writing
+        it down here is that you can check it before you migrate rather than after.
+      </p>
+    </div>
+
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-export">
+      <table class="data">
+        <caption class="vh" id="tbl-export">The twenty-eight parts of a gym export, and what a gym would be leaving behind without each one</caption>
+        <thead>
+          <tr><th scope="col">The part</th><th scope="col">What you would be leaving behind without it</th></tr>
+        </thead>
+        <!-- site-claim: export-parts -->
+        <tbody>
+          <tr><th scope="row">the price book</th><td>what the gym sells and for how much</td></tr>
+          <tr><th scope="row">the member roster</th><td>who the members are</td></tr>
+          <tr><th scope="row">the gym&rsquo;s own file on each member</th><td>contact numbers, next of kin, the medical note and what the desk wrote about each member</td></tr>
+          <tr><th scope="row">memberships</th><td>who holds what plan, since when, and in what state</td></tr>
+          <tr><th scope="row">payments</th><td>every payment the gym has recorded</td></tr>
+          <tr><th scope="row">the invoice register</th><td>what the gym billed, to whom, and what is still owed on it</td></tr>
+          <tr><th scope="row">what members bought online</th><td>every card payment the gym took online, and the Stripe reference each one reconciles to</td></tr>
+          <tr><th scope="row">the reconciliation marks</th><td>which payments and invoices somebody accepted as explained, and the reason they gave</td></tr>
+          <tr><th scope="row">the months that were signed off</th><td>the figures each month was signed off on, who signed it, and what they were told was wrong at the time</td></tr>
+          <tr><th scope="row">the timetable</th><td>what was on the timetable</td></tr>
+          <tr><th scope="row">class attendance</th><td>who booked a class and who turned up</td></tr>
+          <tr><th scope="row">one-to-ones</th><td>one-to-ones delivered and what they were worth</td></tr>
+          <tr><th scope="row">pass types</th><td>what a drop-in, guest pass or class pack costs</td></tr>
+          <tr><th scope="row">passes issued</th><td>passes sold and the visits still owed on them</td></tr>
+          <tr><th scope="row">the door log</th><td>who came through the door and when</td></tr>
+          <tr><th scope="row">invites</th><td>who was invited and whether they joined</td></tr>
+          <tr><th scope="row">payroll settlements</th><td>what the gym actually paid its staff, and when</td></tr>
+          <tr><th scope="row">payroll adjustments</th><td>the bonuses, deductions, reimbursements and advances behind what the staff were actually paid</td></tr>
+          <tr><th scope="row">the equipment register</th><td>what the gym owns and what is due a service</td></tr>
+          <tr><th scope="row">the maintenance and accident book</th><td>when each machine was serviced, what the engineer found, and every incident recorded on one</td></tr>
+          <tr><th scope="row">the rota</th><td>who was rostered on the floor and when</td></tr>
+          <tr><th scope="row">member contact</th><td>the record that anybody was ever contacted about leaving</td></tr>
+          <tr><th scope="row">promo codes</th><td>what was discounted and how often it was used</td></tr>
+          <tr><th scope="row">the activity log</th><td>what happened in the building, as the database recorded it</td></tr>
+          <tr><th scope="row">PT packs sold</th><td>what the coaches sold through their own checkout</td></tr>
+          <tr><th scope="row">the documents people are asked to sign</th><td>the wording of every waiver, consent and set of terms, as each version stood</td></tr>
+          <tr><th scope="row">signatures</th><td>who signed what, when, and whether they signed it themselves</td></tr>
+          <tr><th scope="row">the filing cabinet</th><td>the contracts, insurance, certificates and incident reports the gym holds</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiny after-sm">
+      The right-hand column is not marketing copy written about the export. It is the sentence the
+      console itself prints beside a part when that part cannot be read &mdash; the product's own
+      account of what a gym would be walking away without.
+    </p>
+
+    <div class="split" style="margin-top:clamp(34px,5vw,52px)">
+      <div>
+        <h3 class="hd" style="font-size:clamp(21px,2.5vw,27px)">What stops it lying about itself</h3>
+        <ul class="ticks" role="list">
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A part that could not be read is named, not omitted.</strong> It gets a file of its own saying so, the word &ldquo;INCOMPLETE&rdquo; goes into the name of every file in the bundle, and the manifest records that it is not complete. A folder in Downloads is read by its filename long before anybody opens the README, so that is where the warning goes.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>No read comes back short in silence.</strong> Each one either asks for a row more than it will accept and fails on getting it, or pages until it has the set. There is no third behaviour where a large gym quietly exports the first thousand rows of its door log.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A slice says it is a slice.</strong> Take a month or a year rather than everything &mdash; this month, last month, the last ninety days, this year, last year, or two dates you type &mdash; and the bundle is labelled with the period and separately with the day it was taken, so two dates in one filename cannot be read as one. &ldquo;Complete&rdquo; on a windowed bundle is stated to mean nothing was lost to a failed read, not that this is the whole record.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>A missing column is absent, not blank.</strong> Where member email addresses could not be read, the roster ships with no email column at all and a note saying why &mdash; because an empty column reads as &ldquo;this member has no address&rdquo;, which is a different and worse thing to believe.</span></li>
+          <li><span class="tk"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12.5l5.5 5.5L20 7"/></svg></span>
+            <span><strong>Every run is written down.</strong> Who exported, what they took and when is a row in your gym's own record &mdash; which is what makes an export something you can be accountable for rather than something that merely happened.</span></li>
+        </ul>
+      </div>
+
+      <div class="assure">
+        <div class="pair">
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4 19h16"/></svg></div>
+            <h3>One member, on request</h3>
+            <p>The same page builds the record of a single person &mdash; their own file, memberships, payments, invoices, attendance, one-to-ones, passes, visits, invitations, contact history, what they bought and the events against them. It is named for the person, so a folder of them cannot be mistaken for a backup of the gym.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></div>
+            <h3>Spreadsheets, not our format</h3>
+            <p>Comma-separated files in a zip, with a manifest and a README. Nothing in the bundle needs Repple to open it, which is the only definition of portable that is worth anything.</p>
+          </div>
+          <div class="card">
+            <div class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4.5l3 1.8"/></svg></div>
+            <h3>Where it is not</h3>
+            <p>This is a console page, not a phone screen &mdash; the Studio app on your phone has no gym export in it. And the Export My Data button in any app's own Settings is a different thing entirely: that one hands you <em>your own</em> record as a person, not your gym's. Two exports, two meanings, and it is worth knowing which you pressed.</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1402,6 +1557,7 @@ addEventListener('DOMContentLoaded', function () {
         <h2 class="fh">Getting started</h2>
         <ul role="list">
           <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/coach-setup">Setting up as a coach</a></li>
           <li><a href="/pricing">Pricing</a></li>
           <li><a href="/signup">Create account</a></li>
           <li><a href="/forgot-password">Reset password</a></li>

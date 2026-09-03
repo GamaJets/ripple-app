@@ -123,7 +123,7 @@ for (const m of MONEYS) {
 // the two agree about a string and nothing about the CSV between them. This
 // builds the actual bundle, pulls payments.csv and plans.csv out of it by
 // name, and imports them with the previewers the import screen calls.
-function bundleFor(m: Money) {
+function bundleFor(m: Money, timezone: string | null = null) {
   const plans: MembershipPlan[] = m.amounts.map((cents, i) => ({
     id: `pl${i}`,
     // A comma and a quote in the name, because a shifted column is the other
@@ -150,6 +150,7 @@ function bundleFor(m: Money) {
   }));
   const input: GymExportInput = {
     gymName: `Gym ${m.code}`, tenantId: 'T', generatedAt: '2026-08-26T08:00:00.000Z',
+    timezone,
     from: null, to: null,
     plans: ready(plans), memberships: ready([]), payments: ready(payments),
     classes: ready([]), attendance: ready([]), sessions: ready([]),
@@ -311,6 +312,111 @@ eq(parseMoneyCents('12.34', 'GBP').ok && (parseMoneyCents('12.34', 'GBP') as any
     'and the currency column is read rather than reported as unrecognised');
 }
 
+/* ── 8. and the DAY survives the round trip, not just the amount ─────────── */
+//
+// The second half of the same failure, and it took the same shape: the exporter
+// read UTC's day off the stored instant and the importer re-stamped whatever it
+// was given at midday, so an export and a re-import agreed perfectly about a
+// day that was not the gym's.
+//
+// It only ever showed on a payment recorded NATIVELY at the desk. Everything
+// this product imported is stamped `T12:00:00Z` by src/lib/gymImports.ts, which
+// no zone on earth can move off its day — which is exactly why nobody saw it,
+// and why the fixtures above (all at 09:14Z) could not have caught it either.
+// A payment written by the money screen with no date picked carries the real
+// instant, and a gym four hours east of UTC then exported and re-imported half
+// of every night onto the previous day.
+//
+// So the fixtures here are deliberately the awkward ones: instants within two
+// hours of midnight, in a gym east of UTC and a gym west of it, where the
+// gym's day and UTC's day are different dates. If `gymDatePart` regresses to a
+// slice of the timestamp, every assertion in this block fails at once.
+{
+  const payAt = (id: string, takenAt: string): GymPayment => ({
+    id, memberId: 'u1', memberName: 'Amy', amountCents: 4500, currency: 'GBP',
+    method: 'card', takenAt, note: null, kind: 'payment',
+    reversesPaymentId: null, invoiceId: null, membershipId: null,
+  });
+
+  const withZone = (zone: string | null, rows: GymPayment[]) => {
+    const { input } = bundleFor(MONEYS[0], zone);
+    const bundle = buildGymExport({ ...input, payments: ready(rows) });
+    const csv = bundle.files.find((f) => f.name.endsWith('payments.csv'));
+    ok(csv !== undefined, `${zone ?? 'no zone'}: the bundle contains payments.csv`);
+    return { bundle, text: csv?.text ?? '' };
+  };
+
+  // Dubai is UTC+4 and does not observe daylight saving, so 22:30Z on the 31st
+  // is 02:30 on the 1st at the desk — the next day, and the next MONTH, which
+  // is the boundary an accountant's file turns on.
+  const dubai = withZone('Asia/Dubai', [payAt('p1', '2026-08-31T22:30:00.000Z')]);
+  const dubaiRead = previewPayments(dubai.text, undefined, 'GBP');
+  eq(dubaiRead.rejected.length, 0, 'Asia/Dubai: the exported row is readable on the way back in');
+  eq(dubaiRead.ready[0]?.takenOn, '2026-09-01',
+    'a payment taken at 02:30 on 1 September in Dubai re-imports on 1 September, not on 31 August');
+  eq(dubai.bundle.manifest.daysAt, 'gym', 'and the manifest says the days are the gym’s');
+  eq(dubai.bundle.manifest.timezone, 'Asia/Dubai', 'and names which gym’s');
+  ok(/Asia\/Dubai/.test(dubai.bundle.manifest.parts.find((p) => p.part === 'payments')?.note ?? ''),
+    'the note on payments.csv names the calendar its date column is on');
+
+  // And the other direction. Los Angeles is UTC-7 in September, so 03:00Z on
+  // the 1st is 20:00 on the 31st at the desk — the previous day, and the
+  // previous month.
+  const la = withZone('America/Los_Angeles', [payAt('p2', '2026-09-01T03:00:00.000Z')]);
+  const laRead = previewPayments(la.text, undefined, 'GBP');
+  eq(laRead.ready[0]?.takenOn, '2026-08-31',
+    'a payment taken at 20:00 on 31 August in Los Angeles re-imports on 31 August, not on 1 September');
+
+  // The two gyms disagree about the same instant, which is the whole point: if
+  // they agreed, both could be passing against a slice of the timestamp.
+  const sameInstant = '2026-08-31T22:30:00.000Z';
+  const east = previewPayments(withZone('Asia/Dubai', [payAt('p3', sameInstant)]).text, undefined, 'GBP');
+  const west = previewPayments(withZone('America/Los_Angeles', [payAt('p4', sameInstant)]).text, undefined, 'GBP');
+  ok(east.ready[0]?.takenOn !== west.ready[0]?.takenOn,
+    'one instant is two different days in two different gyms, and the file says the gym’s');
+  eq(east.ready[0]?.takenOn, '2026-09-01', 'the eastern gym files it on the 1st');
+  eq(west.ready[0]?.takenOn, '2026-08-31', 'the western gym files it on the 31st');
+
+  // A gym that has not set a timezone still gets a usable file. Blanking the
+  // column would be the honest-looking answer and it would break the round trip
+  // outright for every such gym, which is a larger failure than the one this
+  // closes — so it falls back to UTC's day and the bundle says so three times.
+  const none = withZone(null, [payAt('p5', '2026-08-31T22:30:00.000Z')]);
+  const noneRead = previewPayments(none.text, undefined, 'GBP');
+  eq(noneRead.rejected.length, 0, 'no zone: the row still re-imports rather than being refused');
+  eq(noneRead.ready[0]?.takenOn, '2026-08-31', 'and falls back to UTC’s day, as it always did');
+  eq(none.bundle.manifest.daysAt, 'utc', 'the manifest says which calendar it used');
+  eq(none.bundle.manifest.timezone, null, 'and does not invent a zone the gym never set');
+  ok(/not set a timezone/.test(none.bundle.manifest.conventions.dates ?? ''),
+    'the conventions tell the reader why, and what to do about it');
+  const readme = none.bundle.files.find((f) => f.name.endsWith('README.txt'))?.text ?? '';
+  ok(/Days:\s+UTC/.test(readme), 'and the README says it in the block a reader actually reads');
+
+  // A zone this runtime cannot resolve is not a zone. It must not silently
+  // become one, and it must not blank the column either.
+  const bogus = withZone('Mars/Olympus', [payAt('p6', '2026-08-31T22:30:00.000Z')]);
+  eq(bogus.bundle.manifest.daysAt, 'utc', 'an unresolvable zone is treated as no zone, not asserted as the gym’s');
+  eq(previewPayments(bogus.text, undefined, 'GBP').ready[0]?.takenOn, '2026-08-31',
+    'and the day falls back rather than going empty');
+
+  // The stored instant is untouched by all of this. `date` is a re-import
+  // convenience; `taken_at` is the record, and a fix that moved the record
+  // would be a worse bug than the one it fixed.
+  const sheet = parseSheet(dubai.text);
+  eq(sheet.rows[0]?.[sheet.header.indexOf('taken_at')], '2026-08-31T22:30:00.000Z',
+    'taken_at is still the stored instant, unchanged, beside the gym’s day');
+
+  // And the filename carries the gym's day too, for the same reason: a bundle
+  // taken at 02:30 on 1 September in Dubai is a September export, and a folder
+  // of these is read by its name long before anybody opens the README.
+  const stamped = buildGymExport({
+    ...bundleFor(MONEYS[0], 'Asia/Dubai').input,
+    generatedAt: '2026-08-31T22:30:00.000Z',
+  });
+  ok(/2026-09-01/.test(stamped.prefix),
+    `the filename is stamped with the gym's day, not UTC's — got ${stamped.prefix}`);
+}
+
 if (errors.length) { for (const e of errors) console.error('FAIL ' + e); process.exit(1); }
 process.exitCode = 0;
-console.log(`importRoundTrip: ok — export and re-import agree in ${MONEYS.map((m) => m.code).join(', ')}`);
+console.log(`importRoundTrip: ok — export and re-import agree in ${MONEYS.map((m) => m.code).join(', ')}, and on the gym's own day`);

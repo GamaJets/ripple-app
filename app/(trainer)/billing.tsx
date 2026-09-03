@@ -25,9 +25,8 @@ import { sp, layout, hairline, type as ty, value } from '../../src/theme/scale';
 import { PLANS } from '../../src/lib/ownerMock';
 import { planOffer } from '../../src/lib/planOffer';
 import { subscribeToPlan, openBillingPortal, fetchMySubscription, PRICE_IDS, type Subscription } from '../../src/lib/billing';
-import { readTrial, trialDisagreement, TRIAL_NOT_YET_ENFORCED, type TrialReading } from '../../src/lib/trialGate';
-import { fetchAccountTrial } from '../../src/ui/trialAccount';
-import { trialInfo } from '../../src/lib/trial';
+import { trialDisagreement, TRIAL_NOT_YET_ENFORCED } from '../../src/lib/trialGate';
+import { useTrialReading } from '../../src/ui/trialReading';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 
 const STATUS_LABEL: Record<string, string> = { active: 'Active', trialing: 'Trial', past_due: 'Past due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Incomplete' };
@@ -44,8 +43,14 @@ export default function TrainerBilling() {
   // authority and the device's copy is kept only so the screen can SAY when
   // they disagree — the gap between them is the leak part 191 closes, and a
   // coach who has reinstalled twice is entitled to see that the app noticed.
-  const [trial, setTrial] = useState<TrialReading | null>(null);
-  const [localDays, setLocalDays] = useState<number | null>(null);
+  //
+  // Both now come from src/ui/trialReading.ts, which is also what the Clients
+  // tab renders its card from. This screen used to do its own `readTrial` over
+  // its own `fetchAccountTrial` and its own `Date.now()`, and the dashboard
+  // did something else entirely — so the two screens said different things
+  // about one account, minutes apart, and each was right about its own source.
+  // One read, one clock, both screens.
+  const { reading: trial, localDaysLeft: localDays, reload: reloadTrial } = useTrialReading();
   // What this screen is allowed to put in front of a coach, and whether any of
   // it is for sale. The rule and the reasoning are in src/lib/planOffer.ts;
   // the short version is that a plan with no Stripe price id is not rendered
@@ -59,16 +64,11 @@ export default function TrainerBilling() {
   // paying — and the obvious thing to do on that screen is pay again.
   const load = useCallback(async () => {
     setLoading(true);
-    const [r, acct, local] = await Promise.all([fetchMySubscription(), fetchAccountTrial(), trialInfo()]);
+    const [r] = await Promise.all([fetchMySubscription(), reloadTrial()]);
     setSub(r.sub);
     setSubErr(r.error);
-    // `Date.now()` read once and passed in, so the figure that is rendered and
-    // the figure the disagreement line is computed from cannot differ by the
-    // width of a render.
-    setTrial(readTrial(acct.startedAt, acct.status, Date.now()));
-    setLocalDays(local.daysLeft);
     setLoading(false);
-  }, []);
+  }, [reloadTrial]);
   // On focus, not on mount, and the comment directly above is the reason.
   //
   // `subscribe` and `manage` both hand off to `Linking.openURL` — Stripe
@@ -136,25 +136,35 @@ export default function TrainerBilling() {
             Nothing is gated on it yet and the copy says so outright. A coach
             reading "your trial has ended" beside a fully working app would
             reasonably conclude the app was lying about one or the other. */}
-        {trial ? (
-          <Section>
-            <SectionHead title="Your Free Trial" />
-            {/* An unread start date is not an expired trial. `readTrial`
-                returns no state for a failed read and the note says which
-                silence it is — a paywall raised on a refused query is this
-                app's worst defect wearing a billing hat. */}
-            {trial.state ? (
-              <Text style={{ ...ty.body, color: t.ink }}>
-                {trial.state.expired ? 'Your free days are used up' : `${trial.state.daysLeft} free ${trial.state.daysLeft === 1 ? 'day' : 'days'} left`}
-              </Text>
-            ) : null}
-            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{trial.note}</Text>
-            {trialDisagreement(trial.state, localDays) ? (
-              <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>{trialDisagreement(trial.state, localDays)}</Flag>
-            ) : null}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{TRIAL_NOT_YET_ENFORCED}</Text>
-          </Section>
-        ) : null}
+        {/* Always rendered, because this screen's subject IS the trial and
+            all four states have a sentence. The Clients tab is the opposite
+            case and takes the opposite decision — `trialCard` prints a
+            countdown only when the account produced one and draws nothing
+            otherwise — and the argument for the asymmetry is in that
+            function's header. */}
+        <Section>
+          <SectionHead title="Your Free Trial" />
+          {/* An unread start date is not an expired trial, and a read still in
+              flight is neither. `readTrial` returns no state for either and
+              the note says WHICH silence it is — a paywall raised on a refused
+              query is this app's worst defect wearing a billing hat. */}
+          {trial.state ? (
+            <Text style={{ ...ty.body, color: t.ink }}>
+              {trial.state.expired ? 'Your free days are used up' : `${trial.state.daysLeft} free ${trial.state.daysLeft === 1 ? 'day' : 'days'} left`}
+            </Text>
+          ) : null}
+          <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{trial.note}</Text>
+          {/* The whole reading, not just its state. Passing `trial.state`
+              meant this line was silent for BOTH kinds of null — the account
+              that did not answer and the account that answered with nothing —
+              so the one mechanism built to reconcile the phone with the
+              account was switched off in the case where they diverge hardest.
+              See trialGate.ts. */}
+          {trialDisagreement(trial, localDays) ? (
+            <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>{trialDisagreement(trial, localDays)}</Flag>
+          ) : null}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{TRIAL_NOT_YET_ENFORCED}</Text>
+        </Section>
 
         {loading ? (
           <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} />

@@ -340,12 +340,18 @@ export default function Groups() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
+        {/* Back leads the row and carries a label. Seen on an iPhone 17 Pro:
+            it trailed, which put the one control that leaves this screen in the
+            top-RIGHT corner — where iOS has never put it and where the rest of
+            this app does not put it — and without `a11yLabel` a screen reader
+            announced it as "button". The house form is in
+            src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Write it once</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Groups</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           A bootcamp, a 6am class, a beginners' block. One programme goes to everybody in the group — and any one of them can be changed afterwards without touching the rest.

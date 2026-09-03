@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
+<title>Repple Coach — setting up</title>
+  <link rel="canonical" href="https://www.repplefitness.com/coach-setup">
+<meta name="description" content="The nine-item setup list Repple Coach opens on, published in advance: what each step turns on, what stays broken until you do it, and which figures stay a dash until a currency and a session rate exist.">
+<meta property="og:title" content="Repple Coach — setting up">
+<meta property="og:description" content="Nine steps, in the app’s own order, and the thing that stays broken until you do each one.">
+<meta property="og:url" content="https://www.repplefitness.com/coach-setup">
+<!-- The card a link to this page unfurls as, in a message, a Slack channel or a
+     search result. Every page on this site shipped without one. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Repple">
+<meta property="og:image" content="https://www.repplefitness.com/og/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Repple mark beside the words “Repple — the operating record for gyms, coaches and the people they train.”">
+<meta name="twitter:card" content="summary_large_image">
+<!-- styles.css @imports its three families from Google Fonts. Without these,
+     the browser cannot start that request until it has downloaded and parsed
+     the stylesheet: DNS, TCP and TLS to two hosts all sit on the critical path
+     for the first paint of text. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=38b4504e80">
+<link rel="icon" href="favicon.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<script>
+/* The phone header. Links collapse behind one button; without JavaScript they
+   simply stay in the bar and wrap, which is why the collapsed state is gated on
+   the js-nav class rather than being the default. */
+document.documentElement.classList.add('js-nav');
+addEventListener('DOMContentLoaded', function () {
+  var nav = document.querySelector('nav.site');
+  var btn = nav && nav.querySelector('.nav-toggle');
+  if (!btn) return;
+  /* Closing the menu takes its links OUT OF THE RENDER TREE — `.nav-links` goes
+     back to display:none below 760px — so when focus is on one of them at the
+     moment this runs, focus lands on the document body and a keyboard user is nowhere,
+     with no way back but Tab from the top of the document.
+
+     All three ways in reach it while a link can be focused: Escape (the exact
+     key a disclosure is supposed to be closed with), a click outside, and
+     `resize` — which on a phone fires when the URL bar collapses or the
+     on-screen keyboard opens, i.e. with no gesture from the user at all.
+
+     So focus goes back to the button that opened the menu, which is where a
+     disclosure is required to return it. Only when focus was actually inside:
+     moving focus that was somewhere else entirely would be a worse bug than
+     the one being fixed. */
+  var menu = nav.querySelector('#site-menu');
+  function shut() {
+    var wasInside = nav.classList.contains('open') && menu
+      && menu.contains(document.activeElement);
+    nav.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+    btn.setAttribute('aria-label', 'Open menu');
+    if (wasInside) btn.focus();
+  }
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var open = nav.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  });
+  document.addEventListener('click', function (e) { if (!nav.contains(e.target)) shut(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') shut(); });
+  addEventListener('resize', shut);
+});
+</script>
+</head>
+<body class="tone-coach">
+
+<!-- The header carries six links before the content starts. Without this a
+     keyboard or switch user tabs all six on every page of the site. -->
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <span class="mark">
+        <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
+          <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+          <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+        </svg>
+      </span>
+      Repple<span class="vh"> home</span>
+    </a>
+    <nav class="site">
+      <div class="nav-links" id="site-menu">
+      <a href="/client">Members</a>
+      <a href="/trainer" aria-current="page">Coaches</a>
+      <a href="/studio">Gyms</a>
+      <a href="/support">Support</a>
+      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      </div>
+      <a class="cta" href="/signup">Create account</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+        <svg class="ico-open" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <svg class="ico-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <div class="eyebrow">Repple Coach &middot; setting up</div>
+        <h1 class="display">Nine things,<br>and what each one <em>turns on</em>.</h1>
+        <p class="lede after-sm">
+          Repple Coach opens on a setup list, and this page is that list &mdash; published before
+          you sign up rather than discovered one dash at a time afterwards. Nine items, in the
+          order the app puts them in, each with the thing that stays broken until you do it. Every
+          sentence in the third column below is the app&rsquo;s own, taken from the screen that
+          says it.
+        </p>
+        <div class="btn-row">
+          <a class="btn primary" href="/signup">Create an account</a>
+          <a class="btn" href="#order">Start at step one</a>
+          <a class="btn" href="/trainer">What the app does</a>
+        </div>
+      </div>
+
+      <div class="surface">
+        <div class="surface-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="ttl">getting started &middot; illustrative</span>
+        </div>
+        <div class="surface-body">
+          <div class="sample">Illustrative</div>
+          <div class="rows">
+            <div class="row"><span class="nm">Say How You Coach</span><span class="mt">in person, online, or both</span><span class="pill ok">done</span></div>
+            <div class="row"><span class="nm">Set Your Currency</span><span class="mt">the code every price is printed in</span><span class="pill ok">done</span></div>
+            <div class="row"><span class="nm">Set Your Session Rate</span><span class="mt">what one hour with you costs</span><span class="pill warn">to do</span></div>
+            <div class="row"><span class="nm">Add Your First Client</span><span class="mt">invite somebody, or write them down</span><span class="pill warn">to do</span></div>
+            <div class="row"><span class="nm">Set When You Work</span><span class="mt">the hours clients may book</span><span class="pill">&mdash;</span></div>
+          </div>
+          <p class="chart-note" style="margin-top:14px">
+            A step whose read did not answer shows a dash and counts as neither done nor
+            outstanding &mdash; because &ldquo;we could not check&rdquo; and &ldquo;you have not
+            done it&rdquo; are different sentences. The ticks here are invented; the titles and the
+            notes beside them are the app&rsquo;s.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <ul class="jump" style="margin-top:clamp(34px,5vw,52px)" role="list">
+      <li><a href="#order">The nine</a></li>
+      <li><a href="#dashes">Where the dashes come from</a></li>
+      <li><a href="#clients">Getting clients in</a></li>
+      <li><a href="#answers">Straight answers</a></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ── the nine ───────────────────────────────────────────────────────── -->
+<!--
+     These nine are not a marketing sequence invented for this page. They are
+     the rows of `COACH_SETUP_STEPS` in src/lib/coachFirstRun.ts:104, in that
+     order, rendered in the app at app/(trainer)/getting-started.tsx. Each row
+     carries a `title`, a `note` and a `breaks` — and `breaks` is the sentence
+     the app itself shows a coach to say what does not work until the step is
+     done. The third paragraph of each step below is that sentence.
+
+     check M in scripts/check-site-claims.mjs holds the titles and the order
+     against that file, so renaming a step in the app fails this page rather
+     than leaving it describing a screen that no longer exists.
+-->
+<section class="band" id="order">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">The sequence</div>
+      <h2 class="hd">The list the app opens on,<br><span class="serif">in its own order.</span></h2>
+      <p class="lede">
+        Nothing here is a wizard you have to finish before the app will let you in. Skipping is
+        free and the order is a dependency order, not a gate &mdash; do them out of sequence and
+        the screens simply stay honest about what they are missing. Two of them are worth doing on
+        the first evening whatever else waits: the currency and the rate, because between them
+        they decide whether any figure in the app is a number or a dash.
+      </p>
+    </div>
+
+    <!-- site-claim: coach-setup-steps -->
+    <ol class="steps" role="list">
+      <li>
+        <span class="no">1</span>
+        <div>
+          <h3>Say How You Coach</h3>
+          <p>In person, online, or both. It is first because it changes what the rest of the list is: answer &ldquo;online&rdquo; and setting your in-person hours stops being an outstanding task rather than sitting there unfinished forever.</p>
+          <p class="tiny" style="margin-top:9px"><strong>Until you do:</strong> the app cannot set itself up around your coaching, so you are shown every in-person tool whether you use one or not.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">2</span>
+        <div>
+          <h3>Set Your Currency</h3>
+          <p>The code every price and total in the app is printed in. There is no default anywhere in Repple and that is deliberate &mdash; the product is white-labelled, and a guess here is a guess about somebody&rsquo;s money. If you coach inside a gym running Repple Studio, the gym&rsquo;s currency is used and you do not set this at all.</p>
+          <p class="tiny" style="margin-top:9px"><strong>Until you do:</strong> every money figure in the app is withheld and shown as a dash, on six separate screens.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">3</span>
+        <div>
+          <h3>Set Your Session Rate</h3>
+          <p>What one hour with you costs. Leave the box empty &mdash; or type a zero, which clears it &mdash; and nothing quotes a rate for you. Once it is set, the rate is stamped onto each session at the moment you mark it, so raising your price next quarter cannot rewrite what last month was worth.</p>
+          <p class="tiny" style="margin-top:9px"><strong>Until you do:</strong> sessions are recorded with no value on them, so nothing you deliver adds up to a figure.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">4</span>
+        <div>
+          <h3>Add Your First Client</h3>
+          <p>Invite somebody, or write them down by hand. The three routes in, and exactly what each one does and does not give you, are <a href="#clients">further down this page</a> &mdash; the difference matters more than it sounds.</p>
+          <p class="tiny" style="margin-top:9px"><strong>Until you do:</strong> every screen in the app is empty, and an empty screen looks the same as a broken one.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">5</span>
+        <div>
+          <h3>Set When You Work</h3>
+          <p>The hours clients may book, week by week. You give it a stretch of time and it becomes discrete slots; one press then generates open slots four weeks ahead, skipping anything you are already booked for, anything already open, and any class you are teaching &mdash; and telling you how many it skipped for each reason.</p>
+          <p class="tiny" style="margin-top:9px"><strong>Until you do:</strong> nobody can book you, because there is nothing on offer for them to take.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">6</span>
+        <div>
+          <h3>Create Something To Sell</h3>
+          <p>A session pack or a monthly package, at your price. A package cannot be created at all without a currency, which is why step two sits where it does rather than at the end.</p>
+          <p class="tiny" style="margin-top:9px"><strong>Until you do:</strong> there is nothing for a client to buy, so no payment can ever start.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">7</span>
+        <div>
+          <h3>Connect Stripe</h3>
+          <p>So a client can pay you from inside the app. Repple never holds the money &mdash; the account is yours, Stripe handles the card, and the payout screen keeps five states apart: not started, started, live, still loading, and could not be read. That last one deliberately withholds the &ldquo;set up payouts&rdquo; button, because offering it twice is how somebody ends up with two live accounts.</p>
+          <p class="tiny" style="margin-top:9px"><strong>Until you do:</strong> a client can see what you sell and cannot pay for it &mdash; the money has nowhere to land.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">8</span>
+        <div>
+          <h3>Name a Join Code</h3>
+          <p>One code per flyer, post or referral card. It is the only thing in the app that answers &ldquo;where did this client come from&rdquo;, and it has to be named before the client arrives rather than after.</p>
+          <p class="tiny" style="margin-top:9px"><strong>Until you do:</strong> every client arrives from an unnamed source, so nothing can tell you which of your channels works.</p>
+        </div>
+      </li>
+      <li>
+        <span class="no">9</span>
+        <div>
+          <h3>Upload Your Paperwork</h3>
+          <p>Your waiver, your par-q, your house rules. Repple holds the version each person signed, so the wording somebody agreed to a year ago is still the wording you can produce.</p>
+          <p class="tiny" style="margin-top:9px"><strong>Until you do:</strong> a client starts training with you having signed nothing of yours.</p>
+        </div>
+      </li>
+    </ol>
+
+    <p class="tiny after-sm">
+      One thing that is <em>not</em> on the list, because it is not a step: you are not listed
+      anywhere by default. The Find a Trainer switch on your profile starts off, and a separate
+      opt-in for an open-web page starts off as well. Nobody browsing for a coach sees you until
+      you turn the first one on.
+    </p>
+  </div>
+</section>
+
+<!-- ── where the dashes come from ─────────────────────────────────────── -->
+<section class="band tint" id="dashes">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Dependencies</div>
+      <h2 class="hd">A dash is the app saying<br><span class="serif">it does not know.</span></h2>
+      <p class="lede">
+        Repple Coach will not estimate its way past a missing input, and it will not draw a figure
+        from a read that came back short. Where the record is thin you get a dash and the sentence
+        saying which part is thin. The important half of that rule is the second one: a roster that
+        only partly loaded produces no bar at all, because a share of part of your book is not a
+        share of your book.
+      </p>
+    </div>
+
+    <figure class="chart">
+      <div class="chart-hd">
+        <div>
+          <span class="chart-k">Setup</span>
+          <h3 id="chart-coach-deps">What has to exist before each figure does</h3>
+        </div>
+      </div>
+      <div class="chart-scroll" tabindex="0" role="region" aria-labelledby="chart-coach-deps">
+        <svg viewBox="0 0 740 338" width="740" height="338" role="img" aria-label="A map of five dependencies in Repple Coach. A currency, together with a session rate, produces what a delivered session is worth. Outcomes marked on your sessions produce a count of sessions delivered. Your clients filing a weekly check-in produces adherence and the roster split. Two recorded months produce a revenue trend. A client holding a Repple account of their own produces a training log you can read.">
+          <text class="cx-cap" x="16" y="30">YOU RECORD</text>
+          <text class="cx-cap" x="452" y="30">COACH CAN THEN SHOW</text>
+
+          <rect class="cx-box" x="16" y="52" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="77">A currency, and a session rate</text>
+          <line class="cx-flow" x1="296" y1="72" x2="438" y2="72"/>
+          <polygon class="cx-tip" points="438,68 450,72 438,76"/>
+          <rect class="cx-box" x="452" y="52" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="77">What a delivered session is worth</text>
+
+          <rect class="cx-box" x="16" y="106" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="131">An outcome on every session</text>
+          <line class="cx-flow" x1="296" y1="126" x2="438" y2="126"/>
+          <polygon class="cx-tip" points="438,122 450,126 438,130"/>
+          <rect class="cx-box" x="452" y="106" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="131">Sessions delivered this month</text>
+
+          <rect class="cx-box" x="16" y="160" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="185">Clients filing a weekly check-in</text>
+          <line class="cx-flow" x1="296" y1="180" x2="438" y2="180"/>
+          <polygon class="cx-tip" points="438,176 450,180 438,184"/>
+          <rect class="cx-box" x="452" y="160" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="185">Adherence, and the roster split</text>
+
+          <rect class="cx-box" x="16" y="214" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="239">Two months of the app running</text>
+          <line class="cx-flow" x1="296" y1="234" x2="438" y2="234"/>
+          <polygon class="cx-tip" points="438,230 450,234 438,238"/>
+          <rect class="cx-box" x="452" y="214" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="239">A revenue trend with a line on it</text>
+
+          <rect class="cx-box" x="16" y="268" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="30" y="293">A client with their own account</text>
+          <line class="cx-flow" x1="296" y1="288" x2="438" y2="288"/>
+          <polygon class="cx-tip" points="438,284 450,288 438,292"/>
+          <rect class="cx-box" x="452" y="268" width="272" height="40" rx="8"/>
+          <text class="cx-lab" x="466" y="293">Their training log, and a thread</text>
+
+          <line class="cx-base" x1="16" y1="324" x2="724" y2="324"/>
+        </svg>
+      </div>
+      <figcaption class="chart-note">
+        <strong>Nothing on the right is estimated from a partial left.</strong> The first row is the
+        one that surprises people: a new coach has no currency and no rate, so on the first evening
+        every money figure in the app is a dash. That is the system working, and it says which of
+        the two is missing.
+      </figcaption>
+    </figure>
+
+    <div class="scroll" tabindex="0" role="region" aria-labelledby="tbl-coach-figures">
+      <table class="data">
+        <caption class="vh" id="tbl-coach-figures">Each figure in Repple Coach, what it needs, and what you see until then</caption>
+        <thead>
+          <tr><th scope="col">Figure</th><th scope="col">What it needs</th><th scope="col">What you see until then</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row"><strong>Sessions delivered</strong></th>
+            <td>Sessions you marked as having gone ahead. Booked and delivered are different columns, and only the second is counted.</td>
+            <td>A dash, and which of three things happened: still reading, came back short, or could not be read at all. Never a zero.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Revenue</strong></th>
+            <td>Those delivered sessions, a session rate on your profile, and a currency.</td>
+            <td>A dash naming whichever is missing &mdash; &ldquo;set a session rate in your profile to see what that is worth&rdquo;, or that there is no unit to price the sessions in.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Taken this month</strong></th>
+            <td>Package sales, subscription renewals and receipts you recorded &mdash; all read whole, and all in one currency.</td>
+            <td>A dash. Money taken in two currencies is never added into one figure; the screen names the currencies instead.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Average adherence</strong></th>
+            <td>At least one client who has filed a check-in.</td>
+            <td>A dash, with &ldquo;no check-ins yet&rdquo; beside it. A client who has never checked in is not counted as a hundred per cent.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>The roster split</strong></th>
+            <td>Your whole roster, read whole. On track is 85% adherence and above, watch is 70 to 84, at risk is below 70, and everyone with no check-in at all is a fourth group.</td>
+            <td>No bar at all, and the reason. It is withheld rather than drawn short, because a share of part of your book is not a share of it.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Value per client</strong></th>
+            <td>Revenue, a currency, and at least one client.</td>
+            <td>A dash &mdash; explicitly not a zero in your currency, which would read as clients who are worth nothing.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Revenue trend</strong></th>
+            <td>Two recorded monthly snapshots. One is taken per month; the chart draws the last six.</td>
+            <td>&ldquo;Not enough history yet &mdash; a snapshot is recorded each month, and the trend appears from the second one.&rdquo; A month with no rate set records nothing rather than a false zero, and stays a hole.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Against last year</strong></th>
+            <td>The same month, one year earlier, recorded at the time.</td>
+            <td>A sentence saying which it is: still reading, the read failed, that month is still some months away, or it was never recorded because the app was not running then.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>How long people stay</strong></th>
+            <td>Coaching relationships with a start date behind them.</td>
+            <td>&ldquo;Nobody has started with you yet.&rdquo; It is read from the relationships rather than the roster, so the two cannot disagree.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Clients at risk</strong></th>
+            <td>A whole roster read, and each client measured against their own recent pattern rather than against each other.</td>
+            <td>One of four sentences, and never &ldquo;everyone is on track&rdquo; off a read that failed. A quiet list and a broken list are not allowed to look alike.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>The weekly digest, and the CSV</strong></th>
+            <td>Both the roster and the sessions read whole.</td>
+            <td>A disabled button that says it needs figures it could not read. Where the export does run, a figure that is unknown leaves an empty cell rather than a zero.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiny after-sm">
+      A failed read and an empty book are kept apart everywhere on that screen. &ldquo;You have no
+      clients yet&rdquo; and &ldquo;your roster would not load&rdquo; produce different words,
+      because only one of them means you should go and do something about it.
+    </p>
+  </div>
+</section>
+
+<!-- ── clients ────────────────────────────────────────────────────────── -->
+<section class="band" id="clients">
+  <div class="wrap">
+    <div class="lead-in wide">
+      <div class="eyebrow">Getting clients in</div>
+      <h2 class="hd">Three ways in, and one<br><span class="serif">of them is only half a client.</span></h2>
+      <p class="lede">
+        This is the part of moving a book across that goes wrong quietly, so it is worth being
+        exact about. A client you typed in by hand is a real row on your roster and in your
+        schedule &mdash; and until they hold a Repple account of their own, four things simply do
+        not work for them. The app refuses those four rather than appearing to accept them.
+      </p>
+    </div>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="cap">By hand</div>
+        <h3>Written down, in seconds</h3>
+        <p>Name, an email if you have one, a goal and a coaching type. It is on your roster
+        immediately and in your schedule, and the write is read back &mdash; if it did not reach
+        the server the app says so rather than showing you a client who will be gone tomorrow.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">By invitation</div>
+        <h3>Recorded against their address</h3>
+        <p>The invitation is a row held against their email. They are linked to you the first time
+        they sign in to Repple with that address. <strong>Repple does not send the email</strong>
+        &mdash; nothing in the product posts a message to them, so telling them is your job, and
+        the app says exactly that instead of reporting a send it never made.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">By request</div>
+        <h3>They come to you</h3>
+        <p>Only if you have turned the Find a Trainer switch on. A client browsing coaches sends a
+        request that arrives as a card with accept and decline on it, and accepting is what puts
+        them on the roster. They are told your answer either way.</p>
+      </div>
+    </div>
+
+    <div class="scroll after" tabindex="0" role="region" aria-labelledby="tbl-handadded">
+      <table class="data">
+        <caption class="vh" id="tbl-handadded">What works and what does not for a client with no Repple account of their own</caption>
+        <thead>
+          <tr><th scope="col">The job</th><th scope="col">A client you typed in by hand</th><th scope="col">Once they hold an account</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row"><strong>On your roster and in your week</strong></th>
+            <td>Yes. Book them, keep notes on them, count them.</td>
+            <td>Yes.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Assigning them a programme</strong></th>
+            <td><strong>Refused, and named.</strong> There is no Train tab for it to land in, so the write is turned down at the database and the app says &ldquo;clients you added by hand have no Train tab until they join&rdquo;. Nothing is queued and nothing syncs later.</td>
+            <td>Assigned straight into the app they already open.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Messaging them</strong></th>
+            <td>No thread exists to write in, and the app says so rather than writing into nothing.</td>
+            <td>A thread, and a broadcast reports how many threads it reached.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Reading what they trained</strong></th>
+            <td>Nothing to read. The app stands the review down rather than reporting that they never train.</td>
+            <td>Their log, their loads, their scans and their check-ins, on one timeline.</td>
+          </tr>
+          <tr>
+            <th scope="row"><strong>Bulk actions across a segment</strong></th>
+            <td>They are named as blocked, never silently skipped, so the count you are shown is the count that landed.</td>
+            <td>Included.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiny after-sm">
+      None of this is a reason to avoid adding clients by hand &mdash; it is the fastest way to get
+      a book into the app on the first evening, and a client who joins later keeps everything you
+      recorded against them. It is a reason to know which half you have.
+    </p>
+  </div>
+</section>
+
+<!-- ── straight answers ───────────────────────────────────────────────── -->
+<section class="band tint" id="answers">
+  <div class="wrap narrow">
+    <div class="lead-in">
+      <div class="eyebrow">Straight answers</div>
+      <h2 class="hd">The questions that come up<br><span class="serif">in the first fortnight.</span></h2>
+    </div>
+    <div class="faq">
+      <details>
+        <summary>How long does it take before the app is useful?</summary>
+        <div class="a"><p>The parts under your own control are an evening: the currency, the rate, your hours, your paperwork and a first client written down. The parts that are not are the ones that need other people &mdash; a client accepting an invitation, Stripe verifying you &mdash; and no honest number goes on those. The two figures that genuinely need time rather than work are the revenue trend, which needs a second month, and the year-on-year comparison, which needs a year.</p></div>
+      </details>
+      <details>
+        <summary>Do I pick &ldquo;coach&rdquo; when I sign up?</summary>
+        <div class="a"><p>No &mdash; the app you install is the role. Create your account inside Repple Coach and you are a coach; the same email in Repple is your own training. There is no role menu to get wrong, and no way to end up in the wrong app with the right password. Signing up also creates a space of your own that your clients and programmes belong to, without you asking for one.</p></div>
+      </details>
+      <details>
+        <summary>Why is everything a dash when I first open it?</summary>
+        <div class="a"><p>Because a new account has no currency and no session rate, and almost every figure worth showing needs one or both. That is steps two and three, and it is why they sit near the top of the list rather than near the bottom. The app names which one is missing on each screen rather than showing a zero and letting you conclude your first month was worthless.</p></div>
+      </details>
+      <details>
+        <summary>Does Repple email my clients for me?</summary>
+        <div class="a"><p>No. An invitation is recorded against an email address and picked up when that person signs in with it. Nothing in the product sends them a message, so telling them is your job &mdash; and the app says that on the screen rather than showing you a &ldquo;sent&rdquo; that did not happen. The same honesty applies to notifications: a broadcast reports how many threads it was written into, never how many phones it reached.</p></div>
+      </details>
+      <details>
+        <summary>Do my open slots keep themselves topped up?</summary>
+        <div class="a"><p>Not by themselves. Generating open slots is a button you press, and it fills the next four weeks. The app watches the end of that window and tells you when your last open slot is close, rather than quietly running out. It is one press, and it is worth knowing it is a press.</p></div>
+      </details>
+      <details>
+        <summary>Do I need a gym?</summary>
+        <div class="a"><p>No. The whole of the book works with no gym anywhere near it. If you do coach inside a gym running Repple Studio, two things change: the gym&rsquo;s currency is the one your figures are printed in, and the outcomes you mark are what its payroll pays on. Your own clients, notes and messages stay yours either way.</p></div>
+      </details>
+      <details>
+        <summary>Can I take money through it on day one?</summary>
+        <div class="a"><p>Only once Stripe has verified you, which is their process rather than ours and takes as long as it takes. Repple never holds the money &mdash; the account is yours, and you are the merchant. Until it is live the screen says payouts are not live instead of showing you a balance. The one charge Repple takes is 10% of what you sell through its checkout, which is on <a href="/pricing">Pricing</a> rather than discovered in a settlement report.</p></div>
+      </details>
+      <details>
+        <summary>What happens to my clients if I stop using Repple?</summary>
+        <div class="a"><p>Their records were always theirs, not yours and not ours &mdash; a client&rsquo;s training history belongs to their account and goes with them. You can take everything Repple holds about you as a file from Settings whenever you like, and you can ask for the account to be erased. Erasing you does not erase them; they stay, and lose you as their coach.</p></div>
+      </details>
+      <details>
+        <summary>Is the screen at the top of this page real?</summary>
+        <div class="a"><p>The five rows are the app&rsquo;s real setup items in the app&rsquo;s real order, with invented ticks against them. Repple has not launched publicly, so there is no coach&rsquo;s account to draw from &mdash; and we would not publish one if there were. A new account opens with all nine outstanding and an empty roster behind them.</p></div>
+      </details>
+    </div>
+  </div>
+</section>
+<section class="close-cta">
+  <div class="wrap">
+    <h2 class="display">Step one is an <em>account</em>.</h2>
+    <p class="lede" style="margin:22px auto 0;max-width:52ch">
+      It costs nothing, it creates a space of your own with it, and the other eight can wait until
+      you have had a look around an empty book.
+    </p>
+    <div class="btn-row">
+      <a class="btn primary" href="/signup">Create an account</a>
+      <a class="btn" href="/trainer">What Repple Coach does</a>
+      <a class="btn" href="/pricing">What it costs</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <span class="mark">
+            <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
+              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+            </svg>
+          </span>
+          Repple<span class="vh"> home</span>
+    </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          The operating record for gyms, the coaches who work in them, and the people they train.
+        </p>
+      </div>
+      <div>
+        <h2 class="fh">Apps</h2>
+        <ul role="list">
+          <li><a href="/client">Repple</a></li>
+          <li><a href="/trainer">Repple Coach</a></li>
+          <li><a href="/studio">Repple Studio</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Getting started</h2>
+        <ul role="list">
+          <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/coach-setup">Setting up as a coach</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/signup">Create account</a></li>
+          <li><a href="/forgot-password">Reset password</a></li>
+          <li><a href="/support">Support</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Legal &amp; data</h2>
+        <ul role="list">
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/security">Security &amp; data</a></li>
+          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

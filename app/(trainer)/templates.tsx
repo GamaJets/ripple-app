@@ -298,12 +298,19 @@ export default function Templates() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
+        {/* Back LEADS the row and is announced. Seen on an iPhone 17 Pro: it
+            trailed, which put the one control that leaves this screen in the
+            top-RIGHT corner — where iOS has never put it, where the rest of
+            this app does not put it, and where the dev-launcher button sits on
+            top of it. Without `a11yLabel` it was also announced as "button"
+            and there is no other way back from here. See the same correction
+            in src/ui/FeedbackScreen.tsx. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your library</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Templates</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Build once, assign to many. Save any program from the builder.

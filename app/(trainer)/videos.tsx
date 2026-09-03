@@ -334,7 +334,7 @@ export default function TrainerVideos() {
   const { templates, status: tplStatus, reload: reloadTemplates } = useProgramTemplates();
   // ── Whose programmes this section is about ─────────────────────────────
   //
-  // The heading says "What Your Programmes Need", and the list under it has to
+  // The heading says "What Your Programs Need", and the list under it has to
   // be the coach's own work or the sentence is false. Two things stood between
   // it and that, and the section was running with neither:
   //
@@ -632,7 +632,12 @@ export default function TrainerVideos() {
         {coverage && coverageLine(coverage) ? (
           <>
             <Section>
-              <SectionHead title="What Your Programmes Need"
+              {/* "Programs", not "Programmes". The tab bar under this heading
+                  says Programs, the Programs tab itself says Programs, and the
+                  User Guide quotes this heading — so on one screen, at the
+                  default text size, a coach read the British spelling in a
+                  section title and the American one in the tab it is about. */}
+              <SectionHead title="What Your Programs Need"
                 note={coverage.missing.length ? `${num(coverage.missing.length)} to film` : undefined} />
               <Text style={{ ...ty.label, color: t.ink2 }}>{coverageLine(coverage)}</Text>
 

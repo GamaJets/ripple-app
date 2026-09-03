@@ -89,6 +89,15 @@ import {
 // coachMoney touches no Supabase, no browser and no clock, and evaluates
 // nothing at module scope.
 import { currencyDecimals } from './coachMoney';
+// The third, on the same amendment and the same grounds. Which DAY an instant
+// fell on is a question this file was also answering wrongly — it was reading
+// UTC's day off a stored timestamp and writing it into the column the importer
+// reads — and gymZone.ts is the single place in TypeScript where a zone becomes
+// a day. Its own header says so, and a second copy of that arithmetic is how a
+// Sunday's takings come to sit in two places. The purity the header is about
+// holds: gymZone evaluates nothing at module scope, imports nothing, and the
+// one function used here takes its zone as an argument and asks `Intl`.
+import { gymDay } from './gymZone';
 
 // Re-exported so a caller building a GymExportInput — a screen, or a test —
 // can name every row type from here rather than importing six modules to do it.
@@ -229,6 +238,59 @@ export function minorToDecimal(cents: number | null | undefined, currency?: stri
 export function isoDatePart(ts: string | null | undefined): string {
   if (!ts) return '';
   return /^\d{4}-\d{2}-\d{2}/.test(ts) ? ts.slice(0, 10) : '';
+}
+
+/**
+ * The day a stored instant fell on AT THE GYM, for the columns the importer
+ * reads — and the reason `isoDatePart` alone was not enough.
+ *
+ * ── What was wrong ────────────────────────────────────────────────────────
+ *
+ * `isoDatePart` reads UTC's day off the timestamp, because the first ten
+ * characters of an ISO instant are UTC's date and nobody else's. Every payment
+ * this product IMPORTED survives that: src/lib/gymImports.ts stamps them at
+ * `T12:00:00Z`, so there is no zone on earth that moves them off their day.
+ * A payment recorded natively at the desk carries the real instant — the money
+ * screen writes one only when somebody picks a date — and a gym far enough from
+ * UTC then exports the day either side of its own.
+ *
+ * That is not a cosmetic column. `date` is what `previewPayments` reads and
+ * `gymImports` re-stamps at midday, so a bundle exported at the wrong day
+ * RE-IMPORTS at the wrong day: the export a gym moves on with restates its own
+ * takings into the neighbouring day, and on a month boundary into the
+ * neighbouring month, on the file it hands an accountant. `taken_at` sits
+ * beside it unchanged and is still the stored instant, so nothing is lost —
+ * but the column that is read back is the one that has to be right.
+ *
+ * ── Why a zone-less gym still gets a day ──────────────────────────────────
+ *
+ * `gymDay` obeys the house rule and returns null when the gym has not set a
+ * timezone. That is the right answer for bucketing a month's takings and the
+ * wrong one here: blanking `date` for every gym that has not filled in a
+ * setting would break the round trip outright, which is a far larger failure
+ * than the one this closes. So it falls back to UTC's day, exactly as before,
+ * and the bundle SAYS SO — `daysAt` in the manifest, the note on payments.csv
+ * and the dates convention in the README all name which calendar was used.
+ * That is the same bargain `gymWhen.ts` strikes with `atGym`, argued there.
+ */
+export function gymDatePart(ts: string | null | undefined, zone: string | null | undefined): string {
+  return gymDay(ts, zone) ?? isoDatePart(ts);
+}
+
+/**
+ * Which calendar the date-only columns in this bundle were written on.
+ *
+ * Two values and no third: the gym's own zone, or UTC because the gym has not
+ * set one. Never "the reader's" — a bundle is a file that outlives the browser
+ * that made it, and a day taken off whichever laptop pressed the button is a
+ * fact about that laptop.
+ */
+export type ExportDaysAt = 'gym' | 'utc';
+
+export function daysAt(zone: string | null | undefined): ExportDaysAt {
+  // Asked through `gymDay` itself rather than through `isZone`, so this cannot
+  // answer 'gym' for a zone the formatter would then refuse.
+  return gymDay('2026-01-01T00:00:00.000Z', zone) ? 'gym' : 'utc';
 }
 
 /** A gym's name reduced to something safe in a filename. Empty names give ''. */
@@ -817,6 +879,15 @@ export interface GymExportInput {
   /** ISO instant the export was taken. Passed in so the output is testable. */
   generatedAt: string;
   /**
+   * `tenants.timezone` — the calendar the date-only columns are written on.
+   *
+   * Null or unset is a real and common state, not an oversight, and it does not
+   * blank the columns: see `gymDatePart` for why they fall back to UTC's day
+   * and where the bundle says that it did. Passed in rather than read, like
+   * everything else here — this module touches no Supabase and no clock.
+   */
+  timezone?: string | null;
+  /**
    * The period this export covers. Null on both sides is the whole record.
    *
    * `buildGymExport` APPLIES these rather than merely reporting them, so a
@@ -1082,6 +1153,16 @@ export interface ExportManifest {
   gym: string | null;
   tenantId: string | null;
   exportedAt: string;
+  /**
+   * The gym's timezone as it stood, or null when it has not set one — and which
+   * calendar the date-only columns were therefore written on.
+   *
+   * Both, not one. `timezone: null` alone would leave a reader to guess what
+   * happened instead, and the two answers a reader could guess (UTC, or
+   * whichever laptop pressed the button) differ by a day for half the world.
+   */
+  timezone: string | null;
+  daysAt: ExportDaysAt;
   /** The period, and a sentence saying it. `bounded` is the field to read: null
    *  on both sides is the whole record, which is a different claim from a very
    *  wide window and used to be indistinguishable from one. */
@@ -1415,7 +1496,11 @@ export function buildGymExport(raw: GymExportInput): GymExportBundle {
   missing.sort((a, b) => EXPORT_PARTS.indexOf(a.part) - EXPORT_PARTS.indexOf(b.part));
 
   const complete = missing.length === 0;
-  const day = isoDatePart(input.generatedAt) || 'undated';
+  // The gym's day, not UTC's, for the same reason the `date` column is: a
+  // bundle taken at 01:00 on 1 September in Auckland is a September export and
+  // filing it as `taken-2026-08-31` is how it gets sent as the wrong one. Falls
+  // back to UTC's day where the gym has no zone — `gymDatePart` says why.
+  const day = gymDatePart(input.generatedAt, input.timezone) || 'undated';
   // The period, in the filename, before the day it was taken. A bundle sitting
   // in a Downloads folder among four others is read by its NAME long before
   // anybody opens the README, and "this is the first quarter, not the record"
@@ -1536,6 +1621,8 @@ export function buildGymExport(raw: GymExportInput): GymExportBundle {
     gym: input.gymName ?? null,
     tenantId: input.tenantId ?? null,
     exportedAt: input.generatedAt,
+    timezone: input.timezone ?? null,
+    daysAt: daysAt(input.timezone),
     window: {
       from: window.from,
       to: window.to,
@@ -1552,7 +1639,7 @@ export function buildGymExport(raw: GymExportInput): GymExportBundle {
     warning: incompleteWarning(missing),
     parts: reports,
     caveats,
-    conventions: CONVENTIONS,
+    conventions: conventionsFor(input.timezone),
   };
 
   files.push({
@@ -1584,7 +1671,7 @@ function tableFor(part: ExportPart, input: GymExportInput): Table {
     case 'plans': return plansTable(readyRows(input.plans));
     case 'members': return membersTable(input);
     case 'memberships': return membershipsTable(readyRows(input.memberships));
-    case 'payments': return paymentsTable(readyRows(input.payments));
+    case 'payments': return paymentsTable(readyRows(input.payments), input.timezone);
     case 'classes': return classesTable(readyRows(input.classes));
     case 'attendance': return attendanceTable(readyRows(input.attendance));
     case 'sessions': return sessionsTable(readyRows(input.sessions));
@@ -2051,7 +2138,8 @@ function membershipsTable(rows: Membership[]): Table {
  * a name nor an address is one the importer will rightly refuse to attribute,
  * and that refusal should be visible rather than caused by a missing column.
  */
-function paymentsTable(rows: GymPayment[]): Table {
+function paymentsTable(rows: GymPayment[], zone: string | null | undefined): Table {
+  const at = daysAt(zone);
   return {
     header: [
       'member', 'email', 'amount', 'date', 'method', 'note',
@@ -2061,7 +2149,7 @@ function paymentsTable(rows: GymPayment[]): Table {
       p.memberName,
       null,
       minorToDecimal(p.amountCents, p.currency),
-      isoDatePart(p.takenAt),
+      gymDatePart(p.takenAt, zone),
       p.method,
       p.note,
       p.id,
@@ -2070,7 +2158,10 @@ function paymentsTable(rows: GymPayment[]): Table {
       p.currency,
       p.takenAt,
     ]),
-    note: 'Re-importable by previewPayments. amount_cents and taken_at are the stored values; amount and date are the same values in the shapes the importer reads. `amount` is written to the number of decimal places `currency` has, so a file re-imported into a gym set to a DIFFERENT currency would be read at a different factor \u2014 previewPayments refuses any row whose currency column disagrees with the one it is importing in, rather than converting at par. `date` is the UTC day of `taken_at`, which is the day the gym recorded for every payment this product imported (they are stamped at midday UTC) but can be a day either side for one taken near midnight at a desk far from UTC; `taken_at` beside it is the stored instant and is the one to believe.',
+    note: 'Re-importable by previewPayments. amount_cents and taken_at are the stored values; amount and date are the same values in the shapes the importer reads. `amount` is written to the number of decimal places `currency` has, so a file re-imported into a gym set to a DIFFERENT currency would be read at a different factor \u2014 previewPayments refuses any row whose currency column disagrees with the one it is importing in, rather than converting at par. '
+      + (at === 'gym'
+        ? `\`date\` is the day \`taken_at\` fell on IN THIS GYM'S OWN TIMEZONE (${String(zone)}), which is the day the till recorded and the day this file re-imports on. \`taken_at\` beside it is the stored instant, unchanged, and the two can name different days for a payment taken near midnight \u2014 that is not a disagreement, it is the same moment on two clocks.`
+        : '`date` is the UTC day of `taken_at`, because this gym has not set a timezone and there is no other calendar to use \u2014 the reader\u2019s own laptop is not one, since this file outlives the browser that made it. That is the day the gym recorded for every payment this product imported (they are stamped at midday UTC, so no zone moves them) but can be a day either side for one taken near midnight at a desk far from UTC. Set the gym\u2019s timezone in Settings and export again to have this column written on the gym\u2019s own calendar; `taken_at` beside it is the stored instant either way and is the one to believe.'),
   };
 }
 
@@ -2159,14 +2250,33 @@ function invitesTable(rows: MemberInvite[]): Table {
 
 /* ── the prose ─────────────────────────────────────────────────────────────── */
 
-const CONVENTIONS: Record<string, string> = {
+/**
+ * The reader's key to the whole bundle — and a function rather than a constant,
+ * because one line of it is a fact about THIS gym.
+ *
+ * It was a module constant, and two of its entries had gone stale against the
+ * code that writes the files: `money` still promised "two-decimal strings" long
+ * after `minorToDecimal` became currency-aware, which is a README telling a
+ * Japanese gym its yen column has a fractional part; and `dates` said nothing
+ * at all about which calendar the date-only columns are on, which is the entire
+ * question `gymDatePart` exists to answer.
+ */
+function conventionsFor(zone: string | null | undefined): Record<string, string> {
+  const at = daysAt(zone);
+  return {
   money:
     'Held and exported as integer minor units (fils/cents) in the *_cents columns. ' +
     'The plain price/amount/paid/rate columns are the same figures written as exact ' +
-    'two-decimal strings for spreadsheet and importer use. Nothing is rounded.',
+    'decimal strings for spreadsheet and importer use, to the number of places the ' +
+    'row’s own currency has — two for GBP, none at all for JPY, three for KWD. ' +
+    'An amount whose currency this gym never recorded is left EMPTY rather than ' +
+    'written at a number of places nobody chose. Nothing is rounded.',
   dates:
     'ISO 8601 exactly as stored. Timestamps keep their time and zone; the date-only ' +
-    'columns the importer reads sit beside them, never instead of them.',
+    'columns the importer reads sit beside them, never instead of them. ' +
+    (at === 'gym'
+      ? `Those date-only columns are written on THIS GYM'S calendar (${String(zone)}), so the day beside a payment is the day the till recorded it — which is a different day from the timestamp's UTC date for anything taken near midnight.`
+      : 'This gym has not set a timezone, so those date-only columns are UTC’s day. For a gym far from UTC that is a day either side of its own for anything recorded near midnight. Set the timezone in Settings and export again.'),
   empty:
     'An empty cell means the gym never recorded a value. It is never 0, never "null", ' +
     'and never a dash. A member with no recorded weight did not weigh nothing.',
@@ -2175,7 +2285,8 @@ const CONVENTIONS: Record<string, string> = {
     'quoted, and an inner quote is doubled. Names like O’Brien, "Bob" Smith and ' +
     'Smith, Jr. survive intact.',
   encoding: 'UTF-8 with a byte-order mark, CRLF line endings.',
-};
+  };
+}
 
 function notExportedText(m: MissingPart, input: GymExportInput): string {
   return [
@@ -2284,6 +2395,12 @@ function readmeText(manifest: ExportManifest, missing: MissingPart[]): string {
   // raw instants. "Covers: the whole record, with no period applied" is a
   // claim somebody can check; a missing line is one they have to infer.
   out.push(`Covers:   ${manifest.window.covers}`);
+  // Which calendar the day-only columns are on, beside the instant rather than
+  // buried in the conventions at the bottom. A reader who takes only this block
+  // away is the reader most likely to add a column up by day.
+  out.push(manifest.daysAt === 'gym'
+    ? `Days:     the gym’s own calendar, ${manifest.timezone}`
+    : 'Days:     UTC — this gym has not set a timezone, so the date-only columns are UTC’s day and can be a day either side of the gym’s own');
   out.push('');
 
   out.push('Files');

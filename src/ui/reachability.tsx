@@ -45,10 +45,17 @@ export function useReachability(): Reach {
   return reach;
 }
 
-/** Where the probe knocks. The Supabase host's own health endpoint, which
- *  needs no key and answers on a bare GET. Empty when the app is built without
- *  a backend, and the probe then does nothing at all rather than fetching a
- *  malformed URL every thirty seconds. */
+/** Where the probe knocks. The Supabase host's own health endpoint.
+ *
+ *  It answers on a bare GET, and it answers 401 — the gateway naming itself and
+ *  saying no key was sent. That is an answer, which is the entire question this
+ *  probe asks; `knock` below sets out why it is left that way rather than
+ *  quietened with a key. It does NOT need a key to be a useful instrument, which
+ *  is not the same as needing no key to return 200, and this comment used to say
+ *  the second while meaning the first.
+ *
+ *  Empty when the app is built without a backend, and the probe then does
+ *  nothing at all rather than fetching a malformed URL every thirty seconds. */
 function probeUrl(): string | null {
   const base = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim().replace(/\/+$/, '');
   return base ? `${base}/auth/v1/health` : null;
@@ -63,6 +70,60 @@ const PROBE_TIMEOUT_MS = 6_000;
  * One knock. Reports through the store either way and swallows everything —
  * a probe that throws into a timer is an unhandled rejection and, on some
  * runtimes, a crash.
+ *
+ * ── The 401, and why it stays ─────────────────────────────────────────────
+ *
+ * This request carries no `apikey`, so the Supabase gateway answers 401 and
+ * never reaches GoTrue. That has been read as a defect — a stream of
+ * authentication failures in the project's auth log, produced by us — and it
+ * was looked at properly on 4 September 2026. It is not one, and it is being
+ * written down here so the next reader does not have to look twice.
+ *
+ * Verified against the live project rather than assumed. Unauthenticated, the
+ * endpoint answers:
+ *
+ *     401  {"message":"No API key found in request", …}
+ *     sb-error-code:   UNAUTHORIZED_MISSING_API_KEY
+ *     sb-project-ref:  <this project>
+ *
+ * Two things follow from that, and they are the whole argument.
+ *
+ * FIRST: the answer names our own project. It is the edge saying "you have
+ * reached me and you did not identify yourself" — which is a positive
+ * identification of the host, and it is precisely the fact this probe exists to
+ * establish. Nothing about it is a rejection of the app, and nothing about it
+ * would be more true at 200.
+ *
+ * SECOND, and this is the part that decides it: adding the key would change
+ * nothing about the verdict and would put a trap in the file. `noteReached()`
+ * fires on the fetch RESOLVING; the status is never read, deliberately, and a
+ * 200, a 401 and a 503 are one answer here. So the key would buy a tidier auth
+ * log and nothing else — while making the probe depend on a credential being
+ * present and current. The moment somebody later "tightens" this by checking
+ * `res.ok`, that version reports the entire backend UNREACHABLE on a rotated or
+ * mistyped key: the app draws an offline banner, `canAssertEmpty` goes false and
+ * every screen switches to its no-signal copy, on a server that is answering
+ * perfectly. This version cannot fail that way, because there is no key here to
+ * be wrong. That immunity is worth more than a clean log.
+ *
+ * The volume is also smaller than it looks. The probe runs FOREGROUND ONLY and
+ * the steady interval is 30s (`probeDelayMs(0)`), so it is 2 knocks per minute
+ * of screen time and nothing at all while the app is away — a few dozen a day
+ * for a real member, not four figures. Every ordinary request the app makes
+ * already reports for free through `observedFetch`, which is why the interval
+ * can be as slow as it is.
+ *
+ * What this probe genuinely cannot see is a captive portal that answers on the
+ * host's behalf: a hotel splash page returning its own 200 makes this fetch
+ * resolve, and the app believes it is online. That is a real hole and it is NOT
+ * closed by sending a key, because the portal never forwards the request either
+ * way. Closing it means inspecting the response and deciding that some answers
+ * do not count — and every heuristic for that (a content type, a header, a body
+ * shape) risks calling a healthy server unreachable, which is a far worse
+ * failure than the one it fixes and would happen to people with working signal.
+ * It is left open on purpose: the portal is caught by the next real request,
+ * which fails to parse and reports through `observedFetch` with better evidence
+ * than a probe has.
  *
  * The abort is deliberately NOT reported as a transport failure by
  * `isTransportFailure`, so the timeout is turned into an explicit

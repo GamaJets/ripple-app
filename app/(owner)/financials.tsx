@@ -524,7 +524,16 @@ export default function Financials() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
+        {/* Back on the LEADING edge, which is where it is on the other seven
+            screens in this portal and on every screen in the other two apps.
+            It was on the trailing edge here — the same chevron, the same
+            action, on the opposite side of the same header — which is the one
+            control a reader is never looking for and always reaching for. It
+            also put it under the thumb that scrolls, and past the title in
+            reading order, so a screen reader announced the screen and then
+            offered the way out of it. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon="back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial Checks</Text>
@@ -532,7 +541,6 @@ export default function Financials() {
                 checked against is not. This line is about the register. */}
             <Fetched at={fetchedAt} onRefresh={reread} busy={busy} />
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
         </View>
         {/* Says what this is before it says anything about the gym. The
             sentence comes from src/lib/finReview.ts rather than being typed

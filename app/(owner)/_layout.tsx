@@ -11,18 +11,39 @@ import { sp, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
 export default function OwnerLayout() {
-  // This build is one of three separate apps. If the owner portal is not
-  // the one it ships, nothing here is reachable — a deep link or a tapped
-  // notification pointing into it goes home instead of rendering a portal
-  // this user's app is not supposed to have.
-  if (!groupAllowed('owner')) return <Redirect href="/" />;
-
+  // ── Every hook first, and the gate after them ─────────────────────────────
+  //
+  // The early `return <Redirect/>` used to sit ABOVE these three, which is a
+  // rules-of-hooks violation that is currently harmless and will not stay that
+  // way. `groupAllowed('owner')` reads a build constant, so today the branch is
+  // decided at compile time and this component either always calls the hooks or
+  // never does — React never sees the count change and nothing breaks.
+  //
+  // The day that gate becomes dynamic — a per-account entitlement, a remote
+  // flag, anything read rather than baked — the count changes between renders,
+  // and React does not report that as "the gate changed". It reports it as
+  // whichever hook happens to be third: a theme that is suddenly an auth
+  // session, or a crash from deep inside useWhatsNew. That is a very hard
+  // failure to read back to this line, and it costs nothing to make impossible
+  // now.
+  //
+  // Calling the hooks in a build that does not ship the owner portal is not
+  // waste: this component is not mounted at all in those builds beyond the one
+  // render that redirects, and `useWhatsNew` is keyed on the account, so a
+  // redirecting render asks nothing it would not otherwise ask.
   const t = useTheme();
   // What this owner missed, filtered to the Studio app. A release whose only
   // changes were a client's or a coach's is skipped entirely rather than
   // opening an empty sheet at them.
   const { user } = useAuth();
   const whatsNew = useWhatsNew(user?.id ?? null);
+
+  // This build is one of three separate apps. If the owner portal is not
+  // the one it ships, nothing here is reachable — a deep link or a tapped
+  // notification pointing into it goes home instead of rendering a portal
+  // this user's app is not supposed to have.
+  if (!groupAllowed('owner')) return <Redirect href="/" />;
+
   return (
     <>
     <Tabs backBehavior="history" screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 62, paddingTop: sp.sm, paddingBottom: sp.sm }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' }, sceneStyle: { backgroundColor: t.bg } }}>

@@ -146,6 +146,14 @@ ok(donePercent(5, 4) === 100, 'a stale done count must not exceed 100%');
 ok(donePercent(1, NaN) === null, 'a non-finite total has no percentage');
 ok(donePercent(1, -4) === null, 'a negative total has no percentage — clamping it to 0% would state a fact');
 
+// The endpoints, on the same rule src/lib/sharePercent.ts states. Nought is
+// reserved for nothing ticked and a hundred for everything ticked; a list long
+// enough for one tick to round away must not print either.
+ok(donePercent(1, 201) === 1, 'one habit ticked out of 201 is not nought per cent — the day has been started');
+ok(donePercent(200, 201) === 99, 'one habit outstanding out of 201 is not a hundred per cent — a box is still open');
+ok(donePercent(0, 201) === 0, 'but nothing ticked on a long list is still a real nought');
+ok(donePercent(201, 201) === 100, 'and everything ticked on a long list is still a real hundred');
+
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'CHECKLIST FAILURES:\n' + errors.join('\n') : 'ALL CHECKLIST TESTS PASSED');
 if (errors.length) process.exit(1);
