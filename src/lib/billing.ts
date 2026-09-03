@@ -10,7 +10,7 @@ import { supabase } from './supabase';
 // coachMoney.ts because that is where it was first needed and it is tested
 // there; coachStatement.ts and coachInvoice.ts already import it from there
 // rather than keeping their own, and so does this file now.
-import { ZERO_DECIMAL } from './coachMoney';
+import { ZERO_DECIMAL, currencyDecimals } from './coachMoney';
 import { capLimit, capped } from './rowCap';
 import type { LoadStatus } from '../ui/loadStatus';
 
@@ -150,11 +150,23 @@ export const money = (cents: number | null, cur: string | null = null): string =
   // Stripe always sends a currency, so its absence means the read did not land,
   // and guessing is what this whole function exists to refuse.
   if (!c) return `${cents.toLocaleString(undefined)} (currency not read)`;
-  const zero = ZERO_DECIMAL.has(c);
-  const v = zero ? cents : cents / 100;
+  // `currencyDecimals`, not a zero/two branch. This function knew about the
+  // sixteen zero-decimal currencies and not about the five THREE-decimal ones,
+  // so for BHD, JOD, KWD, OMR and TND it divided thousandths by a hundred and
+  // printed a subscription price TEN TIMES what the gym is charged — on a live
+  // billing screen, in a form that reads as a considered figure. Half-adopting
+  // the rule is what made it invisible: the import on line 13 said this file
+  // had been through the currency sweep.
+  const places = currencyDecimals(c);
+  // Unreachable — currencyDecimals only answers null for an empty code, which
+  // the line above already returned on. Written as a branch rather than a `!`
+  // so that if it ever does answer null this prints the integer it was given
+  // instead of scaling by NaN and rendering every figure as a dash.
+  if (places == null) return `${cents.toLocaleString(undefined)} (currency not read)`;
+  const v = places === 0 ? cents : cents / 10 ** places;
   const amount = v.toLocaleString(undefined, {
-    minimumFractionDigits: !zero && v % 1 ? 2 : 0,
-    maximumFractionDigits: zero ? 0 : 2,
+    minimumFractionDigits: v % 1 ? places : 0,
+    maximumFractionDigits: places,
   });
   const sym = SYMBOLS[c];
   if (sym) return sym + amount;
