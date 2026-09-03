@@ -76,6 +76,17 @@
 //     is the only test of this setting a person can actually perform, so the
 //     screen performs it in front of them.
 //
+// ── The thing on this screen that is not a setting ─────────────────────────
+//
+// `CardPayments` at the foot. It is not a column on `tenants` and it does not
+// save with the form — it is the gym's own Stripe account, and it is here
+// because `fetchGymMerchant` and `startGymOnboarding` had exactly one caller in
+// the whole product and it was on the PHONE. A gym whose owner has not
+// installed the owner app could not connect a payment account at all, from the
+// console where every figure the money produces is read. See the doc comment on
+// the component for why the return URLs are the public site's and not this
+// page's.
+//
 // ── What it writes with ────────────────────────────────────────────────────
 //
 // The anon key and the signed-in owner's session, like every other screen here.
@@ -98,6 +109,10 @@ import {
   parseGymZone, zoneOptions, gymTimeLabel, gymDay, readerZone, zoneGapNote,
 } from '@lib/gymZone';
 import { parseSessionFee, parseGymName, sessionFeeFieldValue } from '@lib/gymSettings';
+import {
+  fetchGymMerchant, startGymOnboarding, merchantState, type GymMerchant,
+} from '@lib/gymMerchant';
+import { BRAND } from '@lib/brands';
 import { NO_CURRENCY_NOTE } from '@/lib/currency';
 import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
 
@@ -599,7 +614,180 @@ export default function Settings() {
           </p>
         </form>
       )}
+
+      {/* Outside the form on purpose. Nothing here is a field that saves with
+          the six above — it is an account at Stripe, and it is rendered even
+          when the `tenants` read failed, because whether the gym can take a
+          card is a different read with a different answer. */}
+      <CardPayments tenantId={tenantId} />
     </Shell>
+  );
+}
+
+/* ── the gym's own Stripe account ──────────────────────────────────────────── */
+
+/**
+ * Connect onboarding, from the console.
+ *
+ * ── Why this is here ──────────────────────────────────────────────────────
+ *
+ * `fetchGymMerchant` and `startGymOnboarding` (src/lib/gymMerchant.ts) had
+ * exactly one caller in the product: `app/(owner)/ops.tsx`, on the phone. So a
+ * gym whose owner does not have the owner app installed could not connect a
+ * payment account AT ALL — not slowly, not awkwardly, not at all — while the
+ * console that shows them every figure the money produces sent them nowhere.
+ * Membership sales, pass sales and renewals in the member app are all gated on
+ * `canTakeDirectCharges` against this one row.
+ *
+ * ── The same two return URLs the phone uses, and not this page ────────────
+ *
+ * Stripe's account-links documentation says `refresh_url` and `return_url` "can
+ * only use HTTPS in live mode". `window.location.origin` is `http://localhost`
+ * for everybody developing this console, so composing the URLs from it would
+ * work in test and fail on the day it went live — surfacing as the first real
+ * owner failing to onboard while holding their passport and their bank details.
+ * `BRAND.webOrigin` is https for every brand and the two pages behind it
+ * (`web/connect-return.html`, `web/connect-refresh.html`) already exist and
+ * already say the right thing.
+ *
+ * ── Coming back does not mean it worked ───────────────────────────────────
+ *
+ * Landing on `return_url` means the owner LEFT Stripe's flow, which is not the
+ * same as finishing it. The truth is what `account.updated` writes onto
+ * `gym_connect_accounts`, so this re-reads the row when the tab is looked at
+ * again rather than congratulating anybody, and there is a button to re-read on
+ * demand for the case where the webhook has not landed yet.
+ */
+function CardPayments({ tenantId }: { tenantId: string }) {
+  const [merchant, setMerchant] = useState<GymMerchant | null>(null);
+  // Three states, not two. `merchant === null` with no error is a gym that has
+  // never started onboarding — one tap from starting — and a gym whose read was
+  // refused is not, and telling the second one "you have not set this up" is
+  // how somebody sets it up twice.
+  const [state, setState] = useState<Unread>('loading');
+  const [readErr, setReadErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  /** Set only when the browser refused to open the tab. The owner then has the
+   *  link itself rather than a dead button and a shrug. */
+  const [manualUrl, setManualUrl] = useState<string | null>(null);
+
+  const read = useCallback(async () => {
+    setState('loading');
+    const r = await fetchGymMerchant(supabase as never, tenantId);
+    if (r.ok) { setMerchant(r.value); setReadErr(null); setState(null); }
+    else { setMerchant(null); setReadErr(r.reason); setState('failed'); }
+  }, [tenantId]);
+
+  useEffect(() => { void read(); }, [read]);
+
+  // Re-read when the tab is looked at again — the owner coming back from
+  // Stripe is the case this exists for, and it is the one moment the row is
+  // most likely to have just changed underneath the page.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') void read(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [read]);
+
+  const start = async () => {
+    setBusy(true); setMsg(null); setManualUrl(null);
+    const r = await startGymOnboarding(supabase as never, {
+      refreshUrl: `${BRAND.webOrigin}/connect-refresh`,
+      returnUrl: `${BRAND.webOrigin}/connect-return`,
+    });
+    setBusy(false);
+    if (!r.ok) {
+      setMsg(r.error || 'Stripe setup could not be opened. Nothing has changed.');
+      return;
+    }
+    // A new tab, so the console is still here when they come back. `window.open`
+    // after an await is what a pop-up blocker stops, and a blocked pop-up
+    // returns null silently — so the URL is offered as a link rather than the
+    // button appearing to do nothing.
+    const w = window.open(r.url, '_blank', 'noopener,noreferrer');
+    if (!w) {
+      setManualUrl(r.url);
+      setMsg('Your browser blocked the new tab. Nothing has changed — open Stripe setup with the link below.');
+    }
+  };
+
+  const s = state === null ? merchantState(merchant) : null;
+
+  return (
+    <section style={{
+      border: '1px solid var(--ring)', borderRadius: 0, background: 'var(--surface)',
+      padding: '14px 16px', marginTop: 24, maxWidth: 620,
+    }}>
+      <div className="micro">Card payments</div>
+
+      {state === 'loading' ? (
+        <p style={{ margin: '9px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
+          Reading your gym&rsquo;s payment account…
+        </p>
+      ) : state === 'failed' ? (
+        <>
+          {/* Not "you have not set this up". A refused read is unknown, and the
+              two have opposite instructions. */}
+          <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--crit)', maxWidth: '64ch' }}>
+            Your gym&rsquo;s payment account could not be read: {readErr}. That is not the same as
+            not having one — nothing here knows either way, so nothing is offered until it does.
+          </p>
+          <button type="button" onClick={() => void read()} style={{ ...primaryBtn, marginTop: 10 }}>
+            Try again
+          </button>
+        </>
+      ) : (
+        <>
+          <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--ink2)', maxWidth: '64ch' }}>
+            {s!.note}
+          </p>
+          {s!.kind === 'blocked' ? null : (
+            <button
+              type="button" onClick={() => void start()} disabled={busy}
+              style={{ ...primaryBtn, marginTop: 11 }}
+            >
+              {busy ? 'Opening Stripe…' : s!.cta}
+            </button>
+          )}
+          {s!.kind === 'pending' ? (
+            <p style={{ margin: '9px 0 0', fontSize: 12, color: 'var(--ink3)', maxWidth: '64ch' }}>
+              Coming back from Stripe does not by itself mean it finished — this row is updated by
+              Stripe&rsquo;s own <span className="mono">account.updated</span> webhook, which can
+              land a moment later. This re-reads it whenever you come back to this tab.{' '}
+              <button
+                type="button" onClick={() => void read()}
+                style={{
+                  background: 'none', border: 'none', padding: 0, font: 'inherit',
+                  color: 'var(--brand)', cursor: 'pointer', textDecoration: 'underline',
+                }}
+              >Check again</button>
+            </p>
+          ) : null}
+        </>
+      )}
+
+      {msg ? (
+        <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--crit)', maxWidth: '64ch' }}>{msg}</p>
+      ) : null}
+      {manualUrl ? (
+        <p style={{ margin: '6px 0 0', fontSize: 12.5, maxWidth: '64ch' }}>
+          <a href={manualUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--brand)' }}>
+            Open Stripe setup
+          </a>
+        </p>
+      ) : null}
+
+      <p style={{ margin: '11px 0 0', color: 'var(--ink3)', fontSize: 12, maxWidth: '64ch' }}>
+        This is the gym&rsquo;s OWN Stripe account and not the owner&rsquo;s personal coaching one.
+        Selling a gym membership on a coach account would make a different legal entity the merchant
+        of record for it — the charge succeeds, the money lands in the wrong company&rsquo;s balance
+        and the wrong company&rsquo;s name is on the member&rsquo;s card statement, with nothing in
+        the app looking wrong. Until this account can take payments, members cannot buy or renew
+        anything in the app; the front desk can still record what it takes on{' '}
+        <a href="/money" style={{ color: 'var(--brand)' }}>Plans &amp; payments</a>.
+      </p>
+    </section>
   );
 }
 

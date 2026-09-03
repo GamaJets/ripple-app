@@ -185,6 +185,7 @@
     "src/lib/gymSettings.test.ts",
     "src/lib/packDraw.test.ts",
     "src/lib/notifyInbox.test.ts",
+    "src/lib/notifyDispatch.test.ts",
     "src/lib/memberChurn.test.ts",
     "src/lib/memberRecord.test.ts",
     "src/lib/memberBuy.test.ts",
@@ -310,6 +311,8 @@
     "src/lib/exportWindow.test.ts",
     "src/lib/gymZone.ts",
     "src/lib/gymZone.test.ts",
+    "src/lib/gymToday.ts",
+    "src/lib/gymToday.test.ts",
     "src/lib/staffRoles.ts",
     "src/lib/staffRoles.test.ts",
     "src/lib/gymCosts.ts",
@@ -342,6 +345,8 @@
     "src/lib/daySession.ts",
     "src/lib/daySession.test.ts",
     "src/lib/sessionFinish.ts",
-    "src/lib/sessionFinish.test.ts"
+    "src/lib/sessionFinish.test.ts",
+    "src/lib/consoleSay.test.ts",
+    "src/lib/staleRead.test.ts"
   ]
 }

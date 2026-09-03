@@ -30,6 +30,7 @@ import { reportError } from '../../src/lib/reportError';
 import { isoDate } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { readState, hasRows, canSayEmpty, staleNote, failedNote } from '../../src/lib/staleRead';
 import {
   fetchPlans, fetchMemberships, fetchPayments, createMembership,
   setMembershipStatus, recordPayment, summarise, money,
@@ -99,7 +100,14 @@ export default function OwnerMembers() {
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [rows, setRows] = useState<Membership[] | null>(null);
   const [payments, setPayments] = useState<GymPayment[]>([]);
-  const [failed, setFailed] = useState(false);   // the register read itself failed
+  // The most recent ATTEMPT failed. Not "there is nothing" — `rows` says that,
+  // separately, and the two together are what `readState` turns into the four
+  // things that can be true here. See src/lib/staleRead.ts.
+  const [failed, setFailed] = useState(false);
+  /** Why the last attempt failed, where the read gave a sentence worth showing
+   *  — `fetchMemberships` throws a TruncatedRead whose text is written to be
+   *  read by a gym owner. */
+  const [reason, setReason] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -149,18 +157,32 @@ export default function OwnerMembers() {
       ]);
       setPlans(p); setRows(m); setPayments(pay);
       setFailed(false);
+      setReason(null);
       setFetchedAt(Date.now());
-    } catch (e) {
+    } catch (e: any) {
       reportError('members.fetch', e);
       // NOT `setRows([])`. That flipped `loaded` true with nothing behind it,
       // so a failed read rendered as "Nobody on the register yet" over KPIs of
       // 0 active, 0 frozen, 0 payments logged — a gym owner told, in the
       // screen's own confident voice, that they have no members and have taken
-      // no money. The three reads land together or not at all, so null here
-      // covers all three, and `failed` is what separates "we could not ask"
-      // from "we asked and the register is empty".
-      setRows(null);
+      // no money. The three reads land together or not at all, so `failed` is
+      // what separates "we could not ask" from "we asked and the register is
+      // empty".
+      //
+      // And NOT `setRows(null)` either, which is what it used to do. That was
+      // right while this screen read exactly once, on mount. Pull-to-refresh
+      // made a second read routine, and a second read fails for reasons that
+      // say nothing about the register — a lift, a basement, a tunnel — so an
+      // owner who pulled down out of habit watched a correct roster empty in
+      // front of them and could no longer freeze or cancel anybody. The rows
+      // that landed are kept and labelled: `stale`, in `readState` below.
+      //
+      // `plans` and `payments` were already kept on this path. Keeping the
+      // memberships makes the three consistent — before this, a failed refresh
+      // left the price book and the takings from the earlier read on screen
+      // beside a register that had been emptied.
       setFailed(true);
+      setReason(typeof e?.message === 'string' ? e.message : null);
     } finally {
       setReloading(false);
     }
@@ -172,7 +194,11 @@ export default function OwnerMembers() {
   // memberships and the thirty-day payments — so the gesture asks for all three.
   const pull = usePullToRefresh(load);
 
-  const loaded = rows !== null;
+  // What this screen holds, and whether the last attempt landed — two facts,
+  // four states, src/lib/staleRead.ts. `loaded` used to be `rows !== null` and
+  // carried both.
+  const state = readState(rows, failed);
+  const loaded = hasRows(state);
   const list = rows ?? [];
   const sum = useMemo(() => summarise(payments, list, plans), [payments, list, plans]);
 
@@ -311,18 +337,37 @@ export default function OwnerMembers() {
             roster with nothing on the page saying how old it was. */}
         <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={reloading} style={{ marginTop: 0, marginBottom: sp.md }} />
 
+        {/* One caveat for the whole screen, because staleness is a fact about
+            the read and every figure below comes off the same read. Said here
+            rather than repeated into each note: three copies of "not confirmed
+            current" is how the three come to disagree.
+
+            `warn`, not `crit`. The rows below are real and complete; what
+            failed is the attempt to confirm them, and a red mark over a correct
+            register is the boy who cried wolf on the one screen an owner uses
+            to cancel somebody's billing. */}
+        {state === 'stale' ? (
+          <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote('register', reason)}</Flag>
+        ) : null}
+
         <Hero
           label="Recurring Revenue (monthly)"
-          figure={money(sum.mrrCents, cur) ?? "—"}
-          note={failed
-            ? 'The register could not be read, so recurring revenue is not known. This is a failed read, not a gym with no members.'
+          // A figure only where there are rows behind it. `summarise` over three
+          // empty arrays returns a null MRR today, so this was already a dash
+          // under a failed read — by arithmetic rather than on purpose, which is
+          // one refactor of `summarise` away from printing a confident 0.
+          figure={hasRows(state) ? (money(sum.mrrCents, cur) ?? '—') : '—'}
+          note={state === 'failed'
+            ? failedNote('register', reason)
+            : state === 'loading'
+            ? 'Reading your register…'
             : sum.mrrCents != null && !cur
             // The figure is known and the money it is in is not. Printing it
             // bare would be read in whatever currency the owner is thinking in,
             // which is the same wrong number with fewer clues.
             ? 'This gym has not set its currency, so a recurring total cannot be written down. An owner sets it in Ops.'
             : sum.mrrCents == null
-            ? loaded && list.length === 0
+            ? canSayEmpty(state) && list.length === 0
               ? 'No memberships on the register yet.'
               : 'No active membership sits on a priced plan, so this is not known — which is not the same as nothing.'
             : `${sum.activeMembers} active${frozen ? ` · ${frozen} frozen` : ''}`}
@@ -357,11 +402,14 @@ export default function OwnerMembers() {
             />
           ) : null}
 
-          {failed ? (
+          {/* `state === 'failed'`, not `failed`. This branch is for a screen
+              holding nothing; a failed refresh over rows that did land is
+              'stale', keeps the list below, and is said once at the top.
+              The old wording — "this screen simply has nothing to show you" —
+              was true of both and is only true of this one. */}
+          {state === 'failed' ? (
             <Flag tone={t.crit}>
-              The register could not be read. Nobody has been removed and no membership has
-              lapsed — this screen simply has nothing to show you. Check your connection and try
-              again.
+              {failedNote('register', reason)} Check your connection and try again.
             </Flag>
           ) : !loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Loading…</Text>
@@ -502,7 +550,11 @@ export default function OwnerMembers() {
             )}
 
             <Text style={{ ...lab, marginTop: sp.lg }}>Plan</Text>
-            {failed && plans.length === 0 ? (
+            {/* Gated on 'failed' rather than on `failed`: a stale screen has
+                the price book from the earlier read and can offer it. An owner
+                who pulled to refresh in a lift should not then be told their
+                plans are unreadable while they are listed two lines down. */}
+            {state === 'failed' && plans.length === 0 ? (
               // The price book rides on the same read as the register, so when
               // that read failed there is no basis for "no plans set up yet" —
               // an owner who has plans would be told they have none and open

@@ -1641,8 +1641,14 @@ export default function TrainerClients() {
         </View>
 
         {/* Clients who found this coach in the public directory and asked to
-            be coached. Renders nothing at all when there are none. */}
-        <CoachRequests />
+            be coached. Renders nothing at all when there are none.
+
+            `readNonce` is threaded in so a pull down this screen re-reads the
+            requests too. The component owns its own state, so without it the
+            gesture refreshed everything around a pending request and not the
+            request itself — and it re-reads on focus of its own accord, which
+            is what a push arriving while the app is open needs. */}
+        <CoachRequests reload={readNonce} />
         <UnmarkedSessions n={unmarked} failed={sessionsUnread} hasGym={!!tenant?.id} />
 
         {/* What the band headings below actually mean. "At risk" is measured

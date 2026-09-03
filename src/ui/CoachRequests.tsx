@@ -6,6 +6,7 @@
 // accepted; declining just marks it declined. Both are real writes — the
 // client's "Request pending" state on their side reflects this row.
 import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { View, Text, Pressable, Alert } from 'react-native';
 import { Icon } from './Icon';
 import { useTheme } from './components';
@@ -39,7 +40,7 @@ import { sendPushChecked } from './pushNotifications';
 
 interface Req { id: string; clientId: string; name: string; mode: CoachedMode; at: string }
 
-export function CoachRequests() {
+export function CoachRequests({ reload }: { reload?: number } = {}) {
   const t = useTheme();
   const [reqs, setReqs] = useState<Req[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -92,6 +93,28 @@ export function CoachRequests() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── the read that only ever happened once ─────────────────────────────────
+  //
+  // `useEffect(…, [load])` runs on mount and never again, and this component
+  // owns its own state so the dashboard's pull-to-refresh does not reach it.
+  //
+  // That is the whole of a reported defect. A coach with the app already open
+  // gets the push, taps it, and is routed to the dashboard — which is ALREADY
+  // MOUNTED, so nothing re-reads. They land on a screen still showing what it
+  // fetched before the request existed: no request, no accept, no decline, and
+  // no reason given. The only way to see it was to kill the app and relaunch.
+  //
+  // Re-read on focus, which covers the push arriving while the app is open, a
+  // coach coming back from another tab, and returning from the background.
+  // `load` already guards its own failure and sets `unread`, so a refused
+  // re-read says so rather than emptying the list.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // And a pull on the screen this sits in. `reload` is a nonce the dashboard
+  // bumps; the effect ignores its value and re-reads on any change, which is
+  // the same shape every other provider on that screen uses.
+  useEffect(() => { if (reload !== undefined) load(); }, [reload, load]);
 
   const respond = useCallback(async (r: Req, accept: boolean) => {
     setBusy(r.id);

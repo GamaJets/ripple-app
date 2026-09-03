@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
+import { Banner as SharedBanner, Announce } from '@/components/Banner';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 // `money()` is reached through lib/currency's `amount()` here: every figure on
 // this page is priced from the gym's session fee and has no currency of its own,
@@ -47,7 +48,9 @@ import {
   type DemandBlock, type Shift, type ShiftRole,
 } from '@lib/gymRota';
 import { money } from '@lib/gymRecord';
+import { readAll } from '@lib/rowCap';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+import { wrote, refused, sayText, sayTone, type Said } from '@lib/consoleSay';
 import { fetchClientActivity, DRIFT_LABEL, DEFAULT_WINDOWS, type Drift } from '@lib/clientDrift';
 import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
 import {
@@ -755,7 +758,7 @@ function Roles({ tenantId, actorId, clients, zone, onChanged }: {
   const [people, setPeople] = useState<Person[] | null>(null);
   const [grants, setGrants] = useState<StaffGrant[] | null>(null);
   const [readErr, setReadErr] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
   const [busy, setBusy] = useState(false);
 
   // The add form. `who` is either an id picked from the members below or one
@@ -805,20 +808,22 @@ function Roles({ tenantId, actorId, clients, zone, onChanged }: {
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (addBlocker || !role) { setMsg(addBlocker); return; }
+    // `!role` is here for the narrowing below; grantBlocker already returns a
+    // sentence for it, so the fallback is only ever reached if that changes.
+    if (addBlocker || !role) { setMsg(refused(addBlocker, 'Say what they are being taken on as.')); return; }
     setBusy(true); setMsg(null);
     try {
       const out = await grantStaffRole(supabase, who.trim(), role, note.trim() || null);
-      setMsg(
+      setMsg(wrote(
         `On the staff as ${ROLE_LABEL[out.role].toLowerCase()}.`
         + (out.rosterRow ? ' A roster row was created, so they appear in the rota and in payroll.' : '')
         + ' Recorded against your name.',
-      );
+      ));
       setWho(''); setRole(''); setNote('');
       await load();
       onChanged();
     } catch (x: any) {
-      setMsg(x?.message ?? 'That grant was refused, so nothing changed.');
+      setMsg(refused(x?.message, 'That grant was refused, so nothing changed.'));
     } finally { setBusy(false); }
   };
 
@@ -826,16 +831,16 @@ function Roles({ tenantId, actorId, clients, zone, onChanged }: {
     const stop = revokeBlocker({
       subjectId: p.id, subjectRole: p.role, actorId, clientsOnBook: bookOf(p.id),
     });
-    if (stop) { setMsg(stop); return; }
+    if (stop) { setMsg(refused(stop)); return; }
     if (!confirm(`Take ${p.name ?? 'this person'} off the staff?\n\n${revokeConsequence(p.role)}`)) return;
     setBusy(true); setMsg(null);
     try {
       await revokeStaffRole(supabase, p.id, null);
-      setMsg('Off the staff, and the record says when and by whom.');
+      setMsg(wrote('Off the staff, and the record says when and by whom.'));
       await load();
       onChanged();
     } catch (x: any) {
-      setMsg(x?.message ?? 'That removal was refused, so nothing changed.');
+      setMsg(refused(x?.message, 'That removal was refused, so nothing changed.'));
     } finally { setBusy(false); }
   };
 
@@ -953,6 +958,10 @@ function Roles({ tenantId, actorId, clients, zone, onChanged }: {
         </div>
       </div>
 
+      {/* Mounted for as long as this form is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text. See studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
       <form onSubmit={add} style={{ display: 'grid', gap: 9, padding: 14, borderTop: '1px solid var(--ring)' }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <select
@@ -997,7 +1006,7 @@ function Roles({ tenantId, actorId, clients, zone, onChanged }: {
             records. */}
         {role ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)', maxWidth: '78ch' }}>{STAFF_ROLE_NOTE[role]}</p> : null}
         {addBlocker && who ? <p style={{ margin: 0, fontSize: 12.5, color: '#f0c04e' }}>{addBlocker}</p> : null}
-        {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+        {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
         <p style={{ margin: 0, fontSize: 12, color: 'var(--ink3)', maxWidth: '78ch' }}>
           This console can only list accounts already in this gym — the database shows an owner
           their own gym&rsquo;s profiles and no others, which is the right rule and is why the second
@@ -1052,7 +1061,7 @@ function Rota({ tenantId, trainers, ccy, zone }: {
   const [week, setWeek] = useState(() => weekStartOf());
   const [shifts, setShifts] = useState<Shift[] | null>(null);
   const [readErr, setReadErr] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
   const [editing, setEditing] = useState<Shift | null>(null);
 
   // The add form.
@@ -1112,22 +1121,22 @@ function Rota({ tenantId, trainers, ccy, zone }: {
       trainerId: who, startsAt: d?.startsAt ?? null, endsAt: d?.endsAt ?? null,
       rateCents: cents, currency: cents == null ? null : ccy,
     });
-    if (stop || !d) { setMsg(stop ?? 'That shift could not be built from those hours.'); return; }
+    if (stop || !d) { setMsg(refused(stop, 'That shift could not be built from those hours.')); return; }
     setBusy(true); setMsg(null);
     try {
       await addShift(supabase, tenantId, { ...d, rateCents: cents, currency: cents == null ? null : ccy });
-      setMsg('On the rota.');
+      setMsg(wrote('On the rota.'));
       setRate('');
       await load();
     } catch (x: any) {
-      setMsg(x?.message ?? 'That shift was not added, so nobody is rostered for it.');
+      setMsg(refused(x?.message, 'That shift was not added, so nobody is rostered for it.'));
     } finally { setBusy(false); }
   };
 
   const act = async (job: Promise<void>, done: string) => {
     setMsg(null);
-    try { await job; setMsg(done); await load(); }
-    catch (x: any) { setMsg(x?.message ?? 'That change was refused, so the rota is unchanged.'); }
+    try { await job; setMsg(wrote(done)); await load(); }
+    catch (x: any) { setMsg(refused(x?.message, 'That change was refused, so the rota is unchanged.')); }
   };
 
   const options = trainers.state === 'ready' ? trainers.rows : null;
@@ -1199,6 +1208,10 @@ function Rota({ tenantId, trainers, ccy, zone }: {
       title="The rota"
       sub="Who is on the floor this week, and what it costs. A pulled shift is kept rather than deleted: an hour somebody dropped out of and an hour nobody was booked for make the same hole in the cover and are different problems."
     >
+      {/* Mounted for as long as this form is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text. See studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '12px 14px', flexWrap: 'wrap' }}>
         <button style={ghostBtn} onClick={() => setWeek((w) => shiftWeek(w, -1))}>← Previous</button>
         <button style={ghostBtn} onClick={() => setWeek(weekStartOf())} disabled={week === weekStartOf()}>This week</button>
@@ -1293,7 +1306,7 @@ function Rota({ tenantId, trainers, ccy, zone }: {
         </p>
       ) : null}
       {blocker ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p> : null}
-      {msg ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {msg ? <p style={{ margin: 0, padding: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
 
       {/* Whose clock the column below is in. Stated always, in both states,
           because the failure this fixes is invisible: a shift at the wrong hour
@@ -1382,7 +1395,7 @@ function EditShift({ shift, ccy, zone, onClose }: {
   const [note, setNote] = useState(shift.note ?? '');
   const [rate, setRate] = useState(shift.rateCents == null ? '' : String(shift.rateCents / 100));
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
 
   // The shift's OWN currency wins over the gym's: a rate filed last March in
   // one currency must not be silently re-denominated because the gym has since
@@ -1399,7 +1412,7 @@ function EditShift({ shift, ccy, zone, onClose }: {
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (blocker) { setMsg(blocker); return; }
+    if (blocker) { setMsg(refused(blocker)); return; }
     setBusy(true); setMsg(null);
     try {
       await updateShift(supabase, shift.id, {
@@ -1412,7 +1425,7 @@ function EditShift({ shift, ccy, zone, onClose }: {
       });
       onClose(true);
     } catch (x: any) {
-      setMsg(x?.message ?? 'That change was refused, so the shift is unchanged.');
+      setMsg(refused(x?.message, 'That change was refused, so the shift is unchanged.'));
     } finally { setBusy(false); }
   };
 
@@ -1432,6 +1445,10 @@ function EditShift({ shift, ccy, zone, onClose }: {
               : <>hours are this device&rsquo;s, not the gym&rsquo;s — the gym has not set a timezone</>}
           </p>
         </div>
+        {/* Mounted for as long as this form is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text. See studio-web/components/Banner.tsx. */}
+        <Announce say={sayText(msg)} tone={sayTone(msg)} />
         <form onSubmit={save} style={{ display: 'grid', gap: 9, padding: 14 }}>
           <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} style={field} aria-label="Starts" />
           <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} style={field} aria-label="Ends" />
@@ -1450,7 +1467,7 @@ function EditShift({ shift, ccy, zone, onClose }: {
             <button type="submit" disabled={busy || !!blocker} style={btn}>{busy ? 'Saving…' : 'Save'}</button>
             <button type="button" onClick={() => onClose(false)} style={ghostBtn}>Cancel</button>
           </div>
-          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
         </form>
       </div>
     </div>
@@ -1597,18 +1614,44 @@ async function fetchGrants(tenantId: string): Promise<StaffGrant[]> {
     .filter((g): g is StaffGrant => g !== null);
 }
 
-/** Every client in the gym and whose book they are on. `trainer_id` null is a
- *  real answer — a member nobody coaches — and is counted as such. */
+/**
+ * Every client in the gym and whose book they are on. `trainer_id` null is a
+ * real answer — a member nobody coaches — and is counted as such.
+ *
+ * ── Why this is paged rather than capped ───────────────────────────────────
+ *
+ * It was neither, which is the state src/lib/rowCap.ts was written about: an
+ * unbounded `.select()` stops at a thousand rows, says nothing, and hands back
+ * a prefix that looks exactly like a complete answer.
+ *
+ * Two things downstream make that worse than a short list. `fetchActivity`
+ * builds its id set from these rows, so a cut does not shorten one column — it
+ * removes people from the gym's book entirely, and every figure derived from
+ * them is then complete and confident about a roster missing its tail. And
+ * `revokeBlocker` reads the count per trainer to decide whether somebody can be
+ * taken off the staff: its own comment says a null count is "we could not count
+ * them", which is not zero — an UNDERSTATED count is worse still, because it is
+ * a number, and it waves through the removal of a coach whose clients are all
+ * past row 1000.
+ *
+ * `readAll` rather than `assertWhole` for the reason the module gives: the
+ * screen genuinely needs every row, refusing the whole staff page over a large
+ * gym would take a working screen away, and the set is finite by construction.
+ * Ordered by the primary key because `readAll` requires an order that cannot
+ * tie, and this table has no other column that qualifies.
+ */
 async function fetchClients(tenantId: string): Promise<StaffClient[]> {
-  const { data, error } = await supabase
-    .from('clients').select('id, trainer_id').eq('tenant_id', tenantId);
-  if (error) throw error;
-
-  const rows = data ?? [];
+  const rows = await readAll<{ id: string; trainer_id: string | null }>(
+    (from, to) => supabase
+      .from('clients').select('id, trainer_id').eq('tenant_id', tenantId)
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's clients",
+  );
   if (!rows.length) return [];
 
-  const meta = await profilesFor(rows.map((r: any) => r.id));
-  return rows.map((r: any) => ({
+  const meta = await profilesFor(rows.map((r) => r.id));
+  return rows.map((r) => ({
     clientId: r.id,
     name: meta.get(r.id)?.name ?? null,
     trainerId: r.trainer_id ?? null,
@@ -1768,14 +1811,13 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
   );
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page's copy rendered into a plain <div>, so every "the write was refused and
+// nothing was saved" it said was a silence for a screen reader. The shared one
+// carries role="alert"/aria-live; `live={false}` is for the ones an Announce
+// region on the same screen is already reading out.
+function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'crit'; live?: boolean }) {
+  return <SharedBanner tone={tone} live={live}>{children}</SharedBanner>;
 }
 
 function Loading() {

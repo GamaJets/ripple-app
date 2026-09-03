@@ -25,6 +25,7 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
+import { Banner as SharedBanner, Announce } from '@/components/Banner';
 import {
   fetchMemberships, fetchPayments, money,
   type Membership, type GymPayment,
@@ -41,6 +42,7 @@ import {
   type GymMemberRecord, type MemberRecordPatch,
 } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+import { wrote, refused, sayText, sayTone, type Said } from '@lib/consoleSay';
 import { isoDate } from '@lib/format';
 import {
   fetchMemberNotes, addMemberNote, noteBlocker, withLegacy, noteAttribution, MAX_NOTE,
@@ -885,7 +887,7 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
   const [medical, setMedical] = useState(rec?.medicalNote ?? '');
   const [tags, setTags] = useState(tagsText(rec?.tags));
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
 
   // Re-seeded when the selected member changes. Without this, opening a second
   // member shows the first one's phone number in the box — and saving it files
@@ -910,16 +912,16 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
     // An all-blank form on a person with no record would write a row that says
     // nothing and then read back as "a record exists".
     if (!rec && isEmptyPatch(patch)) {
-      setMsg('Nothing to save yet — fill something in first.');
+      setMsg(refused('Nothing to save yet — fill something in first.'));
       return;
     }
     setBusy(true); setMsg(null);
     try {
       await saveMemberRecord(supabase, tenantId, memberId, patch, me.id ?? null);
-      setMsg('Saved.');
+      setMsg(wrote('Saved.'));
       onSaved();
     } catch (x: any) {
-      setMsg(x?.message ?? 'That was not saved, so the record is unchanged.');
+      setMsg(refused(x?.message, 'That was not saved, so the record is unchanged.'));
     } finally { setBusy(false); }
   };
 
@@ -934,6 +936,12 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
           theirs, is written by them, and nothing here touches it.
         </p>
       </div>
+
+      {/* Mounted for as long as this form is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text — which is the case screen readers handle
+          inconsistently. See studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
 
       {!read ? (
         <p style={{ margin: 0, padding: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
@@ -971,7 +979,7 @@ function GymRecordEditor({ memberId, name, rec, read, tenantId, me, onSaved }: {
               <span style={{ fontSize: 12, color: 'var(--ink3)' }}>nothing recorded yet</span>
             )}
           </div>
-          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+          {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
         </form>
       )}
     </div>
@@ -1013,7 +1021,7 @@ function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me }: {
   const [failed, setFailed] = useState<string | null>(null);
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
 
   const load = useCallback(async () => {
     setFailed(null);
@@ -1033,16 +1041,16 @@ function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me }: {
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (blocker) { setMsg(blocker); return; }
+    if (blocker) { setMsg(refused(blocker)); return; }
     setBusy(true); setMsg(null);
     try {
       await addMemberNote(supabase, tenantId, memberId, body, me.id ?? null);
       setBody('');
-      setMsg('Added. It carries your name and the time, and nothing can type over it.');
+      setMsg(wrote('Added. It carries your name and the time, and nothing can type over it.'));
       await load();
     } catch (x: any) {
       // The words stay in the box on a failure: they were written once.
-      setMsg(x?.message ?? 'That note was not saved, so it is not on the record.');
+      setMsg(refused(x?.message, 'That note was not saved, so it is not on the record.'));
     } finally { setBusy(false); }
   };
 
@@ -1059,6 +1067,12 @@ function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me }: {
         </p>
       </div>
 
+      {/* Mounted for as long as this form is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text — which is the case screen readers handle
+          inconsistently. See studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
+
       <form onSubmit={add} style={{ display: 'grid', gap: 8, padding: '0 14px 14px' }}>
         <textarea
           value={body} onChange={(e) => setBody(e.target.value)}
@@ -1071,7 +1085,7 @@ function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me }: {
           <button type="submit" disabled={busy || !!blocker} style={{ ...btn, opacity: blocker ? 0.5 : 1 }}>
             {busy ? 'Adding…' : 'Add note'}
           </button>
-          {msg ? <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</span> : null}
+          {msg ? <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</span> : null}
         </div>
       </form>
 
@@ -1263,7 +1277,7 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
   const [segId, setSegId] = useState<SegmentId>('unseen');
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
   const [open, setOpen] = useState(false);
 
   const segments: Segment[] | null = useMemo(() => {
@@ -1283,7 +1297,7 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
   const send = async () => {
     if (!seg || !me.id) return;
     const stop = reachBlocker(body, seg.members.length);
-    if (stop) { setMsg(stop); return; }
+    if (stop) { setMsg(refused(stop)); return; }
     setBusy(true); setMsg(null);
     try {
       const memberIds = seg.members.map((m) => m.memberId);
@@ -1312,14 +1326,18 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
         delivered: res.delivered,
         body,
       });
-      setMsg([deliveryNote(res, seg.members.length), loggingNote(logErr)]
-        .filter((x): x is string => !!x).join(' '));
+      // `wrote`, not `refused`, even when `logErr` is set: the post HAPPENED.
+      // A logging gap is a gap in the record of it, said in the same breath —
+      // announcing it assertively would tell the sender their message did not
+      // go out, which is the one thing that is not true here.
+      setMsg(wrote([deliveryNote(res, seg.members.length), loggingNote(logErr)]
+        .filter((x): x is string => !!x).join(' ')));
       // Cleared only on a success. The words stay in the box after a refusal:
       // they were written once, and a cleared field after a failed send is how
       // a notice is lost between the owner and the server.
       setBody('');
     } catch (e: any) {
-      setMsg(e?.message ?? 'Nothing was posted, so nobody has seen it. Your words are still here.');
+      setMsg(refused(e?.message, 'Nothing was posted, so nobody has seen it. Your words are still here.'));
     } finally { setBusy(false); }
   };
 
@@ -1369,6 +1387,11 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
       title="Say something to a group"
       sub="Posts to the gym’s notice board and drops it in the chosen members’ inboxes. No push and no scheduling — the console can send neither, and says so rather than implying otherwise."
     >
+      {/* Mounted for as long as this form is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text — which is the case screen readers handle
+          inconsistently. See studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
       {!open ? (
         <p style={{ margin: 0, padding: '16px 14px', fontSize: 13, color: 'var(--ink3)' }}>
           <button onClick={() => setOpen(true)} style={linkBtn}>Write to a group</button>
@@ -1451,7 +1474,7 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
                 the words, and the members it was addressed to — because a message in dozens of
                 inboxes that nothing can trace is the same gap pointing the other way.
               </p>
-              {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)' }}>{msg}</p> : null}
+              {msg ? <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)' }}>{msg.text}</p> : null}
             </>
           ) : null}
         </div>
@@ -1511,14 +1534,13 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
   );
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page's copy rendered into a plain <div>, so every "the write was refused and
+// nothing was saved" it said was a silence for a screen reader. The shared one
+// carries role="alert"/aria-live; `live={false}` is for the ones an Announce
+// region on the same screen is already reading out.
+function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'crit'; live?: boolean }) {
+  return <SharedBanner tone={tone} live={live}>{children}</SharedBanner>;
 }
 
 function Loading() {

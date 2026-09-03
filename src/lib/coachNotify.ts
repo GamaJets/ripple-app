@@ -139,6 +139,24 @@ export interface CoachChannelDef {
    * on the coach's own device out of reads it already makes. The preference
    * still lives in the same server table, so it follows the coach between
    * phones like the other five — only the place it is APPLIED differs.
+   *
+   * ── Where that stopped being the whole truth ─────────────────────────────
+   *
+   * "No other person's action to hang a trigger on" is still true and it is no
+   * longer the same thing as "no server can send it". Parts 202, 471 and 613
+   * added NIGHTLY PASSES — a client past their usual gap, a training block that
+   * ran out, an invoice crossing an ageing band — and a scheduled pass needs
+   * nobody's action at all, which is exactly why those three were written as
+   * cron rather than as triggers. Since part 900 the server dispatches them,
+   * on this channel.
+   *
+   * So `book` is now the one channel applied in BOTH places: the handset's
+   * `bookAlert` below, and supabase/functions/send-push for the three the
+   * server sends. `local` stays true because it means what it has always meant
+   * — this handset schedules something on this channel — and `CHANNEL_LOCAL_NOTE`
+   * stays accurate about that half. What would be wrong is reading it as "and
+   * nothing else does": the switch governs both halves, one answer, stored
+   * once, and a coach muting it silences the banner and the push together.
    */
   local: boolean;
   /**
@@ -174,12 +192,43 @@ export const COACH_CHANNELS: readonly CoachChannelDef[] = [
     note: 'A package bought, a subscription starting or ending, and a subscription payment failing.',
   },
   {
-    key: 'clients', title: 'Joining And Leaving', quietCost: null, local: false,
-    note: 'Somebody asking to be coached by you, and somebody ending their coaching.',
+    // ── the label that named two of six ─────────────────────────────────
+    //
+    // This read 'Joining And Leaving' / 'Somebody asking to be coached by you,
+    // and somebody ending their coaching.' — which was exactly right for the
+    // two things part 158 and part 159 send to '/(trainer)/dashboard', and
+    // wrong about everything else that had since been pointed at this switch.
+    //
+    // By the time the server-side dispatch was written (part 900) the key
+    // `clients` governed six kinds: a coaching request and a coaching ending
+    // (parts 158, 159), an enquiry from somebody with no account yet (part
+    // 470), a goal a client reached (part 202), a progress photo a client sent
+    // (part 614), and the personal best src/lib/prNotifyStore.ts sends on it.
+    // A coach muting Joining And Leaving lost four things the label did not
+    // mention, and the last of those is the single most encouraging thing in
+    // the product.
+    //
+    // The KEY is what is right here and the label is what was narrow. The
+    // grouping principle is "what would the coach do about it", and the answer
+    // for all six is the same: think about that person. A message is a
+    // conversation, a booking is a diary entry, a payment is the books — and
+    // this is the switch for a client doing something worth knowing about.
+    // Splitting the four off into a seventh switch would have been a seventh
+    // control on a screen whose whole problem was that one control was too
+    // blunt, and it would have left `clients` naming two rare events.
+    key: 'clients', title: 'Your Clients', quietCost: null, local: false,
+    note: 'Somebody asking to be coached by you, somebody ending their coaching, and what a client does in between — a goal reached, a personal best, a progress photo sent.',
   },
   {
+    // 'a credential running out' was added to the note when part 900 gave this
+    // switch a sender. Part 202 writes it to '/(trainer)/credentials', which is
+    // the same screen the review notification opens, and a route cannot tell
+    // the two apart. It does not need to: an insurance certificate with an
+    // expiry date on it is paperwork by any reading of this label, and the
+    // consequence of muting it — working uninsured without being reminded — is
+    // named rather than left to be discovered.
     key: 'admin', title: 'Paperwork', quietCost: null, local: false,
-    note: 'An intake coming back, a document accepted, a release signed, and a review left.',
+    note: 'An intake coming back, a document accepted, a release signed, a review left, and one of your own credentials running out.',
   },
   {
     // The second channel to carry a quiet cost, and the reason `quietCost`

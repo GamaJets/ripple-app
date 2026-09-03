@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
+import { Banner as SharedBanner, Announce } from '@/components/Banner';
 import {
   fetchVisits, checkIn, checkOut, summariseVisits, dwellMinutes,
   sweepStaleVisits, isAccountedFor, currentlyInside, duplicateOpenVisits,
@@ -22,6 +23,7 @@ import {
   type Visit, type Admission, type PendingDoorWrite,
 } from '@lib/gymVisits';
 import { searchRows } from '@lib/consoleSearch';
+import { wrote, refused as sayRefused, sayText, sayTone, type Said } from '@lib/consoleSay';
 import {
   fetchPasses, fetchPassTypes, issuePass, redeemPass,
   summarisePasses, passStatus, remainingUses, passBlocker, spendable,
@@ -606,7 +608,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
    */
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
   /**
    * The refusal the desk is looking at, and the sentence that would let this
    * person in anyway.
@@ -713,11 +715,11 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
         overrideReason,
       });
       setMemberId(''); setReason(''); setRefused(null); setWhy('');
-      setMsg(
+      setMsg(wrote(
         !memberId ? 'Anonymous visit recorded.'
           : overrideReason ? 'Recorded, with your reason on the visit.'
           : 'Checked in.',
-      );
+      ));
       onChange();
       // A desk that has just written a row is a desk that can reach the server,
       // which is the cheapest signal there is that the queue is worth trying.
@@ -746,10 +748,12 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
           visitId: null,
         });
         setMemberId(''); setReason(''); setRefused(null); setWhy('');
-        setMsg('The gym could not be reached, so that arrival is held on this machine and goes up on its own when the connection is back. It keeps the minute they came in.');
+        // Assertive: the arrival is kept, but the GYM does not have it, and the
+        // desk has to know that before it walks away from this browser.
+        setMsg(sayRefused('The gym could not be reached, so that arrival is held on this machine and goes up on its own when the connection is back. It keeps the minute they came in.'));
       } else {
         setRefused(null);
-        setMsg(e?.message ?? 'Could not record that check-in.');
+        setMsg(sayRefused(e?.message, 'Could not record that check-in.'));
       }
     } finally { setBusy(false); }
   };
@@ -761,6 +765,12 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
 
   return (
     <Section title="Check someone in" sub="Leave the member blank to record a visit you cannot attribute — it still counts toward the day. Say what the visit was for and it reconciles against the class or the pass instead of counting twice.">
+      {/* Mounted for as long as this section is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text. This is the desk: whoever is on it is looking at
+          the person in front of them, not at the browser. See
+          studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
       <form onSubmit={go} style={formRow}>
         <MemberPicker
           members={members} value={memberId} onPick={pickMember}
@@ -877,7 +887,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
                         overrideReason: `recorded at the desk while offline at ${new Date(p.atIso).toLocaleTimeString()}`,
                       })
                         .then(() => { queue.settled(p.id); onChange(); })
-                        .catch((e: any) => setMsg(e?.message ?? 'That arrival was still not recorded.'));
+                        .catch((e: any) => setMsg(sayRefused(e?.message, 'That arrival was still not recorded.')));
                     }}
                   >
                     Record it anyway
@@ -973,7 +983,7 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
             : 'The member list did not come back, so only an anonymous visit can be recorded. The banner above says why.'}
         </p>
       ) : null}
-      {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
     </Section>
   );
 }
@@ -1145,7 +1155,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
   queue: DoorQueue;
   onChange: () => void;
 }) {
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
   const [sweeping, setSweeping] = useState(false);
 
   const close = async (v: Visit) => {
@@ -1173,14 +1183,14 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
           atIso: at,
           visitId: v.id,
         });
-        setMsg('The gym could not be reached, so that check-out is held on this machine with the minute they left on it. It goes up on its own when the connection is back — until then this list is still counting them.');
+        setMsg(sayRefused('The gym could not be reached, so that check-out is held on this machine with the minute they left on it. It goes up on its own when the connection is back — until then this list is still counting them.'));
         return;
       }
       // checkOut throws on a refused update, and with no catch that rejection
       // went nowhere: the row stayed exactly as it was and the screen said
       // nothing, so the desk clicked again and read the gym as slow rather
       // than as refusing. The reason is what tells staff to retry or escalate.
-      setMsg(e?.message ?? 'Could not check that visit out.');
+      setMsg(sayRefused(e?.message, 'Could not check that visit out.'));
     }
   };
 
@@ -1245,7 +1255,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
     });
     const w = window.open('', '_blank');
     if (!w) {
-      setMsg('This browser blocked the print window. Allow pop-ups for the console, or take a photograph of the list below — do not leave the building without it.');
+      setMsg(sayRefused('This browser blocked the print window. Allow pop-ups for the console, or take a photograph of the list below — do not leave the building without it.'));
       return;
     }
     w.document.write(rollCallHtml(doc));
@@ -1281,17 +1291,23 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
       // Zero is a real answer and gets its own sentence: pressing the button
       // twice must not report the same rows twice, and it does not — the sweep
       // skips what it has already marked.
-      setMsg(n === 0
+      setMsg(wrote(n === 0
         ? 'Nothing left to sweep — every visit still open has already been accounted for.'
-        : `${n} ${n === 1 ? 'visit' : 'visits'} marked as left without scanning out. They stay open on purpose: no exit time is invented, so none of them enters the average stay.`);
+        : `${n} ${n === 1 ? 'visit' : 'visits'} marked as left without scanning out. They stay open on purpose: no exit time is invented, so none of them enters the average stay.`));
       onChange();
     } catch (e: any) {
-      setMsg(e?.message ?? 'Those visits could not be swept, so nothing has changed.');
+      setMsg(sayRefused(e?.message, 'Those visits could not be swept, so nothing has changed.'));
     } finally { setSweeping(false); }
   };
 
   return (
     <Section title="Inside now" sub="Anyone who came in today and has not been checked out. A visit left open overnight is marked with a note and never a guessed exit time — an invented exit would put a twenty-hour stay into the average.">
+      {/* Mounted for as long as this section is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text. This is the desk: whoever is on it is looking at
+          the person in front of them, not at the browser. See
+          studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
       {/* Above the list, not under it: during an alarm nobody scrolls. */}
       <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '80ch' }}>
         <button type="button" style={linkBtn} disabled={!!unread} onClick={print}>
@@ -1301,7 +1317,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
           ? ' — the door log has not been read, so there is no list to print. This screen will not print a page that says the building is empty.'
           : ' — the list below, with each person’s next of kin and what the floor was told, on paper you can take outside. It is a snapshot of the minute you print it and it says so.'}
       </p>
-      {msg ? <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {msg ? <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
       {duplicates > 0 ? (
         <p style={{ margin: '14px', fontSize: 12.5, color: '#f0c04e', maxWidth: '80ch' }}>
           {duplicates === 1 ? 'One member has' : `${duplicates} members have`} more than one check-in
@@ -1538,7 +1554,7 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
   const [holderName, setHolderName] = useState('');
   const [hostId, setHostId] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Said>(null);
   /** The pass whose redemption the gym's own record refused, and the sentence
    *  that would take it anyway. The same shape the check-in bar uses, because
    *  it is the same decision. */
@@ -1549,9 +1565,9 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
   const sell = async (e: React.FormEvent) => {
     e.preventDefault();
     const t = (types ?? []).find((x) => x.id === typeId);
-    if (!t) { setMsg('Pick a pass.'); return; }
+    if (!t) { setMsg(sayRefused('Pick a pass.')); return; }
     if (!holderId && !holderName.trim()) {
-      setMsg('Say who the pass is for — pick the member, or type the name at the desk for somebody with no account.');
+      setMsg(sayRefused('Say who the pass is for — pick the member, or type the name at the desk for somebody with no account.'));
       return;
     }
     setBusy(true); setMsg(null);
@@ -1565,12 +1581,12 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
       });
       const who = activeMembers.find((m) => m.memberId === holderId)?.memberName;
       setHolderId(''); setHolderName(''); setHostId('');
-      setMsg(holderId
+      setMsg(wrote(holderId
         ? `Pass issued to ${who ?? 'that member'} — it is on their record, so what they do next counts.`
-        : 'Pass issued to a name at the desk. It counts toward pass revenue, but nothing can tell whether this person later joined.');
+        : 'Pass issued to a name at the desk. It counts toward pass revenue, but nothing can tell whether this person later joined.'));
       onChange();
     } catch (e: any) {
-      setMsg(e?.message ?? 'Could not issue that pass.');
+      setMsg(sayRefused(e?.message, 'Could not issue that pass.'));
     } finally { setBusy(false); }
   };
 
@@ -1598,7 +1614,7 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
     // holder walking through the turnstile. `redeemPass` refuses it again on
     // the way to the database — the sentence is the same either way.
     const blocked = passBlocker(p, { spendOn: 'visit', today });
-    if (blocked) { setMsg(blocked); return; }
+    if (blocked) { setMsg(sayRefused(blocked)); return; }
     setTaking(p.id);
     try {
       if (p.holderId && !overrideWhy) {
@@ -1622,7 +1638,7 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
         visitNote: overrideWhy ? `${OVERRIDE_PREFIX}${overrideWhy}` : null,
       });
       setRefusedTake(null); setTakeWhy('');
-      if (overrideWhy) setMsg('Taken, with your reason on the visit.');
+      if (overrideWhy) setMsg(wrote('Taken, with your reason on the visit.'));
       onChange();
     } catch (e: any) {
       if (isOffline(e)) {
@@ -1633,12 +1649,12 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
         // a SECOND visit off the pass, and that is a member's money. So nothing
         // is written, the desk is told exactly that, and it is given the route
         // that is safe.
-        setMsg('The gym could not be reached, so NOTHING was written — the pass is untouched and the arrival is not recorded. Check them in from the bar at the top, which is held on this machine and goes up on its own, then take the pass off when the connection is back.');
+        setMsg(sayRefused('The gym could not be reached, so NOTHING was written — the pass is untouched and the arrival is not recorded. Check them in from the bar at the top, which is held on this machine and goes up on its own, then take the pass off when the connection is back.'));
         return;
       }
       // The reason matters at a desk: "expired on the 3rd" ends an argument
       // that "could not redeem" starts.
-      setMsg(e?.message ?? 'Could not take that pass.');
+      setMsg(sayRefused(e?.message, 'Could not take that pass.'));
     } finally { setTaking(null); }
   };
 
@@ -1696,6 +1712,12 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
           : undefined
       }
     >
+      {/* Mounted for as long as this section is on screen, so a later `msg` is a
+          CHANGE to an existing region rather than a node inserted at the same
+          instant as its text. This is the desk: whoever is on it is looking at
+          the person in front of them, not at the browser. See
+          studio-web/components/Banner.tsx. */}
+      <Announce say={sayText(msg)} tone={sayTone(msg)} />
       {types === null ? (
         // Not the same sentence as "none yet": sending someone to Money to add
         // pass types they already have, because the read broke, wastes the one
@@ -1766,7 +1788,7 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
           banner above says why; sell it on the member&rsquo;s record once the page reloads.
         </p>
       ) : null}
-      {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg}</p> : null}
+      {msg ? <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>{msg.text}</p> : null}
 
       {/* The gym's own record said no to this redemption, and the way past it.
           The same panel as the check-in bar, because it is the same decision
@@ -1864,14 +1886,13 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
   );
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page's copy rendered into a plain <div>, so every "the write was refused and
+// nothing was saved" it said was a silence for a screen reader. The shared one
+// carries role="alert"/aria-live; `live={false}` is for the ones an Announce
+// region on the same screen is already reading out.
+function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'crit'; live?: boolean }) {
+  return <SharedBanner tone={tone} live={live}>{children}</SharedBanner>;
 }
 
 /**

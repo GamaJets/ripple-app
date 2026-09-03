@@ -45,6 +45,7 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { isWhole } from '../../src/ui/loadStatus';
 
 export default function Promotions() {
   const t = useTheme();
@@ -115,15 +116,45 @@ export default function Promotions() {
     } finally { setBusy(false); }
   };
 
-  // Whether the list on screen is what the server holds. Under 'error' it is
-  // an empty array that means UNKNOWN, and a hero reading "0 codes" would tell
-  // an owner with six that they have none — so the figure is withheld instead.
-  // 'partial' is the list plus a caveat: it arrives when the read was truncated
-  // OR when only the redemption counts failed, and this screen cannot tell
-  // those apart, so it says the count may be short rather than guessing.
-  const countable = status !== 'loading' && status !== 'error';
+  // Whether the list on screen is the WHOLE list, which is the only condition
+  // under which anything here may be counted.
+  //
+  // ── Why 'partial' no longer counts ────────────────────────────────────────
+  //
+  // This was `status !== 'loading' && status !== 'error'`, so it counted under
+  // 'partial' and appended "this may be short" to the hero note. That reads like
+  // a stated exception rather than an oversight, and it was defended as one —
+  // but it only ever caveated ONE of the four figures this screen states, and
+  // the three it missed are the ones that do damage:
+  //
+  //   · the `live === 0` branch says "Nothing is redeemable right now" with no
+  //     caveat at all. Under a truncated read, every live code can be past the
+  //     cut — so the sentence is not short, it is the opposite of true, and it
+  //     ends with "create a new offer", which is how a gym gets two of
+  //     everything;
+  //   · `off` — "3 codes are switched off below" — is a count over the same
+  //     unknown fraction and was never caveated;
+  //   · the section heading's "N live of M" states both numbers bare.
+  //
+  // Once all four need the clause, the clause is not the answer. src/ui/
+  // loadStatus.ts already gives it: under 'partial' "the list may be shown. A
+  // total, a count, a sum or an average over it may NOT — it is a figure
+  // computed from an unknown fraction of the set." The list below still renders,
+  // which is the whole point of 'partial'; the numerals over it do not.
+  //
+  // The cost is real and is worth naming: `usePromos` reports 'partial' both
+  // when the CODES read was truncated and when only the REDEMPTION counts
+  // failed, and in the second case the code list is whole and `live` would have
+  // been exact. This screen cannot tell those two apart — the provider collapses
+  // them into one status — so it takes the safe half of an ambiguity rather than
+  // printing a hero figure it can only sometimes stand behind. Separating them
+  // belongs in src/ui/promos.tsx, and would give this screen its figure back.
+  const countable = isWhole(status);
   const live = countable ? promos.filter((p) => p.active).length : null;
-  const off = countable ? promos.length - live! : 0;
+  /** Null wherever `live` is null, so a branch added later cannot state a count
+   *  the screen has not earned. Read only inside branches already past the
+   *  status gate below, where it is a number. */
+  const off = live == null ? null : promos.length - live;
 
   const G = layout.gutter;
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 } as const;
@@ -153,11 +184,16 @@ export default function Promotions() {
           unit={live === 1 ? 'code' : 'codes'}
           note={status === 'loading' ? 'Reading your codes…'
             : status === 'error' ? 'Your codes could not be read — this is not a gym with none.'
+            : !countable
+            // 'partial'. The codes below are real; how many of them there are is
+            // not known, so no numeral is offered — including the one that would
+            // otherwise read "nothing is redeemable right now".
+            ? 'Your codes are listed below, but the read did not come back whole, so this cannot say how many are live. A count over part of a list is not a smaller number, it is a wrong one. Pull down to read them again.'
             : live === 0
-              ? off > 0
+              ? (off ?? 0) > 0
                 ? `Nothing is redeemable right now. ${off} code${off === 1 ? ' is' : 's are'} switched off below — switch one back on, or create a new offer.`
                 : 'Create an offer and push it straight to your members.'
-              : `${off > 0 ? `${off} more switched off. ` : ''}Push a live code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.${status === 'partial' ? ' Some of your codes could not be read, so this may be short.' : ''}`}
+              : `${(off ?? 0) > 0 ? `${off} more switched off. ` : ''}Push a live code to every member. Delivery depends on their notification settings, so treat it as queued rather than guaranteed.`}
         />
 
         <Rule />

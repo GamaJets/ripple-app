@@ -16,7 +16,8 @@ import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrain
 import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
 import { fetchMemberships, fetchPayments, fetchPlans, summarise, type Membership } from '@lib/gymRecord';
 import { fetchClasses, summariseAttendance, pct } from '@lib/gymSchedule';
-import { fetchVisits, summariseVisits } from '@lib/gymVisits';
+import { fetchVisits, summariseVisits, currentlyInside, OPEN_VISIT_HOURS } from '@lib/gymVisits';
+import { gymTodayWindow, inWindow } from '@lib/gymToday';
 import { fetchOwnerMetrics, type OwnerMetrics } from '@/lib/ownerMetrics';
 import { fetchOwnedSites } from '@/lib/sites';
 import { siteNotice, type SiteScope } from '@lib/ownedSites';
@@ -28,6 +29,11 @@ interface Gym {
   /** `tenants.currency`. Null means the gym has not set one — which the schema
    *  says to render as a dash and ask about, never to fill in with a default. */
   currency: string | null;
+  /** `tenants.timezone` (supabase/parts/710). Null is a gym that has not said
+   *  whose day its day is — never UTC and never this laptop's. It is read here
+   *  rather than in a second query because this page already asks `tenants` for
+   *  the name and the fee, and "today" is the window three tiles are cut on. */
+  timezone: string | null;
 }
 
 /**
@@ -84,6 +90,12 @@ export default function Overview() {
     fillRate: number | null;
     visitsToday: number | null;
     inNow: number | null;
+    /** Whose calendar "today" was cut on, when it was not the gym's own —
+     *  `NO_ZONE_NOTE`, from `gymTodayWindow`. Null when `tenants.timezone` is
+     *  set and there is nothing to disclose. A count of arrivals "today" is a
+     *  claim about a day, and a screen that will not say which day it means is
+     *  the reason this page was quietly reporting UTC's. */
+    dayNote: string | null;
 
     /* ── which departments actually answered ──────────────────────────────
      *
@@ -143,15 +155,17 @@ export default function Overview() {
       // stated as facts about the gym: the sidebar says no gym is linked, and
       // the payroll note below says no fee is set. Neither is known to be true.
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('id, name, session_fee, currency').eq('id', who.tenantId).single();
+        .from('tenants').select('id, name, session_fee, currency, timezone').eq('id', who.tenantId).single();
       if (!live) return;
       setGymErr(tErr ? (tErr.message || 'The gym record could not be read.') : null);
+      const zone = t && !tErr ? (((t.timezone ?? '') as string).trim() || null) : null;
       setGym(t && !tErr
         ? {
             id: t.id,
             name: t.name ?? null,
             sessionFee: t.session_fee ?? null,
             currency: ((t.currency ?? '') as string).trim().toUpperCase() || null,
+            timezone: zone,
           }
         : null);
 
@@ -169,13 +183,40 @@ export default function Overview() {
       // allSettled, not all: one failing read must not take the others with it.
       // A department that cannot be read shows a dash; the rest still report.
       const from30 = new Date(Date.now() - 30 * 86400_000).toISOString();
-      const dayStart = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z').toISOString();
+
+      // ── "today", on the gym's calendar and not on UTC's ──────────────────
+      //
+      // This was `new Date(new Date().toISOString().slice(0, 10) +
+      // 'T00:00:00Z')`, which is UTC midnight with the word today on it. For a
+      // gym in Los Angeles that instant is 4pm or 5pm the PREVIOUS afternoon,
+      // so at nine in the morning the tile below had been counting since
+      // yesterday teatime and last night's 6pm and 8pm classes were in it —
+      // every day, with nothing on the tile to say so. Dubai fails the other
+      // way: UTC's day does not turn over until 4am there, so the 5am and 6am
+      // regulars were not in "today" at all until the morning was half gone.
+      //
+      // `gymTodayWindow` (src/lib/gymToday.ts) cuts the day on
+      // `tenants.timezone`. A gym that has not set one gets its READER's day
+      // and `window.note` says so under the tile — that is not a default
+      // timezone, it is the only one of the three answers that discloses which
+      // calendar it used.
+      const today = gymTodayWindow(zone);
+
+      // The door read reaches back the FURTHER of the gym's day and
+      // `OPEN_VISIT_HOURS`, and the two figures below are then cut out of it
+      // separately. They are different questions: "through the door today" is
+      // this calendar day, and "in the building" is whoever has an open visit
+      // that still counts as a person in the room. Asking one window to answer
+      // both is what would make a member who arrived at 11pm and was never
+      // checked out vanish out of the headcount at midnight.
+      const openFrom = new Date(Date.now() - OPEN_VISIT_HOURS * 3600_000).toISOString();
+      const doorSince = today.fromISO < openFrom ? today.fromISO : openFrom;
       const [mRes, pRes, plRes, cRes, vRes] = await Promise.allSettled([
         fetchMemberships(supabase, who.tenantId),
         fetchPayments(supabase, who.tenantId, from30),   // windowed: the tile says 30d
         fetchPlans(supabase, who.tenantId),
         fetchClasses(supabase, who.tenantId, from30, new Date().toISOString()),
-        fetchVisits(supabase, who.tenantId, { sinceIso: dayStart }),
+        fetchVisits(supabase, who.tenantId, { sinceIso: doorSince }),
       ]);
       if (!live) return;
 
@@ -187,7 +228,11 @@ export default function Overview() {
 
       const rec = (memberships && payments && plans) ? summarise(payments, memberships, plans) : null;
       const att = classes ? summariseAttendance(classes) : null;
-      const door = visits ? summariseVisits(visits) : null;
+      // Today's arrivals are the ones inside the gym's own day; the headcount
+      // is over everything fetched, because an open visit is a person in the
+      // room whichever calendar day it started on.
+      const door = visits ? summariseVisits(visits.filter((v) => inWindow(v.enteredAt, today))) : null;
+      const inNow = visits ? currentlyInside(visits).length : null;
 
       // Named, not swallowed. Each rejection carries the reason PostgREST gave
       // and the banner prints it: a refused read is something an owner can act
@@ -214,7 +259,8 @@ export default function Overview() {
         activeMembers: rec ? rec.activeMembers : null,
         fillRate: att?.fillRate ?? null,
         visitsToday: door ? door.visits : null,
-        inNow: door ? door.inside : null,
+        inNow,
+        dayNote: today.note,
         recordRead: memberships !== null && payments !== null && plans !== null,
         classesRead: classes !== null,
         doorRead: visits !== null,
@@ -436,9 +482,14 @@ export default function Overview() {
              note={hub && !hub.classesRead ? UNREAD
                : hub && hub.fillRate == null ? 'no capacity recorded'
                : 'booked ÷ capacity'} />
+        {/* "Today" is the GYM's day — see `gymTodayWindow` in the loader. Where
+            the gym has not set a timezone the count is still stated, and the
+            note says whose day it was counted over rather than leaving an owner
+            to assume it was theirs. */}
         <Kpi label="In the building" value={hub && hub.doorRead ? hub.inNow : null}
              note={hub && !hub.doorRead ? UNREAD
-               : hub?.visitsToday != null ? `${hub.visitsToday} through the door today`
+               : hub?.visitsToday != null
+                 ? `${hub.visitsToday} through the door today${hub.dayNote ? ` — ${hub.dayNote}` : ''}`
                : undefined} />
         {/* There is no "Cash position" tile any more, and its removal is the
             same repair as everything above it.

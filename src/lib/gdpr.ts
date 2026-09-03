@@ -484,12 +484,12 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
   return { json: JSON.stringify(out, null, 2), complete, failed, files: fileRead.files };
 }
 
-/** Back-compatible wrapper: the JSON only. Prefer exportMyDataDetailed, which
- *  can tell the caller the file is partial — a screen that cannot say so will
- *  hand somebody an incomplete record and call it their data. */
-export async function exportMyData(): Promise<string> {
-  return (await exportMyDataDetailed()).json;
-}
+/* `exportMyData()` — the back-compatible wrapper that returned the JSON alone —
+ * used to sit here and is gone. Its own doc told callers to prefer
+ * `exportMyDataDetailed`, because a wrapper that drops `complete` and `failed`
+ * hands somebody an incomplete record and calls it their data; all three
+ * Settings screens took that advice, so it had no callers at all.
+ * scripts/check-dead-exports.mjs is what noticed. */
 
 /** Flag the account for erasure. Returns true if the request was recorded. */
 export async function requestAccountDeletion(): Promise<boolean> {

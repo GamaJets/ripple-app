@@ -58,6 +58,7 @@ import { fmtDay } from '../../src/lib/format';
 import { money } from '../../src/lib/gymRecord';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { readState, hasRows, staleNote, failedNote } from '../../src/lib/staleRead';
 import {
   fetchGymOrders, orderLine, orderTrouble, paidPots,
   ORDER_STATUS_LABEL, type GymOrderRow,
@@ -77,14 +78,18 @@ export default function OwnerOrders() {
   const tenantId = tenant?.id ?? null;
 
   /**
-   * Null is "we could not read it" and stays null.
+   * Null is "nothing has ever landed here".
    *
-   * NOT `[]`. An empty array here renders as "this gym has sold nothing
-   * online" — a specific claim about somebody's business, in the screen's own
-   * confident type, arrived at by a query that failed. `failed` is what
-   * separates the two.
+   * NOT `[]`. An empty array renders as "this gym has sold nothing online" — a
+   * specific claim about somebody's business, in the screen's own confident
+   * type, arrived at by a query that failed.
+   *
+   * And it is not set back to null by a refresh that fails, which is what it
+   * used to do. See the catch below and src/lib/staleRead.ts.
    */
   const [rows, setRows] = useState<GymOrderRow[] | null>(null);
+  /** Whether the most recent ATTEMPT failed. Orthogonal to `rows`: the pair is
+   *  what `readState` turns into the four things that can be true here. */
   const [failed, setFailed] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
@@ -103,7 +108,16 @@ export default function OwnerOrders() {
       setFetchedAt(Date.now());
     } catch (e: any) {
       reportError('ownerOrders.fetch', e);
-      setRows(null);
+      // The rows that landed are KEPT. `setRows(null)` was here, and it was the
+      // right answer while this screen read once on mount — there was nothing
+      // to lose. Pull-to-refresh made failure-after-success an ordinary path,
+      // and a refresh fails for reasons that say nothing about the order book:
+      // an owner in the back office pulls down, the signal drops for a second,
+      // and a correct quarter of orders — including the ones flagged as paid
+      // with nothing granted, which is why this screen exists — disappears.
+      //
+      // What is lost instead is the CLAIM that they are current, which is
+      // `readState`'s 'stale' and is said once, at the top.
       setFailed(true);
       // The message is carried through because `readAll` throws a named
       // TruncatedRead whose text is written to be read by a gym owner, and
@@ -121,7 +135,10 @@ export default function OwnerOrders() {
   // trouble list are all derived from it.
   const pull = usePullToRefresh(load);
 
-  const loaded = rows !== null;
+  // Two facts, four states: src/lib/staleRead.ts. `loaded` was `rows !== null`
+  // and carried both.
+  const state = readState(rows, failed);
+  const loaded = hasRows(state);
   const list = rows ?? [];
   const trouble = orderTrouble(list);
   const needsAPerson = trouble.failed.length + trouble.paidWithNothing.length;
@@ -156,6 +173,20 @@ export default function OwnerOrders() {
         <Fetched at={fetchedAt} onRefresh={() => { void load(); }} busy={busy}
           style={{ marginTop: 0, marginBottom: sp.md }} />
 
+        {/* Said once, for the whole screen: the hero, the per-currency pots,
+            the four KPIs and the book are all derived from this one read, so
+            three copies of "not confirmed current" would be three sentences to
+            keep in step rather than one fact.
+
+            `warn` and not `crit`. The orders below are real and the read that
+            produced them was whole; the failure is in the attempt to confirm
+            them. `crit` on this screen already means something specific and
+            worse — a member who paid and got nothing — and spending it on a
+            dropped connection is how it stops being read. */}
+        {state === 'stale' ? (
+          <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote('order book', reason)}</Flag>
+        ) : null}
+
         {/* The hero is the count of orders that need a person, and not the
             money. A gym reading "GBP 4,300 taken" over three members who paid
             and got nothing has been told the comfortable half of the fact. */}
@@ -163,9 +194,12 @@ export default function OwnerOrders() {
           label="Need Attention"
           figure={fig(loaded ? needsAPerson : null)}
           tone={needsAPerson > 0 ? t.crit : undefined}
-          note={failed
-            ? `Your order book could not be read${reason ? ` — ${reason}` : ''}. This is NOT an all-clear: it is a read that did not come back.`
-            : !loaded
+          note={state === 'failed'
+            // The most important sentence on the screen: the hero figure is a
+            // count of members who paid and got nothing, and a dash over it must
+            // never be read as a zero.
+            ? `${failedNote('order book', reason)} This is NOT an all-clear.`
+            : state === 'loading'
             ? 'Reading your online orders…'
             : list.length === 0
             ? `Nothing has been bought online in ${WINDOW_DAYS} days. If that is a surprise, check that card payments are switched on in Operations.`
@@ -199,7 +233,7 @@ export default function OwnerOrders() {
           <SectionHead title="Taken Online" note={`Last ${WINDOW_DAYS} days`} />
           {!loaded ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {failed
+              {state === 'failed'
                 ? 'Not known — the order book could not be read. This is not a quarter in which nothing sold.'
                 : 'Reading…'}
             </Text>
@@ -261,11 +295,16 @@ export default function OwnerOrders() {
             />
           ) : null}
 
-          {failed ? (
+          {/* 'failed', not `failed`: a refresh that failed over orders that did
+              land is 'stale' and keeps the book below. The old wording — "this
+              screen simply does not know what sold" — was written for a screen
+              holding nothing, and is false of one holding a complete earlier
+              read. */}
+          {state === 'failed' ? (
             <View>
               <Flag tone={t.crit}>
-                The order book could not be read. Nothing has been cleared — this screen simply
-                does not know what sold, which is not the same as nothing having sold.
+                {failedNote('order book', reason)} This screen does not know what sold, which is
+                not the same as nothing having sold.
               </Flag>
               <Pressable
                 onPress={() => { void load(); }}

@@ -10,6 +10,7 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
+import { Banner as SharedBanner, Announce } from '@/components/Banner';
 import {
   fetchPlans, createPlan, setPlanActive,
   fetchMemberships, createMembership, setMembershipStatus,
@@ -339,6 +340,11 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
 
   return (
     <Section title="Price book" sub="Retiring a plan keeps it on the memberships already sold on it.">
+      {/* Mounted from the first render so a later `writeErr` is a CHANGE to an
+          existing region rather than an inserted one — see components/Banner.tsx.
+          The banner below carries the same text with `live={false}` so it is not
+          read out twice. */}
+      <Announce say={writeErr} tone="crit" />
       <form onSubmit={add} style={formRow}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Plan name" style={{ ...field, flex: 2 }} />
         {/* The placeholder names the currency the number will be STORED in.
@@ -353,7 +359,7 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
         <button type="submit" disabled={busy || !ccy} style={primaryBtn}>Add plan</button>
       </form>
       {ccy ? null : <Banner>Plans cannot be priced until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. Guessing one would write it into every price sold on it.</Banner>}
-      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
       {plans === null ? (
         readErr ? (
           <Banner tone="crit">
@@ -500,6 +506,11 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
       title="Pass price book"
       sub="Drop-ins, guest passes and packs — what the desk can sell on the Door screen. Retiring one keeps every pass already sold on it valid."
     >
+      {/* Mounted from the first render so a later `writeErr` is a CHANGE to an
+          existing region rather than an inserted one — see components/Banner.tsx.
+          The banner below carries the same text with `live={false}` so it is not
+          read out twice. */}
+      <Announce say={writeErr} tone="crit" />
       <form onSubmit={add} style={formRow}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Pass name" style={{ ...field, flex: 2, minWidth: 140 }} />
         <select value={kind} onChange={(e) => setKind(e.target.value as PassKind)} style={{ ...field, flex: 1, minWidth: 130 }}>
@@ -548,7 +559,7 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
       {blocker && !writeErr ? (
         <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{blocker}</p>
       ) : null}
-      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
       {types === null ? (
         readErr ? (
           <Banner tone="crit">
@@ -682,6 +693,11 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
 
   return (
     <Section title="Memberships" sub="The member id is their Repple account id — the same person who signs into the app. Start and end dates are the gym's to state: a migrated roster whose every member starts today has no tenure and no cohort to measure.">
+      {/* Mounted from the first render so a later `writeErr` is a CHANGE to an
+          existing region rather than an inserted one — see components/Banner.tsx.
+          The banner below carries the same text with `live={false}` so it is not
+          read out twice. */}
+      <Announce say={writeErr} tone="crit" />
       <form onSubmit={add} style={formRow}>
         <input value={memberId} onChange={(e) => setMemberId(e.target.value)}
                placeholder="Member account id (uuid)" style={{ ...field, flex: 3, fontFamily: 'var(--mono)', fontSize: 12.5 }} />
@@ -715,7 +731,7 @@ function Members({ members, readErr, plans, tenantId, onChange }: {
       {dateBlocker && !writeErr ? (
         <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: '#f0c04e' }}>{dateBlocker}</p>
       ) : null}
-      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
       {members === null ? (
         readErr ? (
           <Banner tone="crit">
@@ -932,6 +948,11 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
           A chargeback lands weeks after the sale. The correction it needs is on the row itself.
         </span>
       </div>
+      {/* Mounted from the first render so a later `writeErr` is a CHANGE to an
+          existing region rather than an inserted one — see components/Banner.tsx.
+          The banner below carries the same text with `live={false}` so it is not
+          read out twice. */}
+      <Announce say={writeErr} tone="crit" />
       <form onSubmit={add} style={formRow}>
         {/* Names the currency this figure is STORED in, not the one the reader
             assumes. The Members screen's twin of this form had its label
@@ -978,7 +999,7 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange, win
         into a fact — nothing else in the database links a payment to what it was for.
       </p>
       {ccy ? null : <Banner>Payments cannot be recorded until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. A recorded amount is permanent, and it is only a number until it says what money it is.</Banner>}
-      {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
+      {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
       {correcting ? (
         <Correction
           p={correcting}
@@ -1169,14 +1190,13 @@ function Kpi({ label, text, note }: { label: string; text: string | null; note?:
   );
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone?: 'crit' }) {
-  return (
-    <div style={{
-      margin: '14px 0', padding: '11px 14px', borderRadius: 0, background: 'var(--surface)',
-      border: '1px solid var(--ring)', borderLeft: `3px solid ${tone === 'crit' ? 'var(--crit)' : 'var(--brand)'}`,
-      color: 'var(--ink2)', fontSize: 13,
-    }}>{children}</div>
-  );
+// The banner is the shared one now: studio-web/components/Banner.tsx. This
+// page's copy rendered into a plain <div>, so every "the write was refused and
+// nothing was saved" it said was a silence for a screen reader. The shared one
+// carries role="alert"/aria-live; `live={false}` is for the ones an Announce
+// region on the same screen is already reading out.
+function Banner({ children, tone, live }: { children: React.ReactNode; tone?: 'crit'; live?: boolean }) {
+  return <SharedBanner tone={tone} live={live}>{children}</SharedBanner>;
 }
 
 function Loading() {

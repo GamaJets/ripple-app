@@ -2,8 +2,7 @@
 // (Elevated Teal default), selectable by client & trainer. An optional accent
 // override sits on top for owner white-labelling. Both persist.
 import { ReactNode, createContext, useContext, useState, useEffect } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, TextInput, useColorScheme } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, Pressable, TextInput, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   paletteByKey, paletteForScheme, highContrast, brandInkFor,
@@ -12,8 +11,6 @@ import {
 import { VARIANT, VARIANT_ACCENT } from '../lib/variant';
 import { Icon } from './Icon';
 import { passwordRules } from '../lib/passwordRules';
-// `value` is aliased to `figure` so it can't shadow <Tile/>'s `value` prop.
-import { sp, layout, radius, hairline, type as ty, value as figure } from '../theme/scale';
 
 interface ThemeControls {
   /** The palette the member CHOSE. Not necessarily the one on screen — see
@@ -152,49 +149,20 @@ export function useThemeControls(): ThemeControls {
   return c;
 }
 
-export function Screen({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
-  const t = useTheme();
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }}>
-      <ScrollView contentContainerStyle={{ padding: layout.gutter }} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-        <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>{title}</Text>
-        {subtitle ? <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{subtitle}</Text> : <View style={{ height: sp.md }} />}
-        {children}
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-export function Card({ children, tint }: { children: ReactNode; tint?: boolean }) {
-  const t = useTheme();
-  return <View style={[s.card, { backgroundColor: tint ? t.surface2 : t.surface, borderColor: t.ring }]}>{children}</View>;
-}
-
-export function Tile({ label, value, unit, foot }: { label: string; value: string; unit?: string; foot?: string }) {
-  const t = useTheme();
-  return (
-    <View style={[s.tile, { backgroundColor: t.surface, borderColor: t.ring }]}>
-      <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink3, textTransform: 'capitalize' }}>{label}</Text>
-      <Text style={{ ...figure(24), color: t.ink, marginTop: 4 }}>
-        {value}{unit ? <Text style={{ ...ty.label, color: t.ink3 }}> {unit}</Text> : null}
-      </Text>
-      {foot ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{foot}</Text> : null}
-    </View>
-  );
-}
-
-export function Row({ children }: { children: ReactNode }) {
-  return <View style={s.row}>{children}</View>;
-}
-
-export function Btn({ label, onPress, primary }: { label: string; onPress?: () => void; primary?: boolean }) {
-  const t = useTheme();
-  return (
-    <Pressable onPress={onPress} style={[s.btn, { backgroundColor: primary ? t.brand : t.surface2, borderColor: t.ring }]}>
-      <Text style={{ ...ty.label, fontWeight: '600', color: primary ? t.brandInk : t.ink }}>{label}</Text>
-    </Pressable>
-  );
-}
+/* ── Screen / Card / Tile / Row / Btn used to live here ────────────────────
+ *
+ * They were this file's original primitives and src/ui/kit.tsx superseded every
+ * one of them — Section, ListRow, KpiRow, Ghost and the rest, which 142 files
+ * import. Nothing had imported the five since, and `scripts/check-dead-exports.mjs`
+ * is what noticed: five exported components in src/ui that no non-test file
+ * mentioned. They are deleted rather than kept "in case", because a second set
+ * of primitives with the same names as the real ones is how a screen ends up
+ * drawn half in each.
+ *
+ * The `s` StyleSheet went with them — card/tile/row/btn were its only four
+ * entries — and so did the whole `../theme/scale` import, whose six names were
+ * used by nothing else in this file.
+ */
 
 // Password input with a tappable eye toggle so people can check what they
 // typed before submitting. `style` should be the same object used for
@@ -242,13 +210,6 @@ export function PasswordField({
     </View>
   );
 }
-
-const s = StyleSheet.create({
-  card: { borderWidth: hairline, borderRadius: radius.md, padding: sp.lg, marginBottom: sp.md },
-  tile: { flex: 1, borderWidth: hairline, borderRadius: radius.md, padding: sp.lg },
-  row: { flexDirection: 'row', gap: sp.md, marginBottom: sp.md },
-  btn: { paddingHorizontal: sp.lg, paddingVertical: 9, borderRadius: radius.sm, borderWidth: hairline, alignItems: 'center' },
-});
 
 /**
  * The password rules, shown while somebody types rather than after they are
