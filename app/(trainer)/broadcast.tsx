@@ -112,6 +112,19 @@ export default function Broadcast() {
   const def = sel.kind === 'seg' ? segmentDef(sel.key) : null;
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
+  /**
+   * `busy`, held where a second tap in the same frame can actually see it.
+   *
+   * `if (… || busy) return` below is React state read inside a handler that
+   * then awaits, so the guard only holds if a re-render lands BETWEEN two taps.
+   * It does not on a double tap, and what gets through is not a wasted request:
+   * `sendCoachMessages` is a per-client `messages` insert plus a push, so the
+   * second run puts the coach's words in every thread a second time and rings
+   * every handset again. There is nothing on the server that would collapse
+   * them — this screen's own retry note says why that matters: it "would look,
+   * from their side, like their coach repeating themselves".
+   */
+  const sending = useRef(false);
   // The clients this screen tried to write to and could not. Held so the
   // recipient list can name them and the retry can go to exactly them — a coach
   // told "8 of 12 went through" and nothing else has no way to reach the four.
@@ -306,7 +319,19 @@ export default function Broadcast() {
    */
   const deliver = async (ids: string[]) => {
     const b = body.trim();
-    if (!b || !ids.length || busy) return;
+    // Synchronous, before anything awaits — see `sending`. `busy` is kept in
+    // the test beside it so the control still refuses while a re-render is
+    // pending for any other reason.
+    if (!b || !ids.length || busy || sending.current) return;
+    sending.current = true;
+    try {
+      await deliverOnce(ids, b);
+    } finally {
+      sending.current = false;
+    }
+  };
+
+  const deliverOnce = async (ids: string[], b: string) => {
     // Refuse rather than warn. A message cannot be taken back, and "send to
     // everybody" written against a list we could not read whole is not a
     // smaller version of the thing the coach asked for.

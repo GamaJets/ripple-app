@@ -48,7 +48,8 @@ import { useBrand } from '../../src/ui/brand';
 import { useRoster } from '../../src/ui/roster';
 import { useToday } from '../../src/ui/today';
 import { isQueryableId } from '../../src/lib/clientDrift';
-import { shareDoc, pdfExportAvailable } from '../../src/lib/exportShare';
+import { shareDoc, shareText, pdfExportAvailable } from '../../src/lib/exportShare';
+import { chaseGroups, chaseMessage, chaseMessageCaveat, type ChaseGroup } from '../../src/lib/chaseList';
 import {
   coachInvoiceDoc, invoiceShareBlurb, invoiceBlockers, invoiceNumber, invoiceDayLabel,
   invoiceBook, money, kindLabel, ageingBook, invoiceAge, chaseBlocker, chaseHistoryLine,
@@ -205,6 +206,20 @@ export default function Invoices() {
   const ageing = useMemo(() => ageingBook(rows, status, today), [rows, status, today]);
 
   /**
+   * The same outstanding book, grouped by WHO OWES IT.
+   *
+   * The lists below are documents banded by lateness, which is the right answer
+   * to "what is late" and the wrong shape for the act: nobody sends four
+   * messages to one client about four invoices. Off the banded lists a coach
+   * did that grouping in their head — the bands interleave people — and then
+   * typed the note by hand, number by number, scrolling back for each one.
+   *
+   * Derived from `ageing`, so there is one reading of what is outstanding on
+   * this screen rather than two that can disagree. See src/lib/chaseList.ts.
+   */
+  const chase = useMemo(() => chaseGroups(ageing, status), [ageing, status]);
+
+  /**
    * What this coach last stated about tax, from their own book.
    *
    * Not stored on the trainer and not a setting. It is read back off the most
@@ -292,6 +307,47 @@ export default function Invoices() {
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, `Invoice ${invoiceNumber(inv.seq)}`); } },
+      ],
+    );
+  };
+
+  /**
+   * The note that chases one person for everything they owe.
+   *
+   * ── Why this is a share and not a send ────────────────────────────────
+   *
+   * Repple does not have a channel to most of these people. `chaseBlocker`
+   * refuses an invoice with no `clientId` — "send it to them the way you sent
+   * it the first time" — and those are exactly the clients this screen's own
+   * header exists for: the half of a working book that pays in cash, by
+   * transfer, or through a gym. The share sheet is the channel the coach
+   * already uses, and it is the same route the invoice itself goes out on.
+   *
+   * ── What it does NOT do, said out loud ────────────────────────────────
+   *
+   * It records nothing. `remindInvoice` is what writes a chase against an
+   * invoice and notifies an account holder, and that is still the per-invoice
+   * "Chase it" below. A coach who assumed this had recorded four chases would
+   * stop being able to tell who they had already asked, so the confirmation
+   * says which of the two they are doing before anything leaves the phone.
+   */
+  const sendChase = (g: ChaseGroup) => {
+    // The coach's own name, and only from a read that came back. A note signed
+    // by the platform instead of by the person asking for the money is the
+    // fault src/lib/coachInvoice.ts refuses on the document itself, and a note
+    // is a smaller version of the same artefact.
+    const note = chaseMessage(g, isWhole(issuer.status) ? issuer.name : null);
+    if (!note) return;
+    const caveat = chaseMessageCaveat(g);
+    Alert.alert(
+      `Note for ${g.billTo}`,
+      note
+      + '\n\n'
+      + (caveat ? caveat + '\n\n' : '')
+      + 'It goes through your phone’s share sheet, so it reaches them however you already talk to them. Nothing is sent from this app and nothing is recorded against these invoices — “Chase it” on an invoice is what records one.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Send it', onPress: () => { void shareText(note, `Outstanding invoices for ${g.billTo}`); } },
       ],
     );
   };
@@ -454,34 +510,59 @@ export default function Invoices() {
         {chased ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{chased}</Text> : null}
         {/* The reason, never a dead control. A coach who taps nothing and is
             told nothing concludes the button is broken; a coach who is told
-            "this one is not tied to an account" knows to send it by hand. */}
-        {blocked ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{blocked}</Text>
-        ) : (
-          <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm, flexWrap: 'wrap' }}>
+            "this one is not tied to an account" knows to send it by hand.
+
+            ── and why it no longer takes the other two acts with it ──
+            This sentence used to REPLACE the whole action row, so an invoice
+            `chaseBlocker` refused had no controls at all. Two of the three have
+            nothing to do with chasing: Send Again is a share sheet and needs no
+            account, and They Paid It is the only door out of this list that
+            does not stamp VOIDED across a document that was paid in full.
+            The invoice it hid them from is the one with no `clientId` — which
+            is exactly the client who pays in cash, by transfer or through a
+            gym's front desk, the half of a working book this screen's own
+            header exists for. That coach could never mark those settled from
+            here: they stayed overdue for ever, in the outstanding figure, on
+            every chase list, with the nightly pass telling them four times over
+            two months to chase money they already had. The undated list below
+            has always drawn all three, so the same invoice offered them or not
+            depending on which list it happened to be on.
+            Only Chase It is gated now, because only Chase It needs an account
+            to notify. */}
+        <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm, flexWrap: 'wrap' }}>
+          {!blocked ? (
             <Pressable onPress={() => { void onChase(inv); }} hitSlop={8} accessibilityRole="button"
               accessibilityLabel={`Chase invoice ${invoiceNumber(inv.seq)}`} disabled={busy}
               accessibilityState={{ disabled: busy, busy }}
               style={{ paddingVertical: sp.xs }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>Chase it</Text>
             </Pressable>
-            {/* The action this list existed without. Everything on it is
-                something the coach is asking for, and until part 660 there was
-                no way to say it had arrived — so a paid invoice stayed here for
-                ever, or was voided, which stamps THIS INVOICE HAS BEEN VOIDED
-                across a document that was paid in full. */}
+          ) : null}
+          {/* The action this list existed without. Everything on it is
+              something the coach is asking for, and until part 660 there was
+              no way to say it had arrived — so a paid invoice stayed here for
+              ever, or was voided, which stamps THIS INVOICE HAS BEEN VOIDED
+              across a document that was paid in full.
+              `settleBlocker` is the same reader the sheet and the server use,
+              so the control is absent exactly where the act would be refused —
+              and it is a different question from whether there is an account to
+              notify, which is what used to decide it. */}
+          {!settleBlocker(inv) ? (
             <Pressable onPress={() => openSettle(inv)} hitSlop={8} accessibilityRole="button"
               accessibilityLabel={`Record invoice ${invoiceNumber(inv.seq)} as paid`} disabled={busy}
               accessibilityState={{ disabled: busy, busy }}
               style={{ paddingVertical: sp.xs }}>
               <Text style={{ ...ty.label, fontWeight: '500', color: busy ? t.ink3 : t.brand }}>They paid it</Text>
             </Pressable>
-            <Pressable onPress={() => { void send(inv); }} hitSlop={8} accessibilityRole="button"
-              accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)} again`} style={{ paddingVertical: sp.xs }}>
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Send again</Text>
-            </Pressable>
-          </View>
-        )}
+          ) : null}
+          <Pressable onPress={() => { void send(inv); }} hitSlop={8} accessibilityRole="button"
+            accessibilityLabel={`Send invoice ${invoiceNumber(inv.seq)} again`} style={{ paddingVertical: sp.xs }}>
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Send again</Text>
+          </Pressable>
+        </View>
+        {blocked ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{blocked}</Text>
+        ) : null}
       </View>
     );
   };

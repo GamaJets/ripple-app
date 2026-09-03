@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Payouts set up — Repple</title>
   <link rel="canonical" href="https://www.repplefitness.com/connect-return">
   <meta name="description" content="You have finished setting up payouts with Stripe. Open the Repple Coach app to carry on.">
@@ -22,7 +27,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 </head>
@@ -61,7 +66,7 @@
   and a page that appears to hang is worse than one with a button on it.
 -->
 
-<main id="main">
+<main id="main" tabindex="-1">
   <div class="wrap page" style="max-width:620px">
     <p class="eyebrow">Repple</p>
     <h1 class="display">You're back from Stripe</h1>

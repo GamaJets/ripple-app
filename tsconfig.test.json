@@ -32,6 +32,10 @@
     "src/lib/requestTimeout.test.ts",
     "src/lib/monthEnd.ts",
     "src/lib/staffView.ts",
+    "src/lib/submitOnce.ts",
+    "src/lib/submitOnce.test.ts",
+    "src/lib/bestSet.ts",
+    "src/lib/bestSet.test.ts",
     "src/lib/readDeadline.test.ts",
     "src/lib/sliceTruncated.test.ts",
     "src/lib/gymWhen.ts",
@@ -415,6 +419,8 @@
     "src/lib/coachMacros.test.ts",
     "src/lib/settlementStamp.test.ts",
     "src/lib/wholeUnits.test.ts",
+    "src/lib/unstampCheck.ts",
+    "src/lib/unstampCheck.test.ts",
     "src/lib/payRunConfirm.ts",
     "src/lib/payRunConfirm.test.ts",
     "src/lib/cappedByIds.ts",
@@ -423,6 +429,10 @@
     "src/lib/templateLibrary.ts",
     "src/lib/templateLibrary.test.ts",
     "src/lib/pullRefresh.ts",
-    "src/lib/pullRefresh.test.ts"
+    "src/lib/pullRefresh.test.ts",
+    "src/lib/changedRows.ts",
+    "src/lib/changedRows.test.ts",
+    "src/lib/registerGaps.ts",
+    "src/lib/registerGaps.test.ts"
   ]
 }

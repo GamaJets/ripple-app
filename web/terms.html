@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Terms — Repple</title>
   <link rel="canonical" href="https://www.repplefitness.com/terms">
 <meta name="description" content="The terms for using Repple, Repple Coach and Repple Studio.">
@@ -24,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -87,7 +92,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main id="main" class="wrap page">
+<main id="main" tabindex="-1" class="wrap page">
   <div class="legal">
 
     <div class="legal-head prose">
@@ -194,7 +199,7 @@ addEventListener('DOMContentLoaded', function () {
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
+        <h2 class="fh">Apps</h2>
         <ul>
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
@@ -202,7 +207,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
+        <h2 class="fh">Getting started</h2>
         <ul>
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
@@ -212,7 +217,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
+        <h2 class="fh">Legal &amp; data</h2>
         <ul>
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>

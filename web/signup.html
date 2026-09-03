@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Create a Repple account</title>
   <link rel="canonical" href="https://www.repplefitness.com/signup">
   <meta name="description" content="Create a Repple account — for people training, coaches running a book, and gyms running the floor.">
@@ -24,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -78,7 +83,7 @@ addEventListener('DOMContentLoaded', function () {
       <a href="/support">Support</a>
       <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
       </div>
-      <a class="cta" href="/signup">Create account</a>
+      <a class="cta" href="/signup" aria-current="page">Create account</a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
         <svg class="ico-open" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         <svg class="ico-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -87,7 +92,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main id="main" class="wrap page">
+<main id="main" tabindex="-1" class="wrap page">
   <div class="signup-grid">
 
     <div>
@@ -149,6 +154,9 @@ addEventListener('DOMContentLoaded', function () {
 
     <!-- the three things people actually stall on before signing up -->
     <div class="assure">
+      <!-- Present for the document outline, not for the eye. This column ran
+           h1 → h3, so a screen reader was told a level was missing. -->
+      <h2 class="vh">Before you sign up</h2>
       <div class="surface">
         <div class="surface-bar"><span class="ttl">which app do I get?</span></div>
         <div class="rows">

@@ -14,6 +14,7 @@ import { useMemo, useState } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
+import { useSubmitOnce } from '../../src/ui/submitOnce';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -53,6 +54,8 @@ export default function Restaurant() {
   const marks = dishMarkNotice(cd.profileStatus, cd.avoid.length);
 
   const est = sel ? estimateDish(sel, portion) : null;
+  const send = useSubmitOnce('restaurant.logIt');
+
   const logIt = async () => {
     if (!est) return;
     // Awaited and branched. This announced "added to today" whatever the
@@ -199,7 +202,13 @@ export default function Restaurant() {
                 { label: 'Fat', value: fig(est.fat), unit: 'g' },
               ]} />
               <View style={{ height: sp.xl }} />
-              <Cta label="Add to Today" wide onPress={logIt} />
+              {/* Guarded. `logFood` writes a new row per call, so two taps
+                  in the wait put the same dish on today's record twice — and
+                  the member then eats the rest of their day around a calorie
+                  figure that is double what they had. See
+                  src/lib/submitOnce.ts. */}
+              <Cta label={send.busy ? 'Adding…' : 'Add to Today'} disabled={send.busy}
+                wide onPress={() => send.run(logIt)} />
               <View style={{ height: sp.sm }} />
               <Ghost label="Cancel" onPress={() => setSel(null)} />
             </>

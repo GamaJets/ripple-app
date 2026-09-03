@@ -1,24 +1,56 @@
 # repplefitness.com
 
-The public site. Seven static pages, one stylesheet, no build step — so it can
-be dropped on any static host as-is.
+The public site. Twenty-one static pages, one stylesheet, no build step — so it
+can be dropped on any static host as-is.
 
 Two of these pages are not optional marketing: `/support` and `/privacy` are the
 Support URL and Privacy Policy URL on all three App Store listings, and App
 Review checks that both resolve. Until this is live, all three apps are blocked.
+`/delete-account` is the third of that kind: Google Play requires a publicly
+reachable account-deletion URL, and this is it.
 
 ## Files
 
-    index.html            home — what the three apps are
+The four that a stranger decides on:
+
+    index.html            home — what the three apps are, and why they share one record
+    client.html           /client  — the member app
+    trainer.html          /trainer — the coach app
+    studio.html           /studio  — the gym console
+
+The rest of the marketing site:
+
+    how-it-works.html     the first week of a gym's setup, in order
+    pricing.html          what can honestly be said about money today
+    download.html         which app you want, and where to get it
     support.html          Support URL for the App Store listings
+    security.html         RLS, what a coach cannot see, what deletion reaches
     privacy.html          Privacy Policy URL for the App Store listings
     terms.html            terms of use
+    delete-account.html   Google Play's account-deletion URL
+    404.html              served by Cloudflare Pages for any unmatched path
+
+Account and hand-off pages, all `noindex`:
+
     signup.html           create an account from the web
     forgot-password.html  request a reset link
     reset-password.html   where the reset link lands; sets the new password
+    confirmed.html        where the confirmation link lands
+    join.html             /join — a client accepting a coach's invitation
+    connect-return.html   where Stripe Connect onboarding returns to
+    connect-refresh.html  where Stripe sends a coach whose onboarding link expired
     coach.html            one coach's own public page, at /coach?h=<handle>
-    styles.css            shared styles, light and dark
-    favicon.png
+
+Everything that is not a page:
+
+    styles.css            shared styles, dark-first with a light palette at the foot
+    favicon.png           196×196
+    apple-touch-icon.png  180×180 — the home-screen icon
+    og/*.jpg              1200×630 social cards; og.jpg is the site-wide one and
+                          /client, /trainer and /studio each carry their own
+    badges/               App Store and Google Play badges
+    play/                 Play Store listing assets, not used by any page
+    sitemap.xml, robots.txt, _headers, .well-known/
 
 `coach.html` is the only page here that has no content of its own. It reads
 `?h=` and asks the database for that coach through `public_coach_page`, which is
@@ -37,7 +69,65 @@ Links between pages are written without the `.html` — `href="/support"`, not
 308-redirects the other, so writing the clean form avoids a redirect on every
 navigation, including the reset link.
 
+## The parts every page carries
+
+Twenty-one pages with no build step means twenty-one copies of the same head and
+the same chrome, and the way that goes wrong is one page quietly missing a piece.
+What every page has, and why:
+
+- **A skip link** as the first focusable element in the body, pointing at
+  `id="main"` on the page's own `<main>`. The sticky header has six links and a
+  menu button in front of the content; without it that is seven tab stops on
+  every page before a word of what you came for.
+- **`aria-current="page"`** on the nav link for the page you are on. The rule
+  that styles it (`nav.site a[aria-current="page"]`) was written long before any
+  page set the attribute.
+- **A social card** — `og:image` at 1200×630, `og:image:alt`, and
+  `twitter:card=summary_large_image`. Regenerating them is in `og/` below.
+- **`theme-color`, twice**, once per colour scheme, so a phone's address bar is
+  not white above a near-black page. The values are `--bg` from each palette; if
+  either changes in `styles.css`, change it in twenty-one heads too.
+- **Two `preconnect`s** to `fonts.googleapis.com` and `fonts.gstatic.com`.
+  `styles.css` reaches the three families through an `@import`, which the browser
+  cannot even begin until the stylesheet has downloaded and parsed. The
+  `@import` is kept because it is the single place the font URL is written; the
+  preconnects take DNS, TCP and TLS off the critical path without copying it.
+- **`<link rel="apple-touch-icon">`**, or "Add to Home Screen" gets a screenshot.
+
+`404.html` needs no configuration: Cloudflare Pages serves it for any path that
+does not resolve. Before it existed, every mistyped link and stale bookmark
+landed on Cloudflare's own notice, which carries no Repple header, no navigation
+and no way back into the site.
+
+### Regenerating the social cards
+
+`og/*.jpg` were rendered from SVG with `qlmanage` and `sips`, both of which ship
+with macOS — there is no dependency to install and nothing in `package.json`
+does it. The source SVGs are not kept: they are four near-identical files whose
+only content is the wordmark, one line of copy taken from that page's
+`og:description`, and the app's own gradient. If a card needs to change, write
+the SVG at 1200×1200 with the design in the middle band, then:
+
+    qlmanage -t -s 1200 -o . card.svg      # renders card.svg.png at 1200×1200
+    sips -c 630 1200 card.svg.png --out card.png
+    sips -s format jpeg -s formatOptions 88 card.png --out og/card.jpg
+
+The square canvas and the centre crop are because `qlmanage` pads a non-square
+SVG onto a square thumbnail. JPEG rather than PNG because the gradient costs
+470 KB as a PNG and 90 KB as a JPEG, and no unfurler cares.
+
 ## Deploying
+
+**Run `node scripts/stamp-css.mjs` first, every time `styles.css` changes.** It
+rewrites the `?v=` on the stylesheet link in every page to a hash of the CSS
+bytes. Cloudflare serves `styles.css` with `max-age=14400` and the HTML with
+`max-age=0`, so without the stamp a visitor gets new markup against a stylesheet
+up to four hours old — which on 26 Aug 2026 rendered every chart on the site
+solid black. It is idempotent and a no-op when the CSS has not moved.
+
+It is **not** wired into `check:all`, `preflight` or `scripts/publish.sh`, and it
+has no entry in `package.json`. Nothing catches a forgotten stamp, so it is a
+line in this file and a habit, which is the weakest kind of gate this repo has.
 
 Any static host works. Point it at this folder; there is nothing to compile.
 

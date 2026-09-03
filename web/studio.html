@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Repple Studio — the whole gym on one board</title>
   <link rel="canonical" href="https://www.repplefitness.com/studio">
 <meta name="description" content="Timetable, memberships, payments, the door log, the equipment register and payroll computed only from sessions somebody confirmed. Repple Studio is the operating record for a gym.">
@@ -24,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -87,7 +92,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main id="main">
+<main id="main" tabindex="-1">
 
 <section class="hero" id="repple-studio-for-the-gym">
   <div class="wrap">
@@ -103,11 +108,8 @@ addEventListener('DOMContentLoaded', function () {
         </p>
 
     <!-- Present for the document outline, not for the eye: this page went h1 → h3
-
          and a screen reader was told a level was missing at the top of it. -->
-
     <h2 class="vh">Get Repple Studio</h2>
-
     <div class="getbar" style="grid-template-columns:1fr;max-width:640px">
       <div class="app">
         <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple Studio app icon" focusable="false">
@@ -833,7 +835,7 @@ addEventListener('DOMContentLoaded', function () {
     <div class="scroll after">
       <table class="data">
         <thead>
-          <tr><th>Service state</th><th>What it means</th></tr>
+          <tr><th scope="col">Service state</th><th scope="col">What it means</th></tr>
         </thead>
         <tbody>
           <tr><td><strong>No schedule</strong></td><td>You decided this kit needs no service interval. A decision, recorded as one.</td></tr>
@@ -912,7 +914,7 @@ addEventListener('DOMContentLoaded', function () {
     <div class="scroll after">
       <table class="data">
         <thead>
-          <tr><th>What the sheet says</th><th>What the importer does, and why</th></tr>
+          <tr><th scope="col">What the sheet says</th><th scope="col">What the importer does, and why</th></tr>
         </thead>
         <tbody>
           <tr>
@@ -1024,10 +1026,10 @@ addEventListener('DOMContentLoaded', function () {
         version of the truth.
       </p>
     </div>
-    <div class="scroll">
+    <div class="scroll" tabindex="0">
       <table class="data">
         <thead>
-          <tr><th>Page</th><th>Who can open it</th><th>What it is for</th></tr>
+          <tr><th scope="col">Page</th><th scope="col">Who can open it</th><th scope="col">What it is for</th></tr>
         </thead>
         <tbody>
           <tr>
@@ -1289,6 +1291,18 @@ addEventListener('DOMContentLoaded', function () {
         <summary>Does it replace our door system?</summary>
         <div class="a"><p>It records visits — at the desk, from a member's entry barcode, or as an unattributed walk-in — and that log is what attendance, dwell time and last-seen are read from. It is a record of who came in, not a lock on the turnstile.</p></div>
       </details>
+      <!-- Two questions a gym owner asks in the first five minutes that this
+           site had no answer to anywhere. Both are exact rather than
+           flattering; the branding one in particular is mostly a list of what
+           does NOT happen, because that is what is true. -->
+      <details>
+        <summary>What currency does it work in?</summary>
+        <div class="a"><p>Yours. There is no default currency anywhere in the system — a gym picks one of forty once, and everything written after that is denominated in it: the price book, a pass, a session fee, a recorded payment. Until one is picked, money renders as a dash and asks rather than guessing, which is deliberate; an amount printed in a currency nobody chose is worse than no amount. Change it later and nothing already recorded moves — a payment is a historical fact, so it keeps the currency it was taken in, and any total that would mix the two is withheld rather than added up.</p></div>
+      </details>
+      <details>
+        <summary>Can we put our own name and colours on it?</summary>
+        <div class="a"><p>Partly, and it is worth being exact about which part. A gym sets its own name and one accent colour. <strong>The name is the part that reaches your members</strong>: the app in their hand takes your gym's name, and their member card and member number are issued under it rather than under ours. <strong>The colour is not</strong> — it themes the console and an owner's own app, and does not reach the member or coach apps today. There is no logo upload for a gym, no gym-specific web address, and no gym-branded app in the App Store: a chain that wants its own apps under its own name is a build and an onboarding project rather than a setting, and it is a conversation to have before you sign rather than after. If branding is a large part of what you are buying, say so early and you will be told exactly where it stands.</p></div>
+      </details>
       <details>
         <summary>What does it cost?</summary>
         <div class="a"><p>Pricing isn't published yet. The apps are in their first release and we would rather set it against how gyms actually use them than guess in advance. Email <a href="mailto:support@repplefitness.com">support@repplefitness.com</a>, tell us how your gym runs, and we will talk plainly about it. <a href="/pricing">Pricing</a> sets out what can honestly be said in the meantime — including that a gym is billed per site rather than per member, and that no subscription is charged today — the one live charge being 10% of anything sold through Repple’s own checkout.</p></div>
@@ -1335,7 +1349,7 @@ addEventListener('DOMContentLoaded', function () {
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
+        <h2 class="fh">Apps</h2>
         <ul>
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
@@ -1343,7 +1357,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
+        <h2 class="fh">Getting started</h2>
         <ul>
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
@@ -1353,7 +1367,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
+        <h2 class="fh">Legal &amp; data</h2>
         <ul>
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>

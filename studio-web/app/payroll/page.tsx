@@ -213,6 +213,11 @@ export default function Payroll() {
    * period switch or a refresh that removes the row takes the question with it.
    */
   const [asking, setAsking] = useState<string | null>(null);
+  // A question armed in August must not still be armed after somebody switches
+  // to July. The figures behind it are all re-derived, so it would ask honestly
+  // about the WRONG MONTH — which is worse than asking wrongly, because every
+  // number in it would be right.
+  useEffect(() => { setAsking(null); }, [periodKey]);
   const [sessionsErr, setSessionsErr] = useState<string | null>(null);
   const [trainersErr, setTrainersErr] = useState<string | null>(null);
   const [runsErr, setRunsErr] = useState<string | null>(null);

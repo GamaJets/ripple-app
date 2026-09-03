@@ -22,7 +22,7 @@
 //   · `addClass` resolves false when the insert never reached `gym_classes`,
 //     and the alert said "Class added" either way. A class that exists on the
 //     coach's phone alone is on nobody's timetable and cannot be booked.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -154,6 +154,23 @@ export default function TrainerClasses() {
   const [againWeeks, setAgainWeeks] = useState(12);
   /** The class currently being repeated, so two taps cannot fan out twice. */
   const [againBusy, setAgainBusy] = useState<string | null>(null);
+  /**
+   * `againBusy`, claimed the instant the control is pressed rather than after
+   * the coach has answered the confirmation.
+   *
+   * The state flag below is set on the far side of an `await` on an Alert, so
+   * for the whole time the dialog is up it is still null and a second press
+   * opens a second dialog. Both closures then compute their plan from the same
+   * captured `classes`, so `duplicatePlan`'s "skip the dates already on the
+   * timetable" filter cannot see the first run's writes — two confirmations
+   * write the term twice, up to twenty-four rows where twelve were offered, and
+   * every phantom one is a class members can book.
+   *
+   * A ref, and claimed BEFORE the dialog: the thing that has to be exclusive is
+   * the whole act, from the press to the last row written, and the dialog is
+   * inside it.
+   */
+  const repeating = useRef(false);
   const knownBranches = branchesFrom(classes);
 
   /* ── managing a class that is already on the board ──────────────────────
@@ -577,7 +594,16 @@ export default function TrainerClasses() {
    * run would collide with.
    */
   const repeatSeries = async (c: GymClass) => {
-    if (againBusy) return;
+    if (againBusy || repeating.current) return;
+    repeating.current = true;
+    try {
+      await repeatSeriesOnce(c);
+    } finally {
+      repeating.current = false;
+    }
+  };
+
+  const repeatSeriesOnce = async (c: GymClass) => {
     const why = duplicateBlocker(status);
     if (why) { Alert.alert('Not Repeated', why); return; }
     const plan = duplicatePlan(c, classes, againWeeks, new Date());

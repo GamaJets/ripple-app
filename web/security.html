@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Repple — security &amp; data</title>
   <link rel="canonical" href="https://www.repplefitness.com/security">
 <meta name="description" content="How access is enforced in Repple: row-level rules per gym, exactly what a coach can and cannot see, why a progress photo reaches a coach only when you share that photo, how deletion works, and where the data is held.">
@@ -24,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -87,7 +92,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main id="main">
+<main id="main" tabindex="-1">
 
 <section class="hero">
   <div class="wrap">
@@ -154,10 +159,10 @@ addEventListener('DOMContentLoaded', function () {
         two lists are genuinely different, and neither of them is everything.
       </p>
     </div>
-    <div class="scroll">
+    <div class="scroll" tabindex="0">
       <table class="data">
         <thead>
-          <tr><th>What is recorded</th><th>You</th><th>Your coach, if you linked one</th><th>Your gym, if you are a member of one</th></tr>
+          <tr><th scope="col">What is recorded</th><th scope="col">You</th><th scope="col">Your coach, if you linked one</th><th scope="col">Your gym, if you are a member of one</th></tr>
         </thead>
         <tbody>
           <tr>
@@ -619,7 +624,7 @@ addEventListener('DOMContentLoaded', function () {
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
+        <h2 class="fh">Apps</h2>
         <ul>
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
@@ -627,7 +632,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
+        <h2 class="fh">Getting started</h2>
         <ul>
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
@@ -637,7 +642,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
+        <h2 class="fh">Legal &amp; data</h2>
         <ul>
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>

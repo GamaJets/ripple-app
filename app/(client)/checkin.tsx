@@ -26,6 +26,7 @@ import { View, Text, TextInput, Pressable, ScrollView, Alert } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useSubmitOnce } from '../../src/ui/submitOnce';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
@@ -101,6 +102,8 @@ export default function CheckIn() {
   const [mood, setMood] = useState(0);
   const [adherence, setAdherence] = useState(0);
   const [note, setNote] = useState('');
+
+  const send = useSubmitOnce('checkin.submit');
 
   const submit = async () => {
     // The range is checked against the number as typed, before any conversion,
@@ -210,7 +213,18 @@ export default function CheckIn() {
             style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 100, textAlignVertical: 'top' }} />
         </Section>
 
-        <Cta label="Send Check-in" onPress={submit} wide />
+        {/* Guarded, and the label says why. `submit` awaits two network
+            writes before it says anything, and on a gym's wifi that window is
+            now as long as the transport ceiling in src/lib/requestTimeout.ts —
+            thirty seconds of a button that looks exactly as it did before it
+            was pressed. `sendCheckIn` mints a fresh id per call, so a member
+            who taps again in that window puts two check-ins in their coach's
+            inbox for one week and gets two "Check-in sent" alerts. A `busy`
+            useState alone would not have stopped it: the handler reads the flag
+            out of the closure it was made in, and two taps in one frame both
+            see false. See src/lib/submitOnce.ts. */}
+        <Cta label={send.busy ? 'Sending…' : 'Send Check-in'} disabled={send.busy}
+          onPress={() => send.run(submit)} wide />
 
         {/* Waiting to go up. Said here rather than only in the alert that
             followed the tap, because the alert is gone by the next time this

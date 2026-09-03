@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Repple — how it works</title>
   <link rel="canonical" href="https://www.repplefitness.com/how-it-works">
 <meta name="description" content="What actually happens when a gym signs up: the account, the Studio console in a browser, importing plans and payments from a spreadsheet, the timetable, the door log — and what each figure needs before it can appear.">
@@ -24,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -87,7 +92,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main id="main">
+<main id="main" tabindex="-1">
 
 <section class="hero">
   <div class="wrap">
@@ -162,7 +167,8 @@ addEventListener('DOMContentLoaded', function () {
         <span class="no">3</span>
         <div>
           <h3>Put the price book in</h3>
-          <p>What the gym sells: a name, a price, and whether it recurs monthly, yearly or is a one-off such as a day pass or a joining fee. Type them in on the Money screen, or paste your existing price list into Import. Prices are held as whole minor units &mdash; an integer number of fils or cents, never a decimal &mdash; because a float near a ledger is a rounding error in a spreadsheet and a dispute in a gym.</p>
+          <p><strong>Say what you charge in first.</strong> There is no default currency in the system, deliberately: a gym that has not chosen one sees a dash where a price would be rather than a figure in somebody else's money. Pick one of forty, once, and everything written from then on is denominated in it. Then the price book itself &mdash; what the gym sells: a name, a price, and whether it recurs monthly, yearly or is a one-off such as a day pass or a joining fee. Type them in on the Money screen, or paste your existing price list into Import. Prices are held as whole minor units &mdash; an integer number of fils or cents, never a decimal &mdash; because a float near a ledger is a rounding error in a spreadsheet and a dispute in a gym.</p>
+          <p class="tiny" style="margin-top:9px">Changing the currency later does not re-denominate anything already recorded &mdash; a payment keeps the currency it was taken in &mdash; so it is worth getting right on the first day rather than the second month.</p>
         </div>
       </li>
       <li>
@@ -281,10 +287,10 @@ addEventListener('DOMContentLoaded', function () {
       </figcaption>
     </figure>
 
-    <div class="scroll">
+    <div class="scroll" tabindex="0">
       <table class="data">
         <thead>
-          <tr><th>Figure</th><th>What it needs</th><th>What you see until then</th></tr>
+          <tr><th scope="col">Figure</th><th scope="col">What it needs</th><th scope="col">What you see until then</th></tr>
         </thead>
         <tbody>
           <tr>
@@ -404,10 +410,10 @@ addEventListener('DOMContentLoaded', function () {
       <div class="eyebrow">Where the work happens</div>
       <h2 class="hd">Seven pages, and the<br><span class="serif">first job on each.</span></h2>
     </div>
-    <div class="scroll">
+    <div class="scroll" tabindex="0">
       <table class="data">
         <thead>
-          <tr><th>Console page</th><th>What you do there first</th></tr>
+          <tr><th scope="col">Console page</th><th scope="col">What you do there first</th></tr>
         </thead>
         <tbody>
           <tr><td><strong>Import</strong></td><td>Paste the price list, read the dry run, then do the same with the payments.</td></tr>
@@ -548,7 +554,7 @@ addEventListener('DOMContentLoaded', function () {
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
+        <h2 class="fh">Apps</h2>
         <ul>
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
@@ -556,7 +562,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
+        <h2 class="fh">Getting started</h2>
         <ul>
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
@@ -566,7 +572,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
+        <h2 class="fh">Legal &amp; data</h2>
         <ul>
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>

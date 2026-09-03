@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Repple — your training, kept properly</title>
   <link rel="canonical" href="https://www.repplefitness.com/client">
 <meta name="description" content="Every session, lift, meal and measurement in one history that goes back as far as you do. Repple is the training record for the person doing the work.">
@@ -24,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -87,7 +92,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main id="main">
+<main id="main" tabindex="-1">
 
 <section class="hero" id="repple-for-the-person-training">
   <div class="wrap">
@@ -102,11 +107,8 @@ addEventListener('DOMContentLoaded', function () {
         </p>
 
     <!-- Present for the document outline, not for the eye: this page went h1 → h3
-
          and a screen reader was told a level was missing at the top of it. -->
-
     <h2 class="vh">Get Repple</h2>
-
     <div class="getbar" style="grid-template-columns:1fr;max-width:640px">
       <div class="app">
         <svg class="appicon" viewBox="0 0 1024 1024" role="img" aria-label="Repple app icon" focusable="false">
@@ -186,10 +188,10 @@ addEventListener('DOMContentLoaded', function () {
       These are the same words the app uses on its own guide screen. A page that describes a
       different product to the one you install is only a longer way of getting it wrong.
     </p>
-    <div class="scroll">
+    <div class="scroll" tabindex="0">
       <table class="data">
         <thead>
-          <tr><th>Tab</th><th>What it is for</th><th>What you do there</th></tr>
+          <tr><th scope="col">Tab</th><th scope="col">What it is for</th><th scope="col">What you do there</th></tr>
         </thead>
         <tbody>
           <tr>
@@ -570,10 +572,10 @@ addEventListener('DOMContentLoaded', function () {
       </div>
     </div>
 
-    <div class="scroll">
+    <div class="scroll" tabindex="0">
       <table class="data">
         <thead>
-          <tr><th>Zone</th><th>% of max HR</th><th>Colour</th><th>What it is</th></tr>
+          <tr><th scope="col">Zone</th><th scope="col">% of max HR</th><th scope="col">Colour</th><th scope="col">What it is</th></tr>
         </thead>
         <tbody>
           <tr><td><strong>1 · Very light</strong></td><td>50–60%</td><td>Grey</td><td>Warming up, barely working.</td></tr>
@@ -1089,6 +1091,12 @@ addEventListener('DOMContentLoaded', function () {
         <summary>Can I fix something I logged wrong?</summary>
         <div class="a"><p>Yes. Any past entry can be edited — the exercise, the sets, the cardio figures, the calories — without deleting the session and starting again. Scan fields read from a photographed report can be corrected before you save them, which is worth doing: reading a printout is done by services outside the app, they misread a digit occasionally, and the figures are yours to correct. <a href="/privacy#ai">Privacy</a> says which services and what is sent.</p></div>
       </details>
+      <!-- The single most common real condition in a gym — no usable signal in
+           the weights room — and the site had never once said what happens. -->
+      <details>
+        <summary>What happens if there is no signal in the gym?</summary>
+        <div class="a"><p>You keep logging. A set the app could not send is held on the phone, stays in your log with the rest of the session, and goes up on the next launch that reaches a server — sessions, meals, measurements, weekly check-ins and habit ticks all work this way. Two things it deliberately does not do: it does not tell you a set is saved while it is still waiting, and it does not confuse "nobody answered" with "the server said no". A write that was actually <em>refused</em> is dropped and named on the spot rather than sitting in a queue being retried forever, because that is the version of this that quietly loses work.</p></div>
+      </details>
       <details>
         <summary>Who can see my data?</summary>
         <div class="a"><p>You, always. A coach you have deliberately linked to. And your gym, for the membership and attendance information needed to run the place — not your private messages. No one else is shown your record, and none of it is used for advertising. The one thing worth knowing beyond that: some features work by sending what you gave them to a service outside the app to be read — a meal photo, an InBody sheet, an injury document, or a question you ask the in-app coach. <a href="/privacy#ai">Privacy</a> names each service and lists exactly what reaches it; what a coach can and cannot read, line by line, is in <a href="/security">Security &amp; data</a>.</p></div>
@@ -1142,7 +1150,7 @@ addEventListener('DOMContentLoaded', function () {
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
+        <h2 class="fh">Apps</h2>
         <ul>
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
@@ -1150,7 +1158,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
+        <h2 class="fh">Getting started</h2>
         <ul>
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
@@ -1160,7 +1168,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
+        <h2 class="fh">Legal &amp; data</h2>
         <ul>
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>

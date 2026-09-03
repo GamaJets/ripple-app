@@ -11,6 +11,7 @@ import { View, Text, Pressable, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useSubmitOnce } from '../../src/ui/submitOnce';
 // `isCancelled` is the one place `status: undefined` is interpreted, so the
 // coach's screen and this one agree about what a called-off class is. This
 // screen read no status at all: a class the gym had cancelled kept its spaces
@@ -68,6 +69,15 @@ export default function Classes() {
     }
     return groups;
   }, [filtered]);
+
+  // One booking at a time — `send.busy` disables every Book button on the
+  // screen while one is in flight, because a seat is a scarce thing and two
+  // requests racing is how a member ends up in two classes at once. `booking`
+  // is which class that is, so only the row actually being booked says
+  // "Booking…" — the others are simply not pressable, rather than all claiming
+  // to be doing something.
+  const [booking, setBooking] = useState<string | null>(null);
+  const send = useSubmitOnce('classes.book');
 
   const onBook = async (c: GymClass) => {
     const st = await book(c.id);
@@ -279,7 +289,17 @@ export default function Classes() {
                       {off ? null : mine ? (
                         <Ghost label={mine === 'waitlist' ? 'Leave Waitlist' : 'Cancel'} onPress={() => onCancel(c)} />
                       ) : (
-                        <Cta label={full ? 'Join Waitlist' : 'Book'} onPress={() => onBook(c)} />
+                        // Guarded. A seat is a scarce thing and `book` is a
+                        // server round trip with no feedback on the button
+                        // while it runs, so a member who taps again puts a
+                        // second registration in — and at most gyms an unused
+                        // seat is a no-show charge. See src/lib/submitOnce.ts.
+                        <Cta label={booking === c.id ? (full ? 'Joining…' : 'Booking…') : full ? 'Join Waitlist' : 'Book'}
+                          disabled={send.busy}
+                          onPress={() => send.run(async () => {
+                            setBooking(c.id);
+                            try { await onBook(c); } finally { setBooking(null); }
+                          })} />
                       )}
                     </View>
                   </View>

@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Repple — the operating record for gyms, coaches and the people they train</title>
   <link rel="canonical" href="https://www.repplefitness.com/">
 <meta name="description" content="One system, three ways in. Repple keeps the training record for members, the client book for coaches, and the whole operating picture for the gym that runs them both.">
@@ -24,9 +29,41 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<!-- Structured data, deliberately kept to the two things nothing in the product
+     decides: who publishes this site and where it lives. It does NOT describe
+     the apps, and in particular it carries no price, no rating and no feature
+     list — every one of those is a claim that would have to be held against the
+     code, and a claim buried in a script tag is the kind nobody re-reads when
+     the code moves. The visible page is where product claims belong, because
+     that is what gets audited. `email` and `name` are the only strings here
+     that also appear on the page; both are in the footer of every page. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://www.repplefitness.com/#org",
+      "name": "Repple",
+      "legalName": "Washateria LLC",
+      "url": "https://www.repplefitness.com/",
+      "logo": "https://www.repplefitness.com/apple-touch-icon.png",
+      "email": "support@repplefitness.com"
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://www.repplefitness.com/#site",
+      "url": "https://www.repplefitness.com/",
+      "name": "Repple",
+      "publisher": { "@id": "https://www.repplefitness.com/#org" },
+      "inLanguage": "en"
+    }
+  ]
+}
+</script>
 <script>
 /* The phone header. Links collapse behind one button; without JavaScript they
    simply stay in the bar and wrap, which is why the collapsed state is gated on
@@ -87,7 +124,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main id="main">
+<main id="main" tabindex="-1">
 
 <!-- ── hero ──────────────────────────────────────────────────────────── -->
 <section class="hero">
@@ -434,14 +471,14 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <div class="scroll" style="margin-bottom:22px">
+    <div class="scroll" tabindex="0" style="margin-bottom:22px">
       <table class="data compare">
         <thead>
           <tr>
-            <th></th>
-            <th class="app c-client"><span class="kick">Repple</span><span class="nm">For members</span><span class="who">You train.</span></th>
-            <th class="app c-coach"><span class="kick">Repple Coach</span><span class="nm">For coaches</span><span class="who">You have clients.</span></th>
-            <th class="app c-studio"><span class="kick">Repple Studio</span><span class="nm">For gyms</span><span class="who">You run the place.</span></th>
+            <th scope="col"></th>
+            <th scope="col" class="app c-client"><span class="kick">Repple</span><span class="nm">For members</span><span class="who">You train.</span></th>
+            <th scope="col" class="app c-coach"><span class="kick">Repple Coach</span><span class="nm">For coaches</span><span class="who">You have clients.</span></th>
+            <th scope="col" class="app c-studio"><span class="kick">Repple Studio</span><span class="nm">For gyms</span><span class="who">You run the place.</span></th>
           </tr>
         </thead>
         <tbody>
@@ -496,17 +533,17 @@ addEventListener('DOMContentLoaded', function () {
     <div class="flow">
       <div class="node c-client">
         <div class="cap">Member logs</div>
-        <h4>The work that happened</h4>
+        <h3>The work that happened</h3>
         <p>Sets, reps, load, effort, cardio, time in heart-rate zone. Imported from the watch or typed in by hand.</p>
       </div>
       <div class="node c-coach">
         <div class="cap">Coach sees</div>
-        <h4>Who is drifting</h4>
+        <h3>Who is drifting</h3>
         <p>Not a wall of numbers — the three clients whose pattern changed this week, and what changed.</p>
       </div>
       <div class="node c-studio">
         <div class="cap">Owner sees</div>
-        <h4>What it costs and earns</h4>
+        <h3>What it costs and earns</h3>
         <p>Sessions delivered, classes filled, payroll owed, memberships lapsing. The same events, priced.</p>
       </div>
     </div>
@@ -617,10 +654,10 @@ addEventListener('DOMContentLoaded', function () {
       </p>
     </div>
 
-    <div class="scroll">
+    <div class="scroll" tabindex="0">
       <table class="data vs">
         <thead>
-          <tr><th>The job</th><th>Spreadsheet, printout, group chat</th><th>Repple</th></tr>
+          <tr><th scope="col">The job</th><th scope="col">Spreadsheet, printout, group chat</th><th scope="col">Repple</th></tr>
         </thead>
         <tbody>
           <tr>
@@ -705,6 +742,19 @@ addEventListener('DOMContentLoaded', function () {
         <div class="cap">Shared functions</div>
         <h3>One implementation per figure</h3>
         <p>The web console and the phone app call the same functions over the same rows through the same permissions. A number cannot read one way on the desk and another way on the owner's phone, because there is only one of it.</p>
+      </div>
+      <!-- Two things the product does that this site had never once mentioned.
+           Both are load-bearing for the people it is written for: a member
+           logging in a basement, and an owner who does not price in dollars. -->
+      <div class="tile">
+        <div class="cap">Signal</div>
+        <h3>A basement is not a lost set</h3>
+        <p>A write nobody answered is kept on the phone, stays in your log, and goes up on the next launch that reaches a server. A write the server actually <em>refused</em> is a different event: it is dropped and named, rather than sitting in a queue being retried for the life of the install. Until the row is on the server the app does not call it saved.</p>
+      </div>
+      <div class="tile">
+        <div class="cap">Currency</div>
+        <h3>The gym's own, or a dash</h3>
+        <p>There is no default currency in the system. A gym picks one of forty and everything written after that is denominated in it; until one is picked, an amount renders as a dash and asks, rather than as a number in somebody else's money. Change it later and nothing already recorded is re-denominated — a total that would mix two currencies is withheld rather than added up.</p>
       </div>
     </div>
   </div>
@@ -795,7 +845,7 @@ addEventListener('DOMContentLoaded', function () {
         </p>
       </div>
       <div>
-        <h5>Apps</h5>
+        <h2 class="fh">Apps</h2>
         <ul>
           <li><a href="/client">Repple</a></li>
           <li><a href="/trainer">Repple Coach</a></li>
@@ -803,7 +853,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Getting started</h5>
+        <h2 class="fh">Getting started</h2>
         <ul>
           <li><a href="/how-it-works">How it works</a></li>
           <li><a href="/pricing">Pricing</a></li>
@@ -813,7 +863,7 @@ addEventListener('DOMContentLoaded', function () {
         </ul>
       </div>
       <div>
-        <h5>Legal &amp; data</h5>
+        <h2 class="fh">Legal &amp; data</h2>
         <ul>
           <li><a href="/privacy">Privacy</a></li>
           <li><a href="/terms">Terms</a></li>

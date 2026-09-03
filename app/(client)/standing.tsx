@@ -119,6 +119,24 @@ export default function StandingAppointments() {
   // was outside the gesture — so a gym that changed its notice period was still
   // being quoted the old one however often the member pulled.
   const { policy: cancelPolicy, status: policyStatus, reload: reloadPolicy } = useCancellationPolicy();
+  /**
+   * The policy, or nothing — never a value we did not confirm.
+   *
+   * This screen already wrote the rule twice and then applied it in three
+   * places out of five. `endPolicy` below carries it: "a policy this app could
+   * not read must not be reported as 'no fee'". `doPause` carries it. `cancelOne`
+   * did NOT — it passed `cancelPolicy` raw into the warning a member reads
+   * before cancelling and into the helper that decides whether their credit
+   * comes back — so after a failed reload one half of this screen treated the
+   * policy as unknown while the other half quoted a fee off it as fact. Two
+   * answers about one gym's rule, on one screen, about somebody's money.
+   *
+   * `useCancellationPolicy` sets 'error' on a failed reload WITHOUT clearing the
+   * value, so the raw variable can hold a genuinely last-known policy. That is
+   * exactly what makes the divergence invisible in testing and wrong in a lift.
+   * One name, used everywhere, so there is nothing left to forget.
+   */
+  const readPolicy: CancellationPolicy | null = policyStatus === 'ready' ? cancelPolicy : null;
   const pull = usePullToRefresh(useCallback(() => { void reloadSeries(); void refreshSessions(); void reloadPauses(); reloadPolicy(); }, [reloadSeries, refreshSessions, reloadPauses, reloadPolicy]));
   const cd = useClientData();
 
@@ -261,12 +279,24 @@ export default function StandingAppointments() {
     // slot, or a one-off Friday booking, was shown a money claim over a set the
     // pause was never going to touch. See `seriesOccurrencesIn`.
     const inRange = seriesOccurrencesIn(sessions, s, now, untilMs);
-    const notice = noticeHoursOf(policyStatus === 'ready' ? cancelPolicy : null);
+    const notice = noticeHoursOf(readPolicy);
     const late = inRange.filter((x) => insideNoticeWindow(x.startsAt, notice)).length;
     // A policy that could not be read is passed as null, never softened into
     // "no fee" — that is the sentence this whole family of screens exists to
     // stop being printed by accident.
-    const preview = pausePreviewLine(inRange.length, late, policyStatus === 'ready' ? cancelPolicy : null);
+    // `isWhole`, not a bare list. `inRange` is counted out of THIS DEVICE'S
+    // calendar, and `useSessions` publishes 'error' for a read that failed and
+    // 'partial' for one PostgREST cut off at its row cap. Under either, an
+    // empty or short `inRange` produced two sentences that are money claims
+    // above a destructive confirm: "we do not expect anything to be cancelled",
+    // and — worse, because it names the cost — "All of them are outside your
+    // coach's notice period, so this costs nothing." This screen states the
+    // rule 100 lines below and applies it to the OTHER count on it: "`upcoming`
+    // is the count the SERVER reports for the arrangement, never one counted
+    // out of `sessions` here: this device's calendar is capped, and a capped
+    // read would understate how many sessions are about to be removed." The
+    // pause preview is the same read and the same risk.
+    const preview = pausePreviewLine(inRange.length, late, readPolicy, isWhole(sessionsStatus));
 
     Alert.alert(
       `Pause for ${label}?`,
@@ -316,9 +346,9 @@ export default function StandingAppointments() {
     // Captured before the alert and passed through, so the rule the member is
     // warned under is the rule that decides whether their credit comes back.
     const asked = Date.now();
-    const warn = cancelWarningFor(one.startsAt, cancelPolicy, asked);
+    const warn = cancelWarningFor(one.startsAt, readPolicy, asked);
     const doCancel = async () => {
-      const out = await cancelBookedSession(one, cancelMyBooking, asked, cancelPolicy);
+      const out = await cancelBookedSession(one, cancelMyBooking, asked, readPolicy);
       if (!out.freed) {
         Alert.alert(
           'Not cancelled',
@@ -361,7 +391,7 @@ export default function StandingAppointments() {
    * counted out of `sessions` here: this device's calendar is capped, and a
    * capped read would understate how many sessions are about to be removed.
    */
-  const endPolicy: CancellationPolicy | null = policyStatus === 'ready' ? cancelPolicy : null;
+  const endPolicy = readPolicy;
   const endNext = endFor ? nextOccurrenceOf(endFor) : null;
   const options: CancelOption[] = endFor
     ? cancelOptions({ startsAt: endFor.nextAt ?? '', policy: endPolicy, upcoming: endFor.upcoming })

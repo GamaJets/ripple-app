@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": { "outDir": ".tmp-lane" },
+  "files": ["src/lib/blockPlan.ts", "src/lib/blockPlan.test.ts", "src/lib/templateUsage.ts", "src/lib/templateUsage.test.ts", "src/lib/chaseList.ts", "src/lib/chaseList.test.ts"]
+}

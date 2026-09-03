@@ -5,24 +5,52 @@
 // 'loading' for the life of the mount. Home then says "Reading your training
 // log…" over dashes for ever, and the notice it already has written for a read
 // that failed is unreachable. See src/lib/readDeadline.ts for the mechanism.
-import { READ_DEADLINE_MS, stalled, escalate, withDeadline, type Deadlined } from './readDeadline';
-import type { Timers } from './deadline';
+import { READ_DEADLINE_MS, stalled, escalate, withDeadline, type Deadlined, type Timers } from './readDeadline';
 import type { LoadStatus } from '../ui/loadStatus';
+import { CALL_CEILING_MS, maxAttempts } from './requestTimeout';
+import { MAX_SPIN_MS } from './pullRefresh';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
-/* ── the ceiling itself ────────────────────────────────────────────────── */
+/* ── the ceiling itself, and the order of the three ────────────────────── */
+//
+// This app has three ceilings and they must fire in this order, because each
+// one is a claim the next one depends on:
+//
+//   MAX_SPIN_MS      ends the wheel and hands the gesture back
+//   CALL_CEILING_MS  ends the request and draws the offline banner
+//   READ_DEADLINE_MS lets the screen stop calling itself busy
+//
+// Every inversion of that order puts a wrong sentence in front of somebody, and
+// the assertions below are what stop one being introduced by a plausible edit
+// to a constant in another file.
 
-// Longer than the pull-to-refresh spinner's ceiling (MAX_SPIN_MS, 20s), and in
-// that order on purpose: the wheel hands the gesture back first, and only then
-// does the screen say the read failed. Reversed, "we couldn't read your log"
-// would appear under a wheel still claiming to be reading it.
-ok(READ_DEADLINE_MS > 20_000, 'the read ceiling is past the spinner ceiling');
-// And far past any honest read on a mobile network — this must never cut off a
-// request that was going to answer.
-ok(READ_DEADLINE_MS >= 20_000 && READ_DEADLINE_MS <= 60_000, 'the read ceiling is a plausible wait, not a timeout in disguise');
+// Past the pull-to-refresh spinner's ceiling. Reversed, "we couldn't read your
+// log" would appear under a wheel still claiming to be reading it.
+ok(READ_DEADLINE_MS > MAX_SPIN_MS, 'the read deadline is past the spinner ceiling');
+
+// And past the transport's own worst case for a read that is going to SUCCEED:
+// one attempt cut off at the ceiling, and the retry behind it. This is the
+// assertion that matters most. Below this line the screen prints a failure over
+// a request that is still in flight and may be about to answer — the flash
+// src/ui/clientData.tsx forbids in its own words — and it is an easy line to
+// cross by hand, because 25 seconds looks like a perfectly sensible number
+// until you know the transport retries.
+ok(READ_DEADLINE_MS > CALL_CEILING_MS * maxAttempts('GET'),
+  'the read deadline is past the transport ceiling times its retries, so a screen never calls a live retry a failure');
+
+// A GET is the read. A write is not retried, and nothing routes a write
+// through this module — if that ever changes, the arithmetic above is the
+// wrong arithmetic and this pins the assumption.
+eq(maxAttempts('GET'), 2, 'a read is attempted twice, which is what the deadline is sized against');
+eq(maxAttempts('POST'), 1, 'a write is sent once');
+
+// Not unbounded either: a person watching a screen call itself busy for three
+// minutes has learned nothing the offline banner did not tell them at thirty
+// seconds.
+ok(READ_DEADLINE_MS <= 120_000, 'the read deadline is still a wait somebody could sit through');
 
 /* ── stalled: only a read still in flight can be stalled ───────────────── */
 
@@ -69,10 +97,10 @@ eq(escalate('error', false), 'error', 'a read that already failed stays failed i
 
 /* ── withDeadline ──────────────────────────────────────────────────────── */
 //
-// The timer and the DeadlineExceeded class live in src/lib/deadline.ts and are
-// tested there. What is pinned here is the RETURN SHAPE this wrapper exists
-// for: a client screen branching on a value rather than catching an exception,
-// and the one kind of throw that must still reach it.
+// A screen branches on a VALUE here rather than catching an exception, and the
+// one kind of throw that must still reach it is a refusal — because a server
+// that said no and a server that said nothing get opposite treatment
+// everywhere else in this codebase.
 
 // A fake clock, so nothing here waits on a real timer and a twenty-five second
 // ceiling can be crossed on demand.
@@ -127,6 +155,22 @@ const settle = () => new Promise<void>((r) => { setImmediate(() => r()); });
     eq((await p).answered, false, 'and it fires');
   }
 
+  /* no usable ceiling means NO ceiling, never an instant failure */
+  {
+    // The guard matters because the alternative is catastrophic rather than
+    // merely wrong: a ceiling of zero arms a timer that fires on the next tick,
+    // so every read in the app would come back unanswered while the server was
+    // answering all of them.
+    const clock = makeClock();
+    const got = await withDeadline(Promise.resolve('x'), { ms: 0, timers: clock.timers });
+    eq(got.answered, true, 'a zero ceiling does not fail a read that answers');
+    eq(clock.armedAt().length, 0, 'a zero ceiling arms no timer at all');
+    const clock2 = makeClock();
+    const got2 = await withDeadline(Promise.resolve('y'), { ms: Number.NaN, timers: clock2.timers });
+    eq(got2.answered, true, 'an unreadable ceiling does not fail a read that answers');
+    eq(clock2.armedAt().length, 0, 'an unreadable ceiling arms no timer either');
+  }
+
   /* a refusal is not a silence */
   {
     const clock = makeClock();
@@ -135,7 +179,7 @@ const settle = () => new Promise<void>((r) => { setImmediate(() => r()); });
     try {
       await withDeadline(Promise.reject(refused), { ms: 25_000, timers: clock.timers });
     } catch (e) { threw = e; }
-    eq(threw, refused, 'a rejection that is not a deadline passes straight through, so a refusal stays distinguishable from a silence');
+    eq(threw, refused, 'a rejection passes straight through, so a refusal stays distinguishable from a silence');
     eq(clock.live(), 0, 'the ceiling is cancelled by a rejection too');
   }
 

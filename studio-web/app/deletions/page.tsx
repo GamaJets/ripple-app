@@ -108,10 +108,34 @@ export default function Deletions() {
     let logWhole = false;
 
     const [q, l] = await Promise.allSettled([
-      supabase
-        .from('pending_deletions')
-        .select('subject_id, full_name, role, deletion_requested_at, days_remaining')
-        .order('deletion_requested_at', { ascending: true }),
+      // Read whole, for the same reason the log below it is — and it took
+      // longer to get here than that one did. This was a bare `.select()` with
+      // no `.limit` and no paging, so PostgREST answered with at most a
+      // thousand rows, no error and no flag, and the three tiles built from it
+      // reported a prefix as a total: "Waiting" is `rows.length` and "Past
+      // thirty days" is `overdue.length`.
+      //
+      // The order is what makes that worse rather than merely wrong. It is
+      // `deletion_requested_at` ASCENDING, so the rows a truncation drops are
+      // the NEWEST requests — the ones whose thirty days have most recently
+      // started, on a clock that is statutory. A gym over the ceiling would
+      // have been told a smaller number of people were waiting than actually
+      // are, and the ones it did not mention would be the ones it had heard
+      // from most recently.
+      //
+      // `subject_id` is the tiebreaker, not decoration: `readAll` walks the set
+      // in ranges, and two rows requested in the same tick with no second key
+      // can swap between pages — which duplicates one and drops the other. The
+      // queue is one row per subject, so this orders it totally.
+      readAll<any>(
+        (from, to) => supabase
+          .from('pending_deletions')
+          .select('subject_id, full_name, role, deletion_requested_at, days_remaining')
+          .order('deletion_requested_at', { ascending: true })
+          .order('subject_id', { ascending: true })
+          .range(from, to),
+        'the people waiting to be erased',
+      ),
       // Read whole rather than to a ceiling. The count under this table is what
       // an owner would quote to a regulator, and `.limit(50)` printed as a
       // total is a number about a query rather than about the gym.
@@ -132,8 +156,16 @@ export default function Deletions() {
     // `data: null`, falls through `?? []`, and renders as "nobody is waiting":
     // a gym told it has no obligations because a read failed. That false
     // all-clear is the single worst thing this screen could do.
-    if (q.status === 'fulfilled' && !q.value.error) {
-      setQueue((q.value.data ?? []).map((r: any) => ({
+    // `readAll` throws on a database error rather than handing one back, so a
+    // refused read arrives here as a REJECTION and there is no `.error` left to
+    // check. The paragraph above still holds and is why this is written as one
+    // branch rather than two: a refusal must never reach the `?? []` that would
+    // render it as "nobody is waiting". It also throws `TruncatedRead` on a
+    // queue past the paging ceiling, which lands in the same place — a queue
+    // too large to read whole is a queue this screen must not put a number
+    // under, for the same reason a prefix was not one.
+    if (q.status === 'fulfilled') {
+      setQueue(q.value.map((r: any) => ({
         subjectId: String(r.subject_id),
         name: r.full_name ?? null,
         role: r.role ?? null,
@@ -144,7 +176,7 @@ export default function Deletions() {
       queueWhole = true;
     } else {
       setQueue(null);
-      const why = q.status === 'rejected' ? q.reason?.message : (q.value as any).error?.message;
+      const why = q.reason?.message;
       setQueueWhy(`The erasure queue did not come back${why ? `: ${why}` : '.'} This is not a gym with nobody waiting — the clock is still running on anybody who has asked.`);
     }
 

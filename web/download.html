@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Get the apps — Repple</title>
   <link rel="canonical" href="https://www.repplefitness.com/download">
 <meta name="description" content="Repple, Repple Coach and Repple Studio — which one you need, and how to get it.">
@@ -24,7 +29,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -113,7 +118,7 @@ addEventListener('DOMContentLoaded', function () {
       <a href="/trainer">Coaches</a>
       <a href="/studio">Gyms</a>
       <a href="/support">Support</a>
-      <a class="get" href="/download"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
+      <a class="get" href="/download" aria-current="page"><svg class="getico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="6.6" y="2.5" width="10.8" height="19" rx="2.6"/><path d="M12 8.6v6.2"/><path d="M9.5 12.3 12 14.8l2.5-2.5"/></svg>Get the app</a>
       </div>
       <a class="cta" href="/signup">Create account</a>
       <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
@@ -124,7 +129,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main id="main">
+<main id="main" tabindex="-1">
   <div class="wrap page">
 
     <p class="eyebrow">Get the apps</p>
@@ -296,13 +301,53 @@ addEventListener('DOMContentLoaded', function () {
 
 <footer class="site">
   <div class="wrap">
-    <span>© 2026 Repple</span>
-    <span>
-      <a href="/support">Support</a> ·
-      <a href="/privacy">Privacy</a> ·
-      <a href="/security">Security</a> ·
-      <a href="/terms">Terms</a>
-    </span>
+    <div class="cols">
+      <div>
+        <a class="brand" href="/">
+          <span class="mark">
+            <svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true">
+              <g fill="none" stroke="#04211d" stroke-width="8"><circle cx="50" cy="50" r="32" opacity=".45"/><circle cx="50" cy="50" r="20" opacity=".75"/></g>
+              <circle cx="50" cy="50" r="8.5" fill="#04211d"/>
+            </svg>
+          </span>
+          Repple
+        </a>
+        <p class="tiny" style="margin-top:14px;max-width:34ch">
+          The operating record for gyms, the coaches who work in them, and the people they train.
+        </p>
+      </div>
+      <div>
+        <h2 class="fh">Apps</h2>
+        <ul>
+          <li><a href="/client">Repple</a></li>
+          <li><a href="/trainer">Repple Coach</a></li>
+          <li><a href="/studio">Repple Studio</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Getting started</h2>
+        <ul>
+          <li><a href="/how-it-works">How it works</a></li>
+          <li><a href="/pricing">Pricing</a></li>
+          <li><a href="/signup">Create account</a></li>
+          <li><a href="/forgot-password">Reset password</a></li>
+          <li><a href="/support">Support</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="fh">Legal &amp; data</h2>
+        <ul>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/security">Security &amp; data</a></li>
+          <li><a href="mailto:support@repplefitness.com">Contact</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="base">
+      <span>© 2026 Repple · Operated by Washateria LLC</span>
+      <span><a href="mailto:support@repplefitness.com">support@repplefitness.com</a></span>
+    </div>
   </div>
 </footer>
 

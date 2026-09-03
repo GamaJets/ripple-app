@@ -18,6 +18,7 @@ import { useSettings } from '../../src/ui/settings';
 import { est1RMIn, liftLabel, convertedNote } from '../../src/lib/units';
 import { personalRecords } from '../../src/lib/streaks';
 import { repRecords, bodyweightSetLabel } from '../../src/lib/bodyweightSets';
+import { bestSetLabel } from '../../src/lib/bestSet';
 import { holdRecords, holdLabel, timedSetLabel } from '../../src/lib/timedSets';
 import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -92,12 +93,24 @@ export default function Records() {
   * out to somebody. Every clause here is withheld when its figure is not there,
   * which is the same rule the visible figures on this screen already follow.
   */
+ /** The record's load in the reader's own unit, or null when it could not be
+  *  read. The unit is appended only for the SPOKEN sentence: on screen the
+  *  column beside it already says "est 1RM · kg", and the row has been read
+  *  without a repeated unit since it was built. */
+ const setLoad = (pr: { weight: number }, voice: 'screen' | 'spoken' = 'screen'): string | null => {
+  const l = liftLabel(pr.weight, wu);
+  return l == null ? null : voice === 'spoken' ? `${l} ${wu}` : String(l);
+ };
+ /** What was hung, belted or held on top, in the reader's unit — null when
+  *  nothing was, or when the figure itself could not be read. Null rather than
+  *  a dash: "at bodyweight +— kg" is worse than "at bodyweight". */
+ const setAdded = (pr: { addedKg?: number }): string | null => {
+  if (!pr.addedKg) return null;
+  const a = liftLabel(pr.addedKg, wu);
+  return a == null ? null : `${a} ${wu}`;
+ };
  const prSpoken = (pr: ReturnType<typeof personalRecords>[number], rank: number): string => {
-  const load = liftLabel(pr.weight, wu);
-  const added = pr.addedKg ? liftLabel(pr.addedKg, wu) : null;
-  const best = pr.bodyweight
-   ? bodyweightSetLabel(pr.reps, pr.addedKg ?? 0, added != null ? `${added} ${wu}` : null)
-   : (load != null ? `${load} ${wu} by ${pr.reps} reps` : `${pr.reps} reps`);
+  const best = bestSetLabel(pr, setLoad(pr, 'spoken'), setAdded(pr), 'spoken');
   const one = est1RMIn(pr.est1RM, wu);
   const parts = [`${rank}. ${pr.exercise}`];
   if (one != null) parts.push(`estimated one rep max ${one} ${wu}`);
@@ -223,7 +236,14 @@ export default function Records() {
     label={logStatus === 'partial' ? 'Heaviest Read' : 'Heaviest Lift'}
     figure={fig(est1RMIn(top.est1RM, wu))}
     unit={`${wu} est. 1RM`}
-    note={`${top.exercise} · best set ${fig(liftLabel(top.weight, wu))} × ${top.reps} on ${dstr(top.at)}`}
+    // Through `bestSetLabel`, like the row below and the spoken label above.
+    // This line used to build the phrase by hand and skipped `PR.bodyweight`
+    // doing it, so an 84 kg member's weighted pull-up was announced here as
+    // "best set 104 kg × 12" — a load that is partly their own weigh-in,
+    // presented as a bar — while the row eleven lines down read "12 reps at
+    // bodyweight +20 kg" about the very same set. The hero is the figure people
+    // quote. See src/lib/bestSet.ts.
+    note={`${top.exercise} · best set ${bestSetLabel(top, setLoad(top), setAdded(top))} on ${dstr(top.at)}`}
    />
    {/* The board is kept in kilograms and read out in pounds, so the figures
        here and the ones on a coach's console are the same lifts said twice
@@ -244,7 +264,7 @@ export default function Records() {
       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{i + 1}</Text>
       <View style={{ flex: 1 }}>
        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{pr.exercise}</Text>
-       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>Best set {pr.bodyweight ? bodyweightSetLabel(pr.reps, pr.addedKg ?? 0, pr.addedKg ? `${fig(liftLabel(pr.addedKg, wu))} ${wu}` : null) : `${fig(liftLabel(pr.weight, wu))} × ${pr.reps}`} · {dstr(pr.at)}</Text>
+       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>Best set {bestSetLabel(pr, setLoad(pr), setAdded(pr))} · {dstr(pr.at)}</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
        <Text style={{ ...value(17), color: t.ink }}>{fig(est1RMIn(pr.est1RM, wu))}</Text>

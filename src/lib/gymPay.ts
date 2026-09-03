@@ -52,6 +52,9 @@
 import { assertWhole, capLimit, readAll } from './rowCap';
 import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
+// Whether every session the run paid for actually came loose. The three
+// unstamps below asked for a row count and read none of them.
+import { unstampBlocker } from './unstampCheck';
 import { sharedCurrency } from './gymRecord';
 // The one reader for a typed amount in this product. See parseRate.
 import { readMinorAmount } from './coachMoney';
@@ -918,10 +921,43 @@ export function runCurrencyBlocker(parts: Array<string | null>): string | null {
 export async function reverseSettlement(
   sb: Queryable, settlementId: string, reason: string, by: string | null,
 ): Promise<void> {
+  // What the run says it paid for, read BEFORE anything is written.
+  //
+  // `payroll_settlements.sessions_count` is NOT NULL and `recordSettlement`
+  // writes it as `uniqueIds(run.sessionIds).length` — a count of rows, measured
+  // against the stamp itself. It is therefore the exact number of session rows
+  // that have to come loose here, and it is the only number available that does
+  // not depend on which rows this account can see. See src/lib/unstampCheck.ts
+  // for why counting the rows we could reach would only ever tell us about the
+  // rows we could reach.
+  const claim = await sb.from('payroll_settlements')
+    .select('sessions_count')
+    .eq('id', settlementId)
+    .single();
+  if (claim.error) throw claim.error;
+  const claimed = (claim.data as { sessions_count?: number } | null)?.sessions_count;
+  if (typeof claimed !== 'number') {
+    throw new Error(
+      'This run was not taken back. How many sessions it paid for could not be read, and '
+      + 'unstamping without that number cannot be checked. Nothing has been changed.',
+    );
+  }
+
   const s = await sb.from('sessions')
     .update({ settlement_id: null }, { count: 'exact' })
     .eq('settlement_id', settlementId);
   if (s.error) throw s.error;
+  // The count was already being ASKED for on this write and then dropped. Every
+  // policy on these tables is a `USING` clause and a `USING` clause filters, so
+  // a session row this account cannot update is not refused — it is invisible,
+  // and the update returns 204 with a null error having changed nothing.
+  //
+  // Thrown here, before the settlement is touched, so the state left behind is
+  // the one this function's own ordering argument was written to preserve: the
+  // run still stands, still reads as paid, nothing has been stranded, and
+  // pressing the button again is safe.
+  const shortfall = unstampBlocker(claimed, s.count ?? null);
+  if (shortfall) throw new Error(shortfall);
 
   const c = await sb.from('gym_class_pay')
     .update({ settlement_id: null }, { count: 'exact' })

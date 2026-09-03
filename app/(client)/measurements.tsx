@@ -28,6 +28,7 @@ import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
+import { useSubmitOnce } from '../../src/ui/submitOnce';
 import { useToast } from '../../src/ui/toast';
 import { useMeasurements, METRICS, type MeasureEntry, type MetricKey } from '../../src/ui/measurements';
 import { hitSlopFor } from '../../src/lib/a11y';
@@ -136,6 +137,8 @@ export default function Measurements() {
    ],
   );
  };
+
+ const send = useSubmitOnce('measurements.save');
 
  const save = async () => {
  const parsed: Record<string, number> = {};
@@ -284,7 +287,15 @@ export default function Measurements() {
    ))}
    {note ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{note}</Text> : null}
    <View style={{ height: sp.sm }} />
-   <Cta label="Save Entry" wide onPress={save} />
+   {/* Guarded. `addEntry` inserts a fresh row set on every call, and this
+     provider's own header explains why the duplicate is then invisible:
+     "rowsToEntries groups by taken_at and the last row of a kind wins, so the
+     screen draws one entry either way and nobody can see the duplicate". Two
+     taps in the wait also make `latest` and `prev` the same morning, so every
+     delta on this screen collapses to zero and the real change since the last
+     measurement disappears — the member's whole reason for taking the tape
+     out. See src/lib/submitOnce.ts. */}
+   <Cta label={send.busy ? 'Saving…' : 'Save Entry'} disabled={send.busy} wide onPress={() => send.run(save)} />
   </Section>
 
   <Rule />

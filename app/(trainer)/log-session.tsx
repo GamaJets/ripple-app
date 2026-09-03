@@ -90,7 +90,7 @@
 //     FOR the person whose training this is, so a picker that could point an
 //     hour at somebody else's booking is a refused insert at best. With a
 //     session in hand the client is the session's, stated and not chosen.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -300,6 +300,29 @@ export default function LogSession() {
   const [picker, setPicker] = useState(false);
   const [custom, setCustom] = useState('');
   const [busy, setBusy] = useState(false);
+  /**
+   * The same fact as `busy`, held where a second tap in the same frame can see
+   * it.
+   *
+   * `busy` is React state. It is set inside `save`, which has already awaited
+   * by the time the setter's re-render lands, so two taps a frame apart BOTH
+   * read `busy === false` and both run — and the only thing between them was
+   * `pointerEvents`, computed from that same state and therefore stale in
+   * exactly the frame that matters.
+   *
+   * What the second run costs is written out at length inside `save` itself:
+   * `queue.attempt` sends straight to the server when there is signal, with no
+   * idempotency key anywhere on the path, so it is a second `workouts` insert
+   * of the same entries — "the same hour of somebody else's training in their
+   * history twice", which "the client cannot delete: their coach typed them".
+   * The queue's `supersedeKey` does not help, because it collapses acts that
+   * are WAITING on the phone and these two were both sent.
+   *
+   * A ref rather than a longer-lived lock: it is set and cleared in the same
+   * function, and a tap that arrives while a save is genuinely in flight is
+   * the only thing it refuses.
+   */
+  const saving = useRef(false);
   const [failure, setFailure] = useState<string | null>(null);
 
   const pickedRow = r.roster.find((c) => c.id === picked) ?? null;
@@ -414,6 +437,18 @@ export default function LogSession() {
   const ready = picked != null && hasSets && loadProblem() == null && whenProblem == null;
 
   const save = async () => {
+    // Synchronous, before the first await — see `saving`. This is the whole of
+    // the protection: there is no second one on the server.
+    if (saving.current || busy) return;
+    saving.current = true;
+    try {
+      await runSave();
+    } finally {
+      saving.current = false;
+    }
+  };
+
+  const runSave = async () => {
     // The instant the session is filed under, settled ONCE and reused for every
     // entry. Once, and not per call, because it is also what identifies this
     // log to the offline queue — see `supersedeKey` in src/lib/floorQueue.ts.
@@ -926,7 +961,12 @@ export default function LogSession() {
             <View style={{ opacity: ready && !busy ? 1 : 0.4 }} pointerEvents={ready && !busy ? 'auto' : 'none'}>
               {/* The label says what the press does. With no session in hand it
                   is the sentence this screen has always shown. */}
+              {/* `disabled` as well as the `pointerEvents` above it. The
+                  wrapper stops a thumb and says nothing to a screen reader, so
+                  VoiceOver announced a live button through the whole save and
+                  a second activation landed on it. */}
               <Cta wide
+                disabled={!ready || busy}
                 label={busy
                   ? 'Saving…'
                   : sessionId ? finishCta(markDelivered, true) : `Log to ${first}'s record`}

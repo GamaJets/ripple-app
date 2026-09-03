@@ -50,29 +50,70 @@
 // live status, so a read that answers at thirty seconds publishes 'ready' and
 // the notice goes away on its own.
 //
-// ── The number ────────────────────────────────────────────────────────────
+// ── What this is now that the transport has a ceiling of its own ──────────
 //
-// Deliberately longer than pullRefresh's MAX_SPIN_MS (20s), and in that order
-// for a reason. On a pull, the spinner ends first and hands the gesture back;
-// five seconds later, if nothing has landed, the screen says why. The reverse
-// order would put "we couldn't read your log" on screen underneath a wheel
-// still claiming to be reading it.
+// src/lib/requestTimeout.ts closed the deeper half of this: every request now
+// goes out with an AbortController and a ceiling, so a socket nobody answers
+// becomes a labelled throw instead of an eternal wait, and the providers' own
+// `catch` blocks — which were correct all along and simply unreachable — run.
+// That is the better fix and it covers every read that goes through
+// `observedFetch`.
 //
-// Nothing that is going to answer is cut off by this: it is far past any honest
-// read this app makes on a mobile network, and the only read it changes is one
-// that was never going to end.
+// This is the backstop for the residue, and the residue is real:
+//
+//   · a provider's status is moved by CODE, not by a socket. A read that throws
+//     into a path with no `setStatus('error')` on it, or an `await` on
+//     something that is not a fetch at all — AsyncStorage, a native module, a
+//     permission prompt — leaves the status exactly where the hung socket used
+//     to leave it;
+//   · `withDeadline` below gives a screen that owns its own `Promise.all` a
+//     value to branch on rather than an exception to remember to catch.
+//
+// It is deliberately the SLOWEST of the three ceilings in this app, and the
+// ordering is load-bearing. pullRefresh's MAX_SPIN_MS (20s) ends the wheel and
+// hands the gesture back. requestTimeout's CALL_CEILING_MS (30s, retried once
+// for a GET) ends the request and draws the offline banner. Only after all of
+// that has been tried does a screen stop calling itself busy. Any other order
+// puts a failure sentence on screen over a request that is still going.
 
 import type { LoadStatus } from '../ui/loadStatus';
-import { READ_DEADLINE_MS, isDeadlineExceeded, withDeadline as raceDeadline, type Timers } from './deadline';
+import { CALL_CEILING_MS, maxAttempts } from './requestTimeout';
 
-// The ceiling itself is NOT declared here. src/lib/deadline.ts owns it, and its
-// header makes the same argument about the same condition for the console — a
-// captive portal at a gym's front desk, a socket accepted and then answered
-// never. One number, one place: two constants called READ_DEADLINE_MS in one
-// folder is how a phone and a console end up disagreeing about how long a
-// member's phone should wait, and there is no version of that disagreement
-// anybody would have chosen on purpose.
-export { READ_DEADLINE_MS } from './deadline';
+/**
+ * How long a screen's status may sit at 'loading' before the screen stops
+ * calling itself busy and starts calling it a failure, in milliseconds.
+ *
+ * ── Why it is derived and not typed ───────────────────────────────────────
+ *
+ * Because the one way to get this number wrong is to put it BELOW the transport
+ * ceiling, and a literal cannot notice when somebody moves the other one.
+ *
+ * src/lib/requestTimeout.ts cuts a hung request off at CALL_CEILING_MS and
+ * retries a GET once, so the longest a read that is going to SUCCEED may
+ * legitimately take is one timed-out attempt plus a slow second one. A display
+ * deadline shorter than that prints "we could not read this" over a retry that
+ * is in flight and about to come back — which is the flash
+ * src/ui/clientData.tsx already forbids in its own words: "an attempt with
+ * another one behind it is still a read in flight, and saying 'error' in
+ * between would flash 'we couldn't read your profile' across every screen that
+ * reads this status and then take it back."
+ *
+ * requestTimeout.ts anticipated this file by name and said which number should
+ * move: "If the cascade is worth tidying, the number to move is the display
+ * deadline, not this one." This is that number, and it is written as the
+ * arithmetic so it moves on its own.
+ *
+ * ── Why a minute of silence is affordable ─────────────────────────────────
+ *
+ * Because it is not silence. The transport files its verdict per ATTEMPT, so
+ * the first timeout at thirty seconds already marks the app unreachable —
+ * `offlineBanner` appears, `canAssertEmpty` goes false, and every screen
+ * switches to the sentences it has for a phone that cannot reach us. This
+ * deadline is not how long before the member is told something is wrong. It is
+ * how long before a screen stops describing itself as busy, which must not
+ * happen while the app is still genuinely trying.
+ */
+export const READ_DEADLINE_MS = CALL_CEILING_MS * maxAttempts('GET') + 5_000;
 
 /**
  * True when a read has been in flight past the ceiling and has neither
@@ -120,37 +161,77 @@ export type Deadlined<T> =
   /** The ceiling passed first. The work may still settle later; nobody is waiting. */
   | { answered: false };
 
+/** The two timer functions, injected so a test does not have to wait
+ *  twenty-five seconds to find out what happens at twenty-five seconds. */
+export interface Timers {
+  setTimeout: (fn: () => void, ms: number) => unknown;
+  clearTimeout: (id: unknown) => void;
+}
+
+const realTimers: Timers = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
+};
+
 /**
  * A read that always comes back, for the call sites that own their own promise.
  *
- * A thin shape over `withDeadline` in src/lib/deadline.ts, which owns the timer
- * and the DeadlineExceeded class and is tested there. What this adds is the
- * RETURN SHAPE, and it is the difference between the two callers:
+ * ── Why a value and not an exception ──────────────────────────────────────
  *
- *   · the console throws, because every screen there already has a 'failed' arm
- *     holding the database's own sentence and wants a deadline to land in it;
- *   · a client screen holding `T | null | undefined` does not want an exception
- *     at all. `{ answered: false }` is a value it can branch on beside the
- *     answer it already had, which is what lets a stalled PULL leave a balance
- *     on screen while a stalled FIRST read says so. Wrapping that in try/catch
- *     at each call site is the version that gets written wrong once.
+ * Because of what the callers hold. A client screen keeps `T | null |
+ * undefined` — still reading, could not read, an answer — and branches on it in
+ * the render. `{ answered: false }` slots straight into that beside the answer
+ * it already had, which is what lets a stalled PULL leave a balance on screen
+ * while a stalled FIRST read says so. A throw would put that decision inside a
+ * catch at every call site, which is the version that gets written wrong once
+ * and blanks somebody's purchases.
  *
- * A REJECTION that is not a deadline is rethrown untouched, deliberately: a
- * refusal and a silence get opposite treatment everywhere else in this codebase
- * (src/lib/reachability.ts) and must not be flattened into each other here.
+ * A REJECTION passes straight through and is rethrown, deliberately: every
+ * caller already knows what a refused read means on its screen, and folding the
+ * error into `{ answered: false }` would flatten "the server said no" into "the
+ * server said nothing" — the distinction src/lib/reachability.ts exists to
+ * keep, and the one that decides whether a person is sent to their router.
+ *
+ * A late answer is not an unhandled rejection: both handlers are attached to
+ * `work` unconditionally and simply return once the ceiling has already won.
+ *
+ * Nothing here CANCELS the work. It cannot — it does not own the request, and
+ * there is no AbortController in this app to hand it. A read that answers at
+ * forty seconds still answers; nobody is waiting on it by then.
  */
-export async function withDeadline<T>(
+export function withDeadline<T>(
   work: Promise<T>,
   opts: { ms?: number; timers?: Timers } = {},
 ): Promise<Deadlined<T>> {
-  try {
-    // `wrote: false` — this is the READ half. Giving up on a write is a
-    // different sentence and deadline.ts says why; nothing routes a write
-    // through here.
-    const value = await raceDeadline(work, opts.ms ?? READ_DEADLINE_MS, false, undefined, opts.timers);
-    return { answered: true, value };
-  } catch (e) {
-    if (isDeadlineExceeded(e)) return { answered: false };
-    throw e;
-  }
+  const ms = opts.ms ?? READ_DEADLINE_MS;
+  const timers = opts.timers ?? realTimers;
+  // No usable ceiling means NO ceiling. Resolving as unanswered on the first
+  // tick would be far worse than the bug this file is about: every read in the
+  // app would report a failure that had not happened.
+  if (!Number.isFinite(ms) || ms <= 0) return work.then((value) => ({ answered: true as const, value }));
+  return new Promise<Deadlined<T>>((resolve, reject) => {
+    let done = false;
+    // Cleared whichever way the promise settles. Not tidiness: these tests run
+    // under plain node, and a timer left armed keeps the process alive past the
+    // last assertion, so a suite that passed would hang instead of exiting.
+    const id = timers.setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve({ answered: false });
+    }, ms);
+    work.then(
+      (value) => {
+        if (done) return;
+        done = true;
+        timers.clearTimeout(id);
+        resolve({ answered: true, value });
+      },
+      (err) => {
+        if (done) return;
+        done = true;
+        timers.clearTimeout(id);
+        reject(err);
+      },
+    );
+  });
 }

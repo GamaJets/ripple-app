@@ -167,6 +167,20 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
   transition: top .12s ease;
 }
 .skip:focus { top: 12px; text-decoration: none; }
+/* `<main>` carries tabindex="-1" so following the skip link actually MOVES the
+   focus rather than only scrolling — without it the next Tab goes back to the
+   navigation you just skipped. It is not an interactive element, so the global
+   accent outline would draw a ring round the entire page for no purpose; the
+   feedback that the link worked is the scroll and the tab stop that follows. */
+main:focus, main:focus-visible { outline: none; }
+
+/* .scroll is `overflow-x: auto` around the wide tables. A container that scrolls
+   but cannot take focus is unreachable from a keyboard, which on the home page
+   meant the Coach and Studio columns of the three-app comparison did not exist
+   for anyone not using a pointer. tabindex="0" on the container is the fix; the
+   outline below is the global focus ring, kept close in so it traces the box
+   rather than the page. */
+.scroll:focus-visible { outline-offset: -2px; }
 
 .vh {
   position: absolute !important; width: 1px; height: 1px;
@@ -432,7 +446,10 @@ h3.sub { font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -0.02em; }
 @media (max-width: 820px) { .flow { grid-template-columns: 1fr; } }
 .node { border: var(--rule); border-radius: 12px; padding: 22px; background: var(--panel); position: relative; }
 .node .cap { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--c); }
-.node h4 { font-size: 18px; margin: 10px 0 8px; }
+/* Were <h4> under an <h2>, which skipped a level in the outline on the one
+   page most people read first. Both selectors are kept so the rule survives
+   either markup. */
+.node h3, .node h4 { font-size: 18px; margin: 10px 0 8px; }
 .node p { margin: 0; font-size: 14.5px; color: var(--ink2); line-height: 1.5; }
 
 /* ── stats strip ───────────────────────────────────────────────────────── */
@@ -465,7 +482,12 @@ h3.sub { font-size: clamp(20px, 2.4vw, 26px); letter-spacing: -0.02em; }
 footer.site { border-top: var(--rule); padding: 54px 0 40px; background: var(--sunk); }
 footer.site .cols { display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); gap: 36px; }
 @media (max-width: 820px) { footer.site .cols { grid-template-columns: 1fr 1fr; gap: 30px; } }
-footer.site h5 { margin: 0 0 14px; font-size: 12px; font-family: var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink3); font-weight: 500; }
+/* The footer column headings were <h5> under a page whose deepest content
+   heading is <h2>, so every page on the site ended with a three-level jump in
+   its outline. They are <h2 class="fh"> now — the footer is a `contentinfo`
+   landmark, so a top-level heading inside it is correct — and this rule holds
+   the appearance exactly where it was. */
+footer.site .fh { margin: 0 0 14px; font-size: 12px; font-family: var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink3); font-weight: 500; }
 footer.site ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
 footer.site ul a { color: var(--ink2); font-size: 14.5px; }
 footer.site ul a:hover { color: var(--ink); }
@@ -760,6 +782,13 @@ table.data.compare td.no { color: var(--faint); font-family: var(--mono); font-s
 .tile ul { margin: 11px 0 0; padding-left: 17px; }
 .tile li { font-size: 14px; color: var(--ink2); line-height: 1.5; margin: 6px 0; }
 .tile li::marker { color: var(--ink3); }
+/* A tile listing WHERE TO GO rather than what is true. Bullets and an indent
+   suit a list of statements; a column of destinations reads better as the
+   footer's link columns do, and five accent-coloured links in one tile is a
+   lot of amber for a page whose whole job is to be calm about a wrong turn. */
+.tile ul.plain { list-style: none; padding-left: 0; }
+.tile ul.plain a { color: var(--ink2); }
+.tile ul.plain a:hover { color: var(--ink); }
 
 /* ── numbered steps ────────────────────────────────────────────────────── */
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--line); border: var(--rule); border-radius: 12px; overflow: hidden; }

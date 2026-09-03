@@ -25,6 +25,13 @@ const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 const eq = (a: unknown, b: unknown, msg: string) =>
   ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
+/** The sentence, or the empty string when there wasn't one.
+ *
+ *  Every `includes` below runs on this rather than on the return value direct,
+ *  because the failure being guarded against IS null — a rule that stopped
+ *  refusing — and an assertion that throws while reporting that takes the rest
+ *  of the suite down with it and reports nothing at all. */
+const said = (why: string | null): string => why ?? '';
 
 /* ── 1. a write that landed is not reported ───────────────────────────────*/
 
@@ -36,12 +43,12 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 /* ── 2. zero rows is a refusal, and says so in the coach's words ──────────*/
 
 {
-  const why = changedFailure('That series', 0);
-  ok(why != null, 'zero rows is NEVER null — null is what makes a screen announce it');
-  ok((why as string).startsWith('That series'), 'the subject is the coach’s word for the thing, not a column name');
-  ok((why as string).includes('not yours to change'),
+  const why = said(changedFailure('That series', 0));
+  ok(why !== '', 'zero rows is NEVER null — null is what makes a screen announce it');
+  ok(why.startsWith('That series'), 'the subject is the coach’s word for the thing, not a column name');
+  ok(why.includes('not yours to change'),
     'and it names the cause the policies actually produce: a filtered write, not an error');
-  ok(!(why as string).includes('0 classes'),
+  ok(!why.includes('0 classes'),
     'the count itself is not repeated back — "0 classes were called off" is the sentence this replaces');
 }
 
@@ -50,11 +57,11 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 {
   // `cancelSeriesFrom` carries `.neq('status', 'cancelled')`, so a term that is
   // already off matches nothing for a reason that is not a refusal.
-  const why = changedFailure('Those classes', 0, 'they were already called off') as string;
+  const why = said(changedFailure('Those classes', 0, 'they were already called off'));
   ok(why.includes('already called off'), 'the innocent reading is offered');
   ok(why.includes('not yours to change'),
     'and it is offered BESIDE the refusal, never instead of it — the write cannot tell which happened');
-  const bare = changedFailure('That series', 0) as string;
+  const bare = said(changedFailure('That series', 0));
   ok(!bare.includes(', or '),
     'a writer with only one reading does not get an "or" clause with nothing on the other side');
 }
@@ -62,8 +69,8 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 /* ── 4. nobody counted is not the same as nothing matched ─────────────────*/
 
 {
-  const missing = changedFailure('That series', null) as string;
-  const zero = changedFailure('That series', 0) as string;
+  const missing = said(changedFailure('That series', null));
+  const zero = said(changedFailure('That series', 0));
   ok(missing !== zero, 'a missing count and a zero count are different sentences');
   ok(missing.includes('did not say how many'),
     'and the missing one names the omission, which is what makes a forgetful call site findable');
@@ -74,8 +81,8 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 /* ── 5. a negative count is not a number of rows ──────────────────────────*/
 
 {
-  const why = changedFailure('That series', -1) as string;
-  ok(why != null && why.includes('not a number of rows'),
+  const why = said(changedFailure('That series', -1));
+  ok(why.includes('not a number of rows'),
     'a negative count is reported rather than read as "nothing changed" or waved through');
 }
 

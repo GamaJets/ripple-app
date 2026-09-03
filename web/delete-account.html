@@ -3,6 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The address bar and the pull-down surfaces on a phone are painted by the
+     browser, not by styles.css, so a near-black page sat under a white bar.
+     These two are the same values as --bg in each of the stylesheet's palettes. -->
+<meta name="theme-color" content="#0a1211" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6faf9" media="(prefers-color-scheme: light)">
 <title>Delete your account — Repple</title>
   <link rel="canonical" href="https://www.repplefitness.com/delete-account">
   <meta name="robots" content="noindex, follow">
@@ -25,7 +30,7 @@
      for the first paint of text. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="styles.css?v=276220735b">
+<link rel="stylesheet" href="styles.css?v=1608314385">
 <link rel="icon" href="favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
@@ -88,7 +93,7 @@ addEventListener('DOMContentLoaded', function () {
   </div>
 </header>
 
-<main id="main" class="wrap page prose">
+<main id="main" tabindex="-1" class="wrap page prose">
   <h1>Delete your account</h1>
   <p class="updated">Updated 3 September 2026</p>
 
@@ -164,9 +169,9 @@ addEventListener('DOMContentLoaded', function () {
   <h2>What is kept</h2>
   <p>A few records survive, with you detached from them. The row stays; the column that pointed at your account is emptied. After that it carries no name, no email and no profile — it is a line in a gym's books, not a record of a person. A gym has to keep financial and attendance records for tax and legal reasons, and cannot do that if removing a member erases them.</p>
 
-  <div class="scroll">
+  <div class="scroll" tabindex="0">
   <table class="data">
-    <thead><tr><th>What stays</th><th>Why</th></tr></thead>
+    <thead><tr><th scope="col">What stays</th><th scope="col">Why</th></tr></thead>
     <tbody>
       <tr><td><strong>Payments a gym recorded</strong></td><td>Money actually received. Gyms must keep it for tax and accounting.</td></tr>
       <tr><td><strong>Door-log visits</strong></td><td>Attendance and capacity records the gym relies on and may be required to hold.</td></tr>

@@ -48,6 +48,7 @@ import { Rule, Section, SectionHead, Ghost, Cta, Flag, fig } from '../../src/ui/
 import { sp, layout, hairline, type as ty, numeric } from '../../src/theme/scale';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { worstStatus } from '../../src/ui/loadStatus';
+import { withDeadline } from '../../src/lib/readDeadline';
 import { useAuth } from '../../src/ui/auth';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -102,13 +103,34 @@ export default function GymPlans() {
     if (!USE_SUPABASE) { setFactStatus('ready'); setPlanStatus('ready'); setPassStatus('ready'); setMStatus('ready'); setOrderStatus('ready'); return; }
     if (!uid) { if (!auth.loading) { setFactStatus('error'); setPlanStatus('error'); setPassStatus('error'); setMStatus('error'); setOrderStatus('error'); } return; }
 
-    const [f, p, x, m, o] = await Promise.all([
+    // Under a ceiling. Every one of these five reports a refusal in its own
+    // `ok: false`, and this screen handles all five — but none of them can
+    // report a request that never SETTLES, and no request in this app carries a
+    // timeout (src/lib/readDeadline.ts). On a gym's own captive-portal wifi
+    // this `Promise.all` waits for ever, all five statuses stay at 'loading',
+    // and the member is shown five "Reading…" lines that never end. The
+    // sharpest loss is the last of them: the orders list is the ONLY place a
+    // member is told that their card was charged and the membership never
+    // granted, and it was gated away behind a status that could not move.
+    const read = await withDeadline(Promise.all([
       fetchGymPaymentFacts(supabase as any),
       fetchGymPlans(supabase as any),
       fetchGymPassOffers(supabase as any),
       fetchMyMemberships(supabase as any, uid),
       fetchMyGymOrders(supabase as any, uid),
-    ]);
+    ]));
+    if (!read.answered) {
+      // The same five lines the signed-out branch above writes, and for the
+      // same reason: 'error' is what src/ui/loadStatus.ts calls "the server did
+      // not answer, or refused", and every section below already says the right
+      // thing under it. Nothing on screen is cleared — a membership stays where
+      // it is, on this file's own argument about not replacing what somebody
+      // holds with the fact that we could not ask.
+      setFactStatus('error'); setPlanStatus('error'); setPassStatus('error');
+      setMStatus('error'); setOrderStatus('error');
+      return;
+    }
+    const [f, p, x, m, o] = read.value;
 
     // A refused readiness read is NOT "this gym cannot take payments". That is
     // a specific claim about the gym, and `value: null` — no account row at all

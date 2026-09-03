@@ -47,6 +47,19 @@ import {
 } from '../../src/lib/coachRegister';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useNow } from '../../src/ui/today';
+// ── The registers a coach can still take ──────────────────────────────────
+//
+// `gapNote` below already tells the coach how many classes have no register
+// against them, and until now that sentence was the whole of it: the classes
+// themselves were flat text further down the page, and the only control was a
+// Ghost that opened the entire timetable. So a coach who agreed with the
+// sentence had to remember four dates and go hunting for them.
+//
+// `set_class_attendance` (supabase/parts/460) carries no time bound — its only
+// test is whether the class is one the caller may register — so a register
+// taken on Thursday for Tuesday's class is written exactly like one taken at
+// the door. The coach was simply never handed the tap. See src/lib/registerGaps.ts.
+import { missingRegisters, peopleWaiting, gapsHeading, gapsNote, gapLine } from '../../src/lib/registerGaps';
 
 /** The three windows, in days. Rolling, and the labels come from the module so
  *  the heading and the query cannot disagree about which one is on screen. */
@@ -143,10 +156,20 @@ export default function MyRegister() {
   const headcount = useMemo(() => paidHeadcountTotal(rows ?? []), [rows]);
   const walkKnown = useMemo(() => walkInsKnown(rows ?? []), [rows]);
   const gap = useMemo(() => gapNote(split, walkKnown), [split, walkKnown]);
-
   // Only a whole read may be counted. `classSummary` has no partial state — the
   // RPC either answers or does not — so this is 'ready' and nothing else.
   const countable = status === 'ready' && rows != null;
+
+  // The same classes `gapNote` counts, in the order they can still be acted on.
+  // Built from `rows` rather than from `split` so the module owns the whole
+  // rule — two functions disagreeing about which classes are missing a register
+  // is how a screen comes to say "4" in a sentence and list three.
+  //
+  // Only over a whole read. Under 'error' or a null read this list would be
+  // empty, and an empty list here reads as "you have taken every register",
+  // which is a claim about a coach's own term made from a read that did not
+  // happen — the exact mistake `countable` exists on this screen to prevent.
+  const gaps = useMemo(() => (countable ? missingRegisters(rows ?? [], now) : []), [countable, rows, now]);
 
   const chip = (on: boolean) => ({
     paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill,
@@ -246,6 +269,68 @@ export default function MyRegister() {
         </Section>
 
         <Rule />
+
+        {/* ── the registers that are still open, and the tap that closes one ──
+          *
+          * Drawn only when there is one. A coach who has taken every register
+          * gets no section at all rather than an empty box congratulating them
+          * — `gapsHeading` returns null for that and the absence is the message.
+          *
+          * Every row here opens THAT class's check-in, with its own title and
+          * branch, which is the whole point: the sentence in the Gaps notice
+          * above has counted these classes for as long as this screen has
+          * existed and offered nothing to do about them, so the coach had to
+          * hold four dates in their head and go looking for them on the
+          * timetable.
+          *
+          * The tap is live rather than decorative. `set_class_attendance` has
+          * no time bound (supabase/parts/460) and `class_attendance_summary`
+          * admits a class on `gc.trainer_id = auth.uid()`, so every class that
+          * can appear on this screen is one this coach may register. */}
+        {countable && gaps.length ? (() => {
+          // Read once. `gapsHeading` cannot be null inside this branch — the
+          // branch is its own condition — and the `??` is what says so without
+          // a non-null assertion.
+          const heading = gapsHeading(gaps) ?? '';
+          const waiting = peopleWaiting(gaps);
+          return (
+          <>
+            <Section>
+              <SectionHead title={heading} note={waiting != null ? `${num(waiting)} booked` : undefined} />
+              <Text style={{ ...ty.label, color: t.ink3 }}>{gapsNote(gaps)}</Text>
+              {gaps.map((g, i) => (
+                <Pressable key={g.classId}
+                  onPress={() => router.push({
+                    pathname: '/(trainer)/class-checkin',
+                    params: { id: g.classId, title: g.title, branch: g.branch },
+                  })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Take the register for ${g.title}, ${whenLabel(g.startsAt)}. ${gapLine(g)}`}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: sp.md,
+                    paddingVertical: sp.md, minHeight: MIN_TARGET,
+                    borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                  }}>
+                  {/* A 6pt mark, not coloured words. The sentence beside it
+                      carries the meaning on its own — a status hue as text ink
+                      does not clear 4.5:1 on the light palettes. */}
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>
+                      {whenLabel(g.startsAt)}{g.branch ? ` · ${g.branch}` : ''}
+                    </Text>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{g.title}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{gapLine(g)}</Text>
+                  </View>
+                  <Text style={{ ...ty.label, color: t.brand }}>Take it</Text>
+                </Pressable>
+              ))}
+            </Section>
+
+            <Rule />
+          </>
+          );
+        })() : null}
 
         {/* ── the classes themselves ──────────────────────────────────────── */}
         <Section>
