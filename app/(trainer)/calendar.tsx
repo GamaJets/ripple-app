@@ -2787,43 +2787,60 @@ export default function TrainerSchedule() {
               half — and hiding the row there would leave a coach reading a
               release note about a feature they cannot find. The note says what
               is missing instead, and the sheet says it again in full. */}
-          {/* ── two rows that say the feature is not here, drawn as though
+          {/* ── a row that says the feature is not here, drawn as though
                  it were ────────────────────────────────────────────────────
-              Seen on a device: this row and Google Calendar below it, adjacent,
-              both saying the thing does not exist on this build, and both
+              There were two of these, adjacent — this one and Google Calendar
+              — both saying the thing does not exist on this build, both
               drawing the brand-coloured icon and the same chevron as every
-              working row above them. A coach reads two live-looking rows that
-              lead nowhere and concludes the screen is broken rather than the
-              build is old.
+              working row above them. A coach read two live-looking rows that
+              led nowhere and concluded the screen was broken rather than the
+              build old. Google Calendar has since been withdrawn entirely
+              (see below), because in its case no build was coming.
 
-              They stay tappable — the argument above still holds, and the
-              sheet says it in full — but the icon goes to the quiet ink, which
-              is the difference between "here is a thing you can do" and "here
-              is a thing you cannot do yet, and here is why". The chevron stays
-              because there IS somewhere to go: the explanation. */}
+              This one stays, because a newer build genuinely does fix it and
+              one already exists: expo-calendar is compiled into 1.3.0. It
+              stays tappable — the sheet says it in full — but the icon goes
+              to the quiet ink, which is the difference between "here is a
+              thing you can do" and "here is a thing you cannot do yet, and
+              here is why". The chevron stays because there IS somewhere to
+              go: the explanation. */}
           <ListRow icon="calendar" title="Block Time From Your Calendar"
             tone={HAS_NATIVE_CALENDAR ? undefined : t.ink3}
             note={HAS_NATIVE_CALENDAR
               ? 'Read when your phone says you are busy, times only, and pick what to block'
               : 'Needs a newer build of the app. Blocking time by hand is unaffected'}
             onPress={openBusySheet} />
-          {/* Offered on every build, and its note is the state rather than an
-              instruction. Three of the six states are NOT "the coach has not
-              connected": a build with no client id cannot offer this at all, a
-              link we could not read is unknown rather than absent, and a grant
-              with no refresh token is a connection that dies within the hour.
-              A row that said "Not connected" for any of them would send a
-              coach to sign in to something they are already signed in to. */}
-          <ListRow icon="calendar" title="Google Calendar"
-            tone={CALENDAR_SYNC_CONFIGURED ? undefined : t.ink3}
-            note={!CALENDAR_SYNC_CONFIGURED
-              ? 'Not available in this version of Repple yet'
-              : syncStatus === 'error'
+          {/* ── WITHDRAWN, not hidden-because-broken ─────────────────────
+              Rendered only when a client id is actually configured, which
+              today is nowhere. The row used to be offered on every build with
+              the note "Not available in this version of Repple yet", and that
+              sentence was wrong in the way that matters: it tells a coach to
+              wait for an update. No update can fix it. Nothing was missing
+              from the build — `EXPO_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID` has
+              never been set in .env, eas.json, app.json or the EAS
+              environment, so no version has ever had it and none was coming.
+
+              Not deleted, because the integration is real and finished: the
+              OAuth consent screen, the Calendar API and an iOS client all
+              exist on the Google project as of 2026-09-04. What stopped it
+              shipping is that the redirect is a custom URL scheme, which is
+              native config and therefore a new binary, and that the consent
+              screen sits in Testing — capped at 100 users, tokens expiring
+              every 7 days — until Google verifies a sensitive scope, which
+              takes weeks. It is roadmap work, so the app stops advertising
+              it and says nothing at all instead.
+
+              Setting the env var brings the row back with no other change,
+              which is why this is a condition and not a deletion. */}
+          {CALENDAR_SYNC_CONFIGURED ? (
+            <ListRow icon="calendar" title="Google Calendar"
+              note={syncStatus === 'error'
                 ? 'Your connection could not be read, so this is not "not connected"'
                 : syncStatus === 'loading'
                   ? 'Checking your connection…'
                   : LINK_NOTES[linkState({ configured: CALENDAR_SYNC_CONFIGURED, connecting: false, link: syncLink })]}
-            onPress={() => setSyncOpen(true)} />
+              onPress={() => setSyncOpen(true)} />
+          ) : null}
           <ListRow icon="people" title="Group Classes" note="Schedule & fill classes across branches"
             onPress={() => router.push('/(trainer)/classes')} />
           {booked.length > 0 ? (
@@ -3889,7 +3906,13 @@ export default function TrainerSchedule() {
           to write to somebody's diary in order to read it. The coach sees
           Google's own screen naming the new permission at the moment they ask
           for it, and not before. */}
-      <Modal visible={syncOpen} animationType="slide" transparent onRequestClose={() => setSyncOpen(false)}>
+      {/* Gated with the row that opens it. `syncOpen` cannot become true
+          while the row is withdrawn, and a modal that can never be shown is
+          the dormant-overlay hazard this codebase has already paid for once:
+          an invisible sheet that iOS never presented went on swallowing
+          every touch on the screen behind it. Not left lying in the tree. */}
+      {CALENDAR_SYNC_CONFIGURED ? (
+            <Modal visible={syncOpen} animationType="slide" transparent onRequestClose={() => setSyncOpen(false)}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSyncOpen(false)} />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Google Calendar</Text>
@@ -3988,6 +4011,7 @@ export default function TrainerSchedule() {
           <Ghost label="Done" onPress={() => setSyncOpen(false)} />
         </View>
       </Modal>
+      ) : null}
 
       {/* ── add-session sheet ─────────────────────────────────────────────── */}
       {/* ── move a booked session ────────────────────────────────────────
