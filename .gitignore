@@ -52,3 +52,5 @@ src/**/*.js
 app/**/*.js
 src/**/*.js.map
 app/**/*.js.map
+
+$S/
