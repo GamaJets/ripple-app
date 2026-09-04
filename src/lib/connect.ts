@@ -34,10 +34,11 @@ export interface TrainerPackage { id: string; trainer_id: string; name: string; 
  *  as every function reading the table filtered on it — the client-side reads
  *  never needed to look at a column they were already scoped by. The coach-side
  *  read below is scoped by `trainer_id`, so who bought it is the thing it has to
- *  say. Note what is NOT here: there is no currency column on this table at
- *  all, which is why an amount from it is only printable alongside the package
- *  it was sold from. */
-export interface Purchase { id: string; client_id: string | null; trainer_id: string | null; package_id: string | null; amount_cents: number | null; sessions_total: number | null; sessions_used: number; status: string; created_at: string }
+ *  say. `currency` arrived with part 132: the webhook writes what Stripe
+ *  actually charged onto the sale itself, so an amount from this table is now
+ *  printable on its own rather than only alongside the package it was sold
+ *  from. It is null on rows written before that and never backfilled. */
+export interface Purchase { id: string; client_id: string | null; trainer_id: string | null; package_id: string | null; amount_cents: number | null; currency: string | null; sessions_total: number | null; sessions_used: number; status: string; created_at: string }
 
 const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
 
@@ -147,10 +148,10 @@ export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPa
 /**
  * The currency each of a set of packages is priced in.
  *
- * `client_purchases` records `amount_cents` and no currency at all, so the only
- * place the unit of a past purchase is written down is the package it was
- * bought from. That makes an amount unlabelled whenever the package is gone or
- * unreadable — an inactive package is invisible to the client who bought it
+ * `client_purchases` only started recording a currency of its own in part 132,
+ * so for a row written before that the only place the unit of a past purchase
+ * is written down is the package it was bought from. That makes such an amount
+ * unlabelled whenever the package is gone or unreadable — an inactive package is invisible to the client who bought it
  * under the pkg_read policy — and an unlabelled amount renders as a dash rather
  * than as a number in a currency we picked.
  *
@@ -240,8 +241,12 @@ export interface CoachPurchase extends Purchase {
   /** null when the package has been deleted since the sale. */
   package_name: string | null;
   /**
-   * From the PACKAGE. `client_purchases` has no currency column — checked
-   * against the live schema — so this is null whenever the package row is gone,
+   * From the ROW where it has one, falling back to the PACKAGE. Part 132 added
+   * `client_purchases.currency` and the webhook writes it from the Checkout
+   * Session, so the sale's own record of what Stripe charged wins: it cannot
+   * drift when a coach later edits the package's price, and it survives the
+   * package being deleted. The package is only consulted for rows written
+   * before that column existed and never backfilled. Null when neither says,
    * and an amount with a null currency is printed as a dash rather than as a
    * number in a unit we picked. See `sumTaken` in coachMoney.ts, which counts
    * those separately instead of quietly leaving them out of the total.
@@ -306,7 +311,7 @@ export async function fetchClientPurchases(): Promise<{ rows: CoachPurchase[]; s
       ...r,
       client_name: (r.client_id && names.get(r.client_id)) || null,
       package_name: (r.package_id && pkgs.get(r.package_id)?.name) || null,
-      currency: (r.package_id && pkgs.get(r.package_id)?.currency) || null,
+      currency: r.currency || (r.package_id && pkgs.get(r.package_id)?.currency) || null,
     }));
     return { rows, status: page.truncated ? 'partial' : 'ready' };
   } catch (e) { reportError('connect.fetchClientPurchases', e); return { rows: [], status: 'error' }; }
