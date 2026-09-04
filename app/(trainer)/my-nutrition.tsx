@@ -73,6 +73,7 @@ import { useWearables } from '../../src/ui/wearables';
 import { isWhole } from '../../src/ui/loadStatus';
 import { notifySuccess } from '../../src/ui/haptics';
 import { caloriesLeft, caloriesNote, dayBurn, macrosFor } from '../../src/lib/nutrition';
+import { PROVIDERS } from '../../src/lib/wearables/registry';
 // The three answers the target is built from — the coach's own, not a client
 // provider's defaults. See src/lib/coachMacros.ts.
 import { useMyMacroInputs } from '../../src/ui/coachOwnMacros';
@@ -254,6 +255,40 @@ export default function MyNutrition() {
   });
 
   const burn = target ? dayBurn(target, wToday) : null;
+
+  /* ── the coach's door to Apple Health ───────────────────────────────────
+   *
+   * `WearablesProvider` is mounted in app/_layout.tsx, so all three variants
+   * hold it, and this screen already reads `wearables.today` and calls
+   * `syncAll()` on a pull. What the coach app had no way to do was CONNECT:
+   * there is no app/(trainer)/devices.tsx and no route to the client's, so a
+   * coach's Apple Health was permanently unasked — HealthKit compiled into the
+   * build with no door in front of it.
+   *
+   * It belongs here rather than on a new screen because here is where the
+   * absence costs something. `dayBurn` returns null with no device, and
+   * `caloriesLeft` is then handed `burned: 0` — so "calories remaining" quietly
+   * ignores everything the coach burned today, which is the direction that
+   * makes them eat less than they should. The house rule is that a figure
+   * computed without one of its parts says so; this says so, and offers the
+   * one control that fixes it.
+   *
+   * Same flow as app/(client)/devices.tsx:306, deliberately: ask the provider
+   * whether it can run at all before asking the person for permission, so a
+   * build without HealthKit says why instead of opening nothing. Trainers
+   * self-track on the client hooks, and this is that. */
+  const applePv = PROVIDERS.find((pv) => pv.meta.id === 'apple') ?? null;
+  const appleState = applePv ? wearables.states[applePv.meta.id] ?? 'disconnected' : 'disconnected';
+  const appleReason = applePv ? applePv.unavailableReason() : null;
+  const onConnectApple = useCallback(async () => {
+    if (!applePv) return;
+    if (!applePv.isAvailable() && appleReason) { Alert.alert(applePv.meta.name, appleReason); return; }
+    try {
+      await wearables.connect(applePv.meta.id);
+    } catch (e: any) {
+      Alert.alert(applePv.meta.name, e?.message || 'Could not connect.');
+    }
+  }, [applePv, appleReason, wearables]);
   // The same function the client's two nutrition screens call, so a coach and
   // a client cannot be shown two different answers to "how many left".
   const left = target && whole
@@ -457,6 +492,28 @@ export default function MyNutrition() {
             arcLabel="of today’s calories eaten"
             tone={left && left.net < 0 ? t.crit : undefined}
           />
+
+          {/* Only when it is actually costing something: there is a target to
+              spend against, and no burn came back to spend it on. Connected and
+              simply quiet is a different situation and says nothing here — the
+              provider's own status carries that. */}
+          {target && !burn ? (
+            <Notice
+              tone={t.warn}
+              kicker={appleState === 'connected' ? 'Nothing read today' : 'Not connected'}
+              title={appleState === 'connected'
+                ? 'No activity has come back from Apple Health today'
+                : 'Apple Health is not connected'}
+              note={appleState === 'connected'
+                ? 'The figure above counts what you have eaten and nothing you have burned, so it is lower than the truth. Pull down to read Apple Health again.'
+                : 'The figure above counts what you have eaten and nothing you have burned. Connect Apple Health and it will include the day’s activity — your Apple Watch needs nothing of its own, because it syncs into the iPhone’s Health app and Repple reads it from there.'}>
+              {appleState === 'connected' ? null : (
+                <View style={{ marginTop: sp.lg }}>
+                  <Cta label="Connect Apple Health" wide onPress={onConnectApple} />
+                </View>
+              )}
+            </Notice>
+          ) : null}
 
           <Rule />
 
