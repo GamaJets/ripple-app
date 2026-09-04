@@ -342,7 +342,37 @@ function mapActivity(name: string): string {
 function unavailable(): string | null {
   if (Platform.OS !== 'ios') return 'Apple Health is iPhone-only.';
   if (nativePresent()) return null;
-  return 'Needs the Repple app build (Apple Health can’t run inside Expo Go).';
+
+  // ── two different situations, and they used to share one sentence ────────
+  //
+  // This said “Needs the Repple app build (Apple Health can’t run inside Expo
+  // Go)” to everybody, which is right in Expo Go and actively misleading in the
+  // commoner case: somebody holding a REAL Repple build that was compiled
+  // before `react-native-health` was added to it. They read “needs the Repple
+  // app build”, look at the Repple app they are holding, and have nowhere to go.
+  //
+  // The distinction matters because the remedy differs and one of them is a
+  // thing an update cannot do. HealthKit is native code. It is compiled into a
+  // binary; an over-the-air update replaces JavaScript and nothing else. So a
+  // build without it stays without it however many updates it takes, and
+  // saying so is the difference between waiting and installing.
+  //
+  // Apple Watch is the reason this is worth the words: the watch has no Repple
+  // app on it and needs none — it syncs into the iPhone’s Health app and we
+  // read from there. So “my watch is not working” is nearly always this, and
+  // the answer is a new build rather than anything about the watch.
+  let inExpoGo = false;
+  try {
+    // 'storeClient' is Expo Go. A real build is 'standalone' or 'bare'.
+    inExpoGo = require('expo-constants').default?.executionEnvironment === 'storeClient';
+  } catch { /* no expo-constants: treat as a real build, which is the safer sentence */ }
+
+  return inExpoGo
+    ? 'Apple Health cannot run inside Expo Go. Open Repple’s own build instead.'
+    : 'This build of Repple was made before Apple Health was added, so it has no way to read it. '
+      + 'It needs a new build — an over-the-air update cannot add it, because Apple Health is part '
+      + 'of the app itself rather than something we can send. Your watch does not need anything: it '
+      + 'syncs into the iPhone’s Health app and Repple reads it from there.';
 }
 
 export const appleHealth: WearableProvider = {
