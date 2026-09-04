@@ -12,8 +12,7 @@
 // ever reaches the coach with a placeholder in it where a client's name should
 // be.
 //
-// Not wired into `npm test` — package.json and tsconfig.test.json belong to
-// another agent this session. Run it with:
+// It runs under `npm test`. To run just this one:
 //
 //   npx tsc src/lib/overwriteGuard.test.ts --outDir .tmp-overwriteguard \
 //     --module node16 --moduleResolution node16 --target ES2020 --strict \
