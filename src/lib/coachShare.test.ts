@@ -16,8 +16,8 @@
 // to the screen tomorrow and forgets to declare here is not sent, and the test
 // proves that rather than trusting it.
 import {
-  consentFromStored, storedConsent, shareableContext, sharedInjuries,
-  FITNESS_KEYS, HEALTH_KEYS,
+  consentFromStored, storedConsent, shareableContext, shareableFacts, sharedInjuries,
+  FITNESS_KEYS, HEALTH_KEYS, FACTS_WITHHELD_LINE,
   ALWAYS_SENT, SENT_WITH_PERMISSION, NEVER_SENT,
   WITHHELD_NOTE, NOT_MEDICAL_ADVICE, WHERE_IT_GOES,
   type ShareConsent,
@@ -63,6 +63,9 @@ const FULL: Record<string, unknown> = {
   programTitle: 'Cut · Upper/Lower', programFocus: 'Chest, Back',
   eatenToday: '1,200/2,100 kcal', streak: 12, lastTrained: 'Bench Press',
   nextLift: 'Bench Press: 62.5 kg x 6 (add weight)',
+  // A pair of calendar dates. Fitness tier: it is not a measurement of anybody,
+  // and app/(client)/report.tsx has always sent it.
+  week: 'Aug 27 – Sep 2',
   // Health.
   weightKg: 68.4, bodyFatPct: 24, muscleKg: 26.1,
   readiness: '83/100 (good)', readinessGaps: 'No hydration was logged.',
@@ -118,6 +121,77 @@ for (const k of HEALTH_KEYS) {
   ok(!(FITNESS_KEYS as readonly string[]).includes(k), `${k} is health-only and is not also in the always-sent list`);
 }
 
+/* ── the same partition, over facts written as prose ───────────────────────
+ *
+ * app/(client)/report.tsx does not send its figures as fields of a context
+ * object; it sends them as English sentences inside the prompt, because a
+ * weekly summary is written from a list of facts and the edge function's system
+ * prompt has no template for a tape reading or a check-in. The key allowlist
+ * cannot see a word of that, so `shareableFacts` is the gate, and these are the
+ * assertions that hold it shut. */
+
+const TRAINING = ['Trained 4 time(s) across 3 active day(s).', 'Streak 12 day(s).'];
+const HEALTH = [
+  'Weight 68.4 kg (down 1.2 kg overall), body fat 24%, muscle 26.1 kg.',
+  'Waist 78 cm (down 1 cm since the previous tape reading).',
+  'Check-in energy 3/5, sleep 2/5, mood 4/5, adherence 3/5.',
+  'Body composition to watch: visceral fat.',
+];
+
+eq(shareableFacts(TRAINING, HEALTH, 'unknown'), null,
+  'no prompt is built while the stored answer is still being read — the same window shareableContext refuses on');
+eq(shareableFacts(TRAINING, HEALTH, 'unasked'), null,
+  'and none for a member who has never been asked');
+
+// Null has to mean NOTHING goes, not "send the safe half". A caller that
+// treated null as an empty health list would post the training facts about
+// somebody who has not answered, which is still posting about them.
+ok(shareableFacts([], HEALTH, 'unknown') === null, 'null even when there is nothing but health to withhold');
+ok(shareableFacts(TRAINING, [], 'unasked') === null, 'and null even when there is no health data at all — the answer is what is missing, not the data');
+
+const factsNo = shareableFacts(TRAINING, HEALTH, 'no');
+const factsYes = shareableFacts(TRAINING, HEALTH, 'yes');
+ok(factsNo != null && factsYes != null, 'an answered consent produces a prompt');
+
+for (const line of TRAINING) {
+  ok(factsNo != null && factsNo.includes(line), `no: "${line}" still goes — declining must not empty the report`);
+  ok(factsYes != null && factsYes.includes(line), `yes: "${line}" goes`);
+}
+for (const line of HEALTH) {
+  ok(factsNo != null && !factsNo.includes(line), `no: "${line}" is withheld`);
+  ok(factsYes != null && factsYes.includes(line), `yes: "${line}" goes`);
+}
+
+// The four kinds of health fact this screen holds, each named on its own, so a
+// future edit that moves one of them into the training array fails here rather
+// than in production.
+//
+// Read against the prompt with the withheld INSTRUCTION taken back out. That
+// line says the words "body fat", "sleep" and "check-in" on purpose — it is the
+// sentence telling the model not to talk about them — and matching it would
+// make these four assertions pass for the wrong reason and, worse, fail if the
+// instruction were ever deleted.
+const saidNo = (factsNo ?? '').split('\n').filter((l) => l !== FACTS_WITHHELD_LINE).join('\n');
+ok(!/68\.4|body fat|muscle/i.test(saidNo), 'a member who said no does not send their weight, body fat or muscle');
+ok(!/waist|78 cm/i.test(saidNo), 'or the tape around their waist');
+ok(!/check-in|sleep|mood/i.test(saidNo), 'or what they said about their sleep and their mood');
+ok(!/visceral|composition/i.test(saidNo), 'or what their body-composition scan is doing');
+ok(saidNo.split('\n').filter(Boolean).length === TRAINING.length,
+  'and what is left is the training facts and nothing else — no half-line, no stray figure');
+
+// Withholding silently is not enough. A summariser given a short list and asked
+// for warm prose writes the sentence it expects to be there, so the absence has
+// to be stated.
+ok(factsNo != null && factsNo.includes(FACTS_WITHHELD_LINE), 'the model is told the figures were withheld, so it does not invent them');
+ok(factsYes != null && !factsYes.includes(FACTS_WITHHELD_LINE), 'and is not told that when nothing was withheld');
+ok(/do not/i.test(FACTS_WITHHELD_LINE) && /weight/i.test(FACTS_WITHHELD_LINE),
+  'and that sentence is an instruction naming the figures, not a note about privacy the model may narrate');
+
+// Empty strings are how the screen writes "I do not have this fact" — the
+// arrays are built from conditional expressions. A blank line in a fact list
+// reads to a model as a fact it failed to parse.
+eq(shareableFacts(['a', '', 'b'], [], 'no')?.split('\n')[1], 'b', 'blank facts are dropped rather than joined');
+
 /* ── the injury note never travels ─────────────────────────────────────── */
 
 const NOTE = 'MRI 12/04: grade II medial meniscus tear, Dr A. Okonjo, hosp no. 88213';
@@ -150,6 +224,18 @@ ok(ALWAYS_SENT.length > 0 && SENT_WITH_PERMISSION.length > 0 && NEVER_SENT.lengt
   'all three lists say something');
 ok(NEVER_SENT.some((s) => /name/i.test(s)), 'the never-sent list names the name, because that is the field that was there and is now gone');
 ok(NEVER_SENT.some((s) => /note|document/i.test(s)), 'and the injury note, because that is the rule this was breaking');
+// The lists describe the FEATURE, and the Weekly Report is part of it: it sends
+// a tape measurement, a check-in and a body-composition movement that the chat
+// never sends. A member reads one of these lists and answers once, and the
+// answer governs both screens — so a figure sent by either has to appear here.
+ok(SENT_WITH_PERMISSION.some((s) => /tape|measurement/i.test(s)),
+  'the permission list names the tape measurements, which only the Weekly Report sends');
+ok(SENT_WITH_PERMISSION.some((s) => /check-in/i.test(s)),
+  'and the check-in answers, which carry a sleep and a mood rating');
+ok(SENT_WITH_PERMISSION.some((s) => /scan/i.test(s)),
+  'and what the body-composition scans show moving');
+ok(ALWAYS_SENT.some((s) => /week/i.test(s)),
+  'and the always-sent list names the week a report covers, which is the one context field that screen adds');
 ok(ALWAYS_SENT.some((s) => /what you type/i.test(s)),
   'and the always-sent list starts with the obvious one — a chat sends what you typed, and a disclosure that omits it looks like it is hiding something');
 ok(/Anthropic|Claude/.test(WHERE_IT_GOES), 'where it goes is named rather than described as "our systems"');
@@ -171,4 +257,4 @@ if (errors.length) {
   console.error(`coachShare: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);
   process.exit(1);
 }
-console.log('coachShare: ok (no name, no injury note, nothing at all until the member has answered, and the answer can be no)');
+console.log('coachShare: ok (no name, no injury note, nothing at all until the member has answered — in the context object or in the prompt — and the answer can be no)');

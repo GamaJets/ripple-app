@@ -38,6 +38,16 @@ function systemPrompt(ctx: any): string {
     `- Suggested next progression: ${c.nextLift ?? 'n/a'}`,
     `- Injuries / limitations: ${c.injuries ?? 'none disclosed'}`,
     `- Focus areas to emphasise (from progress photo): ${c.focusAreas ?? 'none set'}`,
+    // Only for the Weekly Report, which is the one caller that sends it. Spread
+    // rather than a `?? 'unknown'` line: the chat has no week and telling the
+    // model that the week is unknown invites it to say so to somebody who never
+    // asked about a week.
+    //
+    // Without this line the field was accepted, carried across the wire and
+    // read by nothing, so the report's summariser was never told which seven
+    // days it was describing and wrote "this week" over a report a member may
+    // open a month later.
+    ...(c.week ? [`- The week this summary covers: ${c.week}`] : []),
     '',
     'Rules: keep replies short (2-4 sentences unless asked for detail). Be encouraging but honest. Use their real numbers. ',
     'When relevant, factor in their readiness, what they have eaten today, and their streak — e.g. suggest a lighter session if under-recovered, or a protein-focused meal if they are behind on protein. ' +

@@ -132,6 +132,22 @@ export const FITNESS_KEYS = [
   'kcal', 'protein', 'carbs', 'fat',
   'programTitle', 'programFocus',
   'eatenToday', 'streak', 'lastTrained', 'nextLift',
+  // The dates a weekly summary covers — "Aug 27 – Sep 2".
+  //
+  // Declared because app/(client)/report.tsx has put it in the context object
+  // since the screen was written, and an undeclared key is dropped in SILENCE.
+  // That is the safe direction and it is still a cost: the summary keeps being
+  // written, the model is never told which seven days it is describing, it
+  // writes "this week" over a report the member may open on a Thursday three
+  // weeks later, and nothing anywhere says a field went missing. This is the
+  // one field where paying that cost buys nothing at all.
+  //
+  // FITNESS rather than HEALTH, and not a close call: a pair of calendar dates
+  // is not a measurement of a person. It is the same string for everybody who
+  // opens the screen on the same day, it says nothing about a body, and
+  // withholding it from a member who declined would make their summary vaguer
+  // without making it more private.
+  'week',
 ] as const;
 
 /**
@@ -220,6 +236,75 @@ export function shareableContext(
   return out;
 }
 
+/**
+ * What the model is told when the member declined, so it does not fill the gap.
+ *
+ * A summariser handed a short list of facts and asked for warm prose will write
+ * the sentence it expects to be there — "and the weight is heading the right
+ * way" — from nothing at all. The unread-read lines in report.tsx already
+ * proved that: the fix for a failed training read was not to send less, it was
+ * to SAY, in as many words, what must not be claimed. This is the same
+ * sentence for a member who withheld rather than for a read that failed.
+ *
+ * It does disclose one thing: that this person declined. That is a fact about a
+ * choice rather than about a body, it names no measurement, and the alternative
+ * is a model inventing the measurements themselves and writing them back to the
+ * member in the second person as their own figures.
+ */
+export const FACTS_WITHHELD_LINE =
+  'Their body, sleep, tape and scan figures were not shared with you. Do not mention weight, body fat, muscle, measurements, sleep, recovery or a check-in, do not guess at any of them, and do not remark on their absence.';
+
+/**
+ * The same partition as `shareableContext`, for facts written as PROSE.
+ *
+ * ── Why this exists at all, when there is already an allowlist ─────────────
+ *
+ * `shareableContext` filters a context OBJECT by key, and that is the whole of
+ * the protection on app/(client)/coach.tsx because every figure that screen
+ * sends is a field of that object. app/(client)/report.tsx is not shaped like
+ * that and cannot be: a weekly summary is written from a list of sentences —
+ * "Waist 84 cm (down 1 cm since the previous tape reading)" — and the edge
+ * function's system prompt has no template for a tape reading, a check-in or a
+ * body-composition movement. Those facts travel in the MESSAGE, which the
+ * allowlist never sees.
+ *
+ * So without this function the screen would assemble one string and hand it to
+ * `askCoachForMember`, whose filter would faithfully strip a context object
+ * that carries nothing sensitive while the member's body composition went out
+ * in the prompt underneath it. The gate has to be where the prose is built.
+ *
+ * ── Why two arrays rather than one and a predicate ─────────────────────────
+ *
+ * Same argument as the allowlist, pointed at sentences instead of keys: the
+ * caller states which pile a line belongs to at the point of writing it, and
+ * the next person to add a fact to this screen has to choose. The failure this
+ * prevents is a health figure appended to the training list and posted to
+ * api.anthropic.com for a member who answered no — and it is prevented by the
+ * signature, because a screen holding two arrays cannot produce the joined
+ * string without coming through here.
+ *
+ * Null on 'unknown' and on 'unasked', for exactly the reasons
+ * `shareableContext` returns null on them: one is a read that has not landed
+ * and the other is a question nobody has put, and neither is permission. A
+ * caller that gets null must send NOTHING — not the training half.
+ *
+ * Empty strings are dropped rather than joined, because the callers build these
+ * lists with conditional expressions that yield '' for a fact they do not have,
+ * and a blank line in a fact list reads to a model as a fact it failed to
+ * parse.
+ */
+export function shareableFacts(
+  fitness: readonly string[],
+  health: readonly string[],
+  consent: ShareConsent,
+): string | null {
+  if (consent !== 'yes' && consent !== 'no') return null;
+  const lines = [...fitness.filter(Boolean)];
+  if (consent === 'yes') lines.push(...health.filter(Boolean));
+  else lines.push(FACTS_WITHHELD_LINE);
+  return lines.join('\n');
+}
+
 /* ── what the member is shown, in their words ─────────────────────────────── */
 
 /**
@@ -231,13 +316,21 @@ export function shareableContext(
  * code actually sends is worse than no list, because somebody has now been told
  * something false and shown a tick box under it.
  */
+// These lists describe the AI coach as a FEATURE, not one screen of it: they
+// are rendered on the chat and on the Weekly Report, and both ask the same
+// model through the same edge function. So each line says the most that can go
+// from anywhere, not the least that goes from wherever the member happens to be
+// standing. A per-screen list would be shorter and would be the wrong shape of
+// true — somebody who read it on the chat and agreed there has agreed for the
+// report as well, and must have been told what that covers.
 export const ALWAYS_SENT: string[] = [
-  'what you type, and the replies so far in this conversation',
+  'what you type in the coach chat, and the replies so far',
   'your goal, your diet style and how many meals a day you eat',
   'your daily calorie and macro targets, and what you have eaten today',
   'the program you are on and what it focuses on',
   'whether anyone is coaching you, and whether they are in the room',
   'your training streak, what you trained last, and what to lift next',
+  'the week your report covers, and the sessions, days and volume in it',
 ];
 
 export const SENT_WITH_PERMISSION: string[] = [
@@ -246,6 +339,9 @@ export const SENT_WITH_PERMISSION: string[] = [
   'your readiness score and what it could not see',
   'your injuries, as the area and how bad it is',
   'the focus areas read off your progress photos',
+  'your tape measurements, and how they have changed',
+  'your check-in answers — energy, sleep, mood and how well you stuck to it',
+  'what your body scans show moving, and what they show worth watching',
 ];
 
 export const NEVER_SENT: string[] = [

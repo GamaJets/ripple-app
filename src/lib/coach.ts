@@ -11,19 +11,23 @@
 //
 // Two doors, in fact, and the difference is who the data is about:
 //
-//   askCoachForMember   the member's own AI Coach chat. The member is the
-//                       subject, they are the one at risk, and the health half
-//                       of the context does not go until they have said it may.
-//                       See src/lib/coachShare.ts for the whole argument.
+//   askCoachForMember   the member's own screens — the AI Coach chat and the
+//                       Weekly Report. The member is the subject, they are the
+//                       one at risk, and the health half of the context does
+//                       not go until they have said it may. See
+//                       src/lib/coachShare.ts for the whole argument.
 //   askCoach            the older, unfiltered call. Its remaining callers are
 //                       the coach's own screens — app/(trainer)/dashboard.tsx
 //                       and app/(trainer)/analytics.tsx, where the subject is a
-//                       client the coach already has the record of — and
-//                       app/(client)/report.tsx, WHICH IS THE SAME DEFECT AS
-//                       THE ONE FIXED HERE AND IS NOT YET FIXED. That screen
-//                       posts a member's own figures with no consent line, and
-//                       it belongs to a different change; this comment is here
-//                       so whoever picks it up finds the gate already built.
+//                       client the coach already has the record of.
+//
+// app/(client)/report.tsx used to be the third caller of the unfiltered door
+// and was the same defect as the one fixed here: it posted a member's weight,
+// body fat, muscle, waist, check-in and body-composition scan movements, under
+// their NAME, with no consent line on the screen. It now goes through
+// `askCoachForMember`. Its facts travel as prose in the message rather than as
+// fields of the context object, so the key allowlist could not reach them and
+// `shareableFacts` in src/lib/coachShare.ts is the gate that does.
 import { supabase } from './supabase';
 import { shareableContext, businessAskContext, clientAskContext, type ShareConsent } from './coachShare';
 
@@ -98,9 +102,9 @@ export async function askCoachForMember(
 /**
  * The unfiltered call. See the header for who still uses it and why.
  *
- * Unchanged in signature and behaviour on purpose: three screens outside this
- * change call it, and breaking them to make a point about a fourth would be a
- * worse outcome than leaving the sentence above for whoever fixes report.tsx.
+ * Unchanged in signature and behaviour on purpose: the two trainer screens
+ * outside this change call it, and breaking them to make a point about a screen
+ * that is now fixed would be a worse outcome than leaving them where they are.
  */
 export async function askCoach(messages: ChatMsg[], context: Record<string, unknown>): Promise<string | null> {
   if (!coachAvailable()) return null;
@@ -122,10 +126,10 @@ export async function askCoach(messages: ChatMsg[], context: Record<string, unkn
  * screen cannot skip it and a field added to a context object without anybody
  * reading src/lib/coachShare.ts is simply not transmitted.
  *
- * `askCoach` is deliberately left in place and unchanged. Removing it would
- * break app/(client)/report.tsx, which is a separate unfixed defect and is
- * flagged as one at the top of this file; changing its signature to make a
- * point about a screen it does not belong to would cost more than it is worth.
+ * `askCoach` is deliberately left in place and unchanged. Its two remaining
+ * callers are app/(trainer)/dashboard.tsx and app/(trainer)/analytics.tsx, and
+ * changing its signature to make a point about screens it does not belong to
+ * would cost more than it is worth.
  */
 
 /**
