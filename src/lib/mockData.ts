@@ -20,26 +20,13 @@
 // of plausible-shaped fake gym rows is the exact ingredient the incident above
 // was made of, so both are deleted rather than left emptied.
 //
-// The file keeps its name because `WorkoutEntry` is imported by name from a
-// dozen screens and renaming it is a separate change from removing dead data.
-import type { Goal, Diet, Sex, Scan } from './types';
-
-export interface MockClient {
-  id: string;
-  name: string;
-  sex: Sex;
-  dob: string;
-  heightCm: number;
-  goal: Goal;
-  diet: Diet;
-  activity: number;
-  mealsPerDay: 3 | 4 | 5;
-  weight: { t: string; v: number }[];
-  bodyFat: { t: string; v: number }[];
-  muscle: { t: string; v: number }[];
-  scans: Scan[];
-  log: WorkoutEntry[];
-}
+// `MockClient` outlived that pass — the fake client's rows were emptied but
+// the shape describing them stayed, and nothing anywhere referenced it. It is
+// gone now, which is what makes the first line of this comment true.
+//
+// The file keeps its name because `WorkoutEntry` is imported by name from
+// three dozen modules and renaming it is a separate change from removing dead
+// data. That type is live and this file is not dead code.
 export interface WorkoutEntry {
   /** Primary key of the `workouts` row, once it has been saved. Absent on an
    *  entry that has only just been logged and not yet come back from the

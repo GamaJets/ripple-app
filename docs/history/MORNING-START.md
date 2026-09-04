@@ -70,16 +70,19 @@ This proves the whole thing runs before we add a backend.
 1. In the project folder, copy `.env.example` to a new file named `.env`.
 2. Paste your two values in:
    ```
-   EXPO_PUBLIC_USE_SUPABASE=1
    EXPO_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
    EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJ...your anon key...
    ```
    (Leave the Stripe lines as-is for now — we wire billing in a later session.)
 3. Stop Expo (Ctrl-C) and re-run `npx expo start`.
 
-That `EXPO_PUBLIC_USE_SUPABASE=1` flag is the single switch that flips the app
-from mock data to your real database (it's read in `src/data/repo.ts`). Flip it
-back to `0` any time to demo offline.
+> **Corrected.** This step used to add a third line, `EXPO_PUBLIC_USE_SUPABASE=1`,
+> and told you to flip it back to `0` to demo offline. That variable no longer
+> exists: nothing reads it, `USE_SUPABASE` is a hardcoded `true` in
+> `src/lib/config.ts`, and `src/data/repo.ts` — the mock-data path it selected —
+> was deleted along with its sample rows. There is no offline demo mode. The two
+> Supabase values above are required; without them the app crashes on launch
+> with `supabaseUrl is required`.
 
 ✅ **Checkpoint:** app still boots. It'll show empty/real data now instead of the
 demo seed — that's expected, because your database is brand new. Our first
