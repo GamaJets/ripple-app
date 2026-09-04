@@ -35,6 +35,9 @@
 import { assertWhole, capLimit } from './rowCap';
 import { assertWrote } from './wroteRows';
 import type { InvoiceStatus } from './gymRecord';
+// A typed amount → the integer to store, scaled by the gym's currency rather
+// than by a flat hundred. See `parseAmount`: this is what a member is billed.
+import { wholeToMinor } from './coachMoney';
 
 type Queryable = { from: (table: string) => any; rpc?: (fn: string, args: any) => any };
 
@@ -105,10 +108,28 @@ export type AmountInput =
  * Three decimal places are refused rather than rounded. `amount_cents` is an
  * integer, so 10.005 has to become either 1000 or 1001 and neither is what the
  * person meant; being told costs a keystroke and guessing costs the invoice.
+ *
+ * ── WHY IT TAKES THE GYM'S CURRENCY ───────────────────────────────────────
+ *
+ * `Math.round(Number(bare) * 100)` assumed a hundred minor units to the whole
+ * unit. There are none in a yen, and `gym_invoices.amount_cents` is what
+ * somebody is ASKED TO PAY: a gym billing ¥6,000 raised an invoice for 600000
+ * minor units, which every screen that ages, chases and reconciles it then
+ * read back as ¥600,000. There is no step downstream that could have caught
+ * it — the figure is internally consistent everywhere, and simply a hundred
+ * times what the owner typed.
+ *
+ * A missing currency is refused rather than defaulted. `invoiceBlocker` already
+ * refuses one for the same reason and says it better; this second refusal
+ * exists because `parseAmount` is exported and the scale must not depend on
+ * which door the amount came through.
  */
-export function parseAmount(input: string | null | undefined): AmountInput {
+export function parseAmount(input: string | null | undefined, currency: string | null | undefined): AmountInput {
   const raw = String(input ?? '').trim();
   if (!raw) return { kind: 'bad', reason: 'An invoice needs an amount.' };
+  if (!(currency || '').trim()) {
+    return { kind: 'bad', reason: 'This gym has not set its currency, so there is nothing to bill in and no way to read what an amount is an amount of.' };
+  }
   // The gym's currency is whatever `tenants.currency` says. A symbol typed in
   // front of the digits is not a second opinion on that and is simply dropped —
   // refusing it teaches nothing.
@@ -119,8 +140,8 @@ export function parseAmount(input: string | null | undefined): AmountInput {
   if (!/^\d+(\.\d{1,2})?$/.test(bare)) {
     return { kind: 'bad', reason: 'Enter the amount as a number — 60, or 82.50. Two decimal places at most.' };
   }
-  const cents = Math.round(Number(bare) * 100);
-  if (!Number.isFinite(cents)) return { kind: 'bad', reason: 'That is not an amount.' };
+  const cents = wholeToMinor(Number(bare), currency);
+  if (cents == null || !Number.isFinite(cents)) return { kind: 'bad', reason: 'That is not an amount.' };
   // `amount_cents` is a plain integer column, so anything past 2^31-1 is
   // rejected by the database with 22003 after the form has closed.
   if (cents > 2_147_483_647) return { kind: 'bad', reason: 'That is more than Repple will record on one invoice — check the zeros.' };
@@ -150,7 +171,7 @@ export function invoiceBlocker(d: InvoiceDraft, currency: string | null): string
   if (!currency) {
     return 'This gym has not set its currency, so there is nothing to bill in. An invoice is what somebody is asked to pay, and no default here would be right for half the gyms running Repple.';
   }
-  const amt = parseAmount(d.amount);
+  const amt = parseAmount(d.amount, currency);
   if (amt.kind === 'bad') return amt.reason;
   if (!isoDay(d.issuedOn)) return 'The issue date has to be a real date — YYYY-MM-DD.';
   // A due date is optional and its absence is a decision: an invoice with no

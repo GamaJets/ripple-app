@@ -11,6 +11,10 @@ import {
   centsFromAmount, codeFromUrl, matchAds, unmatchedReasonNote, urlsFromCreative,
   type AdInsight, type KnownCode, type MatchResult, type UnmatchReason,
 } from './adMatch';
+// The list of currencies with no minor unit. `matchAds` takes it as a
+// parameter rather than importing it — see the note on `centsFromAmount` —
+// so every call here has to hand it in, exactly as `ads-sync` does.
+import { ZERO_DECIMAL } from './zeroDecimal';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -68,16 +72,31 @@ eq(codeFromUrl('https://www.repplefitness.com/join?c=hello-world'), 'HELLO-WORLD
 
 /* ── the amount ────────────────────────────────────────────────────────── */
 
-eq(centsFromAmount('120.00'), 12000, 'a provider decimal becomes minor units');
-eq(centsFromAmount('0'), 0, 'a real zero is a real figure');
-eq(centsFromAmount('1234'), 123400, 'a whole-number amount is major units too — money() divides by 100 for every currency');
-eq(centsFromAmount('1,250.50'), 125050, 'a grouped figure is still an amount');
-eq(centsFromAmount(''), null, 'an empty spend is unknown');
-eq(centsFromAmount(null), null, 'and so is a missing one');
-eq(centsFromAmount('unknown'), null, 'and so is a word');
-eq(centsFromAmount('-5'), null, 'a negative spend is not an amount an ad account reports');
-eq(centsFromAmount('999999999.99'), 99999999999, 'the largest figure part 98 will hold is still an amount');
-eq(centsFromAmount('1000000000'), null, 'and one past it is refused rather than stored wrong — the same ceiling a typed figure gets');
+const cents = (v: string | number | null | undefined, ccy: string | null = 'GBP') =>
+  centsFromAmount(v, ccy, ZERO_DECIMAL);
+
+eq(cents('120.00'), 12000, 'a provider decimal becomes minor units');
+eq(cents('0'), 0, 'a real zero is a real figure');
+eq(cents('1234'), 123400, 'a whole-number amount in a hundredths currency is major units');
+eq(cents('1,250.50'), 125050, 'a grouped figure is still an amount');
+eq(cents(''), null, 'an empty spend is unknown');
+eq(cents(null), null, 'and so is a missing one');
+eq(cents('unknown'), null, 'and so is a word');
+eq(cents('-5'), null, 'a negative spend is not an amount an ad account reports');
+eq(cents('999999999.99'), 99999999999, 'the largest figure part 98 will hold is still an amount');
+eq(cents('1000000000'), null, 'and one past it is refused rather than stored wrong — the same ceiling a typed figure gets');
+
+// This line used to read "a whole-number amount is major units too — money()
+// divides by 100 for every currency", and both halves were wrong. `money()`
+// does not: it knows there are no sen in a yen. And `client_purchases`, which
+// this figure is DIVIDED BY on the coach's screen to give a cost per client,
+// holds what Stripe charged — ¥50,000 as 50000. Multiplying flatly put ad spend
+// on one scale and revenue on another, and printed a ¥1,234 ad as JPY 123,400.
+eq(cents('1234', 'JPY'), 1234, 'a yen account’s reported spend is already the stored integer');
+eq(cents('1234', 'jpy'), 1234, 'whatever case the provider reports it in');
+eq(cents('1234', 'GBP'), 123400, 'and the same digits in sterling are not');
+eq(cents('1234', null), null, 'an amount with no currency has no scale to be read at, so it is unknown');
+eq(cents('1234', ''), null, 'and an empty code is the same silence as a missing one');
 
 /* ── pulling destinations off whatever shape the creative arrived in ───── */
 
@@ -107,7 +126,7 @@ const mixed = matchAds([
   ad({ adId: 'a2', adName: 'Retargeting', spend: '600.00', urls: ['https://www.repplefitness.com/'] }),
   ad({ adId: 'a3', adName: 'Story ad', spend: '45.50', urls: [] }),
   ad({ adId: 'a4', adName: 'Typo ad', spend: '30.00', urls: ['https://www.repplefitness.com/join?c=ZZZZZZ'] }),
-], CODES);
+], CODES, ZERO_DECIMAL);
 
 eq(centsFor(mixed, 'K7M2QX'), 12000, 'the ad that pointed at a code is credited to it');
 eq(mixed.unmatched.length, 3, 'and the three that could not be placed are all carried out');
@@ -121,7 +140,7 @@ eq(mixed.adsSeen, 4, 'the ad count is what came in, not what could be placed');
 
 // The whole point, stated as an assertion: an ad with no code is NOT zero, and
 // it is NOT quietly dropped. Both would produce a smaller, tidier, wrong total.
-const silent = matchAds([ad({ adId: 'a2', spend: '600.00', urls: ['https://www.repplefitness.com/'] })], CODES);
+const silent = matchAds([ad({ adId: 'a2', spend: '600.00', urls: ['https://www.repplefitness.com/'] })], CODES, ZERO_DECIMAL);
 eq(silent.matched.length, 0, 'a campaign with no code on it credits nothing to any code');
 eq(silent.matchedCents, 0, 'so nothing is attributed');
 eq(silent.unmatchedCents, 60000, 'and every penny of it is still reported as spent');
@@ -132,7 +151,7 @@ eq(silent.unmatched[0].reason, 'no-code', 'as unattributable, not as absent');
 const unreadable = matchAds([
   ad({ adId: 'a1', spend: '120.00', urls: ['https://x.com/none'] }),
   ad({ adId: 'a2', spend: null, urls: ['https://x.com/none'] }),
-], CODES);
+], CODES, ZERO_DECIMAL);
 eq(unreadable.unmatchedCents, null, 'one unreadable amount makes the unattributed total unknown');
 ok(unreadable.unmatched.some((u) => u.reason === 'no-amount' && u.cents === null),
   'and that ad carries a null, not a zero — we do not know what it cost');
@@ -141,7 +160,7 @@ ok(!unreadable.unmatched.some((u) => u.reason === 'no-amount' && u.cents === 0),
 
 // An ad whose amount is unreadable is never folded into a code's figure, even
 // when it points at one — that would report a code's spend as lower than it is.
-const unreadableMatched = matchAds([ad({ spend: 'n/a' })], CODES);
+const unreadableMatched = matchAds([ad({ spend: 'n/a' })], CODES, ZERO_DECIMAL);
 eq(unreadableMatched.matched.length, 0, 'an ad with no readable amount is not credited to the code it names');
 eq(unreadableMatched.unmatched[0].reason, 'no-amount', 'it is reported as an amount nobody could read');
 
@@ -151,7 +170,7 @@ const stacked = matchAds([
   ad({ adId: 'a1', spend: '120.00' }),
   ad({ adId: 'a2', spend: '80.50' }),
   ad({ adId: 'a3', spend: '10.00', urls: ['https://www.repplefitness.com/join?c=DEF123'] }),
-], CODES);
+], CODES, ZERO_DECIMAL);
 eq(centsFor(stacked, 'K7M2QX'), 20050, 'two ads on one code add up');
 eq(stacked.matched.find((m) => m.code === 'K7M2QX')?.ads, 2, 'and it says how many ads were behind the figure');
 eq(stacked.matched.find((m) => m.code === 'DEF123')?.codeId, null,
@@ -161,24 +180,24 @@ eq(stacked.unmatched.length, 0, 'and nothing is unmatched when every ad named a 
 
 /* ── currency is never assumed and never added across ──────────────────── */
 
-eq(matchAds([ad()], CODES).currency, 'GBP', 'the ad account’s own currency is carried out');
-const crossed = matchAds([ad({ adId: 'a1', currency: 'GBP' }), ad({ adId: 'a2', currency: 'USD' })], CODES);
+eq(matchAds([ad()], CODES, ZERO_DECIMAL).currency, 'GBP', 'the ad account’s own currency is carried out');
+const crossed = matchAds([ad({ adId: 'a1', currency: 'GBP' }), ad({ adId: 'a2', currency: 'USD' })], CODES, ZERO_DECIMAL);
 eq(crossed.currencyConflict, true, 'two currencies in one account is a conflict');
 eq(crossed.currency, null, 'and there is no single currency to label a total with');
-const silentCcy = matchAds([ad({ currency: null })], CODES);
+const silentCcy = matchAds([ad({ currency: null })], CODES, ZERO_DECIMAL);
 eq(silentCcy.currency, null, 'an account that did not say its currency is not given one');
 eq(silentCcy.currencyConflict, false, 'which is a different problem from disagreeing, and says so');
 
 /* ── nothing in ────────────────────────────────────────────────────────── */
 
-const none = matchAds([], CODES);
+const none = matchAds([], CODES, ZERO_DECIMAL);
 eq(none.adsSeen, 0, 'an account with no ads in the window saw no ads');
 eq(none.matchedCents, 0, 'and attributed nothing');
 eq(none.unmatchedCents, 0, 'and left nothing unattributed');
-eq(matchAds(null, null).adsSeen, 0, 'nothing at all is handled without a coach list either');
+eq(matchAds(null, null, ZERO_DECIMAL).adsSeen, 0, 'nothing at all is handled without a coach list either');
 // A coach with no codes yet: every ad's code is unknown to them, which is not
 // the same as the ad having no code.
-const noCodes = matchAds([ad()], []);
+const noCodes = matchAds([ad()], [], ZERO_DECIMAL);
 eq(noCodes.unmatched[0].reason, 'unknown-code', 'with no codes of their own, a real code on an ad is one we do not know');
 
 /* ── the sentences the screen shows ────────────────────────────────────── */

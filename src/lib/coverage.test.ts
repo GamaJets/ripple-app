@@ -636,17 +636,25 @@ ok(rollBlocked.sessions30 === 20, 'rollup still reports what the record shows to
   ok(mapped.unmatched.includes('Nickname'), 'an unrecognised column is reported, not silently dropped');
 
   // ── money ──
-  ok((parseMoneyCents('£1,234.56') as any).value === 123456, 'money strips a currency symbol and thousands comma');
-  ok((parseMoneyCents('1.234,56') as any).value === 123456, 'European decimal comma is read correctly');
-  ok((parseMoneyCents('1,234') as any).value === 123400, 'a lone separator before three digits is thousands, not decimals');
-  ok((parseMoneyCents('1,23') as any).value === 123, 'a lone separator before two digits is a decimal point');
-  ok((parseMoneyCents('50') as any).value === 5000, 'a bare integer is whole units');
-  ok((parseMoneyCents('0') as any).value === 0, 'zero is a real amount');
-  ok((parseMoneyCents('7.5') as any).value === 750, 'one decimal place is padded, not truncated');
-  ok((parseMoneyCents('(50.00)') as any).value === -5000, 'accounting parentheses mean negative');
-  ok(parseMoneyCents('1.2345').ok === false, 'four decimal places are refused rather than rounded');
-  ok(parseMoneyCents('n/a').ok === false, 'non-numeric text is refused');
-  ok(parseMoneyCents('').ok === false, 'an empty amount is refused');
+  ok((parseMoneyCents('£1,234.56', 'GBP') as any).value === 123456, 'money strips a currency symbol and thousands comma');
+  ok((parseMoneyCents('1.234,56', 'GBP') as any).value === 123456, 'European decimal comma is read correctly');
+  ok((parseMoneyCents('1,234', 'GBP') as any).value === 123400, 'a lone separator before three digits is thousands, not decimals');
+  ok((parseMoneyCents('1,23', 'GBP') as any).value === 123, 'a lone separator before two digits is a decimal point');
+  ok((parseMoneyCents('50', 'GBP') as any).value === 5000, 'a bare integer is whole units');
+  ok((parseMoneyCents('0', 'GBP') as any).value === 0, 'zero is a real amount');
+  ok((parseMoneyCents('7.5', 'GBP') as any).value === 750, 'one decimal place is padded, not truncated');
+  ok((parseMoneyCents('(50.00)', 'GBP') as any).value === -5000, 'accounting parentheses mean negative');
+  ok(parseMoneyCents('1.2345', 'GBP').ok === false, 'four decimal places are refused rather than rounded');
+  ok(parseMoneyCents('n/a', 'GBP').ok === false, 'non-numeric text is refused');
+  ok(parseMoneyCents('', 'GBP').ok === false, 'an empty amount is refused');
+  // Whole units in, minor units out is not a multiplication by a hundred. A
+  // Tokyo gym importing its payment history — years of real figures, in one
+  // press — had every row landed a hundredfold, permanently, with nothing on
+  // any screen marking it as converted.
+  ok((parseMoneyCents('50000', 'JPY') as any).value === 50000, 'a yen sheet states the stored integer already');
+  ok(parseMoneyCents('50.50', 'JPY').ok === false, 'a decimal part in a yen column is refused rather than dropped');
+  ok(parseMoneyCents('50.00', 'JPY').ok === true, 'a trailing .00 is a spreadsheet habit, not a subdivision, and is read');
+  ok(parseMoneyCents('50', null).ok === false, 'and with no currency there is no scale, so the row is refused not guessed');
 
   // ── dates: the decision this module exists for ──
   ok((parseDate('2026-04-03') as any).value === '2026-04-03', 'ISO dates are unambiguous');
@@ -699,7 +707,11 @@ ok(rollBlocked.sessions30 === 20, 'rollup still reports what the record shows to
     'Amy Chen,amy@example.com,"£1,234.56",2026-01-15,Card\n' +
     'Ben Ross,ben@example.com,69.00,2026-01-16,Bank Transfer\n' +
     ',,50.00,2026-01-17,Cash\n' +
-    'Cal Diaz,cal@example.com,-20.00,2026-01-18,Card\n'
+    'Cal Diaz,cal@example.com,-20.00,2026-01-18,Card\n',
+    // The GYM's currency, which a payments sheet never carries a column for.
+    // It decides the SCALE the amounts are read at, not their label — see
+    // `previewPayments`.
+    'GBP',
   );
   ok(pay.ready.length === 2, `payments with a payer and a good amount are ready (got ${pay.ready.length})`);
   ok(pay.ready[0].amountCents === 123456, 'a quoted, symbol-prefixed amount survives the CSV and the parser');
@@ -1298,7 +1310,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 // The third of CSV import that did not exist. A price list is the one sheet
 // where a misread cell becomes a wrong amount of money charged every month.
 {
-  const p = previewPlans('name,price,interval\nOff-peak,180,month\nAnnual,1800,year\nDay pass,45,once\n');
+  const p = previewPlans('name,price,interval\nOff-peak,180,month\nAnnual,1800,year\nDay pass,45,once\n', 'GBP');
   ok(p.ready.length === 3, 'three plans read');
   ok(p.rejected.length === 0, 'nothing rejected from a clean sheet');
   ok(p.ready[0].priceCents === 18000, 'price becomes minor units');
@@ -1317,47 +1329,47 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   // A sheet that DOES say is believed, and it outranks the gym's own currency
   // at the import screen: it is what that plan was actually priced in.
-  const withCcy = previewPlans('name,price,interval,currency\nOff-peak,180,month,GBP\n');
+  const withCcy = previewPlans('name,price,interval,currency\nOff-peak,180,month,GBP\n', 'GBP');
   ok(withCcy.ready.length === 1 && withCcy.ready[0].currency === 'GBP',
     'a currency column is read and kept, rather than being overwritten by a default');
 
   // The refusal that matters most. membership_plans.interval accepts only
   // month/year/once, so a quarterly plan has nowhere truthful to go: mapping
   // it to month divides the gym's recurring revenue by three.
-  const q = previewPlans('name,price,interval\nQuarterly,500,quarterly\n');
+  const q = previewPlans('name,price,interval\nQuarterly,500,quarterly\n', 'GBP');
   ok(q.ready.length === 0, 'a quarterly plan is not silently repriced');
   ok(q.rejected.length === 1, 'it is refused, not dropped');
   ok(/not month, year or one-off/.test(q.rejected[0]?.errors.join(' ') ?? ''), 'and says why');
 
   // A blank price is an unfinished row, not a free plan.
-  const blank = previewPlans('name,price\nUnnamed,\n');
+  const blank = previewPlans('name,price\nUnnamed,\n', 'GBP');
   ok(blank.ready.length === 0, 'a blank price is refused');
   ok(/unfinished row/.test(blank.rejected[0]?.errors.join(' ') ?? ''), 'blank price explains itself');
 
   // But a deliberate zero is a real thing a gym sells: staff, comp, founder.
-  const free = previewPlans('name,price\nStaff,0\n');
+  const free = previewPlans('name,price\nStaff,0\n', 'GBP');
   ok(free.ready.length === 1, 'a deliberate zero IS a plan');
   ok(free.ready[0]?.priceCents === 0, 'and stays zero');
 
-  const neg = previewPlans('name,price\nOops,-50\n');
+  const neg = previewPlans('name,price\nOops,-50\n', 'GBP');
   ok(neg.ready.length === 0, 'a negative price is refused');
 
   // Same plan twice is two prices for one thing.
-  const dup = previewPlans('name,price\nGold,200\ngold,250\n');
+  const dup = previewPlans('name,price\nGold,200\ngold,250\n', 'GBP');
   ok(dup.ready.length === 1, 'a duplicate plan name is refused');
   ok(/duplicate of line 2/.test(dup.rejected[0]?.errors.join(' ') ?? ''), 'and points at the first one');
 
-  const cur = previewPlans('name,price,currency\nGold,200,GBP\n');
+  const cur = previewPlans('name,price,currency\nGold,200,GBP\n', 'GBP');
   ok(cur.ready[0]?.currency === 'GBP', 'a real currency code is kept');
-  const badCur = previewPlans('name,price,currency\nGold,200,pounds\n');
+  const badCur = previewPlans('name,price,currency\nGold,200,pounds\n', 'GBP');
   ok(badCur.ready.length === 0, 'a currency that is not a code is refused');
 
-  const off = previewPlans('name,price,active\nRetired,200,no\n');
+  const off = previewPlans('name,price,active\nRetired,200,no\n', 'GBP');
   ok(off.ready.length === 1 && off.ready[0].active === false, 'no means not on sale');
-  const odd = previewPlans('name,price,active\nGold,200,maybe\n');
+  const odd = previewPlans('name,price,active\nGold,200,maybe\n', 'GBP');
   ok(odd.ready.length === 0, 'an unreadable yes/no is refused, not defaulted on sale');
 
-  const noCols = previewPlans('something,else\na,b\n');
+  const noCols = previewPlans('something,else\na,b\n', 'GBP');
   ok(noCols.missingRequired.includes('name') && noCols.missingRequired.includes('price'),
      'a sheet with neither column says so');
 }
@@ -2777,7 +2789,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ];
 
   const whole: GymExportInput = {
-    gymName: 'Iron House Dubai', tenantId: 'T', generatedAt: '2026-08-26T08:00:00.000Z',
+    gymName: 'Iron House Dubai', tenantId: 'T', currency: 'AED', generatedAt: '2026-08-26T08:00:00.000Z',
     from: '1970-01-01T00:00:00.000Z', to: '2100-01-01T00:00:00.000Z',
     plans: sliceReady(plansIn), memberships: sliceReady(msIn), payments: sliceReady(payIn),
     classes: sliceReady(clsIn), attendance: sliceReady(bkIn), sessions: sliceReady(sessIn),
@@ -2820,14 +2832,18 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(back.rows[1][0] === 'Smith, Jr.' && back.rows[1][1] === '', 'the comma name did not shift the column after it');
 
   // ── money and dates leave as they are stored ──
-  ok(minorToDecimal(45000) === '450.00', 'minor units become an exact decimal');
-  ok(minorToDecimal(5) === '0.05', 'five fils is 0.05, not 5.00');
-  ok(minorToDecimal(0) === '0.00', 'a genuine zero is 0.00');
-  ok(minorToDecimal(-450) === '-4.50', 'a negative keeps its sign');
-  ok(minorToDecimal(123456789) === '1234567.89', 'and a large figure does not go near a float');
-  ok(minorToDecimal(null) === '', 'no recorded price is empty — a pass with no price is not a free pass');
-  ok(parseMoneyCents(minorToDecimal(45000)).ok && (parseMoneyCents(minorToDecimal(45000)) as any).value === 45000, 'the importer reads back the same integer');
-  ok((parseMoneyCents(minorToDecimal(5)) as any).value === 5, 'including the awkward sub-unit one');
+  ok(minorToDecimal(45000, 'AED') === '450.00', 'minor units become an exact decimal');
+  ok(minorToDecimal(5, 'AED') === '0.05', 'five fils is 0.05, not 5.00');
+  ok(minorToDecimal(0, 'AED') === '0.00', 'a genuine zero is 0.00');
+  ok(minorToDecimal(-450, 'AED') === '-4.50', 'a negative keeps its sign');
+  ok(minorToDecimal(123456789, 'AED') === '1234567.89', 'and a large figure does not go near a float');
+  ok(minorToDecimal(null, 'AED') === '', 'no recorded price is empty — a pass with no price is not a free pass');
+  // There are no sen in a yen, and this is the file a gym hands its accountant.
+  ok(minorToDecimal(50000, 'JPY') === '50000', 'a yen amount is written as the integer it is stored as');
+  ok(minorToDecimal(45000, null) === '', 'and an amount whose currency nobody stated is left blank rather than scaled at a guess');
+  ok(parseMoneyCents(minorToDecimal(45000, 'AED'), 'AED').ok && (parseMoneyCents(minorToDecimal(45000, 'AED'), 'AED') as any).value === 45000, 'the importer reads back the same integer');
+  ok((parseMoneyCents(minorToDecimal(5, 'AED'), 'AED') as any).value === 5, 'including the awkward sub-unit one');
+  ok((parseMoneyCents(minorToDecimal(50000, 'JPY'), 'JPY') as any).value === 50000, 'and the yen round trip holds too');
   ok(isoDatePart('2026-08-02T09:14:00.000Z') === '2026-08-02', 'the date-only column is the day part of the stored timestamp');
   ok(isoDatePart(null) === '' && isoDatePart('not a date') === '', 'and anything unreadable is empty rather than guessed');
 
@@ -2870,7 +2886,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   // ── payments.csv round-trips through previewPayments ──
   const payCsv = fileFor(wx, 'payments.csv')!.text;
-  const pp = previewPayments(payCsv);
+  const pp = previewPayments(payCsv, 'AED');
   ok(pp.missingRequired.length === 0, 'the exporter writes the amount and date columns previewPayments requires');
   ok(pp.rows.length === 3 && pp.ready.length === 2, 'two attributed payments import; the unattributed one is refused');
   ok(pp.ready[0].amountCents === 45000, 'the money came back as the same integer minor units');
@@ -2882,7 +2898,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   ok(sheetFor(wx, 'payments.csv').rows[0][8] === '45000', 'the authoritative amount_cents column is the stored integer itself');
 
   // ── plans.csv round-trips through previewPlans ──
-  const pl = previewPlans(fileFor(wx, 'plans.csv')!.text);
+  const pl = previewPlans(fileFor(wx, 'plans.csv')!.text, 'AED');
   ok(pl.missingRequired.length === 0 && pl.ready.length === 2, 'both plans import');
   ok(pl.ready[0].priceCents === 45000 && pl.ready[0].interval === 'month', 'price and billing period survive');
   ok(pl.ready[0].name === 'Monthly, full access', 'and a comma in a plan name does not split it');

@@ -46,11 +46,22 @@
 import { appLocale } from './locale';
 
 
-/** Currencies Stripe bills in whole units — there are no fils in a yen, so a
- *  minor-unit amount is not divided by a hundred. Getting this backwards prints
- *  ¥50,000 as ¥500. Single copy: `pkgMoney` in subscriptions.ts delegates here
- *  rather than keeping a second list that can drift from this one. */
-export const ZERO_DECIMAL = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf']);
+/**
+ * Currencies Stripe bills in whole units — there are no fils in a yen, so a
+ * minor-unit amount is not divided by a hundred. Getting this backwards prints
+ * ¥50,000 as ¥500.
+ *
+ * Re-exported, not declared. The list itself is in src/lib/zeroDecimal.ts,
+ * which has no imports of its own so that the Deno edge functions can read it
+ * too — `ads-sync` scales a Meta ad account's reported spend by it, and this
+ * file's `import { appLocale }` is enough to put it out of Deno's reach. That
+ * is the only reason it moved; this is still the door everything in the app
+ * comes through, `pkgMoney` in subscriptions.ts still delegates here rather
+ * than keeping its own, and there is still exactly one copy of the sixteen
+ * codes in the tree.
+ */
+export { ZERO_DECIMAL } from './zeroDecimal';
+import { ZERO_DECIMAL } from './zeroDecimal';
 
 /**
  * An amount in the currency it is actually charged in — "AED 600.00", never
@@ -80,6 +91,86 @@ export const minorMoney = (amount: number | null | undefined, currency: string |
 
 /** A whole-unit amount somebody typed — a session rate, a revenue target. */
 export const wholeMoney = (amount: number | null | undefined, currency: string | null | undefined): string | null => moneyIn(amount, currency, false);
+
+/* ── the conversions, and why they are not `/ 100` ──────────────────────────
+ *
+ * `moneyIn` above renders. These three convert, and they exist because a
+ * formatter is not enough: half of this codebase has to move a figure BETWEEN
+ * the unit a person types and the unit the database stores, and every one of
+ * those places had `* 100` or `/ 100` written into it by hand.
+ *
+ * That constant is wrong in the sixteen currencies in `ZERO_DECIMAL`. There is
+ * no sen in a yen: Stripe stores ¥50,000 as 50000 minor units, not 5,000,000,
+ * and `minorMoney` renders it on exactly that understanding. So a form that
+ * multiplies a typed 50000 by a hundred stores a figure a hundred times the
+ * one somebody typed, permanently, and the screen beside it then prints
+ * "JPY 5,000,000" — a plausible number, in the right currency, that nobody
+ * entered and nobody can trace back to a keystroke.
+ *
+ * The failure these prevent is that one: a hundred-times error in a stored
+ * amount, in the currencies where nobody reviewing the code was likely to
+ * check, on the figures a gym runs its payroll and its books from.
+ *
+ * They return null on an unknown currency for the same reason `moneyIn` does.
+ * A conversion needs to know whether the currency has hundredths, and Repple is
+ * white-labelled: there is no default that is not simply wrong for some of the
+ * gyms running it. A caller that does not know the currency yet must not be
+ * handed a number — it must be handed the same silence a formatter gives, and
+ * ask.
+ */
+
+/**
+ * Stored minor units → the whole-unit figure a person reads and types.
+ *
+ * Used where the number itself is needed rather than a rendered string: a
+ * derived total compared against a figure the owner typed into a form, and the
+ * prefill of a text box (through `wholeFieldValue` below).
+ */
+export function minorToWhole(minorUnits: number | null | undefined, currency: string | null | undefined): number | null {
+  if (minorUnits == null || !Number.isFinite(minorUnits)) return null;
+  const cur = (currency || '').trim().toLowerCase();
+  if (!cur) return null;
+  return ZERO_DECIMAL.has(cur) ? minorUnits : minorUnits / 100;
+}
+
+/**
+ * A whole-unit figure somebody typed → the integer minor units to store.
+ *
+ * THE ONE THAT WRITES. Every rounding on the way into a money column belongs
+ * here and nowhere else: rounding twice — once in a screen and again in a
+ * parser — is how 74.995 becomes a price nobody typed, and rounding by a
+ * hundred in a currency with no hundredths is how a rate a coach is paid comes
+ * out a hundred times too big.
+ *
+ * `Math.round` on the zero-decimal branch too, so a fractional yen typed into
+ * a box that should not accept one becomes an integer here rather than a
+ * fractional `amount_cents` the database rejects after the form has closed.
+ */
+export function wholeToMinor(whole: number | null | undefined, currency: string | null | undefined): number | null {
+  if (whole == null || !Number.isFinite(whole)) return null;
+  const cur = (currency || '').trim().toLowerCase();
+  if (!cur) return null;
+  return ZERO_DECIMAL.has(cur) ? Math.round(whole) : Math.round(whole * 100);
+}
+
+/**
+ * A stored amount put back into a text box for somebody to edit.
+ *
+ * Trailing zeros are dropped — 250 comes back as "250", not "250.00" — because
+ * a field that grows a decimal place every time it is opened and saved is a
+ * field people stop trusting. A sub-unit amount keeps its two places.
+ *
+ * Empty string, never "0" and never "null": an empty box means nothing has
+ * been recorded, and a zero typed into a money field is a claim somebody made
+ * on purpose. That distinction is load-bearing wherever clearing a field
+ * DELETES a record rather than storing nothing — see `parseSpend` in
+ * src/lib/codeReturn.ts.
+ */
+export function wholeFieldValue(minorUnits: number | null | undefined, currency: string | null | undefined): string {
+  const whole = minorToWhole(minorUnits, currency);
+  if (whole == null) return '';
+  return Number.isInteger(whole) ? String(whole) : whole.toFixed(2);
+}
 
 /** One payment — a one-off sale or a renewal — reduced to the three things a
  *  total depends on. */

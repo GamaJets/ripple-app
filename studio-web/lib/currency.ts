@@ -34,6 +34,8 @@
 // person to act on it would have gone looking for a default that is no longer
 // there.
 import { money } from '@lib/gymRecord';
+// `wholeMoney` for the figures that are NOT in minor units. See `wholeAmount`.
+import { wholeMoney } from '@lib/coachMoney';
 
 /** ISO 4217 as the gym set it, or null when the gym has not set one. The two
  *  are different facts and only one of them may be printed. */
@@ -50,6 +52,31 @@ export type TenantCurrency = string | null;
 export function amount(cents: number | null | undefined, currency: TenantCurrency): string | null {
   if (cents == null || !currency) return null;
   return money(cents, currency);
+}
+
+/**
+ * A gym-denominated figure that is already in WHOLE units, or null.
+ *
+ * The sibling of `amount()` above, and the reason it exists is a trap rather
+ * than a convenience. `tenants.session_fee` is a numeric in whole currency, so
+ * a payroll of 6,300 is six thousand three hundred of something, not sixty-
+ * three. Every caller holding such a figure reached `amount()` — which takes
+ * minor units — through `amount(Math.round(whole * 100), ccy)`, and the
+ * multiply was cancelled by the divide inside the formatter.
+ *
+ * That cancellation stopped happening. `money()` delegates to `minorMoney`,
+ * which knows the sixteen currencies in `ZERO_DECIMAL` have no hundredths and
+ * does not divide for them — so the `* 100` had nothing undoing it, and a Tokyo
+ * gym read the value of its sessions as a hundred times what its owner had set,
+ * on the first tile of the console's front page.
+ *
+ * So a whole-unit figure goes through here and is never multiplied into minor
+ * units on the way to a formatter. Same two silences as `amount()`: no figure,
+ * or no currency, and the caller says which.
+ */
+export function wholeAmount(whole: number | null | undefined, currency: TenantCurrency): string | null {
+  if (whole == null || !currency) return null;
+  return wholeMoney(whole, currency);
 }
 
 /** The note to print under a dash that is missing only for want of a currency.

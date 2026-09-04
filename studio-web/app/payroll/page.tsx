@@ -23,7 +23,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
-import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+import { amount, wholeAmount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import {
   fetchSessions, fetchSettlements, recordSettlement,
   isDelivered, isAwaitingOutcome, isPayable,
@@ -46,6 +46,10 @@ import {
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
 import { money } from '@lib/gymRecord';
 import { isoDate } from '@lib/format';
+// Minor units are not always a hundredth of a whole unit — see `ZERO_DECIMAL`
+// in src/lib/coachMoney.ts. Every conversion on this screen goes through
+// these rather than through a hand-written `* 100` or `/ 100`.
+import { wholeToMinor, wholeFieldValue, minorMoney } from '@lib/coachMoney';
 
 /** How many months back the run can be opened. */
 const PERIODS = 6;
@@ -266,8 +270,12 @@ export default function Payroll() {
     return () => { dropped = true; };
   }, [me, period, load]);
 
-  // The gym's fee is in major units; everything downstream is minor units.
-  const fallbackCents = sessionFee == null ? null : Math.round(sessionFee * 100);
+  // The gym's fee is in major units; everything downstream is minor units, and
+  // the conversion is scaled by the gym's currency rather than by a flat
+  // hundred: `* 100` made a ¥6,000 fee a fallback of 600000, so every session
+  // without a snapshotted rate was paid at a hundred times what the gym
+  // charges, on the screen that hands money over.
+  const fallbackCents = wholeToMinor(sessionFee, ccy);
 
   const stated = payPolicyOf(policyCode);
   const policy: PayPolicy = stated ?? PAY_DELIVERED_ONLY;
@@ -826,7 +834,8 @@ function Rates({ trainers, pay, payErr, ccy, sessionFee, tenantId, me, onChange 
   const [editing, setEditing] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const gymRate = sessionFee == null ? null : Math.round(sessionFee * 100);
+  // Same conversion, same door, same reason as `fallbackCents` above.
+  const gymRate = wholeToMinor(sessionFee, ccy);
 
   const cols: Column<GymTrainer>[] = [
     { key: 'name', header: 'Trainer', value: (t) => t.name },
@@ -908,7 +917,12 @@ function RateEditor({ trainer, existing, ccy, tenantId, me, onDone, onCancel, on
   trainer: GymTrainer; existing: TrainerPay | null; ccy: TenantCurrency;
   tenantId: string; me: Me; onDone: () => void; onCancel: () => void; onErr: (s: string | null) => void;
 }) {
-  const cents = (c: number | null | undefined) => (c == null ? '' : (c / 100).toFixed(2));
+  // A stored rate back into the box the owner edits it in, scaled by the gym's
+  // currency. `/ 100` showed the owner of a gym paying ¥8,000 a session "80.00"
+  // in the field whose next keystroke overwrites the real figure — and
+  // `payRateBlocker` below multiplies whatever is typed straight back, so the
+  // pair only ever agreed by cancelling each other out.
+  const cents = (c: number | null | undefined) => wholeFieldValue(c, ccy);
   const [session, setSession] = useState(cents(existing?.sessionRateCents));
   const [cls, setCls] = useState(cents(existing?.classRateCents));
   const [kind, setKind] = useState<ClassPayKind | ''>(existing?.classPayKind ?? '');
@@ -918,8 +932,8 @@ function RateEditor({ trainer, existing, ccy, tenantId, me, onDone, onCancel, on
 
   const save = async () => {
     if (blocker) { onErr(blocker); return; }
-    const s = parseRate(session);
-    const c = parseRate(cls);
+    const s = parseRate(session, ccy);
+    const c = parseRate(cls, ccy);
     setBusy(true);
     try {
       await saveTrainerPay(supabase, tenantId, {
@@ -998,7 +1012,7 @@ function Adjustments({ trainers, rows, ccy, tenantId, me, period, onChange }: {
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     if (blocker || !ccy) { setErr(blocker); return; }
-    const r = parseRate(amt);
+    const r = parseRate(amt, ccy);
     if (r.kind !== 'rate') return;
     setBusy(true); setErr(null);
     try {
@@ -1127,7 +1141,12 @@ function Run({ rows, unread, rosterUnread, settling, onSettle, method, onMethod,
     { key: 'classes', header: 'Classes', value: (r) => (r.classes.length || null), numeric: true,
       render: (r) => r.classes.length === 0
         ? <span className="dash">—</span>
-        : <span title={r.classes.map((c) => `${c.payKind === 'per_attendee' ? `${c.attendees ?? '?'} × ` : ''}${c.rateCents / 100}`).join(', ')}>
+        // The tooltip breaking a class-pay line down. Through the formatter,
+        // not `/ 100`: it is the only place on this row that states the
+        // per-class rate, and a bare hundredth of it beside a count of classes
+        // is a figure an owner queries. `minorMoney` states the currency too,
+        // which the bare number never did.
+        : <span title={r.classes.map((c) => `${c.payKind === 'per_attendee' ? `${c.attendees ?? '?'} × ` : ''}${minorMoney(c.rateCents, ccy) ?? c.rateCents + ' minor units'}`).join(', ')}>
             {r.classes.length}
           </span> },
     { key: 'adjust', header: 'Adjustments', value: (r) => (r.adjustments.length ? r.adjustments.reduce((a, x) => a + x.amountCents, 0) : null), numeric: true,
@@ -1384,7 +1403,7 @@ function CrossCheck({ trainers, unread, sessionFee, gymError, ccy }: {
         <span className="mono" style={{ fontSize: 18, color: major == null ? 'var(--ink3)' : 'var(--ink)' }}>
           {/* The same refusal as the run above, from the module that owns this
               window: unmarked sessions or no fee means a dash, never a figure. */}
-          {(major != null && amount(Math.round(major * 100), ccy)) || '—'}
+          {wholeAmount(major, ccy) ?? '—'}
         </span>
         {why ? <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>{why}</span> : null}
       </div>

@@ -184,10 +184,22 @@ export default function ImportPage() {
   const preview = useMemo<ImportPreview<MemberRow | PaymentRow | PlanRow> | null>(() => {
     if (!text.trim()) return null;
     const o = order || undefined;
+    // The gym's currency reaches both money previews, and it is not the label —
+    // it is the SCALE. "50000" is fifty thousand minor units in a currency with
+    // no subdivision and five million in one with hundredths, and the parser
+    // cannot tell which without being told. Passed even where a sheet states
+    // its own code per row, because previewPlans uses the gym's only for the
+    // rows that state nothing. Both preview and write therefore read the same
+    // figure the same way — a preview that showed one number and stored another
+    // is the failure the note beside the plan table already warns about.
+    //
+    // Null is not defaulted around. A gym with no currency gets every money row
+    // refused with a reason it can act on, which is the same answer the import
+    // buttons below already give, arrived at before anything is written.
     // Plans carry no dates, so previewPlans takes no order to apply.
-    if (kind === 'plans') return previewPlans(text);
-    return kind === 'payments' ? previewPayments(text, o) : previewMembers(text, o);
-  }, [text, kind, order]);
+    if (kind === 'plans') return previewPlans(text, ccy);
+    return kind === 'payments' ? previewPayments(text, ccy, o) : previewMembers(text, o);
+  }, [text, kind, order, ccy]);
 
   /**
    * The plan rows that will be written, each still carrying its line number.

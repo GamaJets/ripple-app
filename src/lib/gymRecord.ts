@@ -355,6 +355,34 @@ export type CorrectionKind = 'refund' | 'correction';
  * person would say it. The sign is applied by `reversePayment`, never typed,
  * because a screen that asks somebody to enter a negative number will one day
  * be handed a positive one and file a second payment.
+ *
+ * ── WHY THE OVERSHOOT SENTENCE GOES THROUGH THE FORMATTER ─────────────────
+ *
+ * The sentence below used to be built with `(remaining / 100).toFixed(2)`, and
+ * that is two separate defects in one expression, both of them in front of
+ * somebody standing at a front desk about to hand money back.
+ *
+ * It quoted a BARE figure. "That is more than is left on this payment — 45.00
+ * of 60.00 is still outstanding" states two amounts with no currency on either,
+ * which is exactly what `money()` withholds an amount to avoid: a bare number
+ * is read in whatever money the reader happens to be thinking in. Every other
+ * figure this file produces refuses to print without a currency, and this one
+ * printed two without ever asking for one.
+ *
+ * And the division was wrong in sixteen currencies. `/ 100` is only true of a
+ * currency with hundredths; a ¥6,000 payment with ¥4,500 already taken back
+ * would have said "15.00 of 60.00", which is not a hundredth of the real
+ * figures — it is a different pair of numbers entirely, in a sentence whose
+ * whole job is to stop somebody handing back more than they took.
+ *
+ * The payment's OWN currency is used — `original.currency`, not the gym's.
+ * `gym_payments.currency` is stored per row precisely so a payment taken before
+ * a gym changed its currency still states the money it was taken in, and a
+ * reversal of that payment is in that money too.
+ *
+ * When the row states no currency the figures are not printed at all. A
+ * reversal is money leaving the till: an unlabelled pair of numbers there is
+ * worse than no numbers, because it looks like the check was made.
  */
 export function reversalBlocker(
   original: GymPayment,
@@ -372,7 +400,12 @@ export function reversalBlocker(
     return 'This payment has already been reversed in full. Reversing it again would take back money the gym never had.';
   }
   if (amountCents > remaining) {
-    return `That is more than is left on this payment — ${(remaining / 100).toFixed(2)} of ${(original.amountCents / 100).toFixed(2)} is still outstanding against it.`;
+    const left = money(remaining, original.currency);
+    const whole = money(original.amountCents, original.currency);
+    if (!left || !whole) {
+      return 'That is more than is left on this payment. This payment states no currency, so the amounts cannot be written out here — check what is still outstanding against it before taking anything back.';
+    }
+    return `That is more than is left on this payment — ${left} of ${whole} is still outstanding against it.`;
   }
   return null;
 }

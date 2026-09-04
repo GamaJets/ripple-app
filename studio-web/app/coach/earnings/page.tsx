@@ -44,6 +44,10 @@ import { money } from '@lib/gymRecord';
 import { payPolicyOf, PAY_POLICY_LABEL, type PayPolicyCode } from '@lib/gymPolicy';
 import { isoDate } from '@lib/format';
 import { assertWhole, capLimit } from '@lib/rowCap';
+// Minor units are not always a hundredth of a whole unit — see `ZERO_DECIMAL`
+// in src/lib/coachMoney.ts. Every conversion on this screen goes through
+// these rather than through a hand-written `* 100` or `/ 100`.
+import { wholeToMinor } from '@lib/coachMoney';
 
 /** How many months back a coach can look. */
 const PERIODS = 12;
@@ -372,8 +376,13 @@ export default function CoachEarnings() {
     return () => { dropped = true; };
   }, [me, period, load]);
 
-  // The gym's fee is in major units; everything downstream is minor units.
-  const fallbackCents = sessionFee == null ? null : Math.round(sessionFee * 100);
+  // The gym's fee is in major units; everything downstream is minor units, and
+  // the conversion is scaled by the gym's currency rather than by a flat
+  // hundred — `* 100` made a ¥6,000 fee a fallback of 600000, so a coach read
+  // their own earnings at a hundred times what the gym pays. Null where the gym
+  // has not set a currency: no scale, no fallback, and the sessions that have
+  // no rate of their own are shown as unvalued rather than valued wrongly.
+  const fallbackCents = wholeToMinor(sessionFee, ccy);
 
   /**
    * The gym's pay policy, READ — stated rather than chosen, and no longer

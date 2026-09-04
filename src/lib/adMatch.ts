@@ -89,28 +89,71 @@ export type MatchResult = {
 /**
  * A provider's decimal amount → the minor units the rest of Repple stores.
  *
- * Multiplied by 100 flatly, because that is what `money()` in gymRecord.ts
- * divides by for every currency including the ones with no minor unit. A yen
- * figure of "1234" therefore becomes 123400 and renders as "JPY 1,234.00",
- * which is the right amount with a decimal place nobody uses — the same
- * compromise `client_purchases.amount_cents` already makes. Changing it here
- * alone would make ad spend and revenue disagree by a hundredfold.
+ * ── WHY THE FLAT × 100 HAD TO GO ──────────────────────────────────────────
+ *
+ * This multiplied by a hundred in every currency, and the comment here argued
+ * for it: that is what `money()` in gymRecord.ts divided by for every currency
+ * including the ones with no minor unit, so a yen figure of "1234" became
+ * 123400 and rendered as "JPY 1,234.00" — the right amount with a decimal place
+ * nobody uses, and the same compromise `client_purchases.amount_cents` was said
+ * to make. It warned that changing this alone would make ad spend and revenue
+ * disagree by a hundredfold.
+ *
+ * Both halves of that were false, and the warning was the true part.
+ *
+ * `client_purchases.amount_cents` is what STRIPE charged, and Stripe stores
+ * ¥50,000 as 50000 — not 5,000,000. So revenue was already on one scale and
+ * spend on another, for exactly the sixteen currencies in `zeroDecimal`, and
+ * the cost-per-client and return figures on the coach's screen divided one by
+ * the other. And `money()` no longer divides by a hundred unconditionally: it
+ * delegates to `minorMoney`, which knows those currencies have no subdivision.
+ * A ¥1,234 ad was therefore stored as 123400 and PRINTED as "JPY 123,400" — a
+ * hundred times what the account actually spent, in a figure a coach decides
+ * whether to keep running a campaign on.
+ *
+ * So the warning is honoured by making all three agree rather than by leaving
+ * one wrong: minor units as Stripe means them, everywhere. `parseSpend` in
+ * src/lib/codeReturn.ts scales a typed figure the same way, and the formatter
+ * has been reading on that convention all along.
+ *
+ * The currency is the AD ACCOUNT's, and it is required. A provider's figures
+ * are denominated in whatever that account bills in, which is not necessarily
+ * the coach's own — and where the ads do not agree on one currency there is no
+ * scale to read any of them at, so nothing is read. `matchAds` below settles
+ * that before it looks at a single amount.
+ *
+ * `zeroDecimal` is HANDED IN rather than imported, and that is not a style
+ * choice: this module is read by the `ads-sync` Deno function, which resolves
+ * `../../../src/lib/adMatch.ts` directly and therefore needs everything in this
+ * file's import graph to resolve the same way. Keeping it a parameter lets the
+ * one list live in src/lib/zeroDecimal.ts — which the app and the function both
+ * import — instead of a second copy of sixteen currency codes inside the edge
+ * function, which is the copy that would still say what it says today after
+ * somebody adds the seventeenth.
  *
  * Null for anything unreadable, and null is never a zero. An empty string, a
  * missing field and the word "unknown" all mean we do not know what this ad
  * cost, and a zero would say the coach got it for free.
  */
-export function centsFromAmount(v: string | number | null | undefined): number | null {
+export function centsFromAmount(
+  v: string | number | null | undefined,
+  currency: string | null | undefined,
+  zeroDecimal: ReadonlySet<string>,
+): number | null {
   if (v == null) return null;
+  // No currency, no scale. There is nothing to read "1234" as, and reading it
+  // at the wrong one stores a figure a hundredfold out with nothing to notice.
+  const cur = (currency || '').trim().toLowerCase();
+  if (!cur) return null;
   const raw = String(v).trim().replace(/,/g, '');
   if (!raw) return null;
   if (!/^\d+(\.\d+)?$/.test(raw)) return null;
   const n = Number(raw);
   if (!Number.isFinite(n)) return null;
-  const cents = Math.round(n * 100);
+  const cents = zeroDecimal.has(cur) ? Math.round(n) : Math.round(n * 100);
   // The same ceiling part 98 puts on a typed figure. An amount past it is a
   // provider fault or a units mix-up, not a campaign.
-  if (cents < 0 || cents >= 100000000000) return null;
+  if (!Number.isFinite(cents) || cents < 0 || cents >= 100000000000) return null;
   return cents;
 }
 
@@ -221,7 +264,11 @@ export function urlsFromCreative(creative: unknown, limit = 40): string[] {
  * thirty seconds by editing the destination, and a code that is not theirs is
  * usually a typo in that destination.
  */
-export function matchAds(ads: AdInsight[] | null | undefined, codes: KnownCode[] | null | undefined): MatchResult {
+export function matchAds(
+  ads: AdInsight[] | null | undefined,
+  codes: KnownCode[] | null | undefined,
+  zeroDecimal: ReadonlySet<string>,
+): MatchResult {
   const list = Array.isArray(ads) ? ads : [];
   // Code → the coach's own row. Uppercased on both sides so 'k7m2qx' in a
   // hand-typed destination is the same code as 'K7M2QX'.
@@ -252,7 +299,13 @@ export function matchAds(ads: AdInsight[] | null | undefined, codes: KnownCode[]
 
   for (const a of list) {
     const urls = (a?.urls || []).map((u) => String(u || '').trim()).filter(Boolean);
-    const cents = centsFromAmount(a?.spend);
+    // The ad account's currency, settled above across the whole run. Null means
+    // the ads disagreed on one, which makes every amount unreadable rather than
+    // readable at a guessed scale: each ad lands in `unmatched` with
+    // 'no-amount', the unmatched total goes null, and `currencyConflict` is what
+    // the caller reports. A run billed in two currencies has no total to
+    // attribute, and a partial one reads exactly like the whole of it.
+    const cents = centsFromAmount(a?.spend, currency, zeroDecimal);
     // An unreadable amount first: we cannot attribute a number we do not have,
     // and pretending it is zero would let it disappear into a matched code.
     if (cents == null) { dropInUnmatched(a, urls[0] ?? null, null, 'no-amount'); continue; }

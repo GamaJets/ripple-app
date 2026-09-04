@@ -70,7 +70,12 @@ const TO = '2100-01-01T00:00:00.000Z';
  *  enough for the gateway to reject — which would read as "no bookings". */
 const ID_CHUNK = 150;
 
-type Reads = Omit<GymExportInput, 'gymName' | 'tenantId' | 'generatedAt' | 'from' | 'to'>;
+// The slices, and only the slices. `currency` joins the excluded set because
+// it is not a read that can be loading, ready or failed — it comes off the
+// same `tenants` row as the gym's name and is held in its own state beside
+// it, so that a failed tenant read and an unset currency both arrive as the
+// null sessions.csv already knows what to do with.
+type Reads = Omit<GymExportInput, 'gymName' | 'tenantId' | 'currency' | 'generatedAt' | 'from' | 'to'>;
 
 const PENDING: Reads = {
   plans: sliceLoading(),
@@ -117,6 +122,10 @@ const EMPTY: Reads = {
 export default function ExportPage() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [gymName, setGymName] = useState<string | null>(null);
+  /** `tenants.currency`, for the one table whose money carries none of its own.
+   *  Null is both "not read" and "never set", and sessions.csv treats them the
+   *  same way: a blank rate beside the stored integer, never a guessed code. */
+  const [ccy, setCcy] = useState<string | null>(null);
   const [reads, setReads] = useState<Reads>(PENDING);
   const [readAt, setReadAt] = useState<string | null>(null);
 
@@ -190,10 +199,18 @@ export default function ExportPage() {
       setMe(who);
       if (!who?.tenantId) { setReads(EMPTY); setReadAt(new Date().toISOString()); return; }
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency').eq('id', who.tenantId).single();
       // Checked, not assumed: a null name here means "not read", not "the gym
       // has no name" — and the gym's name ends up in every filename.
       if (live) setGymName(tErr ? null : t?.name ?? null);
+      // The currency is read for sessions.csv, and only for it. Every other
+      // money row in this bundle stores its own code and that code always wins;
+      // `pt_sessions.rate_cents` has none, because a session rate has only ever
+      // been in the gym's money. A failed read and an unset currency both land
+      // as null here, and both produce a blank `rate` cell beside the raw
+      // integer rather than a figure in a currency nobody chose — which is the
+      // right answer to both, in a file somebody may hand to an accountant.
+      if (live) setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
       await load(who.tenantId);
     })();
     return () => { live = false; };
@@ -204,13 +221,14 @@ export default function ExportPage() {
       ? {
           gymName,
           tenantId: me?.tenantId ?? null,
+          currency: ccy,
           generatedAt: readAt ?? new Date(0).toISOString(),
           from: FROM,
           to: TO,
           ...reads,
         }
       : null
-  ), [me, gymName, readAt, reads]);
+  ), [me, gymName, ccy, readAt, reads]);
 
   const blocker = input ? exportBlocker(input) : 'Loading.';
   // Built even while blocked, so the screen can show what the bundle WOULD

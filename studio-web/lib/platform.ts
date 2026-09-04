@@ -51,13 +51,16 @@
 // platform at once, and answering "what is Repple's MRR" needs a count and not
 // a name.
 import { supabase } from './supabase';
-// `minorMoney`, NOT `money` from gymRecord. Both take cents and a currency and
-// both refuse to print without one, and only one of them knows that there are
-// no sen in a yen: `money()` divides by 100 unconditionally, so a JPY invoice
-// would print as a hundredth of itself. `ZERO_DECIMAL` in src/lib/coachMoney.ts
-// is the single list of the currencies that has to be true of, and this is the
-// platform's book — the one place on the product where the currencies are
-// whatever Stripe billed rather than whatever one gym set.
+// `minorMoney`, NOT `money` from gymRecord. Both take cents and a currency,
+// both refuse to print without one, and both now know there are no sen in a
+// yen — `money()` used to divide by 100 unconditionally, which would have
+// printed a JPY invoice as a hundredth of itself, and it delegates here
+// instead. This import is kept as the direct one rather than followed back
+// through gymRecord because it says which fact the line depends on.
+// `ZERO_DECIMAL` in src/lib/coachMoney.ts is the single list of the currencies
+// that has to be true of, and this is the platform's book — the one place on
+// the product where the currencies are whatever Stripe billed rather than
+// whatever one gym set.
 import { minorMoney } from '@lib/coachMoney';
 
 /** Whether the signed-in account may read the platform's own book.

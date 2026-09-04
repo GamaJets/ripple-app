@@ -141,7 +141,7 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
 
 {
   const base: GymExportInput = {
-    gymName: 'Iron House', tenantId: 'T1', generatedAt: '2026-08-26T08:00:00.000Z',
+    gymName: 'Iron House', tenantId: 'T1', currency: 'GBP', generatedAt: '2026-08-26T08:00:00.000Z',
     plans: sliceReady([{ id: 'pl1', name: 'Monthly', priceCents: 6000, currency: 'GBP', interval: 'month', active: true }]),
     memberships: sliceReady([
       { id: 'ms1', memberId: 'm1', memberName: 'Sara', planId: 'pl1', planName: 'Monthly', startedOn: '2025-01-01', endsOn: null, status: 'active' },

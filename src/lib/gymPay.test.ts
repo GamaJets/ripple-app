@@ -106,13 +106,27 @@ eq(payCurrency([rate({ currency: null })], 'GBP'), 'GBP',
 /* ── a rate, as somebody types it ──────────────────────────────────────────── */
 
 {
-  const cents = (s: string) => { const r = parseRate(s); return r.kind === 'rate' ? r.cents : r.kind; };
+  const cents = (s: string, ccy: string | null = 'GBP') => {
+    const r = parseRate(s, ccy);
+    return r.kind === 'rate' ? r.cents : r.kind;
+  };
   eq(cents('45'), 4500, 'whole units in, minor units out');
   eq(cents('52.50'), 5250, 'and the halves survive');
   eq(cents(''), 'clear', 'an empty field CLEARS — this coach is on the gym’s standard fee');
   eq(cents('0'), 0, 'a typed zero is a value: the gym pays this coach nothing per session, deliberately');
   eq(cents('-5'), 'bad', 'a negative rate is refused — a deduction is an adjustment line, not a rate');
   eq(cents('4,500'), 450000, 'a thousands comma is stripped rather than truncating the figure');
+
+  // "Whole units in, minor units out" was a multiplication by a hundred, and
+  // there are none in a yen. A Tokyo gym paying a coach ¥8,000 to teach had
+  // ¥800,000 a class in its pay table and on its payroll run — and this is the
+  // one figure in the console that ends in a bank transfer.
+  eq(cents('8000', 'JPY'), 8000, 'a yen rate is stored as the gym typed it');
+  eq(cents('8000', 'GBP'), 800000, 'and the same digits in sterling are not');
+  // Clearing is settled before the currency, and it has to be: a gym that has
+  // not set one must still be able to put a coach back on the standard fee.
+  eq(cents('', null), 'clear', 'an empty field clears even with no currency set');
+  eq(cents('45', null), 'bad', 'but a rate is never stored at a scale nobody chose');
 }
 
 eq(payRateBlocker('45', '', '', 'GBP'), null, 'a session rate alone is fine');

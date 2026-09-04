@@ -50,6 +50,10 @@ import { emptyFinances, hasFigures, anyEntered, reviewFinances, reviewBasis, sto
 import { reconcile, reconcileNote, unreadable } from '../../src/lib/finReconcile';
 import { fetchPlans, fetchMemberships, fetchPayments, summarise } from '../../src/lib/gymRecord';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
+// Minor units → whole units, scaled by the currency rather than by a flat
+// hundred. The derived figures below are COMPARED against numbers the owner
+// typed, so this is arithmetic and not formatting — see `setDerivedMrr`.
+import { minorToWhole } from '../../src/lib/coachMoney';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { deltaLabel } from '../../src/lib/deltaLabel';
@@ -66,6 +70,18 @@ const KEY = 'repple.owner.financials';
 // dash rather than somebody else's money. GYM_CURRENCY is no longer a render
 // fallback anywhere — see the note on it in src/ui/tenant.tsx.
 const moneyIn = (n: number, cur: string | null) => gymMoney(n, cur) ?? '—';
+
+/**
+ * A whole-unit figure rounded to compare against a typed one, or null.
+ *
+ * `minorToWhole` returns null when the currency is unknown, and that null has
+ * to survive the rounding: `Math.round(null)` is 0, and a 0 here is not "we
+ * could not scale this figure", it is "your register says you took nothing" —
+ * a specific, wrong claim about the owner's own gym, in the same type used when
+ * it is true. That substitution is the defect `derivedFailed` below exists to
+ * prevent, and it would have come back in through the arithmetic.
+ */
+const roundOrNull = (n: number | null) => (n == null ? null : Math.round(n));
 
 // `hint` is optional now. A money field's hint IS the gym's currency, and the
 // gym is not known at module scope — it was printing GYM_CURRENCY, the module
@@ -156,7 +172,20 @@ export default function Financials() {
         // summarise returns null when no active membership sits on a priced
         // plan. Passed straight through: "not known" must not become a zero
         // that makes an owner doubt a figure they are right about.
-        setDerivedMrr(sum.mrrCents == null ? null : Math.round(sum.mrrCents / 100));
+        // Minor units → the whole units the owner typed into the form, so the
+        // two can be compared. `/ 100` is only true of a currency with
+        // hundredths: a Tokyo gym's ¥500,000 of MRR is stored as 500000 and was
+        // divided down to 5,000, which was then reconciled against the 500000
+        // the owner had typed and reported as a nine-hundred-and-ninety-nine
+        // percent discrepancy — on the one screen whose entire purpose is
+        // telling an owner whether their own figures hold up.
+        //
+        // Null when the gym has not set a currency, and that is the honest
+        // answer rather than a fallback scale: `reconcile` then reports the
+        // check as not made, which is what it is. A check computed at a guessed
+        // scale is worse than no check, because this screen exists to be
+        // believed.
+        setDerivedMrr(sum.mrrCents == null ? null : roundOrNull(minorToWhole(sum.mrrCents, cur)));
         setDerivedMembers(memberships.length ? sum.activeMembers : null);
 
         // Thirty days back, in whole days, so the window does not slide by the
@@ -168,7 +197,15 @@ export default function Financials() {
         // withholds the check rather than comparing a typed figure against a
         // number made of two moneys.
         const oneMoney = recent.length > 0 && new Set(recent.map((p) => p.currency)).size === 1;
-        setDerivedRevenue(oneMoney ? Math.round(recent.reduce((a, p) => a + p.amountCents, 0) / 100) : null);
+        // Scaled by the currency the ROWS agree on, not the gym's. They are the
+        // same in every ordinary case, and where they are not it is because the
+        // gym changed currency: the till still holds what it holds, in the money
+        // it was taken in, and reading it at today's scale would be the same
+        // hundredfold error with a plausible cause behind it.
+        const tillCcy = oneMoney ? recent[0].currency : null;
+        setDerivedRevenue(oneMoney
+          ? roundOrNull(minorToWhole(recent.reduce((a, p) => a + p.amountCents, 0), tillCcy))
+          : null);
 
         const sinceDay = since.slice(0, 10);
         setDerivedNew(memberships.length ? memberships.filter((m) => m.startedOn >= sinceDay).length : null);
@@ -183,7 +220,10 @@ export default function Financials() {
       }
     })();
     return () => { live = false; };
-  }, [tenant?.id]);
+    // `cur` is a dependency because it is now part of the arithmetic, not just
+    // the label: it decides the scale the derived figures are read at, so a
+    // currency that arrives after the first read has to re-derive them.
+  }, [tenant?.id, cur]);
 
   // `unreadable` rather than `reconcile(..., null)`: only this screen knows the
   // query threw, and it is the one piece of information that separates "your

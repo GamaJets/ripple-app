@@ -50,6 +50,9 @@
 // unpriced work and `settlementBlocker` says so; nothing here weakens that.
 
 import { assertWhole, capLimit } from './rowCap';
+// A typed rate → the integer to store, scaled by the gym's currency rather
+// than by a flat hundred. See `parseRate`: this is what somebody is paid.
+import { wholeToMinor } from './coachMoney';
 import { assertWrote } from './wroteRows';
 import type { PtSession } from './gymSessions';
 
@@ -184,9 +187,9 @@ export async function fetchTrainerPay(sb: Queryable, tenantId: string): Promise<
 export function payRateBlocker(
   sessionRate: string, classRate: string, classKind: ClassPayKind | '', currency: string | null,
 ): string | null {
-  const s = parseRate(sessionRate);
+  const s = parseRate(sessionRate, currency);
   if (s.kind === 'bad') return `Session rate: ${s.reason}`;
-  const c = parseRate(classRate);
+  const c = parseRate(classRate, currency);
   if (c.kind === 'bad') return `Class rate: ${c.reason}`;
   if (c.kind === 'rate' && classKind === '') {
     return 'Say how the class rate is counted — a flat amount for the class, or an amount per person. "80" and "8 a head" are the same number of digits and completely different money.';
@@ -214,16 +217,38 @@ export type RateInput =
  * gym pays this coach nothing per session", which is a claim somebody has to
  * make deliberately — a volunteer, an owner coaching their own clients — and
  * which must not be reachable by tabbing past an empty box.
+ *
+ * ── WHY IT TAKES THE GYM'S CURRENCY ───────────────────────────────────────
+ *
+ * `Math.round(Number(bare) * 100)` assumed a hundred minor units to the whole
+ * unit. There are none in a yen: ¥8,000 a class is stored as 8000, and this
+ * stored 800000, so a Tokyo gym paying a coach ¥8,000 to teach had ¥800,000 a
+ * class in its pay table and on its payroll run. This is what somebody is
+ * actually PAID — the one figure in the console that ends in a bank transfer —
+ * and there is nothing downstream that would have caught it, because the same
+ * hundred came back out of the formatter until the formatter learned better.
+ *
+ * The currency is required and a missing one is REFUSED rather than defaulted.
+ * `payRateBlocker` already refused to save a rate at a gym with no currency —
+ * "what somebody is paid is a permanent record" — and this makes that the same
+ * answer whichever door the rate comes through, including
+ * `adjustmentBlocker`'s.
  */
-export function parseRate(input: string | null | undefined): RateInput {
+export function parseRate(input: string | null | undefined, currency: string | null | undefined): RateInput {
   const raw = String(input ?? '').trim().replace(/[,\s]/g, '');
+  // Clearing is settled before the currency: emptying the box puts the coach
+  // back on the gym's standard fee, which is not an amount and needs no scale.
+  // A gym with no currency must still be able to undo a rate.
   if (!raw) return { kind: 'clear' };
   const bare = raw.replace(/^[^\d.-]+/, '');
   if (/-/.test(raw)) return { kind: 'bad', reason: 'A rate cannot be negative. A deduction is an adjustment line, not a rate.' };
   if (!/^\d+(\.\d{1,2})?$/.test(bare)) {
     return { kind: 'bad', reason: 'Enter it as a number — 45, or 52.50. Leave it empty for the gym’s standard fee.' };
   }
-  const cents = Math.round(Number(bare) * 100);
+  const cents = wholeToMinor(Number(bare), currency);
+  if (cents == null) {
+    return { kind: 'bad', reason: 'This gym has not set its currency, so a rate cannot say what money it is in — and a rate is what somebody is actually paid.' };
+  }
   if (!Number.isFinite(cents) || cents > 2_147_483_647) {
     return { kind: 'bad', reason: 'That is more than Repple will record as a rate — check the zeros.' };
   }
@@ -427,7 +452,7 @@ export interface Adjustment {
 
 /** Why an adjustment cannot be recorded, or null. */
 export function adjustmentBlocker(amount: string, note: string, currency: string | null): string | null {
-  const r = parseRate(amount);
+  const r = parseRate(amount, currency);
   if (r.kind === 'bad') return r.reason;
   if (r.kind === 'clear') return 'Enter the amount, as a positive number. Repple applies the minus for a deduction or an advance.';
   if (r.cents === 0) return 'An adjustment of nothing changes nothing. Leave it off the run instead.';

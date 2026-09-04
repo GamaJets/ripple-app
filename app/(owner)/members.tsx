@@ -32,6 +32,9 @@ import {
   setMembershipStatus, recordPayment, summarise, money,
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
+// A typed amount → the integer stored in the ledger, scaled by the gym's
+// currency rather than by a flat hundred. See the write below.
+import { wholeToMinor } from '../../src/lib/coachMoney';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -217,7 +220,13 @@ export default function OwnerMembers() {
       // label is what makes the owner confident.
       await recordPayment(supabase, tenant.id, {
         memberId: payFor.memberId,
-        amountCents: Math.round(major * 100),
+        // Scaled by `cur`, which the blocker above has already established,
+        // rather than by a flat hundred. A gym taking ¥6,000 at the desk put
+        // 600000 into its ledger — a hundredfold, permanently, on the figure an
+        // owner reconciles against a bank statement. The same shape as the
+        // currency defect this comment describes, in the same write: a label
+        // and an amount that do not describe the same money.
+        amountCents: wholeToMinor(major, cur) ?? 0,
         method,
         takenAt: new Date().toISOString(),
         currency: cur,

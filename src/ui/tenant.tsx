@@ -23,7 +23,11 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { checkTenantBrand } from '../lib/tenantBrand';
-import { money } from '../lib/gymRecord';
+// `wholeMoney`, not `money` from gymRecord.ts. See the note on `gymMoney`: the
+// gym's own figures are typed in whole units, gymRecord's formatter takes minor
+// units, and the `* 100` that bridged them became a hundred-times error the day
+// that formatter learned about the currencies with no hundredths.
+import { wholeMoney } from '../lib/coachMoney';
 import type { LoadStatus } from './loadStatus';
 import { classifySetCurrencyError, isCurrencyCode, readSetCurrency, type SetCurrencyOutcome, type SetCurrencyReply } from '../lib/coachCurrency';
 import { useAuthRevision } from './authRevision';
@@ -83,14 +87,37 @@ import { useAuthRevision } from './authRevision';
 export const GYM_CURRENCY = 'AED';
 
 /**
- * A whole-currency amount as money() renders it — the owner app's one formatter.
+ * A whole-currency amount, rendered — the owner app's one formatter.
  *
  * The gym's own figures come in MAJOR units: `tenants.session_fee` is a numeric
  * in whole currency and `payroll30For` multiplies by it, so a payroll of 6,300
- * is 6,300 dirhams, not 63. `money()` takes MINOR units, so the conversion
- * belongs here rather than at five call sites — one of which is how the console
- * once showed AED 63.00 where the gym owed AED 6,300 (see the note on
- * `payroll30For` in src/lib/gymTrainers.ts).
+ * is 6,300 dirhams, not 63. That is a fact about every caller of this function
+ * and it is why the function exists — one door, rather than the conversion
+ * written out at five call sites, one of which is how the console once showed
+ * AED 63.00 where the gym owed AED 6,300 (see the note on `payroll30For` in
+ * src/lib/gymTrainers.ts).
+ *
+ * ── WHY IT NO LONGER ROUND-TRIPS THROUGH money() ──────────────────────────
+ *
+ * This line was `money(Math.round(whole * 100), currency)`: multiply into minor
+ * units, let gymRecord's formatter divide straight back out. The multiply and
+ * the divide cancelled, so it was correct — for exactly as long as `money()`
+ * divided by a hundred in every currency.
+ *
+ * It no longer does. `money()` delegates to `minorMoney`, which knows the
+ * sixteen currencies in `ZERO_DECIMAL` have no hundredths and does not divide
+ * for them. The multiply here then had nothing cancelling it: a Tokyo gym's
+ * ¥6,300 session fee went in as 6,300, became 630,000, and came back out of the
+ * formatter as "JPY 630,000" — a hundred times the figure the owner set, on the
+ * Overview, on Revenue, on Trainers, in the owner's emailed report, and on the
+ * Operations screen that confirms the fee was saved. Every one of those numbers
+ * looked considered and none of them was.
+ *
+ * `wholeMoney` is the function for exactly this: a whole-unit figure somebody
+ * typed, rendered in the currency they typed it in, with the decimal places
+ * that currency actually has. No multiply, no divide, and nothing here has to
+ * know which currencies are which. `feeAmountLine` in src/lib/booking.ts made
+ * the same move for the same reason.
  *
  * ── TWO reasons this returns null, and they are the same dash ─────────────
  *
@@ -110,7 +137,7 @@ export const GYM_CURRENCY = 'AED';
  * worse than a wrong currency.
  */
 export const gymMoney = (whole: number | null | undefined, currency: string | null | undefined): string | null =>
-  whole == null || !Number.isFinite(whole) ? null : money(Math.round(whole * 100), currency);
+  wholeMoney(whole, currency);
 
 export interface Tenant {
   id: string;

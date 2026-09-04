@@ -886,7 +886,7 @@ function Register({ read, raised, w, ccy, members, tenantId, onChange }: {
     e.preventDefault();
     setSaved(null);
     if (blocker) { setWriteErr(blocker); return; }
-    const amt = parseAmount(amount);
+    const amt = parseAmount(amount, ccy);
     if (amt.kind !== 'amount' || !ccy) return;
     setBusy(true); setWriteErr(null);
     try {

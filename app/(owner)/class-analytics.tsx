@@ -49,6 +49,9 @@ import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 import { supabase } from '../../src/lib/supabase';
 import { money } from '../../src/lib/gymRecord';
+// A stored rate back into the text box, scaled by the gym's currency rather
+// than by a flat hundred. See `RateRow` below.
+import { wholeFieldValue } from '../../src/lib/coachMoney';
 import {
   fetchTrainerPay, saveTrainerPay, fetchClassPay, addClassPay,
   classPayAmount, classPayBlocker, parseRate, payRateBlocker,
@@ -104,9 +107,13 @@ function RateRow({ t, existing, busy, cur, onSave, onCancel }: {
   onSave: (amount: string, kind: ClassPayKind | '') => void;
   onCancel: () => void;
 }) {
-  const [amount, setAmount] = useState(
-    existing?.classRateCents == null ? '' : (existing.classRateCents / 100).toFixed(2),
-  );
+  // Scaled by the gym's currency, not by a flat hundred. A gym paying ¥8,000 a
+  // class stores 8000, and `/ 100` showed its owner "80.00" in the box they
+  // reopen to change a coach's pay — a hundredth of what that coach is actually
+  // on, in a field whose next keystroke overwrites the real figure. `parseRate`
+  // in src/lib/gymPay.ts is the other half of the same round trip and scales
+  // the same way, so what is shown and what is stored cannot drift.
+  const [amount, setAmount] = useState(wholeFieldValue(existing?.classRateCents ?? null, cur));
   const [kind, setKind] = useState<ClassPayKind | ''>(existing?.classPayKind ?? '');
 
   return (
@@ -329,7 +336,7 @@ export default function OwnerClassAnalytics() {
     if (!tenantId || !cur) return;
     const blocker = payRateBlocker('', amount, kind, cur);
     if (blocker) { setWriteErr(blocker); return; }
-    const parsed = parseRate(amount);
+    const parsed = parseRate(amount, cur);
     setBusy(trainerId);
     try {
       const own = pay?.get(trainerId) ?? null;

@@ -33,6 +33,10 @@ import { fetchClasses, type GymClass } from '@lib/gymSchedule';
 import { isoDate } from '@lib/format';
 import { money } from '@lib/gymRecord';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+// Minor units are not always a hundredth of a whole unit — see `ZERO_DECIMAL`
+// in src/lib/coachMoney.ts. Every conversion on this screen goes through
+// these rather than through a hand-written `* 100` or `/ 100`.
+import { wholeToMinor } from '@lib/coachMoney';
 
 const DAY = 86400000;
 
@@ -350,8 +354,14 @@ function History({ rows, kit, unread, today, ccy, tenantId, me, onChange }: {
         happenedOn: on,
         performedBy: by,
         findings,
-        costCents: clean ? Math.round(Number(clean) * 100) : null,
-        currency: clean ? ccy : null,
+        // Scaled by the gym's currency rather than by a flat hundred: a ¥40,000
+        // repair was filed as 4,000,000 minor units, and this is a maintenance
+        // record a gym totals when it decides whether to replace a machine.
+        // Null where the box is empty AND where the gym has no currency, and
+        // `currency` follows the same condition so the two cannot disagree — a
+        // cost with no currency beside it is not a figure.
+        costCents: clean ? wholeToMinor(Number(clean), ccy) : null,
+        currency: clean && ccy ? ccy : null,
         recordedBy: me.id,
       });
       setFindings(''); setBy(''); setCost('');

@@ -23,7 +23,10 @@ import { progressChangeLines, progressSpanLabel, progressSummary, figure, dayLab
 // anybody west of Greenwich, and a scan dated the day before it happened is
 // exactly the sort of thing a coach notices and the app never would.
 import { localDate } from './localDate';
-import { money } from './gymRecord';
+// `wholeMoney`, not `money` from gymRecord.ts. `payroll30` is a whole-unit
+// figure and gymRecord's formatter takes minor units; see the note on the
+// payroll line below for what the `* 100` between them did.
+import { wholeMoney } from './coachMoney';
 // The client's unit reaches these builders as an argument. Nothing here reads a
 // provider, so a report can be built for whoever's row is in hand.
 import { weightIn, convertedNote, type WeightUnit } from './units';
@@ -458,11 +461,21 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     // the table says which.
     //
     // `payroll30` is a MAJOR-unit amount (session_fee is whole currency and
-    // payroll30For multiplies by it) and `money()` takes minor units, which is
-    // the mismatch that once printed AED 63.00 for a gym owed AED 6,300 — so it
-    // is converted here rather than assumed either way.
-    ['Value of those sessions',
-      money(d.payroll30 == null ? null : Math.round(d.payroll30 * 100), d.currency) ?? '\u2014'],
+    // payroll30For multiplies by it), which is the mismatch that once printed
+    // AED 63.00 for a gym owed AED 6,300.
+    //
+    // It bridged that with `money(Math.round(payroll30 * 100), currency)` — up
+    // into minor units so gymRecord's formatter could divide straight back out.
+    // Those cancelled only while that formatter divided by a hundred in every
+    // currency, and it no longer does: it knows the sixteen in `ZERO_DECIMAL`
+    // have no hundredths, so the multiply had nothing undoing it and a Tokyo
+    // gym's report stated the value of its sessions as a hundred times what
+    // the owner's own screen was set to. A report is the copy that gets
+    // forwarded to an accountant, so it is the worst place for that figure.
+    //
+    // `wholeMoney` takes the whole-unit figure as it stands. No conversion, and
+    // nothing here has to know which currencies have a subdivision.
+    ['Value of those sessions', wholeMoney(d.payroll30, d.currency) ?? '\u2014'],
     ['Avg clients / trainer', d.avgClientsPerTrainer == null ? '\u2014' : String(d.avgClientsPerTrainer)],
     ['Trainers needing a look', String(d.atRiskCount)],
     ['Clients with those trainers', String(d.atRiskClients)],

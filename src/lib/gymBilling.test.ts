@@ -20,8 +20,8 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 /* ── an amount, as somebody types it ───────────────────────────────────────── */
 
 {
-  const cents = (s: string) => {
-    const r = parseAmount(s);
+  const cents = (s: string, ccy: string | null = 'GBP') => {
+    const r = parseAmount(s, ccy);
     return r.kind === 'amount' ? r.cents : null;
   };
 
@@ -35,13 +35,25 @@ const eq = (a: unknown, b: unknown, msg: string) =>
   eq(cents('£60'), 6000, 'a currency symbol is dropped, not refused — the gym’s currency is not typed here');
   eq(cents(' 60 '), 6000, 'surrounding whitespace is not an amount');
 
-  ok(parseAmount('').kind === 'bad', 'an empty box is not an invoice for nothing');
-  ok(parseAmount('-60').kind === 'bad', 'a negative invoice is refused — a bill taken back is a void');
-  ok(parseAmount('10.005').kind === 'bad',
+  ok(parseAmount('', 'GBP').kind === 'bad', 'an empty box is not an invoice for nothing');
+  ok(parseAmount('-60', 'GBP').kind === 'bad', 'a negative invoice is refused — a bill taken back is a void');
+  ok(parseAmount('10.005', 'GBP').kind === 'bad',
     'a third decimal place is refused rather than rounded: 1000 and 1001 are both wrong and only the person typing knows which');
-  ok(parseAmount('sixty').kind === 'bad', 'words are not amounts');
-  ok(parseAmount('99999999999').kind === 'bad',
+  ok(parseAmount('sixty', 'GBP').kind === 'bad', 'words are not amounts');
+  ok(parseAmount('99999999999', 'GBP').kind === 'bad',
     'past a 32-bit integer the database raises 22003 after the form has closed');
+
+  // `gym_invoices.amount_cents` is what somebody is ASKED TO PAY, and "whole
+  // number is minor units" was a multiplication by a hundred. There are none in
+  // a yen: a gym billing ¥6,000 raised an invoice for 600000, which every screen
+  // that ages, chases and reconciles it then read back as ¥600,000. Nothing
+  // downstream could have caught it — the figure was consistent everywhere and
+  // simply a hundred times what the owner typed.
+  eq(cents('6000', 'JPY'), 6000, 'a yen invoice is raised for what the owner typed');
+  eq(cents('6000', 'jpy'), 6000, 'whatever case the gym’s currency is held in');
+  eq(cents('6000', 'GBP'), 600000, 'and the same digits in sterling are not the same integer');
+  ok(parseAmount('60', null).kind === 'bad',
+    'and an invoice cannot be raised at a scale nobody chose — invoiceBlocker refuses it first, and so does this');
 }
 
 /* ── a date that is actually a date ────────────────────────────────────────── */

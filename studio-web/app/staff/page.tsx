@@ -46,6 +46,10 @@ import {
   type StaffRecord, type StaffView, type StaffMember, type StaffTrainer,
   type StaffClient, type ClientActivity,
 } from '@lib/staffView';
+// Minor units are not always a hundredth of a whole unit — see `ZERO_DECIMAL`
+// in src/lib/coachMoney.ts. Every conversion on this screen goes through
+// these rather than through a hand-written `* 100` or `/ 100`.
+import { wholeToMinor, wholeFieldValue } from '@lib/coachMoney';
 
 const DAY = 86_400_000;
 /** How far back the sessions, the rota and the timetable are read. */
@@ -158,10 +162,15 @@ export default function Staff() {
 
   const view: StaffView = useMemo(() => buildStaff(rec, {
     policy,
-    // The gym's fee is in major units; everything downstream is minor units.
-    fallbackRateCents: sessionFee == null ? null : Math.round(sessionFee * 100),
+    // The gym's fee is in major units; everything downstream is minor units,
+    // and the conversion is scaled by the gym's currency rather than by a flat
+    // hundred — `* 100` valued every unpriced session at a gym charging ¥6,000
+    // at 600000 minor units, a hundredfold, on the figures this screen judges
+    // coaches by. Null where the gym has not set a currency: the sessions with
+    // no rate of their own stay unvalued and are reported as such.
+    fallbackRateCents: wholeToMinor(sessionFee, ccy),
     windowDays: WINDOW_DAYS,
-  }), [rec, policy, sessionFee]);
+  }), [rec, policy, sessionFee, ccy]);
 
   if (me === undefined) return <div style={{ padding: 40, color: 'var(--ink3)' }}>Loading…</div>;
   if (me === null) return <div style={{ padding: 40 }}><a href="/">Sign in</a></div>;
@@ -725,7 +734,12 @@ function Rota({ tenantId, trainers, ccy }: {
   const canPrice = !!ccy;
 
   const draft = shiftFromHours(who, day, parseInt(from, 10), parseInt(to, 10), role);
-  const cents = rate.trim() === '' ? null : Math.round((parseFloat(rate) || 0) * 100);
+  // Scaled by the gym's currency, not by a flat hundred: a shift rate is what
+  // somebody is paid for turning up, and `* 100` filed a ¥200-an-hour shift as
+  // 20000 minor units — ¥20,000 an hour on the rota's cost line. `canPrice`
+  // above already closes the money half of this form when the gym has no
+  // currency, so null here only ever means an empty box.
+  const cents = wholeToMinor(rate.trim() === '' ? null : (parseFloat(rate) || 0), ccy);
   const blocker = (who || rate)
     ? shiftBlocker({
         trainerId: who,
@@ -960,7 +974,10 @@ function EditShift({ shift, ccy, onClose }: {
   const [endsAt, setEndsAt] = useState(local(shift.endsAt));
   const [role, setRole] = useState<ShiftRole>(shift.role);
   const [note, setNote] = useState(shift.note ?? '');
-  const [rate, setRate] = useState(shift.rateCents == null ? '' : String(shift.rateCents / 100));
+  // Scaled by the shift's own currency — see `cur` below for why the shift's
+  // wins over the gym's. `/ 100` showed a ¥200 shift rate back as "2" in the
+  // box that overwrites it.
+  const [rate, setRate] = useState(wholeFieldValue(shift.rateCents, shift.currency ?? ccy));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -968,7 +985,11 @@ function EditShift({ shift, ccy, onClose }: {
   // one currency must not be silently re-denominated because the gym has since
   // changed its setting. The gym's is only the default for a shift with none.
   const cur = shift.currency ?? ccy;
-  const cents = rate.trim() === '' ? null : Math.round((parseFloat(rate) || 0) * 100);
+  // The same scale the box was filled at, so what is shown and what is stored
+  // cannot disagree. Null for an empty box and null for a shift with no
+  // currency at all — both mean no rate is recorded, which `shiftBlocker`
+  // below already treats as its own case.
+  const cents = wholeToMinor(rate.trim() === '' ? null : (parseFloat(rate) || 0), cur);
   const blocker = shiftBlocker({
     trainerId: shift.trainerId,
     startsAt: startsAt ? new Date(startsAt).toISOString() : null,

@@ -24,6 +24,10 @@ import {
 } from '@lib/gymSessions';
 import { money } from '@lib/gymRecord';
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
+// Minor units are not always a hundredth of a whole unit — see `ZERO_DECIMAL`
+// in src/lib/coachMoney.ts. Every conversion on this screen goes through
+// these rather than through a hand-written `* 100` or `/ 100`.
+import { wholeToMinor } from '@lib/coachMoney';
 
 const DAY = 86400000;
 
@@ -176,9 +180,13 @@ export default function Sessions() {
   const settled = useMemo(() => sessions && sessions.filter((s) => s.outcome !== null), [sessions]);
 
   const lines = useMemo(
-    // The gym's session fee is in major units; payroll works in minor units.
-    () => sessions && payrollByTrainer(sessions, policy, sessionFee == null ? null : Math.round(sessionFee * 100)),
-    [sessions, policy, sessionFee],
+    // The gym's session fee is in major units; payroll works in minor units,
+    // and the conversion is scaled by the gym's currency and not by a flat
+    // hundred. `* 100` turned a ¥6,000 fee into a fallback rate of 600000, so
+    // every unpriced session on this page was valued at a hundred times what
+    // the gym charges — and this is the page a payroll run is built from.
+    () => sessions && payrollByTrainer(sessions, policy, wholeToMinor(sessionFee, ccy)),
+    [sessions, policy, sessionFee, ccy],
   );
   // Totalling nothing gives zeros, which is fine here only because every place
   // that renders one of them checks `sessions` first and shows a dash instead.
@@ -194,7 +202,10 @@ export default function Sessions() {
   // on this page.
   const owed = useMemo(() => {
     if (sessions === null) return null;
-    const feeCents = sessionFee == null ? null : Math.round(sessionFee * 100);
+    // Same scale as `lines` above, from the same door. Null where the gym has
+    // not set a currency: a session with no rate of its own then stays unpriced
+    // and is reported as such, rather than being owed at a guessed scale.
+    const feeCents = wholeToMinor(sessionFee, ccy);
     const byTrainer = new Map<string, { name: string | null; rows: PtSession[]; unmarked: number }>();
     for (const s of sessions) {
       const e = byTrainer.get(s.trainerId)
@@ -281,8 +292,15 @@ export default function Sessions() {
       // "no rate" onto a session that has one. A read we could not make is not
       // a price of nothing; the only safe move is to leave the column untouched
       // and let a later marking, made with the fee in hand, set it.
+      //
+      // And the fee is scaled by the gym's currency, because this WRITES: the
+      // rate is snapshotted onto the session so a later fee change cannot
+      // rewrite what a trainer was owed, which is exactly why a hundredfold
+      // error here is permanent. `wholeToMinor` returns null where the gym has
+      // no currency, which lands in the same `null` branch as no fee at all —
+      // no rate recorded, rather than one nobody chose the scale of.
       await markOutcome(supabase, s.id, outcome,
-        s.rateCents ?? (gymError ? undefined : sessionFee == null ? null : Math.round(sessionFee * 100)));
+        s.rateCents ?? (gymError ? undefined : wholeToMinor(sessionFee, ccy)));
       refresh();
     } catch (e: any) {
       setErr(e?.message ?? 'Could not record that outcome.');

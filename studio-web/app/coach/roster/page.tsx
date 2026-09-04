@@ -837,9 +837,17 @@ function Packs({ packs, failed, rows }: { packs: Pack[] | null; failed: boolean;
       // labelling every pack a coach ever sold with the currency it defaults to.
       // /revenue reached the same wall and answers it the same way: the digits,
       // said to be minor units, rather than a denomination nobody recorded.
+      //
+      // And the digits are the STORED integer, not that integer divided by a
+      // hundred. This column is headed "Paid (minor units)" and then printed a
+      // number that was not in minor units — and for a coach billing in yen the
+      // division was not even a change of unit, it was a hundredth of the
+      // amount with two invented decimal places after it. Without a currency
+      // there is nothing that could tell it which, so the honest cell is the
+      // integer exactly as recorded, which is what the header already promises.
       render: (p) => p.amountCents == null
         ? <span className="dash">— nothing recorded</span>
-        : <span className="mono">{(p.amountCents / 100).toFixed(2)}</span>,
+        : <span className="mono">{p.amountCents}</span>,
     },
     { key: 'status', header: 'Status', value: (p) => p.status },
     {

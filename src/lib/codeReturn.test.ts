@@ -222,26 +222,50 @@ eq(shapeCodeReturns([raw({ spend_cents: 40000, spend_currency: null })])[0].spen
 
 /* ── what the coach types into the spend field ─────────────────────────── */
 
-eq(parseSpend('').kind, 'clear', 'an empty field clears the record — unknown, which is not zero');
-eq(parseSpend('   ').kind, 'clear', 'and so does whitespace');
-eq(parseSpend(null).kind, 'clear', 'and nothing at all');
-const zero = parseSpend('0');
+eq(parseSpend('', 'GBP').kind, 'clear', 'an empty field clears the record — unknown, which is not zero');
+eq(parseSpend('   ', 'GBP').kind, 'clear', 'and so does whitespace');
+eq(parseSpend(null, 'GBP').kind, 'clear', 'and nothing at all');
+const zero = parseSpend('0', 'GBP');
 eq(zero.kind, 'amount', 'a typed zero is a claim the coach is making');
 eq(zero.kind === 'amount' ? zero.cents : -1, 0, 'and it is recorded as zero, not as unknown');
-const p250 = parseSpend('250');
+const p250 = parseSpend('250', 'GBP');
 eq(p250.kind === 'amount' ? p250.cents : -1, 25000, 'whole units in, minor units out');
-const p2505 = parseSpend('250.50');
+const p2505 = parseSpend('250.50', 'GBP');
 eq(p2505.kind === 'amount' ? p2505.cents : -1, 25050, 'and the pennies survive');
-const psym = parseSpend('£1,250');
+const psym = parseSpend('£1,250', 'GBP');
 eq(psym.kind === 'amount' ? psym.cents : -1, 125000, 'a coach asked for an amount types a currency symbol; that is not an error');
-eq(parseSpend('-5').kind, 'bad', 'negative spend is refused');
-eq(parseSpend('lots').kind, 'bad', 'and so is a word');
-eq(parseSpend('999999999999').kind, 'bad', 'an extra run of zeros is caught rather than drowning every other code');
+eq(parseSpend('-5', 'GBP').kind, 'bad', 'negative spend is refused');
+eq(parseSpend('lots', 'GBP').kind, 'bad', 'and so is a word');
+eq(parseSpend('999999999999', 'GBP').kind, 'bad', 'an extra run of zeros is caught rather than drowning every other code');
+
+// "Whole units in, minor units out" is not a multiplication by a hundred. It
+// was, and this is a WRITE — the integer goes into `code_spend` and every
+// cost-per-client and return figure the coach ever reads for that campaign is
+// worked out from it. A coach billing in yen had ¥50,000 of spend stored as
+// 5,000,000, which is also a different scale from the revenue it is divided by.
+const yen = parseSpend('50000', 'JPY');
+eq(yen.kind === 'amount' ? yen.cents : -1, 50000, 'a yen figure is stored as typed — there are no sen in a yen');
+const yenLower = parseSpend('50000', 'jpy');
+eq(yenLower.kind === 'amount' ? yenLower.cents : -1, 50000, 'whatever case the currency is held in');
+// Clearing is settled before the currency: a coach with no currency set must
+// still be able to take back a figure they entered, and deleting a record needs
+// no scale to do it at.
+eq(parseSpend('', null).kind, 'clear', 'an empty field still clears when no currency is set');
+eq(parseSpend('250', null).kind, 'bad', 'but nothing is stored at a scale nobody chose');
+eq(parseSpend('250', '  ').kind, 'bad', 'and whitespace is the same silence as null');
 
 eq(spendFieldValue(row()), '', 'a code with no recorded spend opens with an empty field, not a zero');
 eq(spendFieldValue(row({ spend: { cents: 25000, currency: 'GBP' } })), '250', 'a round amount comes back round');
 eq(spendFieldValue(row({ spend: { cents: 25050, currency: 'GBP' } })), '250.50', 'and a pennies amount comes back whole');
 eq(spendFieldValue(row({ spend: { cents: 0, currency: 'GBP' } })), '0', 'a recorded zero comes back as a zero, so the coach can see they said it');
+// The other half of the pair that used to cancel: the box was filled by
+// dividing by a hundred and saved by multiplying by one, so a yen spend
+// round-tripped perfectly while showing the coach a hundredth of it the whole
+// time. It only bites when they act on what they were shown.
+eq(spendFieldValue(row({ spend: { cents: 50000, currency: 'JPY' } })), '50000',
+  'a yen spend opens at what the coach entered, not at a hundredth of it');
+eq(spendFieldValue(row({ spend: { cents: 25000, currency: null as unknown as string } })), '',
+  'and a spend whose currency is unreadable opens empty rather than at a guessed scale');
 
 /* ── the one sentence about attribution ────────────────────────────────── */
 

@@ -46,6 +46,9 @@ import { weightDeltaIn, type WeightUnit } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 import { goalToEnum } from '../../src/lib/rosterMerge';
 import { billingAvailable } from '../../src/lib/billing';
+// The coach's own currency, for the spend field. See `spendCur` below: what
+// it decides is the scale a typed figure is stored at, not just its label.
+import { myTenantCurrency } from '../../src/lib/subscriptions';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
@@ -645,6 +648,31 @@ export default function TrainerClients() {
   // half-typed number is never mistaken for a recorded one.
   const [spendDraft, setSpendDraft] = useState<Record<string, string>>({});
   const [spendBusy, setSpendBusy] = useState<string | null>(null);
+  /**
+   * The coach's own currency, for the spend field — and it is the SCALE, not
+   * the label.
+   *
+   * `parseSpend` has to know whether a hundred minor units make one whole one
+   * before it can turn "50000" into an integer to store, and the sixteen
+   * currencies in `ZERO_DECIMAL` say no. Without it a coach billing in yen had
+   * every spend they recorded stored a hundred times over, permanently, and
+   * every cost-per-client and return figure on this screen worked out from it.
+   *
+   * A code that already HAS a recorded spend carries its own currency and that
+   * one wins: it is what the stored integer was scaled at, and re-reading an
+   * old figure at today's currency would be editing history in a text box. This
+   * is the fallback for the first entry against a code, which has none.
+   *
+   * Null on a failed read as well as on a gym that has not set one, and both
+   * mean the same thing here — no scale, so nothing is stored and the coach is
+   * told why rather than having a guess written against their campaign.
+   */
+  const [spendCur, setSpendCur] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    myTenantCurrency().then((r) => { if (alive) setSpendCur(r.currency); });
+    return () => { alive = false; };
+  }, []);
   const loadCodes = async () => {
     setCodes((c) => ({ ...c, status: 'loading' }));
     setReturns((r) => ({ ...r, status: 'loading' }));
@@ -661,7 +689,7 @@ export default function TrainerClients() {
   const codeTell = enoughToTell(returns.status, returns.rows);
   const saveSpend = async (row: CodeReturnRow) => {
     const key = row.id ?? '';
-    const parsed = parseSpend(spendDraft[key]);
+    const parsed = parseSpend(spendDraft[key], row.spend?.currency ?? spendCur);
     if (parsed.kind === 'bad') { Alert.alert('Not saved', parsed.reason); return; }
     setSpendBusy(key);
     // A cleared field sends null, which DELETES the record. Sending 0 would
@@ -2917,15 +2945,19 @@ export default function TrainerClients() {
                       // moment a figure was in it, and a coach coming back to
                       // correct a recorded spend saw an unlabelled amount beside
                       // a Save button. The currency is the one already recorded
-                      // against this code; where nothing is recorded yet there
-                      // is none to state, and Repple does not invent one (part
-                      // 99 — `tenants.currency` is nullable because a gym that
-                      // has not said is not to be guessed at).
+                      // against this code, falling back to the coach's own for
+                      // a code nothing has been recorded against yet — which is
+                      // the same currency the figure will be STORED at, so the
+                      // label and the scale cannot disagree. Where neither is
+                      // known there is none to state and Repple does not invent
+                      // one (part 99 — `tenants.currency` is nullable because a
+                      // gym that has not said is not to be guessed at); saving
+                      // is refused with a reason rather than guessed at.
                       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.sm, marginTop: sp.sm }}>
                         <Field
                           label="What it cost you"
-                          hint={c.spend?.currency ? `${c.spend.currency} · leave empty to clear` : 'leave empty if you don’t know'}
-                          a11y={c.spend?.currency ? `What this code cost you, in ${c.spend.currency}` : 'What this code cost you'}
+                          hint={(c.spend?.currency ?? spendCur) ? `${c.spend?.currency ?? spendCur} · leave empty to clear` : 'leave empty if you don’t know'}
+                          a11y={(c.spend?.currency ?? spendCur) ? `What this code cost you, in ${c.spend?.currency ?? spendCur}` : 'What this code cost you'}
                         >
                           <TextInput
                             value={spendDraft[key] ?? ''}

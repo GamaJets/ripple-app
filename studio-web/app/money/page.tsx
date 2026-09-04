@@ -24,6 +24,10 @@ import {
   fetchPassTypes, createPassType, setPassTypeActive, passTypeBlocker,
   type PassType, type PassKind,
 } from '@lib/gymPasses';
+// Minor units are not always a hundredth of a whole unit — see `ZERO_DECIMAL`
+// in src/lib/coachMoney.ts. Every conversion on this screen goes through
+// these rather than through a hand-written `* 100` or `/ 100`.
+import { wholeToMinor, wholeFieldValue } from '@lib/coachMoney';
 
 const DAY = 86400000;
 
@@ -248,7 +252,12 @@ function Plans({ plans, readErr, tenantId, ccy, onChange }: {
     setBusy(true); setWriteErr(null);
     try {
       await createPlan(supabase, tenantId, {
-        name: name.trim(), priceCents: Math.round(major * 100), interval, currency: ccy,
+        // Scaled by `ccy`, which is non-null by the refusal above, rather than
+        // by a flat hundred: a plan priced at ¥6,000 was written as 600000 and
+        // a member billed a hundred times over. `wholeToMinor` cannot return
+        // null here for the same reason — the currency is already established —
+        // and `?? 0` is a type narrowing, not a fallback scale.
+        name: name.trim(), priceCents: wholeToMinor(major, ccy) ?? 0, interval, currency: ccy,
       });
       setName(''); setPrice(''); onChange();
     } catch (e: any) {
@@ -366,7 +375,11 @@ function PassTypes({ types, readErr, tenantId, ccy, onChange }: {
   const draft = {
     name,
     kind,
-    priceCents: Number.isFinite(major) ? Math.round(major * 100) : null,
+    // Scaled by the gym's currency rather than by a flat hundred. Null where
+    // the gym has none, which is the state the banner below already refuses to
+    // price a pass in — so the draft the blocker judges is the same figure the
+    // write would store, and a preview cannot show one price and file another.
+    priceCents: Number.isFinite(major) ? wholeToMinor(major, ccy) : null,
     currency: ccy,
     uses: uses.trim() === '' ? 1 : parseInt(uses, 10),
     validDays: validDays.trim() === '' ? null : parseInt(validDays, 10),
@@ -761,7 +774,12 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, onChange }: {
     try {
       await recordPayment(supabase, tenantId, {
         memberId: memberId || null,
-        amountCents: Math.round(major * 100),
+        // Scaled by `ccy`, non-null by the refusal above. A ¥6,000 payment was
+        // going into the ledger as 600000 — a hundredfold, permanently, on the
+        // figure an owner reconciles against a bank statement, which is exactly
+        // the harm the refusal above was written to prevent and in the same
+        // column.
+        amountCents: wholeToMinor(major, ccy) ?? 0,
         method,
         recordedBy: me.id,
         currency: ccy,
@@ -946,18 +964,37 @@ function Correction({ p, all, tenantId, me, onDone, onCancel, onErr }: {
   // Pre-filled with what is left, because a full reversal is the common case
   // and typing an amount that has to match to the penny is where a partial
   // reversal nobody meant comes from.
-  const [amt, setAmt] = useState((remaining / 100).toFixed(2));
+  //
+  // Scaled by the PAYMENT's own currency — `gym_payments.currency` is stored
+  // per row so a payment taken before the gym changed its currency is still in
+  // the money it was taken in — and not by a flat hundred. `/ 100` offered the
+  // front desk "50.00" as the remainder of a ¥5,000 payment, and the multiply
+  // below turned that back into 5000, so the round trip cancelled out and the
+  // number the person handing money back was reading was a hundredth of what
+  // they were handing back.
+  const [amt, setAmt] = useState(wholeFieldValue(remaining, p.currency));
   const [note, setNote] = useState('');
   const [method, setMethod] = useState<PaymentMethod>(p.method);
   const [busy, setBusy] = useState(false);
 
-  const cents = Math.round(parseFloat(amt) * 100);
+  // The same scale the box was filled at. NaN where the box does not hold a
+  // number and where the payment states no currency — `reversalBlocker` refuses
+  // both, and its overshoot sentence now withholds the figures rather than
+  // quoting them bare when the currency is missing.
+  const typed = parseFloat(amt);
+  const cents = Number.isFinite(typed) ? wholeToMinor(typed, p.currency) : null;
   const blocker =
-    reversalBlocker(p, already, Number.isFinite(cents) ? cents : NaN)
+    reversalBlocker(p, already, cents == null ? NaN : cents)
     ?? (note.trim() ? null : 'Say what this is for. A negative row in the ledger with no reason on it is the line an accountant asks about and nobody can answer.');
 
   const go = async () => {
     if (blocker) { onErr(blocker); return; }
+    // Unreachable: `reversalBlocker` refuses a non-finite amount, and `cents` is
+    // null only where the typed value is not a number or the payment states no
+    // currency, which is the same NaN it was handed. Written as a guard rather
+    // than a `!` because the thing on the other side of it is a permanent
+    // negative row in a gym's ledger.
+    if (cents == null) { onErr('That amount could not be read, so nothing was taken back.'); return; }
     setBusy(true);
     try {
       await reversePayment(supabase, tenantId, p, {

@@ -50,6 +50,9 @@ import {
 } from '../../src/lib/trainerSessions';
 import { useFloorQueue } from '../../src/ui/floorQueue';
 import { floorPendingNote, keptOfflineLine } from '../../src/lib/floorQueue';
+// A whole-unit fee → the integer snapshotted onto a session, scaled by the
+// gym's currency. See the note where `rateCents` is taken.
+import { wholeToMinor } from '../../src/lib/coachMoney';
 
 /** The four outcomes, in the order a person would consider them. */
 const OUTCOMES: { id: SessionOutcome; label: string; short: string; tone: (t: Theme) => string }[] = [
@@ -190,7 +193,20 @@ export default function TrainerSessions() {
       // session marked on Tuesday and sent on Thursday is worth what it was
       // worth on Tuesday, and re-reading the fee would let a rate change in
       // between quietly rewrite it.
-      const rateCents = feeToSnapshot != null ? feeToSnapshot * 100 : undefined;
+      //
+      // Scaled by the gym's currency and not by a flat hundred. The fee is in
+      // whole units and `rate_cents` is minor units, and `* 100` is only the
+      // conversion between them in a currency with hundredths: a gym paying
+      // ¥6,000 a session had 600000 stamped onto every session a coach marked,
+      // permanently, and read back a hundredfold by every payroll screen.
+      //
+      // No currency, no snapshot — `undefined` leaves `rate_cents` untouched,
+      // which is the same instruction the code already sends for an unknown
+      // fee and for the reason the comment above gives. An integer written at a
+      // scale nobody can name is worse than a column left empty: the empty
+      // column is visibly unpriced and can be filled in later, and the integer
+      // is a figure somebody is paid from.
+      const rateCents = wholeToMinor(feeToSnapshot, tenant?.currency ?? null) ?? undefined;
       // ── the outcome, and the room it is recorded in ────────────────────
       //
       // This is the same money as the class tick, one session at a time, and

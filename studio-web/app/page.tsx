@@ -11,7 +11,7 @@ import { supabase, loadMe, type Me } from '@/lib/supabase';
 import { Shell } from '@/components/Shell';
 import { DataTable, type Column } from '@/components/DataTable';
 import { PasswordField } from '@/components/PasswordField';
-import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+import { amount, wholeAmount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { fetchGymTrainers, payrollBlocker, type GymTrainer } from '@lib/gymTrainers';
 import { gymRollup, trainerHealth, type GymRollup } from '@lib/ownerAnalytics';
 import { fetchMemberships, fetchPayments, fetchPlans, summarise, type Membership } from '@lib/gymRecord';
@@ -447,12 +447,20 @@ export default function Overview() {
         <Kpi label="Sessions 30d" value={roll?.sessions30} />
         <Kpi
           label="Session value 30d"
-          // MAJOR units from payroll30For, so ×100 to reach the minor units
-          // `amount` takes. It went out as a bare `value` before — a money
-          // figure with nothing at all to say what money it was, on the tile an
-          // owner reads first. Now it is either written in the gym's own
-          // currency or not written.
-          text={roll?.payroll30 == null ? null : amount(Math.round(roll.payroll30 * 100), ccy)}
+          // MAJOR units from payroll30For, and written as such. It went out as
+          // a bare `value` before — a money figure with nothing at all to say
+          // what money it was, on the tile an owner reads first. Now it is
+          // either written in the gym's own currency or not written.
+          //
+          // It reached the formatter through `amount(Math.round(payroll30 *
+          // 100), ccy)`: up into minor units so the formatter could divide
+          // straight back out. Those cancelled only while the formatter divided
+          // by a hundred in EVERY currency, and it no longer does — the sixteen
+          // in `ZERO_DECIMAL` have no hundredths — so a Tokyo gym read this
+          // tile, the first figure on the console, as a hundred times what its
+          // owner had set the session fee to. `wholeAmount` takes the figure as
+          // it stands.
+          text={wholeAmount(roll?.payroll30 ?? null, ccy)}
           // A dash with no explanation reads as a bug. Say which of the four
           // reasons it is: the gym could not be read, no fee is set, work is
           // still awaiting an outcome, or the gym has never said what money it

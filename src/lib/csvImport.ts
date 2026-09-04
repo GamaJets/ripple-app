@@ -13,6 +13,10 @@
 // it would do before it does anything.
 
 import { parseSheet, mapColumns, type Sheet } from './csv';
+// The single list of currencies with no minor unit. `parseMoneyCents` reads a
+// spreadsheet's major-unit figures into the integers the database stores, and
+// "how many minor units are in one of these" is not a constant — see its note.
+import { ZERO_DECIMAL } from './coachMoney';
 import type { CoachedMode } from './types';
 
 /* ── values ────────────────────────────────────────────────────────────────── */
@@ -37,8 +41,34 @@ const MONEY_STRIP = /[^\d.,\-()]/g;
  * Anything with more than two decimal places is refused rather than rounded:
  * a column of four-decimal figures is a unit price or an exchange rate, and
  * rounding it silently turns a data-shape problem into a money problem.
+ *
+ * ── WHY IT TAKES A CURRENCY ───────────────────────────────────────────────
+ *
+ * "How many minor units are in one whole unit" is not a hundred. It is a
+ * hundred in most currencies and ONE in the sixteen in `ZERO_DECIMAL`: there
+ * are no sen in a yen, so ¥50,000 is stored as 50000, which is exactly what
+ * Stripe does and exactly what `minorMoney` renders on.
+ *
+ * Without the currency this multiplied by a hundred flatly, so a Tokyo gym
+ * importing its payment history — the one operation whose entire purpose is to
+ * get years of real figures into Repple in one press — landed every row a
+ * hundred times too large, permanently, with nothing on any screen marking it
+ * as converted. It is the same defect in the same direction as the export it
+ * round-trips with: `minorToDecimal` in src/lib/gymExport.ts writes these
+ * files, and a file written there has to read back here as the same integer.
+ *
+ * A missing currency is REFUSED rather than assumed. This is a write, and the
+ * whole file is written on one press: guessing the wrong scale here is not a
+ * dash on a screen somebody can go and fix, it is a year of a gym's history
+ * stored a hundredfold out with no marker on any row. The import screen knows
+ * the gym and passes its currency; a gym that has not set one is told to set it
+ * before importing.
  */
-export function parseMoneyCents(raw: string): Parsed<number> {
+export function parseMoneyCents(raw: string, currency: string | null | undefined): Parsed<number> {
+  const cur = (currency || '').trim().toLowerCase();
+  if (!cur) {
+    return { ok: false, reason: 'this gym has not set its currency, so an amount in this column cannot be read as a figure' };
+  }
   const t = raw.trim();
   if (t === '') return { ok: false, reason: 'empty' };
 
@@ -77,6 +107,19 @@ export function parseMoneyCents(raw: string): Parsed<number> {
   }
   if (whole === '' && frac === '') return { ok: false, reason: `"${raw}" is not a number` };
 
+  // A whole-unit currency has no minor part to carry, so the digits before the
+  // point ARE the stored integer. Digits AFTER one are refused rather than
+  // dropped: "5000.50" in a yen column is a column that is not what it looks
+  // like — a figure in another currency, or a rate — and silently discarding
+  // the .50 turns that into a number nobody can trace.
+  if (ZERO_DECIMAL.has(cur)) {
+    if (frac !== '' && Number(frac) !== 0) {
+      return { ok: false, reason: `"${raw}" has a decimal part, and ${cur.toUpperCase()} has no subdivision to put it in` };
+    }
+    const units = Number(whole || '0');
+    if (!Number.isFinite(units)) return { ok: false, reason: `"${raw}" is not a number` };
+    return { ok: true, value: negative ? -units : units };
+  }
   const cents = Number(whole || '0') * 100 + Number((frac + '00').slice(0, 2));
   if (!Number.isFinite(cents)) return { ok: false, reason: `"${raw}" is not a number` };
   return { ok: true, value: negative ? -cents : cents };
@@ -496,7 +539,18 @@ const METHODS: Record<string, PaymentRow['method']> = {
   directdebit: 'direct_debit', dd: 'direct_debit', gocardless: 'direct_debit', standingorder: 'direct_debit',
 };
 
-export function previewPayments(text: string, order?: DateOrder): ImportPreview<PaymentRow> {
+/**
+ * `currency` is the GYM's — `tenants.currency`, from the import screen.
+ *
+ * A payments sheet has no currency column and never has: `gym_payments` stores
+ * one per row, and every row of one import is money the same gym took. What the
+ * currency decides here is not the label, it is the SCALE — whether "50000"
+ * means fifty thousand minor units or five million of them — and that is
+ * `parseMoneyCents`' problem, which is why it is required rather than defaulted.
+ * A gym that has not set a currency gets every row refused with a reason,
+ * rather than a year of history imported a hundredfold out.
+ */
+export function previewPayments(text: string, currency: string | null, order?: DateOrder): ImportPreview<PaymentRow> {
   const sheet = parseSheet(text);
   const { index, unmatched } = mapColumns(sheet.header, PAYMENT_ALIASES);
 
@@ -517,7 +571,7 @@ export function previewPayments(text: string, order?: DateOrder): ImportPreview<
     const line = i + 2;
     const errors: string[] = [];
 
-    const amt = parseMoneyCents(at(r, 'amount'));
+    const amt = parseMoneyCents(at(r, 'amount'), currency);
     if (!amt.ok) errors.push(`amount: ${amt.reason}`);
     // A zero payment is a real thing (a comped month, a correction). A negative
     // one is a refund, which is not what this importer is for.
@@ -634,7 +688,22 @@ const ACTIVE_WORDS = new Set([
  * thing a gym sells at nothing on purpose. The distinction is between an
  * absent cell and a deliberate 0.
  */
-export function previewPlans(text: string): ImportPreview<PlanRow> {
+/**
+ * `currency` is the gym's, and it is the FALLBACK rather than the answer.
+ *
+ * A price book can carry its own currency column and this reads it — a British
+ * gym's export imported into a British gym should not need the sheet rewritten.
+ * Where the sheet states one, that row's own code decides both what the plan is
+ * priced in and how its price is scaled; where it does not, the gym's does, and
+ * `PlanRow.currency` stays null so the import screen can still record that the
+ * sheet said nothing.
+ *
+ * The scale and the label therefore always agree. Reading the price at the
+ * gym's scale and then storing it under the sheet's code would be the worst of
+ * both: a JPY row in a GBP gym's file priced a hundred times over, labelled
+ * correctly, with nothing to notice.
+ */
+export function previewPlans(text: string, currency: string | null): ImportPreview<PlanRow> {
   const sheet = parseSheet(text);
   const { index, unmatched } = mapColumns(sheet.header, PLAN_ALIASES);
 
@@ -667,12 +736,30 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
       else seen.set(key, line);
     }
 
+    // The row's own currency is read BEFORE the price, because it is what
+    // decides how the price is scaled — see the note on this function. A
+    // present column that is not a 3-letter code is an error, and the price is
+    // then read at no scale at all rather than at a guessed one.
+    //
+    // An absent currency column is not an error — most sheets do not have one
+    // — but it is not 'AED' either. Null means "the sheet does not say", the
+    // gym's own currency scales the price, and the import screen fills the
+    // label in from the gym before anything is written.
+    let currencyStated: string | null = null;
+    let currencyBad = false;
+    const rawCurrency = at(r, 'currency').trim().toUpperCase();
+    if (rawCurrency) {
+      if (/^[A-Z]{3}$/.test(rawCurrency)) currencyStated = rawCurrency;
+      else { currencyBad = true; errors.push(`currency "${at(r, 'currency').trim()}" is not a three-letter code`); }
+    }
+    const priceIn = currencyStated ?? (currencyBad ? null : currency);
+
     let priceCents = 0;
     const rawPrice = at(r, 'price').trim();
     if (!rawPrice) {
       errors.push('no price — a blank price is an unfinished row, not a free plan');
     } else {
-      const m = parseMoneyCents(rawPrice);
+      const m = parseMoneyCents(rawPrice, priceIn);
       if (m.ok) {
         if (m.value < 0) errors.push('price is negative');
         else priceCents = m.value;
@@ -687,17 +774,6 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
       else errors.push(`billing period "${at(r, 'interval').trim()}" is not month, year or one-off`);
     }
 
-    // An absent currency column is not an error — most sheets do not have one
-    // — but it is not 'AED' either. Null means "the sheet does not say", and
-    // the import screen fills it from the gym before anything is written. A
-    // present column that is not a 3-letter code IS an error.
-    let currency: string | null = null;
-    const rawCurrency = at(r, 'currency').trim().toUpperCase();
-    if (rawCurrency) {
-      if (/^[A-Z]{3}$/.test(rawCurrency)) currency = rawCurrency;
-      else errors.push(`currency "${at(r, 'currency').trim()}" is not a three-letter code`);
-    }
-
     let active = true;
     const rawActive = at(r, 'active').trim().toLowerCase();
     if (rawActive) {
@@ -708,7 +784,7 @@ export function previewPlans(text: string): ImportPreview<PlanRow> {
       else errors.push(`"${at(r, 'active').trim()}" is not a yes/no I can read`);
     }
 
-    const value: PlanRow = { name, priceCents, interval, currency, active };
+    const value: PlanRow = { name, priceCents, interval, currency: currencyStated, active };
     return errors.length ? { line, errors } : { line, value, errors };
   });
 

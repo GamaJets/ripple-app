@@ -23,6 +23,11 @@
 // as a dash.
 import { num } from './format';
 import { money } from './gymRecord';
+// The typed-figure ↔ stored-integer conversions, currency-aware. This file used
+// to do both by hand with `* 100` and `/ 100`, which is wrong in the sixteen
+// currencies with no minor unit — and one of the two is a WRITE. See the notes
+// on `parseSpend` and `spendFieldValue`.
+import { wholeToMinor, wholeFieldValue } from './coachMoney';
 import type { LoadStatus } from '../ui/loadStatus';
 
 /** An amount and the currency it is an amount of. Minor units, as money() takes. */
@@ -353,15 +358,40 @@ function oneIn(p: number): string {
  * the top of every comparison.
  *
  * Whole units in, minor units out — a coach types 400, not 40000.
+ *
+ * ── WHY IT NEEDS THE CURRENCY, AND WHY THAT MATTERS MORE HERE ─────────────
+ *
+ * This was `Math.round(Number(bare) * 100)`. A hundred minor units to the whole
+ * unit is true of most currencies and false of the sixteen in `ZERO_DECIMAL`:
+ * ¥50,000 is fifty thousand minor units, not five million.
+ *
+ * That makes it wrong in both directions for a coach billing in yen — the field
+ * prefilled a hundredth of what they entered, and what they entered was stored
+ * a hundredfold — but the direction that matters is this one, because THIS IS A
+ * WRITE. A misread display is a wrong number on a screen somebody can look at
+ * again; this puts the wrong integer into `code_spend` permanently, and every
+ * cost-per-client and return figure the coach ever sees for that campaign is
+ * computed from it. A campaign recorded at a hundred times its real cost is a
+ * campaign the coach stops running.
+ *
+ * The currency is REQUIRED and null is refused with a sentence rather than
+ * assumed. A coach whose currency is not set has no scale to store a figure at,
+ * and there is no default that is not simply wrong for some of them.
  */
 export type SpendInput =
   | { kind: 'clear' }
   | { kind: 'amount'; cents: number }
   | { kind: 'bad'; reason: string };
 
-export function parseSpend(input: string | null | undefined): SpendInput {
+export function parseSpend(input: string | null | undefined, currency: string | null | undefined): SpendInput {
   const raw = String(input ?? '').trim().replace(/[, ]/g, '');
+  // Clearing is checked BEFORE the currency. Emptying the box deletes the
+  // record, which needs no scale and no denomination — and a coach who has no
+  // currency set must still be able to take back a figure they entered.
   if (!raw) return { kind: 'clear' };
+  if (!(currency || '').trim()) {
+    return { kind: 'bad', reason: 'You have not set a currency, so an amount cannot be recorded — there is nothing to say what it is an amount of.' };
+  }
   // Currency symbols are what a person types when asked for an amount of
   // money, and refusing them teaches nothing.
   const bare = raw.replace(/^[^\d.\-]+/, '');
@@ -369,17 +399,23 @@ export function parseSpend(input: string | null | undefined): SpendInput {
     if (/^-/.test(bare) || /^[^\d.]*-/.test(raw)) return { kind: 'bad', reason: 'Spend cannot be negative.' };
     return { kind: 'bad', reason: 'Enter what you spent as a number — 250, or 250.50. Leave it empty if you do not know.' };
   }
-  const cents = Math.round(Number(bare) * 100);
-  if (!Number.isFinite(cents)) return { kind: 'bad', reason: 'That is not an amount.' };
+  const cents = wholeToMinor(Number(bare), currency);
+  if (cents == null || !Number.isFinite(cents)) return { kind: 'bad', reason: 'That is not an amount.' };
   if (cents >= 100000000000) return { kind: 'bad', reason: 'That is more than Repple will record against one code — check the zeros.' };
   return { kind: 'amount', cents };
 }
 
-/** What is already in the spend field when the sheet opens, or '' for unknown. */
+/**
+ * What is already in the spend field when the sheet opens, or '' for unknown.
+ *
+ * The row's OWN currency, which is the currency the figure was recorded in —
+ * not the coach's current one. A coach who has changed what they charge in
+ * still has to see the figure they typed against last year's campaign as they
+ * typed it; re-scaling it to today's currency would edit history in a text box.
+ */
 export function spendFieldValue(row: CodeReturnRow): string {
   if (!row.spend) return '';
-  const whole = row.spend.cents / 100;
-  return Number.isInteger(whole) ? String(whole) : whole.toFixed(2);
+  return wholeFieldValue(row.spend.cents, row.spend.currency);
 }
 
 /**

@@ -43,6 +43,13 @@
 // would be a lie about the coach's campaigns.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { matchAds, urlsFromCreative, type AdInsight } from '../../../src/lib/adMatch.ts';
+// The currencies with no minor unit, so a reported spend is read at the scale
+// Stripe stores in: ¥1,234 is 1234 minor units, not 123400. `adMatch.ts` takes
+// this as a parameter rather than importing it, because everything it imports
+// has to resolve under Deno too — see the note on `centsFromAmount`. This is
+// the same list the app reads through `ZERO_DECIMAL` in src/lib/coachMoney.ts,
+// not a copy of it.
+import { ZERO_DECIMAL } from '../../../src/lib/zeroDecimal.ts';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -248,7 +255,7 @@ Deno.serve(async (req) => {
   const windowFrom = insights.rows.map((r: any) => r?.date_start).filter(Boolean).sort()[0] ?? null;
   const windowTo = insights.rows.map((r: any) => r?.date_stop).filter(Boolean).sort().slice(-1)[0] ?? null;
 
-  const result = matchAds(rows, codes);
+  const result = matchAds(rows, codes, ZERO_DECIMAL);
 
   // Two currencies in one account, or none at all. Either way there is no unit
   // to put on a total, and a total with no unit is not an amount of money.

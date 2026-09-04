@@ -192,6 +192,10 @@ import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, fetchMyPromoCodes, createPromoCode, archivePromoCode, type ConnectStatus, type TrainerPackage, type CoachPurchase } from '../../src/lib/connect';
 import { packageEditBlocker, isReprice, repriceNote } from '../../src/lib/packageEdit';
 import { fetchMySubscribers, fetchMySubscriptionPayments, myTenantCurrency, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, endSubscriptionNow, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
+// The typed-figure ↔ stored-integer conversions for the edit sheet's price
+// box, scaled by the package's own currency rather than by a flat hundred.
+// See `openEdit` and `editPatch`.
+import { wholeFieldValue, wholeToMinor } from '../../src/lib/coachMoney';
 import {
   normaliseCode, promoBlocker, promoState, promoStateLabel, promoUseLine,
   PROMO_IS_A_PERCENTAGE, PROMO_IS_TYPED_AT_CHECKOUT, PROMO_LIVES_AT_STRIPE, PROMO_WITHDRAW_IS_FORWARD_ONLY,
@@ -318,7 +322,12 @@ export default function TrainerPayments() {
     // 97 and the guard in createPackage both refuse it, and the form does not
     // offer the field at all, so this is belt and braces on a typed value.
     const sess = interval ? null : sessions.trim() ? parseInt(sessions, 10) : null;
-    const cents = Math.round(amount * 100);
+    // Scaled by the currency, non-null by the refusal above, rather than by a
+    // flat hundred. A pack priced at ¥50,000 went on sale at 5,000,000 minor
+    // units — and a recurring package priced wrong is not one wrong sale, it is
+    // a wrong sale every month to everybody who ever buys it, which is exactly
+    // what `confirmLine` below exists to let the coach catch.
+    const cents = wholeToMinor(amount, currency) ?? 0;
     // The last thing before a recurring price goes on sale is the coach reading
     // it back in the currency it will actually be charged in. A subscription
     // priced by accident in the wrong currency is not one wrong sale, it is a
@@ -604,7 +613,19 @@ export default function TrainerPayments() {
     setEditName(p.name);
     // Shown in MAJOR units, which is what the coach thinks in and what the Add
     // form above already takes. The conversion happens once, on save.
-    setEditPrice(String(p.price_cents / 100));
+    //
+    // Scaled by the PACKAGE's own currency, not by a flat hundred. There are no
+    // sen in a yen: a ¥50,000 pack is stored as 50000, and dividing it by a
+    // hundred put "500" in front of a coach about to edit the name on it. Save
+    // then multiplied that back by a hundred and wrote 50000 — so the round
+    // trip happened to survive, and the number the coach was looking at while
+    // they decided was a hundredth of what their clients pay. One of them
+    // would eventually have typed the figure they meant.
+    //
+    // The package's own currency and not the coach's: `trainer_packages`
+    // stores one per row, and a pack priced before the coach changed what they
+    // charge in is still priced in the money it was sold in.
+    setEditPrice(wholeFieldValue(p.price_cents, p.currency));
     setEditErr(null);
     setSubCount(null);
     void countActiveSubscribers(p.id).then(setSubCount);
@@ -617,11 +638,22 @@ export default function TrainerPayments() {
     if (!editing) return null;
     const typed = Number(editPrice.replace(/,/g, '').trim());
     if (!Number.isFinite(typed)) return null;
-    // Rounded to whole minor units here and NOWHERE else. `Math.round` on a
-    // major-unit figure is the only rounding in this path, and packageEdit
-    // refuses a fractional minor unit rather than rounding a second time — two
-    // roundings on one price is how 74.995 becomes a number nobody typed.
-    const cents = Math.round(typed * 100);
+    // Rounded to whole minor units here and NOWHERE else. `wholeToMinor` is
+    // the only rounding in this path, and packageEdit refuses a fractional
+    // minor unit rather than rounding a second time — two roundings on one
+    // price is how 74.995 becomes a number nobody typed.
+    //
+    // It scales by the package's currency, which is what makes the round trip
+    // above honest rather than merely self-cancelling: `* 100` here undid the
+    // `/ 100` there, so a yen pack came out the same integer it went in — right
+    // up until a coach corrected the price they were shown, at which point they
+    // wrote a hundredth of what they meant to charge.
+    //
+    // Null is a refusal, not a zero. A package with no currency on it cannot be
+    // repriced, and the blocker below says so rather than storing a figure at a
+    // scale nobody chose.
+    const cents = wholeToMinor(typed, editing.currency);
+    if (cents == null) return null;
     const patch: { name?: string; price_cents?: number } = {};
     if (editName.trim() !== editing.name) patch.name = editName;
     if (cents !== editing.price_cents) patch.price_cents = cents;
@@ -631,7 +663,16 @@ export default function TrainerPayments() {
   const saveEdit = async () => {
     if (!editing || editBusy) return;
     const patch = editPatch();
-    if (!patch) { setEditErr('That price is not a number.'); return; }
+    // The two ways `editPatch` returns null are different facts and get
+    // different sentences. A coach whose package carries no currency cannot fix
+    // that by retyping the price, and telling them the number is wrong sends
+    // them round the loop that cannot end.
+    if (!patch) {
+      setEditErr((editing.currency || '').trim()
+        ? 'That price is not a number.'
+        : 'This package does not say what currency it is priced in, so a new price cannot be recorded against it — there would be nothing to say what the amount is an amount of.');
+      return;
+    }
     const blocker = packageEditBlocker(patch);
     if (blocker) { setEditErr(blocker); return; }
     setEditBusy(true); setEditErr(null);
@@ -804,7 +845,13 @@ export default function TrainerPayments() {
   // The same reader `addPkg` uses, so the price echoed under the box is the
   // price the button is about to charge.
   const typed = readNumber(price) ?? 0;
-  const priceEcho = currency && typed > 0 ? pkgMoney(Math.round(typed * 100), currency) : null;
+  // Through `wholeToMinor`, which is literally the conversion `addPkg` above
+  // performs — so the echo is the integer the button is about to store, not a
+  // second arithmetic that happens to agree. `Math.round(typed * 100)` agreed
+  // only in the currencies with hundredths: in yen it echoed a price a hundred
+  // times the one that would go on sale, under a box a coach reads to check
+  // exactly that.
+  const priceEcho = currency && typed > 0 ? pkgMoney(wholeToMinor(typed, currency), currency) : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>

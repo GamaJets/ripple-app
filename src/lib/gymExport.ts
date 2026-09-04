@@ -24,12 +24,19 @@
 // ── The other three rules ────────────────────────────────────────────────
 //
 // * **Stored, not derived.** Money leaves as the integer minor units it is
-//   held in (`amount_cents`), and only *additionally* as an exact two-decimal
+//   held in (`amount_cents`), and only *additionally* as a human-readable
 //   string for the columns the importer reads. 4500 -> "45.00" is a lossless
 //   rewriting of an integer, computed with string arithmetic rather than
 //   `/100`, so no float ever touches the ledger. Nothing here rounds, and
 //   nothing clamps: `uses_left` is absent because `remainingUses` floors at
 //   zero, and a pass counter that is out of step is evidence.
+//
+//   That rewriting is not always TWO decimals, and it took a currency to know
+//   it. There are no sen in a yen: ¥50,000 is stored as 50000, so the readable
+//   column is "50000" and not "500.00". `minorToDecimal` is where that lives
+//   and where the reasoning is written out; the point here is that the raw
+//   integer is in the file either way, so the readable column can be blank —
+//   at a gym that never set a currency — without a single figure being lost.
 //
 // * **A null survives as empty.** Not `0`, not `"null"`, not `"-"`. A member
 //   with no recorded weight must not export as weighing nothing, and a pass
@@ -49,6 +56,11 @@
 // deliberate — the *reads* are where the failure modes live, and a screen has
 // to render its own failures. This module's job is to refuse to paper over them.
 
+// The single list of the currencies with no minor unit. Imported, never
+// copied: `minorToDecimal` below and `minorToPlain` in coachStatement.ts do
+// the same job in two files, and two copies of this list is how one of them
+// quietly stops matching the other.
+import { ZERO_DECIMAL } from './coachMoney';
 import type { MembershipPlan, Membership, GymPayment } from './gymRecord';
 import type { GymClass } from './gymSchedule';
 import type { PtSession } from './gymSessions';
@@ -141,10 +153,39 @@ export function toCsv(header: string[], rows: Cell[][], bom = true): string {
  *
  * Null is empty rather than "0.00" — a pass with no recorded price is not a
  * free pass, and that distinction is the whole reason `paidCents` is nullable.
+ *
+ * ── WHY IT TAKES A CURRENCY ───────────────────────────────────────────────
+ *
+ * It pushed the point two places for EVERY currency. There are no sen in a
+ * yen: ¥50,000 is stored as 50000 minor units, and writing "500.00" into the
+ * file a gym hands its accountant understates every figure in it by a factor
+ * of a hundred, in sixteen currencies, in a document nobody re-derives because
+ * the whole point of an export is that it is the record.
+ *
+ * `minorToPlain` in src/lib/coachStatement.ts is the same idea done correctly
+ * for a coach's own statement, and its comment names this function as the one
+ * that got it wrong. There is now one behaviour and two call sites for it; the
+ * list of which currencies have no subdivision stays in `ZERO_DECIMAL` in
+ * src/lib/coachMoney.ts, imported rather than copied, because a second copy is
+ * how the two come to disagree.
+ *
+ * A MISSING currency returns '' — the same empty cell an unrecorded amount
+ * gets, and for a stronger reason. An amount whose unit nobody stated is not a
+ * figure, and a spreadsheet is exactly where a bare number acquires whatever
+ * unit its reader assumes. Every table below therefore writes the raw
+ * `amount_cents` integer AND its currency in their own columns beside this
+ * one, so a blank human-readable cell never loses the underlying record: the
+ * integer is still there, and the file says what could not be denominated.
  */
-export function minorToDecimal(cents: number | null | undefined): string {
+export function minorToDecimal(cents: number | null | undefined, currency: string | null | undefined): string {
   if (cents === null || cents === undefined) return '';
   if (!Number.isFinite(cents) || !Number.isInteger(cents)) return '';
+  const cur = (currency || '').trim().toLowerCase();
+  if (!cur) return '';
+  // A whole-unit currency: the stored integer already IS the amount, so there
+  // is no point to push and nothing to pad. Returning it unchanged is the whole
+  // fix — every other branch of this function is about the point.
+  if (ZERO_DECIMAL.has(cur)) return String(cents);
   const neg = cents < 0;
   const digits = String(Math.abs(cents)).padStart(3, '0');
   const whole = digits.slice(0, -2);
@@ -388,6 +429,24 @@ export const EXPORT_FILE: Record<ExportPart, string> = {
 export interface GymExportInput {
   gymName: string | null;
   tenantId: string | null;
+  /**
+   * The gym's own currency — `tenants.currency`, null when it has not set one.
+   *
+   * Here for the rows that carry NO currency of their own. `gym_payments`,
+   * `gym_invoices`, `membership_plans`, `payroll_settlements`, `gym_pass_types`,
+   * `gym_passes` and `client_purchases` all store one per row and that row's
+   * own code always wins — a payment taken before a gym changed its currency
+   * is still in the money it was taken in, and an export that relabelled it
+   * would be rewriting the record it exists to preserve.
+   *
+   * One-to-one sessions are the exception: `pt_sessions.rate_cents` is a
+   * snapshot of what the trainer was owed and there is no currency column
+   * beside it, because the rate has only ever been denominated in the gym's.
+   * So sessions.csv reads it from here, and a gym that has not set a currency
+   * gets a blank `rate` cell beside the raw `rate_cents` integer rather than a
+   * figure in a currency nobody chose.
+   */
+  currency: string | null;
   /** ISO instant the export was taken. Passed in so the output is testable. */
   generatedAt: string;
   /** The bounds the time-ranged reads were made over, stated so the bundle
@@ -807,7 +866,7 @@ function tableFor(part: ExportPart, input: GymExportInput): Table {
     case 'payments': return paymentsTable(readyRows(input.payments));
     case 'classes': return classesTable(readyRows(input.classes));
     case 'attendance': return attendanceTable(readyRows(input.attendance));
-    case 'sessions': return sessionsTable(readyRows(input.sessions));
+    case 'sessions': return sessionsTable(readyRows(input.sessions), input.currency);
     case 'passTypes': return passTypesTable(readyRows(input.passTypes));
     case 'passes': return passesTable(readyRows(input.passes));
     case 'visits': return visitsTable(readyRows(input.visits));
@@ -838,7 +897,7 @@ function invoicesTable(rows: ExportInvoice[]): Table {
     header: ['invoice_number', 'issued_on', 'due_on', 'member_name', 'member_id', 'amount', 'currency', 'amount_cents', 'status', 'note', 'invoice_id'],
     rows: rows.map((i) => [
       i.number, i.issuedOn, i.dueOn, i.memberName, i.memberId,
-      minorToDecimal(i.amountCents), i.currency, i.amountCents,
+      minorToDecimal(i.amountCents, i.currency), i.currency, i.amountCents,
       i.status, i.note, i.id,
     ]),
     note: 'What the gym billed. A blank amount is an invoice that records none — it is not a free one. `status` is the register\u2019s own word; overdue is computed from due_on and is not stored.',
@@ -851,7 +910,7 @@ function settlementsTable(rows: ExportSettlement[]): Table {
     header: ['settled_at', 'trainer_name', 'trainer_id', 'period_from', 'period_to', 'amount', 'currency', 'amount_cents', 'sessions', 'method', 'reversed_at', 'reverse_reason', 'settlement_id'],
     rows: rows.map((r) => [
       r.settledAt, r.trainerName, r.trainerId, r.periodFrom, r.periodTo,
-      minorToDecimal(r.amountCents), r.currency, r.amountCents,
+      minorToDecimal(r.amountCents, r.currency), r.currency, r.amountCents,
       r.sessionsCount, r.method, r.reversedAt, r.reverseReason, r.id,
     ]),
     note: 'Amounts are snapshots of what was handed over and are never recomputed. A row with reversed_at set was TAKEN BACK — it is kept because a settlement that was recorded and then withdrawn is two facts, and it must not be counted as money out.',
@@ -912,7 +971,7 @@ function purchasesTable(rows: ExportPurchase[]): Table {
     header: ['created_at', 'trainer_name', 'trainer_id', 'client_id', 'amount', 'currency', 'amount_cents', 'sessions_total', 'sessions_used', 'status', 'purchase_id'],
     rows: rows.map((p) => [
       p.createdAt, p.trainerName, p.trainerId, p.clientId,
-      minorToDecimal(p.amountCents), p.currency, p.amountCents,
+      minorToDecimal(p.amountCents, p.currency), p.currency, p.amountCents,
       p.sessionsTotal, p.sessionsUsed, p.status, p.id,
     ]),
     note: '`client_purchases` carries no tenant column, so these rows are scoped by the trainers on this gym\u2019s roster — a purchase against a coach who has since left the roster is not here. A blank currency means the package it was sold from has been deleted and the unit is unrecoverable; it is never guessed.',
@@ -927,13 +986,19 @@ function purchasesTable(rows: ExportPurchase[]): Table {
  * `price_cents` follows as the authoritative figure — `price` is the same
  * number written for the importer's benefit and loses nothing, but if the two
  * ever disagree the integer is the one to believe.
+ *
+ * The `currency` column carries its weight in both directions: it says what a
+ * plan is priced in, and it is also what tells `previewPlans` the SCALE to read
+ * `price` back at. A row stating JPY is written whole here and read whole
+ * there; a row stating nothing is read at the importing gym's own currency.
+ * That is why the two are written side by side rather than the price alone.
  */
 function plansTable(rows: MembershipPlan[]): Table {
   return {
     header: ['name', 'price', 'interval', 'currency', 'active', 'plan_id', 'price_cents'],
     rows: rows.map((p) => [
       p.name,
-      minorToDecimal(p.priceCents),
+      minorToDecimal(p.priceCents, p.currency),
       p.interval,
       p.currency,
       p.active,
@@ -1016,10 +1081,16 @@ function membershipsTable(rows: Membership[]): Table {
  * Payments, in the shape `previewPayments` reads.
  *
  * Two columns exist purely so the round trip works, and neither replaces
- * anything: `amount` is `amount_cents` written as an exact decimal because
- * `parseMoneyCents` reads money in major units, and `date` is the day part of
- * `taken_at` because `parseDate` refuses a full timestamp. The stored values
- * are both still here in full.
+ * anything: `amount` is `amount_cents` written as a human-readable figure
+ * because `parseMoneyCents` reads money in major units, and `date` is the day
+ * part of `taken_at` because `parseDate` refuses a full timestamp. The stored
+ * values are both still here in full.
+ *
+ * The round trip is currency-dependent at BOTH ends, and has to be. `amount`
+ * is written at the row's own scale by `minorToDecimal`, and `previewPayments`
+ * is handed the gym's currency and reads it back at the same one. Making one
+ * of the two currency-aware and not the other would have broken re-importing
+ * silently, and only for the sixteen currencies nobody reviewing it bills in.
  *
  * The `email` column is always empty: `gym_payments` attributes by member id,
  * and profiles carry no address. It is present because a payment with neither
@@ -1035,7 +1106,7 @@ function paymentsTable(rows: GymPayment[]): Table {
     rows: rows.map((p) => [
       p.memberName,
       null,
-      minorToDecimal(p.amountCents),
+      minorToDecimal(p.amountCents, p.currency),
       isoDatePart(p.takenAt),
       p.method,
       p.note,
@@ -1065,26 +1136,42 @@ function attendanceTable(rows: MemberBooking[]): Table {
   };
 }
 
-function sessionsTable(rows: PtSession[]): Table {
+/**
+ * One-to-ones, and the only table here whose money is denominated from outside
+ * the row.
+ *
+ * `pt_sessions.rate_cents` is the rate snapshotted at delivery so a later fee
+ * change cannot rewrite what a trainer was owed — but there is no currency
+ * column beside it, because a session rate has only ever been in the gym's own
+ * money. So the currency comes from `tenants.currency` on the input, and it is
+ * written into a column of its own rather than left implicit: a spreadsheet
+ * that states an amount and not its unit is where a bare number acquires
+ * whatever unit its reader assumes.
+ *
+ * At a gym that has not set a currency the `rate` cell is blank and
+ * `rate_cents` still holds the integer. That is the honest pair — the record is
+ * not lost, and nothing in the file claims a denomination nobody chose.
+ */
+function sessionsTable(rows: PtSession[], currency: string | null): Table {
   return {
     header: [
       'session_id', 'trainer_id', 'trainer_name', 'client_id', 'client_name',
       'starts_at', 'duration_min', 'slot_status', 'outcome', 'outcome_at',
-      'rate_cents', 'rate', 'settlement_id',
+      'rate_cents', 'rate', 'currency', 'settlement_id',
     ],
     rows: rows.map((s) => [
       s.id, s.trainerId, s.trainerName, s.clientId, s.clientName,
       s.startsAt, s.durationMin, s.status, s.outcome, s.outcomeAt,
-      s.rateCents, minorToDecimal(s.rateCents), s.settlementId,
+      s.rateCents, minorToDecimal(s.rateCents, currency), currency, s.settlementId,
     ]),
-    note: 'An empty outcome means nobody has said what happened. It is not a no-show, and it was never treated as one.',
+    note: 'An empty outcome means nobody has said what happened. It is not a no-show, and it was never treated as one. A session rate carries no currency of its own — it is in the gym\u2019s, which is the currency column here; where the gym has not set one the rate is left blank rather than written in a currency nobody chose.',
   };
 }
 
 function passTypesTable(rows: PassType[]): Table {
   return {
     header: ['pass_type_id', 'name', 'kind', 'price_cents', 'price', 'currency', 'uses', 'valid_days', 'active'],
-    rows: rows.map((t) => [t.id, t.name, t.kind, t.priceCents, minorToDecimal(t.priceCents), t.currency, t.uses, t.validDays, t.active]),
+    rows: rows.map((t) => [t.id, t.name, t.kind, t.priceCents, minorToDecimal(t.priceCents, t.currency), t.currency, t.uses, t.validDays, t.active]),
     note: 'An empty valid_days means the pass does not expire.',
   };
 }
@@ -1099,7 +1186,7 @@ function passesTable(rows: GymPass[]): Table {
     rows: rows.map((p) => [
       p.id, p.passTypeId, p.passTypeName, p.kind, p.holderId, p.holderName,
       p.hostMemberId, p.issuedOn, p.expiresOn, p.usesTotal, p.usesSpent,
-      p.paidCents, minorToDecimal(p.paidCents), p.currency, p.note,
+      p.paidCents, minorToDecimal(p.paidCents, p.currency), p.currency, p.note,
     ]),
     note: 'uses_total and uses_spent are exported raw and never differenced here — a clamped "uses left" would hide a counter that is out of step. An empty paid_cents means no price was recorded, not that it was free.',
   };

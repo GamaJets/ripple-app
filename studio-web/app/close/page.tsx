@@ -42,6 +42,10 @@ import {
 } from '@lib/gymClose';
 import { toCsv } from '@lib/gymExport';
 import { saveText } from '@/lib/save';
+// Minor units are not always a hundredth of a whole unit — see `ZERO_DECIMAL`
+// in src/lib/coachMoney.ts. Every conversion on this screen goes through
+// these rather than through a hand-written `* 100` or `/ 100`.
+import { wholeToMinor } from '@lib/coachMoney';
 
 const EMPTY: CloseRecord = {
   payments: sliceLoading(),
@@ -191,8 +195,16 @@ export default function Close() {
     if (!w) return null;
     return buildClose(rec, w, {
       policy,
-      // The gym's fee is in major units; everything downstream is minor units.
-      fallbackRateCents: sessionFee == null ? null : Math.round(sessionFee * 100),
+      // The gym's fee is in major units; everything downstream is minor units,
+      // and the conversion is scaled by the gym's currency rather than by a
+      // flat hundred. A gym paying ¥6,000 a session stores 6000 on a
+      // `pt_sessions.rate_cents`, and `* 100` made the FALLBACK 600000 — so
+      // every session with no snapshotted rate was closed at a hundred times
+      // the gym's own fee, on the screen that decides what a coach is paid.
+      // Null when the gym has not set a currency, which is the same answer the
+      // fee being unset already gives: no fallback, and the sessions without a
+      // rate are reported rather than valued.
+      fallbackRateCents: wholeToMinor(sessionFee, currency),
       fmt: (c) => money(c, currency) ?? '—',
     });
   }, [rec, w, policy, sessionFee, currency]);
