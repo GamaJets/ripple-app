@@ -19827,6 +19827,11 @@ revoke all on public.coach_credentials from public, anon, authenticated;
 
 -- `verified_by` is deliberately absent: which Repple reviewer signed a
 -- credential off is not directory information.
+--
+-- grant-ok: public.coach_credentials.verified_by — which Repple reviewer signed
+--   a credential off is not directory information; the badge is, the reviewer is
+--   not. Every other column of this table is granted, so `npm run check:grants`
+--   would otherwise read this omission as the accident it looks exactly like.
 grant select (id, coach_id, kind, title, issuer, reference,
               issued_on, expires_on, verification, verified_at,
               created_at, updated_at)
@@ -57429,6 +57434,12 @@ revoke all on function public.trainer_availability_check() from public, anon, au
 -- `authenticated`. Nothing in the app selects it directly — src/ui/joinCode.ts
 -- goes through the RPC — so it is not broken and granting it here would be a
 -- widening nobody asked for, in a part filed about something else.
+--
+-- grant-ok: public.trainers.join_code — handed out deliberately, and read back
+--   through `my_join_code()` and `my_join_codes()`. Part 131 took it off the
+--   directory because every signed-in account could otherwise read every listed
+--   coach's code, and this table's column-by-column grant exists for that one
+--   reason. A grant here would undo it.
 -- ─────────────────────────────────────────────────────────────────────────
 
 grant select (trial_started_at) on public.trainers to authenticated;

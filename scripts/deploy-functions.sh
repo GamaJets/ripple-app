@@ -78,7 +78,15 @@ for name in "${NAMES[@]}"; do
   printf '── %s %s\n' "$name" "${FLAG:+($FLAG)}"
   OUT="$(npx supabase functions deploy "$name" --project-ref "$PROJECT_REF" ${FLAG} 2>&1)"
 
-  if ! grep -q '"message":"Deployed Functions."' <<<"$OUT"; then
+  # Two spellings, because the CLI changed its mind and this script did not
+  # notice. It used to print the JSON `{"message":"Deployed Functions."}`; it now
+  # prints a human line, `Deployed Functions on project <ref>: <name>`. Matching
+  # only the old one meant three functions that deployed perfectly on 4 Sep 2026
+  # were reported as DEPLOY FAILED — and, worse, `continue` then skipped the boot
+  # check that would have shown them answering. A success detector that matches
+  # one release of somebody else's output is a coin toss; match either, and treat
+  # neither-matching as the failure it is.
+  if ! grep -qE '"message":"Deployed Functions\."|Deployed Functions on project' <<<"$OUT"; then
     echo "$OUT" | grep -vE "PostHog|_tag" | tail -12 >&2
     echo "   DEPLOY FAILED" >&2; FAILED+=("$name"); continue
   fi

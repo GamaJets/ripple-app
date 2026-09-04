@@ -237,6 +237,11 @@ revoke all on public.coach_credentials from public, anon, authenticated;
 
 -- `verified_by` is deliberately absent: which Repple reviewer signed a
 -- credential off is not directory information.
+--
+-- grant-ok: public.coach_credentials.verified_by — which Repple reviewer signed
+--   a credential off is not directory information; the badge is, the reviewer is
+--   not. Every other column of this table is granted, so `npm run check:grants`
+--   would otherwise read this omission as the accident it looks exactly like.
 grant select (id, coach_id, kind, title, issuer, reference,
               issued_on, expires_on, verification, verified_at,
               created_at, updated_at)

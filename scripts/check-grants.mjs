@@ -1,6 +1,19 @@
 #!/usr/bin/env node
-// Who may execute it. The half of a SECURITY DEFINER function that lives
-// outside its body.
+// Who may execute it, and who may read it column by column. The half of a
+// schema that lives outside the function bodies and the RLS policies.
+//
+// Two gates in one file, because they are one question asked about the two
+// kinds of object and the mistake is identical in both — a part that adds
+// something and says nothing about who may reach it.
+//
+//   §1  EXECUTE on functions, read from supabase/parts/*.sql. Silence hands a
+//       SECURITY DEFINER function to `anon`.
+//   §2  SELECT and UPDATE on table COLUMNS, read from supabase/setup.sql.
+//       Silence makes a new column unreadable to the role that owns the row.
+//
+// §1 is below; §2 begins at "who may READ it, column by column".
+//
+// ── §1 ────────────────────────────────────────────────────────────────────
 //
 // ── the bug this exists for ───────────────────────────────────────────────
 //
@@ -503,6 +516,483 @@ if (drifted.length) {
   process.exit(1);
 }
 
+/* ══ §2 ─ who may READ it, column by column ═══════════════════════════════ */
+//
+// ── the bug this half exists for ──────────────────────────────────────────
+//
+// `public.trainers` does not grant SELECT to `authenticated` table-wide. It
+// grants it COLUMN BY COLUMN — part 131 revoked the table-level grant on
+// purpose, because in PostgreSQL a table-level SELECT supersedes a column
+// revoke and there was no other way to keep `join_code` off the directory.
+//
+// Part 191 then added `trial_started_at` with `alter table … add column` and
+// wrote no grant. Adding a column to a table whose SELECT is column-level does
+// not extend the grant to it, so the column existed and nobody could read it.
+// PostgREST answers a request that names a column the role holds no grant on
+// with 403, before RLS is consulted at all — this is a privilege check and the
+// row is not the question.
+//
+// Measured on 4 September 2026 against project phgfwzpkkwdysftlgkoq, one
+// second apart, same row, same session, same policy:
+//
+//     GET /rest/v1/trainers?select=session_fee,delivery_mode&id=eq.<uid>  200
+//     GET /rest/v1/trainers?select=trial_started_at&id=eq.<uid>&limit=1   403
+//
+// 29 of 29 `select=trial_started_at` requests in the last 24 hours of edge
+// logs were 403, and it was the only REST 403 in that window. So this was not
+// intermittent and not one coach: every coach's trial read had failed, every
+// time, for as long as the column had existed.
+//
+// ── why nothing else could see it ─────────────────────────────────────────
+//
+// The app handled the refusal CORRECTLY at every layer, which is exactly why
+// nobody found it. src/ui/trialAccount.ts checks `.error` first and answers
+// 'error' rather than 'no start date'; src/lib/trialGate.ts prints the note for
+// an unread account rather than an expired trial; app/(trainer)/billing.tsx
+// renders that note. The sentence the coach read — "when your trial started
+// could not be read" — was TRUE. A defect whose every layer behaves well
+// produces no stack trace, no report and no bad screenshot.
+//
+// `scripts/check-schema.mjs` compares COLUMNS, not grants, so a column that
+// exists and cannot be read looks identical to one that works. `check:reads`
+// reads the app's selects and not the ledger's grants. Nothing in this
+// repository related the two, and the only signals were a status code and the
+// grants themselves.
+//
+// ── and it had already happened once ──────────────────────────────────────
+//
+// Part 151's header is the same defect, found the same way and eight months
+// earlier: part 126 added `late_cancel_applies`, `late_cancel_notice_hours`
+// and `late_cancel_fee`, part 131 enumerated the grant FIVE FILES LATER and
+// missed all three, and the coach's cancellation-policy editor was refused
+// 42501 until somebody opened that screen. 151 records the asymmetry that
+// makes it worse than it sounds: 131 left INSERT and UPDATE alone, so the
+// screen could not READ the stored policy and could still overwrite it with
+// the defaults its hook falls back to on a failed read.
+//
+// Twice is a class, not an accident, and the shape is always the same — a
+// column added by a later part to a table whose grant is an enumeration
+// written by an earlier one.
+//
+// ── what this checks ──────────────────────────────────────────────────────
+//
+// For every (table, role) where the role's SELECT or UPDATE on that table is
+// COLUMN-LEVEL rather than table-wide, every column the table has must be
+// named in some grant to that role, or carry a `grant-ok:` marker saying why
+// it is deliberately withheld.
+//
+// The union across privileges is deliberate, and it is what keeps this gate
+// from arguing about narrow UPDATE grants. `trial_started_at` is granted
+// SELECT and NOT UPDATE, on purpose — part 191's trigger makes it immutable
+// and the grant is the second lock. A rule stated per privilege would demand
+// an escape marker for every column a role may read and not write, which is
+// most of them. The question this asks is the one the defect answers to: is
+// there a column of this table that this role was never given ANY access to,
+// while holding a hand-written list of the others.
+//
+// A role that holds table-wide SELECT is not asked. A new column is readable
+// the moment it exists, so the failure this is about cannot occur; which
+// columns that role may WRITE stays a decision for the part to make.
+//
+// ── what it deliberately does NOT check ───────────────────────────────────
+//
+// INSERT. A column-level INSERT grant is narrow by construction — you do not
+// grant `created_at`, or an id with a default, or a status the trigger sets —
+// so "every column must appear" is the wrong sentence for it and would need an
+// escape marker per defaulted column on every table in the schema.
+//
+// Whether the granted columns are the RIGHT ones. This cannot tell that a
+// coach should not be able to read some column; it can only tell that a
+// column was passed over in silence. Widening a grant to shut it up is
+// therefore a real risk, and the two right answers are named in the failure
+// text: grant the column, or say why not.
+//
+// ── what it cannot see, said plainly ──────────────────────────────────────
+//
+// The same limit as the half above. It reads supabase/setup.sql — generated
+// from supabase/parts/ and checked by `db:check` — and connects to nothing. A
+// grant made by hand in the SQL editor is invisible to it, in both directions:
+// it will report a column that is actually granted, and it will pass a column
+// that is actually refused. `npm run check:schema` is the gate that probes the
+// real database. Going green here means the ledger is complete, not that the
+// database is.
+//
+// It reads setup.sql rather than the parts because a grant is only meaningful
+// in the order it is applied, and setup.sql IS that order — one file, one
+// pass, with the same statement sequence Postgres saw.
+
+const SETUP = join(ROOT, 'supabase/setup.sql');
+const setupSql = readFileSync(SETUP, 'utf8');
+
+/**
+ * Everything that is not code, blanked to spaces, keeping every newline and
+ * every offset so a finding can still name a line.
+ *
+ * This is a scanner and not three regex passes, and that is not fastidiousness.
+ * The first draft blanked line comments, then string literals, and setup.sql
+ * contains comment prose with apostrophes AND string literals containing `--`.
+ * Each pass broke the other's quoting: 17,015 lines went missing and the gate
+ * reported `trainers` as having 16 columns and passed. One left-to-right pass
+ * that knows which of the four states it is in is the only version that can be
+ * right, because that is what the server does.
+ */
+function blankNonCode(src) {
+  const out = src.split('');
+  const blank = (a, b) => { for (let k = a; k < b && k < out.length; k += 1) if (out[k] !== '\n') out[k] = ' '; };
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === '-' && src[i + 1] === '-') {                     // line comment
+      let e = src.indexOf('\n', i);
+      if (e === -1) e = src.length;
+      blank(i, e); i = e; continue;
+    }
+    if (ch === '/' && src[i + 1] === '*') {                     // block comment, nestable
+      let depth = 0; let k = i;
+      while (k < src.length) {
+        if (src[k] === '/' && src[k + 1] === '*') { depth += 1; k += 2; continue; }
+        if (src[k] === '*' && src[k + 1] === '/') { depth -= 1; k += 2; if (!depth) break; continue; }
+        k += 1;
+      }
+      blank(i, k); i = k; continue;
+    }
+    if (ch === "'") {                                           // string, '' escapes a quote
+      let k = i + 1;
+      while (k < src.length) {
+        if (src[k] !== "'") { k += 1; continue; }
+        if (src[k + 1] === "'") { k += 2; continue; }
+        k += 1; break;
+      }
+      blank(i, k); i = k; continue;
+    }
+    if (ch === '"') {                                           // quoted identifier — KEPT
+      let k = i + 1;
+      while (k < src.length) {
+        if (src[k] !== '"') { k += 1; continue; }
+        if (src[k + 1] === '"') { k += 2; continue; }
+        k += 1; break;
+      }
+      i = k; continue;
+    }
+    if (ch === '$') {                                           // dollar-quoted body
+      const tag = /^\$(?:[a-z_][a-z0-9_]*)?\$/i.exec(src.slice(i, i + 64));
+      if (tag) {
+        const close = src.indexOf(tag[0], i + tag[0].length);
+        const end = close === -1 ? src.length : close + tag[0].length;
+        blank(i, end); i = end; continue;
+      }
+    }
+    i += 1;
+  }
+  return out.join('');
+}
+
+const code = blankNonCode(setupSql);
+if (code.length !== setupSql.length) {
+  console.error('check-grants: the setup.sql scanner changed the length of the file, so every '
+    + 'offset it reports is wrong. Fix blankNonCode in scripts/check-grants.mjs.');
+  process.exit(1);
+}
+
+/** `public.trainers`, `"Trainers"` and `trainers` are one table here. */
+const tkey = (n) => n.replace(/"/g, '').replace(/^public\./i, '').toLowerCase();
+const lineAt = (off) => code.slice(0, off).split('\n').length;
+
+/** Statements, with the offset each one starts at. */
+const stmts = [];
+{
+  let start = 0;
+  for (let i = 0; i < code.length; i += 1) {
+    if (code[i] !== ';') continue;
+    stmts.push({ at: start, text: code.slice(start, i) });
+    start = i + 1;
+  }
+  if (code.slice(start).trim()) stmts.push({ at: start, text: code.slice(start) });
+}
+
+/** Split on commas that are not inside parentheses — a type like `numeric(5,1)`
+ *  and a column list like `(a, b)` both have to survive this. */
+const commaSplit = (s) => {
+  const out = []; let depth = 0; let cur = '';
+  for (const ch of s) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    else if (ch === ',' && depth === 0) { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+};
+/** The parenthesised group starting at or after `from`, balanced. */
+const groupAfter = (s, from) => {
+  const open = s.indexOf('(', from);
+  if (open === -1) return null;
+  let depth = 0;
+  for (let i = open; i < s.length; i += 1) {
+    if (s[i] === '(') depth += 1;
+    else if (s[i] === ')') { depth -= 1; if (!depth) return { open, close: i }; }
+  }
+  return null;
+};
+
+const TABLE_CREATE = /\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?(?:only\s+)?([a-z0-9_."]+)\s*\(/i;
+const TABLE_ALTER = /\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([a-z0-9_."]+)([\s\S]*)$/i;
+/** A table-constraint clause, which sits in the same comma list as a column. */
+const NOT_A_COLUMN = /^(constraint|primary|unique|foreign|check|exclude|like)$/i;
+
+const TABLE_GRANT = /\bgrant\s+([\s\S]*?)\s+on\s+(?:table\s+)?([\s\S]*?)\s+to\s+([\s\S]*)$/i;
+const TABLE_REVOKE = /\brevoke\s+(?:grant\s+option\s+for\s+)?([\s\S]*?)\s+on\s+(?:table\s+)?([\s\S]*?)\s+from\s+([\s\S]*)$/i;
+/** An object list this half has no view on: it is not a table. */
+const NOT_A_TABLE = /^(function|procedure|routine|schema|sequence|database|domain|type|language|tablespace|foreign|large|all)\b/i;
+
+/** table → Map(column → offset it was added at). */
+const tableColumns = new Map();
+/** Tables whose `create table` this actually read. A grant on anything else is
+ *  a table whose columns cannot be enumerated, and is refused rather than passed. */
+const createdTables = new Set();
+const addColumn = (t, c, at) => {
+  const cols = tableColumns.get(t) ?? new Map();
+  if (!cols.has(c)) cols.set(c, at);
+  tableColumns.set(t, cols);
+};
+
+/**
+ * `${table} ${role}` → what that role holds, per privilege.
+ *
+ * `mode` is 'none', 'table' (table-wide, so every column present and future),
+ * or 'columns' (a hand-written enumeration). Statements are applied in file
+ * order, which is apply order, so the last word holds — with one asymmetry
+ * that is Postgres's and not this file's: a column-level REVOKE against a
+ * table-level GRANT does nothing. Part 131 proved that live, twice, and the
+ * whole column-by-column arrangement on `trainers` exists because of it.
+ */
+const holds = new Map();
+const holding = (t, r) => {
+  const k = `${t} ${r}`;
+  let h = holds.get(k);
+  if (!h) {
+    h = { table: t, role: r, priv: { select: { mode: 'none', cols: new Set() }, update: { mode: 'none', cols: new Set() } } };
+    holds.set(k, h);
+  }
+  return h;
+};
+
+for (const st of stmts) {
+  const text = st.text;
+
+  let m = TABLE_CREATE.exec(text);
+  if (m) {
+    const t = tkey(m[1]);
+    createdTables.add(t);
+    if (!tableColumns.has(t)) tableColumns.set(t, new Map());
+    const g = groupAfter(text, m.index);
+    if (g) {
+      for (const item of commaSplit(text.slice(g.open + 1, g.close))) {
+        const word = item.trim().split(/\s+/)[0];
+        if (word && !NOT_A_COLUMN.test(word)) addColumn(t, tkey(word), st.at);
+      }
+    }
+    continue;
+  }
+
+  // `alter default privileges … grant/revoke … on tables …` names no table and
+  // must not be read as one.
+  if (/\balter\s+default\s+privileges\b/i.test(text)) continue;
+
+  m = TABLE_ALTER.exec(text);
+  if (m) {
+    const t = tkey(m[1]);
+    for (const action of commaSplit(m[2])) {
+      const a = action.trim();
+      let g = /^add\s+(?:column\s+)?(?:if\s+not\s+exists\s+)?([a-z0-9_."]+)/i.exec(a);
+      if (g && !NOT_A_COLUMN.test(g[1])) { addColumn(t, tkey(g[1]), st.at); continue; }
+      g = /^drop\s+(?:column\s+)?(?:if\s+exists\s+)?([a-z0-9_."]+)/i.exec(a);
+      if (g && !NOT_A_COLUMN.test(g[1])) { tableColumns.get(t)?.delete(tkey(g[1])); continue; }
+      g = /^rename\s+column\s+([a-z0-9_."]+)\s+to\s+([a-z0-9_."]+)/i.exec(a);
+      if (g) {
+        const cols = tableColumns.get(t);
+        if (cols?.has(tkey(g[1]))) { const at = cols.get(tkey(g[1])); cols.delete(tkey(g[1])); cols.set(tkey(g[2]), at); }
+      }
+    }
+    continue;
+  }
+
+  for (const [RE, giving] of [[TABLE_GRANT, true], [TABLE_REVOKE, false]]) {
+    const g = RE.exec(text);
+    if (!g) continue;
+    const objects = g[2].trim();
+    if (NOT_A_TABLE.test(objects)) break;
+    const tables = objects.split(',').map((o) => tkey(o.trim())).filter((o) => /^[a-z0-9_.]+$/.test(o));
+    const roles = g[3].split(',')
+      .map((r) => r.replace(/\b(cascade|restrict|with\s+grant\s+option|group)\b/gi, '').trim().toLowerCase())
+      .filter(Boolean);
+    if (!tables.length || !roles.length) break;
+
+    for (const item of commaSplit(g[1])) {
+      const priv = item.trim().split(/[\s(]/)[0].toLowerCase();
+      const group = item.includes('(') ? groupAfter(item, 0) : null;
+      const named = group
+        ? item.slice(group.open + 1, group.close).split(',').map((c) => tkey(c.trim())).filter(Boolean)
+        : null;
+      // `all` and `all privileges` are table-wide by definition; they cannot
+      // carry a column list.
+      for (const p of priv === 'all' ? ['select', 'update'] : [priv]) {
+        if (p !== 'select' && p !== 'update') continue;
+        for (const t of tables) {
+          for (const r of roles) {
+            const s = holding(t, r).priv[p];
+            if (giving && !named) { s.mode = 'table'; s.cols.clear(); }
+            else if (giving) { if (s.mode !== 'table') s.mode = 'columns'; for (const c of named) s.cols.add(c); }
+            else if (!named) { s.mode = 'none'; s.cols.clear(); }
+            else if (s.mode === 'columns') for (const c of named) s.cols.delete(c);
+          }
+        }
+      }
+    }
+    break;
+  }
+}
+
+/**
+ * `grant-ok: public.trainers.join_code — <why>`, read off the RAW file because
+ * it lives in a SQL comment.
+ *
+ * Same contract as every other `…-ok:` marker in scripts/: it names the thing
+ * it excuses, and a marker with no reason after it does not count. The reason
+ * is the whole value — a bare marker is an ignore list with extra steps, and
+ * the two this schema legitimately needs both had their reason written in
+ * English years before there was anything to read it.
+ *
+ * The reason has to START on the marker's own line, and `[ \t]*` rather than
+ * `\s*` is what says so. The first draft used `\s*`, which crosses a newline,
+ * so a bare `-- grant-ok: public.trainers.join_code` quietly borrowed the
+ * continuation comment underneath it as its reason and passed. Wrapping onto
+ * the following lines is fine; beginning there is not.
+ */
+const WITHHELD_MARKER = /grant-ok:[ \t]*([a-z0-9_."]+)\.([a-z0-9_"]+)[ \t]*([^\n]*)/gi;
+const withheld = new Map();       // `${table}.${column}` → { reason, line }
+const reasonless = [];
+{
+  let m;
+  while ((m = WITHHELD_MARKER.exec(setupSql))) {
+    const reason = m[3].replace(/^[\s:—–-]+/, '').trim();
+    const at = `${tkey(m[1])}.${tkey(m[2])}`;
+    const line = setupSql.slice(0, m.index).split('\n').length;
+    if (reason.length < 20) { reasonless.push({ at, line }); continue; }
+    withheld.set(at, { reason, line });
+  }
+}
+
+/* ── the judgement ────────────────────────────────────────────────────────── */
+
+const ungranted = [];     // a column of a column-granted table nobody named
+const opaque = [];        // a column-level grant on a table we could not enumerate
+const consulted = new Set();
+let columnLevel = 0;
+
+for (const h of [...holds.values()].sort((a, b) => (a.table === b.table ? (a.role < b.role ? -1 : 1) : (a.table < b.table ? -1 : 1)))) {
+  const modes = [h.priv.select.mode, h.priv.update.mode];
+  if (modes.includes('table')) continue;      // table-wide reader: a new column is readable
+  if (!modes.includes('columns')) continue;   // holds nothing here
+  columnLevel += 1;
+
+  if (!createdTables.has(h.table)) { opaque.push(h); continue; }
+
+  const named = new Set([...h.priv.select.cols, ...h.priv.update.cols]);
+  const all = tableColumns.get(h.table) ?? new Map();
+  for (const [col, at] of all) {
+    if (named.has(col)) continue;
+    const mark = withheld.get(`${h.table}.${col}`);
+    if (mark) { consulted.add(`${h.table}.${col}`); continue; }
+    ungranted.push({ table: h.table, role: h.role, col, addedLine: lineAt(at) });
+  }
+}
+
+// A parse that finds nothing would print "ok" about a file it did not
+// understand, and this half has no ratchet to notice that for it.
+if (createdTables.size < 100 || columnLevel < 1) {
+  console.error('\ncheck-grants: the setup.sql pass found '
+    + `${createdTables.size} tables and ${columnLevel} column-level grant${columnLevel === 1 ? '' : 's'}, `
+    + 'which is too few to be a reading of this schema — it held 159 and 2 on 4 September 2026. '
+    + 'Whatever it is about to say would be a claim about a file it did not parse. The statement '
+    + 'shapes have changed; fix the §2 half of scripts/check-grants.mjs rather than the floor.\n');
+  process.exit(1);
+}
+
+if (reasonless.length) {
+  console.error(`\ncheck-grants — ${reasonless.length} \`grant-ok:\` marker${reasonless.length === 1 ? '' : 's'} `
+    + 'with no reason:\n');
+  for (const r of reasonless) console.error(`  supabase/setup.sql:${r.line}  ${r.at}`);
+  console.error('\nThe reason IS the marker. Withholding a column from a role is a decision '
+    + '\nsomebody has to be able to disagree with in five years, and "grant-ok" on its own is'
+    + '\nan ignore list. Write the sentence:'
+    + '\n\n  -- grant-ok: public.trainers.join_code — handed out through my_join_code(); a grant'
+    + '\n  --   here would put it back on the directory, which is what part 131 took it off.\n');
+  process.exit(1);
+}
+
+if (opaque.length) {
+  console.error('\ncheck-grants — a column-level grant on a table this gate could not enumerate:\n');
+  for (const o of opaque) console.error(`  ${o.table} (to ${o.role})`);
+  console.error('\nIts `create table` is not in supabase/setup.sql, so "every column is granted" '
+    + 'is not something this can\ncheck — and passing quietly is how the column-level half stops '
+    + 'covering a table without saying so.\n');
+  process.exit(1);
+}
+
+if (ungranted.length) {
+  console.error(`\ncheck-grants — ${ungranted.length} column${ungranted.length === 1 ? '' : 's'} `
+    + `${ungranted.length === 1 ? 'is' : 'are'} on a table whose grant is written out column by `
+    + 'column, and in no grant at all:\n');
+  for (const u of ungranted) {
+    console.error(`  public.${u.table}.${u.col}  —  ${u.role} holds no grant naming it`);
+    console.error(`    added at supabase/setup.sql:${u.addedLine}`);
+  }
+  console.error(
+    '\nThis role\'s SELECT on that table is COLUMN-LEVEL, so adding a column does not extend the'
+    + '\ngrant to it. PostgREST answers a request that names a column the role may not read with'
+    + '\n403 — before RLS, because it is a privilege check and the row is not the question — so'
+    + '\nevery `select=<column>` this appears in has been refused since the column existed, for'
+    + '\nevery user of that role.'
+    + '\n\n  right: in the part that adds the column, under the `alter table` —'
+    + '\n\n           grant select (name) on public.table to authenticated;'
+    + '\n\n         Only the privileges the column actually needs. A column that a trigger keeps'
+    + '\n         immutable gets SELECT and not UPDATE, which is what part 2200 does for'
+    + '\n         `trial_started_at` and why the check above unions the two rather than asking'
+    + '\n         them separately.'
+    + '\n\n         NOT `grant select on public.table to authenticated`. A table-wide grant issued'
+    + '\n         to fix one column supersedes every column revoke on that table, and hands over'
+    + '\n         the columns the enumeration existed to keep back. Part 131 tried the reverse of'
+    + '\n         that and recorded the result: a column-level revoke against a table-level grant'
+    + '\n         reports success and changes nothing.'
+    + '\n\n  or:    if it is meant to be unreadable, say so where the schema can be read —'
+    + '\n\n           -- grant-ok: public.table.column — <why this role must not read it>'
+    + '\n\n         supabase/parts/139 and /2200 are the two worked examples.'
+    + '\n\n         Do not widen a grant to silence this. The two answers are grant the column or'
+    + '\n         write the sentence; there is no third one that leaves the question open.'
+    + '\n\nThis has happened twice already and looked like something else both times: part 151'
+    + '\n(a policy editor that could not load and could still save over itself) and part 2200'
+    + '\n(every coach on the platform told their trial start date could not be read).\n',
+  );
+  process.exit(1);
+}
+
+/* A marker that excuses nothing is the same failure as a ratchet entry that
+ * names something already fixed: it stops describing the tree, and the next
+ * person reads it as a live decision. */
+const staleMarkers = [...withheld].filter(([at]) => !consulted.has(at));
+if (staleMarkers.length) {
+  console.error(`\ncheck-grants — ${staleMarkers.length} \`grant-ok:\` marker${staleMarkers.length === 1 ? '' : 's'} `
+    + 'excusing nothing:\n');
+  for (const [at, mark] of staleMarkers) {
+    console.error(`  supabase/setup.sql:${mark.line}  ${at}`);
+  }
+  console.error('\nEither the column is granted now, or it no longer exists, or the table\'s grant '
+    + 'became table-wide.\nIn all three the marker is a sentence about the schema that is no longer '
+    + 'true, and it reads as a\nlive decision to whoever finds it next. Delete it.\n');
+  process.exit(1);
+}
+
 const marked = [...state.values()].filter((s) => s.marked != null).map((s) => s.name);
 const backlog = [...KNOWN.values()].reduce((n, e) => n + e.count, 0);
 console.log(
@@ -511,4 +1001,11 @@ console.log(
   + (marked.length ? `; ${marked.length} deliberate anon entry point${marked.length === 1 ? '' : 's'} (${marked.join(', ')})` : '')
   + `; ${sweeps.length} dynamic sweeps recognised`
   + (backlog ? `; ${backlog} known and ratcheted` : ''),
+);
+console.log(
+  `check-grants — ok, ${columnLevel} table/role pair${columnLevel === 1 ? '' : 's'} grant columns `
+  + `one by one across ${createdTables.size} tables, and name every column those tables have`
+  + (withheld.size
+    ? `; ${withheld.size} deliberately withheld (${[...withheld.keys()].join(', ')})`
+    : ''),
 );
