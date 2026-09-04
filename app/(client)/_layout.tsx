@@ -44,7 +44,24 @@ export default function ClientLayout() {
   // notes are ready the moment the release is signed.
   const waiver = useWaiver();
   const { user } = useAuth();
-  const whatsNew = useWhatsNew(user?.id ?? null, waiver.applies && waiver.gate !== 'pass');
+  // `gate === 'block' || gate === 'wait'`, not `!== 'pass'`. The gate answers
+  // THREE things and the negation collapsed them: 'block' (there is a release
+  // to sign — hold, and the gate is on screen saying so), 'wait' (the read has
+  // not come back — hold, and the gate is on screen saying so), and the case
+  // that has no name here, where `waiverState` could not be established at all.
+  //
+  // That third one is the reason for the change. `waiverGate` sends an
+  // unreadable state to 'block' only when the member has never accepted before,
+  // and to 'pass' when they have — so a member whose acceptance is on file and
+  // whose read failed gets 'pass' and their news, which is right. But writing
+  // the hold as "anything that is not pass" made this file's behaviour depend
+  // on a default two modules away rather than on the two states it actually
+  // means to wait for. Naming them is what stops a fourth gate value, added
+  // later for some other reason, silently suppressing the changelog with
+  // nothing on screen to explain it — a sheet held by a state nobody can see
+  // is indistinguishable from a sheet that is broken.
+  const waiverHolds = waiver.applies && (waiver.gate === 'block' || waiver.gate === 'wait');
+  const whatsNew = useWhatsNew(user?.id ?? null, waiverHolds);
   return (
     <WaiverGate>
     <Tabs
