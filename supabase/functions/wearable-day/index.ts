@@ -224,14 +224,24 @@ async function whoopDay(token: string) {
     const rs = r?.records?.[0]?.score;
     out.heartRateResting = numOr(rs?.resting_heart_rate);
     out.recoveryPct = numOr(rs?.recovery_score);
-    // `hrv_rmssd_milli` is WHOOP's own field name and it is a LIE about the
-    // unit: the published example is 0.0621 for a 62 ms RMSSD, i.e. seconds.
-    // Storing it verbatim would put "0.1 ms" on the Recovery screen, which
-    // reads as a catastrophic reading rather than as a unit mistake. The
-    // conversion lives here, next to the field, and DailyMetrics.hrv states the
-    // unit it arrives in so nobody converts it a second time.
+    // `hrv_rmssd_milli` has meant two different units in two API versions, and
+    // this line has now been wrong in both directions.
+    //
+    // In v1 the name was a LIE: the published example was 0.0621 for a 62 ms
+    // RMSSD, i.e. seconds, so the code multiplied by a thousand. The call above
+    // is v2, where the name is honest and the value arrives as 64.212 — and
+    // that same multiply turned it into "64212 ms HRV" on the Recovery screen.
+    // A reading a thousand times too large reads as a broken sensor rather than
+    // as a unit mistake, which is exactly the failure the multiply was added to
+    // prevent, produced by the fix itself.
+    //
+    // So the unit is now DETECTED rather than assumed. A human RMSSD in
+    // milliseconds runs roughly 5-300; the same figure in seconds is 0.005-0.3.
+    // Nothing real lands near 1 from either side, so the threshold separates
+    // them with room to spare and keeps working if WHOOP changes its mind
+    // again — which, on the evidence of this field, it does.
     const rmssd = numOr(rs?.hrv_rmssd_milli);
-    out.hrv = rmssd == null ? null : Math.round(rmssd * 1000);
+    out.hrv = rmssd == null ? null : Math.round(rmssd < 1 ? rmssd * 1000 : rmssd);
   } catch { /* leave nulls */ }
   // Sum today's workout durations, and roll up time-in-zone.
   //
