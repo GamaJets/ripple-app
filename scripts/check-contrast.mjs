@@ -293,21 +293,14 @@ const AA_MARK = 3;
  * entry is in `studio-web/app/globals.css`, which this lane does not write.
  */
 const KNOWN_CSS = new Map([
-  // The print palette merged over the DARK screen palette. The daylight one
-  // prints clean — its status colours were already picked against white — so
-  // this is precisely "somebody on the default dark theme pressed Print".
-  ['print over dark: --ink #111111 on --surface3 #1b3229 is 1.38:1 as text, under 4.5', 'print does not override --surface3'],
-  ['print over dark: --ink2 #333333 on --surface3 #1b3229 is 1.08:1 as text, under 4.5', 'print does not override --surface3'],
-  ['print over dark: --ink3 #555555 on --surface3 #1b3229 is 1.84:1 as text, under 4.5', 'print does not override --surface3'],
-  ['print over dark: --brand #111111 on --surface3 #1b3229 is 1.38:1 as a mark, under 3', 'print does not override --surface3'],
-  ['print over dark: --warn #fab219 on --bg #ffffff is 1.83:1 as a mark, under 3', 'print leaves the four status colours at their dark-screen values'],
-  ['print over dark: --warn #fab219 on --surface #ffffff is 1.83:1 as a mark, under 3', 'same'],
-  ['print over dark: --warn #fab219 on --surface2 #ffffff is 1.83:1 as a mark, under 3', 'same'],
-  ['print over dark: --warn #fab219 on --rail #ffffff is 1.83:1 as a mark, under 3', 'same'],
-  ['print over dark: --serious #ec835a on --bg #ffffff is 2.64:1 as a mark, under 3', 'same'],
-  ['print over dark: --serious #ec835a on --surface #ffffff is 2.64:1 as a mark, under 3', 'same'],
-  ['print over dark: --serious #ec835a on --surface2 #ffffff is 2.64:1 as a mark, under 3', 'same'],
-  ['print over dark: --serious #ec835a on --rail #ffffff is 2.64:1 as a mark, under 3', 'same'],
+  // Empty, and it took twelve entries to get here. All of them were one block:
+  // `@media print` in studio-web/app/globals.css repainted the grounds white and
+  // the inks near-black and stopped, leaving --surface3 and the four status
+  // colours at their DARK screen values. On paper that is amber marks at 1.83:1
+  // and a panel at 1.08:1, in a document somebody signs — and only for a reader
+  // who happened to be on the default theme when they pressed Print, which is
+  // why it survived so long. The print block now names all five, taken from the
+  // light palette that already cleared both floors.
 ]);
 const cssStanding = new Set();
 

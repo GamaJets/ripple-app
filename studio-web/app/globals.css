@@ -204,6 +204,19 @@ h3 { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
     --bg: #ffffff; --surface: #ffffff; --surface2: #ffffff; --rail: #ffffff;
     --ink: #111111; --ink2: #333333; --ink3: #555555;
     --ring: #bbbbbb; --ring2: #dddddd; --brand: #111111; --brand-ink: #ffffff;
+    /* These five were the block's hole, and it was on paper that it showed.
+       Repainting the grounds white and the inks near-black and stopping there
+       left --surface3 and the four status colours at their DARK screen values,
+       so a reader on the default theme who printed /close or /accounting got
+       amber marks at 1.83:1 and any --surface3 panel at 1.08:1 — in a document
+       somebody signs, where there is no toggle to fix it and no way to tell it
+       came out wrong other than squinting at it. The daylight palette already
+       printed clean, which is why this went unseen: it depended on the theme
+       the reader happened to be in when they hit Print.
+
+       Taken verbatim from the light block above, which clears both floors. */
+    --surface3: #e3e9f4;
+    --good: #0a820a; --warn: #956703; --serious: #c44717; --crit: #cf3737;
   }
   /* ink-hex-ok: the print ground is paper, not --bg, and this block exists to
      say so — every token above it is redefined for the same reason. 18.88:1 on
