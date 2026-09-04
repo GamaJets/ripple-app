@@ -511,6 +511,8 @@
     "src/lib/pickerMonth.ts",
     "src/lib/pickerMonth.test.ts",
     "src/lib/lastActiveLine.test.ts",
-    "src/lib/zoneInk.test.ts"
+    "src/lib/zoneInk.test.ts",
+    "src/lib/updateCheck.ts",
+    "src/lib/updateCheck.test.ts"
   ]
 }

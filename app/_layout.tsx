@@ -1,6 +1,8 @@
 import { Stack, useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import * as Updates from 'expo-updates';
+import { sayUpdateCheck, whyFailed } from '../src/lib/updateCheck';
+import { reportError } from '../src/lib/reportError';
 import { addNotificationTapListener } from '../src/ui/pushNotifications';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ClientDataProvider } from '../src/ui/clientData';
@@ -66,15 +68,36 @@ function ThemedStack() {
 // work" when it's really just normal (if confusing) expo-updates behavior.
 function useApplyUpdateOnLaunch() {
   useEffect(() => {
-    if (!Updates.isEnabled) return; // no-op in dev / Expo Go
+    // Recorded, not swallowed. The previous version of this effect ended in
+    // `catch {}` with a comment reading "offline or check failed", which is two
+    // different situations, and neither reached the phone's own Build screen.
+    // Four devices then sat on stale bundles for a morning while thirteen
+    // publishes reported success, and nothing on any of them could say whether
+    // the check had run at all. src/lib/updateCheck.ts has the full account.
+    if (!Updates.isEnabled) { sayUpdateCheck({ state: 'disabled' }); return; } // dev build / Expo Go
     (async () => {
       try {
+        sayUpdateCheck({ state: 'checking', at: Date.now() });
         const result = await Updates.checkForUpdateAsync();
-        if (result.isAvailable) {
-          await Updates.fetchUpdateAsync();
-          await Updates.reloadAsync();
+        if (!result.isAvailable) {
+          // Said out loud on purpose. "Already up to date" and "never checked"
+          // are the two this screen exists to tell apart, and they are
+          // indistinguishable unless the first one is stated.
+          sayUpdateCheck({ state: 'current', at: Date.now() });
+          return;
         }
-      } catch { /* offline or check failed — just stay on the current bundle */ }
+        sayUpdateCheck({ state: 'downloading', at: Date.now() });
+        await Updates.fetchUpdateAsync();
+        sayUpdateCheck({ state: 'applying', at: Date.now() });
+        await Updates.reloadAsync();
+      } catch (e) {
+        // Offline is ordinary and stays quiet in the crash log; anything else
+        // is worth reporting. Both are shown on the Build screen either way,
+        // because the person who can see this phone is the one who can act.
+        const why = whyFailed(e);
+        sayUpdateCheck({ state: 'failed', at: Date.now(), why });
+        if (!/offline/i.test(why)) reportError('updates.check', e);
+      }
     })();
   }, []);
 }
