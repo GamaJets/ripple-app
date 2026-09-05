@@ -39,8 +39,11 @@ export function heatmapDayLabel(d: Date, count: number | null, today: Date): str
   const when = d.toLocaleDateString(appLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
   if (d.getTime() > today.getTime()) return `${when}, still to come`;
   if (count == null) return `${when}, not read`;
-  if (count === 0) return `${when}, no sessions`;
-  return count === 1 ? `${when}, 1 session` : `${when}, ${count} sessions`;
+  // EXERCISES, not sessions. The caller counts `workouts` rows and this app
+  // writes one per movement, so this said "7 sessions" over one visit to the
+  // gym — to the one reader who cannot see the grid and check.
+  if (count === 0) return `${when}, nothing logged`;
+  return count === 1 ? `${when}, 1 exercise` : `${when}, ${count} exercises`;
 }
 
 /**

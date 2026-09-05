@@ -30,6 +30,9 @@ import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { startOfWeek } from '../../src/lib/weekStart';
 import { fmtAxisDay } from '../../src/lib/format';
+// The local calendar day of an instant, so one movement done twice in an
+// afternoon is one point on the trend rather than two.
+import { dayKeyOf } from '../../src/lib/entryEdit';
 
 const WEEKS = 10;
 
@@ -96,7 +99,10 @@ export default function Trends() {
   // Weekly training volume (last 10 weeks, oldest → newest).
   const weeks = useMemo(() => {
     const weekOpened = startOfWeek(now);
-    const out: { label: string; iso: string; vol: number; unpriced: number; sessions: number }[] = [];
+    // `days`, and named that way on purpose: the value is `days.size`, the label
+    // beside it is "Training Days", and calling the field `sessions` was how the
+    // same figure got read as a session count on three other screens.
+    const out: { label: string; iso: string; vol: number; unpriced: number; days: number }[] = [];
     for (let w = WEEKS - 1; w >= 0; w--) {
       const start = new Date(weekOpened); start.setDate(weekOpened.getDate() - w * 7);
       const end = new Date(start); end.setDate(start.getDate() + 7);
@@ -120,7 +126,7 @@ export default function Trends() {
       // it and no load to put on that work, and a bare `vol` would state the
       // shortfall as a smaller number rather than as an unknown.
       const t = inWk.reduce<Tonnage>((a, e) => { const x = entryTonnage(e, weightSeries); return { kg: a.kg + x.kg, unknownSets: a.unknownSets + x.unknownSets }; }, { kg: 0, unknownSets: 0 });
-      out.push({ label: fmtAxisDay(start.getFullYear(), start.getMonth(), start.getDate()), iso, vol: t.kg, unpriced: t.unknownSets, sessions: days.size });
+      out.push({ label: fmtAxisDay(start.getFullYear(), start.getMonth(), start.getDate()), iso, vol: t.kg, unpriced: t.unknownSets, days: days.size });
     }
     return out;
     // `now` is a dependency, not a value read past the memo: without it the
@@ -137,13 +143,42 @@ export default function Trends() {
   const [sel, setSel] = useState<string | null>(null);
   const selName = sel || exercises[0] || null;
 
-  // Every session of this movement that was read, oldest first. The `.slice`
+  // Every OUTING of this movement that was read, oldest first. The `.slice`
   // that used to end this build is now on the CHART only.
+  //
+  // ── the day is the unit, not the row ────────────────────────────────────
+  //
+  // This mapped one point per LOG ENTRY, and a movement is written as one entry
+  // each time it is saved: a member who logs three sets of bench, walks away and
+  // comes back for two more has two rows on one afternoon, and a double tap on
+  // Save has four. So "Sessions 12" was a count of saves rather than of
+  // sessions, "Best" was unaffected but the LINE was three points stacked on a
+  // single Tuesday — src/lib/exerciseHistory.ts calls that exact shape "a
+  // picture of a plateau drawn out of a double tap", and folds by day for it.
+  // The best estimated max of the day is that day's point, which is the same
+  // rule `bestOf` already applies inside one entry.
   const allSessions = useMemo(() => {
     if (!selName) return [] as { t: string; v: number }[];
-    return log.filter((e) => e.exercise === selName && e.sets && e.sets.length)
-      .map((e) => ({ t: e.t, v: bestOf(e, weightSeries) }))
-      .sort((a, b) => +new Date(a.t) - +new Date(b.t));
+    const byDay = new Map<string, { t: string; v: number }>();
+    for (const e of log) {
+      if (e.exercise !== selName || !e.sets || !e.sets.length) continue;
+      // Null when the timestamp will not parse. Such an entry is dropped rather
+      // than filed under today — inventing a training day out of a parsing
+      // failure is the defect src/lib/ownTraining.ts documents — and it charted
+      // as a point at the Unix epoch before.
+      const day = dayKeyOf(e.t);
+      if (!day) continue;
+      const v = bestOf(e, weightSeries);
+      const cur = byDay.get(day);
+      // The day's best, and the LATEST instant of it, so the axis label reads
+      // as the day rather than as whichever save happened to win.
+      if (!cur) byDay.set(day, { t: e.t, v });
+      else byDay.set(day, {
+        t: Date.parse(e.t) > Date.parse(cur.t) ? e.t : cur.t,
+        v: Math.max(cur.v, v),
+      });
+    }
+    return [...byDay.values()].sort((a, b) => +new Date(a.t) - +new Date(b.t));
   }, [log, selName, weightSeries]);
   // How many points the sparkline draws. Twelve is a chart decision — a line
   // through forty points on a phone is a smudge — and it was silently a
@@ -190,9 +225,9 @@ export default function Trends() {
           figure={logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null)}
           unit={logKnown ? wu : undefined}
           note={logStatus === 'loading' ? 'Reading your training log…' : logStatus === 'partial' ? 'More logged than this screen can read at once, so the weekly figures would be short.' : !logKnown ? 'We couldn’t read your training log — this is not a week with nothing in it.'
-            : thisWeek.sessions
-            ? `${thisWeek.sessions} training day${thisWeek.sessions === 1 ? '' : 's'} this week`
-            : 'No sessions logged this week yet.'}
+            : thisWeek.days
+            ? `${thisWeek.days} training day${thisWeek.days === 1 ? '' : 's'} this week`
+            : 'Nothing logged this week yet.'}
         />
 
         {/* Said once, under the hero, rather than beside each figure: a pounds
@@ -240,7 +275,7 @@ export default function Trends() {
           <View style={{ height: sp.lg }} />
           <KpiRow items={[
             { label: 'This Week', value: logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined },
-            { label: 'Training Days', value: logKnown ? fig(thisWeek.sessions) : fig(null) },
+            { label: 'Training Days', value: logKnown ? fig(thisWeek.days) : fig(null) },
             { label: 'Best Week', value: logKnown ? fig(volumeIn(bestWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined, delta: logKnown && anyVolume ? `w/c ${bestWeek.label}` : undefined },
           ]} />
         </Section>
@@ -304,6 +339,9 @@ export default function Trends() {
                         : logKnown ? undefined : 'not all read',
                     },
                     { label: 'Best', value: logKnown ? fig(est1RMIn(maxE, wu)) : fig(null), unit: logKnown ? wu : undefined },
+                    // Days this movement was trained — see the fold in
+                    // `allSessions`. Counted per row it read "Sessions 12"
+                    // over eight afternoons.
                     { label: 'Sessions', value: logKnown ? fig(allSessions.length) : fig(null) },
                   ]} />
                   {/* Said only when the chart is showing less than the two

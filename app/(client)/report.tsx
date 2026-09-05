@@ -192,7 +192,13 @@ export default function WeeklyReport() {
   // where a later edit to this list cannot skip it.
   const fitnessFacts = [
     `Week of ${range}.`,
-    trainingWhole ? `Trained ${wk.workouts} time(s) across ${wk.days} active day(s).` : '',
+    // DAYS, not `wk.workouts`. That is one log entry per EXERCISE, so this
+    // line told the model — and through it the coach this document is sent to
+    // — "Trained 7 time(s) across 1 active day(s)" about a single Monday of
+    // seven movements. It says days now rather than a session count because
+    // this app cannot count sessions: see the note on `WeekStats.days` in
+    // src/lib/streaks.ts for the production rows that settle it.
+    trainingWhole ? `Trained on ${wk.days} day(s) this week.` : '',
     trainingWhole ? `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${num(wk.kcal)} kcal.` : '',
     // Said to the model too, for the same reason the caveats above and below
     // are: the fact lines are its only source, so a tonnage handed over bare is
@@ -250,9 +256,9 @@ export default function WeeklyReport() {
     // never-weighed member read about a week of pull-ups and dips. The count of
     // sessions and active days is unaffected — those are facts — and the note
     // underneath the KPI row says which sets are missing and why.
-    else if (wk.workouts > 0) bits.push(volNote
-      ? `You trained ${wk.workouts} time${wk.workouts === 1 ? '' : 's'} over ${wk.days} day${wk.days === 1 ? '' : 's'}.`
-      : `You trained ${wk.workouts} time${wk.workouts === 1 ? '' : 's'} over ${wk.days} day${wk.days === 1 ? '' : 's'}, moving ${(wk.volumeKg / 1000).toFixed(1)} tonnes of volume.`);
+    else if (wk.days > 0) bits.push(volNote
+      ? `You trained on ${wk.days} day${wk.days === 1 ? '' : 's'} this week.`
+      : `You trained on ${wk.days} day${wk.days === 1 ? '' : 's'} this week, moving ${(wk.volumeKg / 1000).toFixed(1)} tonnes of volume.`);
     else bits.push('No logged workouts this week — a fresh chance to get one on the board.');
     if (trainingWhole && streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'} — keep it alive.`);
     // Gated on the CONVERTED change: a fifth of a kilogram is under half a
@@ -414,10 +420,18 @@ export default function WeeklyReport() {
         {/* The whole hero is a count over the week's log. A dash and a
             sentence, not a zero — "Trained This Week: 0" is the single most
             demoralising thing this app can put in front of somebody who did. */}
-        <Hero label="Trained This Week" figure={trainingWhole ? fig(wk.workouts) : fig(null)}
-          unit={trainingWhole ? (wk.workouts === 1 ? 'session' : 'sessions') : undefined}
+        {/* DAYS. This was `wk.workouts`, which is log ENTRIES, one per
+            exercise: a member who trained once and logged seven movements read
+            "7 sessions" directly above a note saying "1 active day" — two
+            numbers from the same data, on the same card, disagreeing, in a
+            document they send to their coach.
+            A session count is not available to fix it with; see
+            `WeekStats.days` in src/lib/streaks.ts. The note underneath carries
+            the exercise count instead, which is a fact. */}
+        <Hero label="Trained This Week" figure={trainingWhole ? fig(wk.days) : fig(null)}
+          unit={trainingWhole ? (wk.days === 1 ? 'day' : 'days') : undefined}
           note={trainingWhole
-            ? `${wk.days} active day${wk.days === 1 ? '' : 's'}${streak > 0 ? ` · ${streak}-day streak` : ''}`
+            ? `${wk.workouts} exercise${wk.workouts === 1 ? '' : 's'} logged${streak > 0 ? ` · ${streak}-day streak` : ''}`
             : logStatus === 'loading' ? 'Reading your training log…'
             : logStatus === 'partial' ? 'More logged than this screen can read in one go, so a week counted from it would be short.'
             : 'We couldn’t read your training log. This is not a week with nothing in it.'} />

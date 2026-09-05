@@ -20,7 +20,7 @@ import { offlineBanner } from '../../src/lib/reachability';
 import { useOutbox } from '../../src/ui/outbox';
 import { OUTBOX_KINDS, lapsedNote, outboxNote } from '../../src/lib/outbox';
 import { BRAND } from '../../src/lib/brands';
-import { weekIndexOf } from '../../src/lib/weekStart';
+import { weekIndexOf, startOfWeek } from '../../src/lib/weekStart';
 import { View, Text, ScrollView, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -54,7 +54,15 @@ import { useSessions } from '../../src/ui/sessions';
 import { useInvites } from '../../src/ui/invites';
 import { useFoodLog } from '../../src/ui/foodLog';
 import { useWearables } from '../../src/ui/wearables';
-import { shownStreak, thisWeekStats, personalRecords, streakRisk, freezeBudget } from '../../src/lib/streaks';
+import { shownStreak, thisWeekStats, streakRisk, freezeBudget } from '../../src/lib/streaks';
+// When each record was SET, which is the only thing that can answer "new PRs
+// this week". `personalRecords` answers a different question — the best ever
+// per lift — and its length was being printed under a heading about a week.
+import { prTimeline } from '../../src/lib/longView';
+// The week's tonnage is a floor, not a total, whenever a bodyweight set in it
+// had no weigh-in to price it against. Same note history.tsx, trends.tsx,
+// report.tsx and the session summary already print.
+import { tonnageNote } from '../../src/lib/bodyweightSets';
 import { severeSummary } from '../../src/lib/injuries';
 import { booksInPerson, coachedRemotely, COACHED_MODE_SHORT, COACHING_MODE_NOTE } from '../../src/lib/types';
 import { scheduleLocal, pushAvailable } from '../../src/ui/pushNotifications';
@@ -388,7 +396,29 @@ export default function Home() {
   // `useNow()` rather than `Date.now()`, because the answer changes at the
   // Sunday midnight this screen sits open across.
   const wk = thisWeekStats(log, nowMs, c.weightSeries);
-  const prs = personalRecords(log, c.weightSeries);
+  /**
+   * Records actually SET since the week opened.
+   *
+   * This tile is captioned "New PRs" inside a block headed "This Week", and it
+   * was `personalRecords(log, …).length` — the best-ever set on every lift the
+   * member has a load for, all-time, with no date in it at all. So a member
+   * with a year behind them and a rest week read "New PRs 12" every Sunday,
+   * and the figure never moved when they actually set one.
+   *
+   * `prTimeline` is the module that knows WHEN each record happened; it is
+   * already what app/(client)/history.tsx draws its Milestones from, so the two
+   * screens cannot come to disagree about what a record is.
+   *
+   * Anchored on `startOfWeek(nowMs)`, the same Sunday `thisWeekStats` counts
+   * from, so this tile and the two beside it describe one window.
+   */
+  const weekOpenedMs = startOfWeek(nowMs).getTime();
+  const newPrs = prTimeline(log, c.weightSeries)
+    .filter((m) => Date.parse(m.at) >= weekOpenedMs).length;
+  /** Said whenever the week's tonnage is short — a bodyweight set nobody has a
+   *  weigh-in for is real training with no load to put on it, and "Lifted
+   *  4,200 kg" printed over it looks exactly as measured as a whole total. */
+  const weekVolNote = tonnageNote({ kg: wk.volumeKg, unknownSets: wk.unpricedSets });
   const goalDays = planDays.length || 4;
 
   // ── Getting Started, while it has anything to say ────────────────────────
@@ -769,16 +799,25 @@ export default function Home() {
             // like a rendering fault. Past the goal it says so instead; the
             // count itself is never hidden, because the number they earned is
             // the point.
+            // `wk.days`, not `wk.workouts`. `goalDays` is `planDays.length` —
+            // the number of TRAINING DAYS the programme runs in a week, the
+            // same figure app/(client)/week.tsx prints as "3 training days a
+            // week". `wk.workouts` is log ENTRIES, and this app writes one per
+            // exercise, so a member who trained once on Monday and logged
+            // seven movements read "7 this week · goal was 4" over a filled
+            // ring and a WeekDots strip three lines down showing one day. The
+            // ring is a week's plan against a week's training and both sides
+            // of it are now counted in days.
             note={!logKnown ? undefined
-              : wk.workouts > goalDays ? `${wk.workouts} this week · goal was ${goalDays}`
-                : wk.workouts === goalDays ? `${wk.workouts} of ${goalDays} this week · goal met`
-                  : `${wk.workouts} of ${goalDays} this week`}
+              : wk.days > goalDays ? `${wk.days} this week · goal was ${goalDays}`
+                : wk.days === goalDays ? `${wk.days} of ${goalDays} this week · goal met`
+                  : `${wk.days} of ${goalDays} this week`}
           />
           <ActionCard
-            ring={logKnown && goalDays ? wk.workouts / goalDays : 0}
+            ring={logKnown && goalDays ? wk.days / goalDays : 0}
             ringLabel={logKnown ? String(streak) : fig(null)}
-            // The number is a day streak and the ring is this week's sessions —
-            // neither is about the meal this card is asking you to log.
+            // The number is a day streak and the ring is this week's training
+            // days — neither is about the meal this card is asking you to log.
             ringNote={logKnown ? (streak === 1 ? 'day streak' : 'day streak') : 'streak'}
             title={today.headline}
             note={today.tip}
@@ -927,7 +966,13 @@ export default function Home() {
         <Section>
           <SectionHead title="This Week" note="All activity" onPress={() => router.push('/(client)/trends')} />
           <KpiRow items={[
-            { label: 'Sessions', value: logKnown ? fig(wk.workouts) : fig(null), unit: logKnown ? `/${goalDays}` : undefined },
+            // Days, against a goal counted in days — see the note on the ring
+            // above. This read `wk.workouts`, which is one log entry per
+            // EXERCISE, so a single Monday session of seven movements printed
+            // "Sessions 7 /4" directly above a WeekDots strip showing one day
+            // filled. Labelled the way app/(client)/consistency.tsx labels the
+            // same quantity.
+            { label: 'Days Trained', value: logKnown ? fig(wk.days) : fig(null), unit: logKnown ? `/${goalDays}` : undefined },
             // `(0).toLocaleString()` is the string "0" — a tonnage stated as
             // measured, with no hint that nothing was measured.
             // Tonnage is a weight like any other — a client who loads the bar
@@ -935,8 +980,21 @@ export default function Home() {
             // a whole unit either way, because nobody reads a week's volume to
             // the tenth.
             { label: 'Lifted', value: logKnown ? Math.round(wu === 'lb' ? kgToLb(wk.volumeKg) : wk.volumeKg).toLocaleString() : fig(null), unit: logKnown ? wu : undefined },
-            { label: 'New PRs', value: logKnown ? fig(prs.length) : fig(null) },
+            // Records set THIS WEEK. The all-time board is a different
+            // question — see `newPrs` above.
+            //
+            // Two reads, not one. `prTimeline` prices a bodyweight set from
+            // `c.weightSeries`, so a member whose scans read failed loses every
+            // pull-up and dip from the count while their log comes back whole —
+            // the same hole app/(client)/report.tsx names on its own PR figure.
+            { label: 'New PRs', value: logKnown && scansWhole ? fig(newPrs) : fig(null) },
           ]} />
+          {/* The week's tonnage is a floor whenever a bodyweight set in it had
+              no weigh-in to price it against. Every other screen that prints a
+              tonnage says so; this one printed the figure bare. */}
+          {logKnown && weekVolNote ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{weekVolNote}</Text>
+          ) : null}
           <WeekDots done={logKnown ? wk.days : 0} />
         </Section>
         </>) : null}

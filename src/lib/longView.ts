@@ -148,8 +148,21 @@ export interface MonthCell {
   label: string;
   /** At least one session was logged in this month. */
   trained: boolean;
-  /** Distinct sessions. One session writes every exercise with the same
-   *  `performed_at` (see WorkoutEntry.id), so distinct timestamps count them. */
+  /**
+   * Distinct `performed_at` values — SAVES, not sessions.
+   *
+   * This said "Distinct sessions. One session writes every exercise with the
+   * same performed_at", which is true of the write path and false of the
+   * members. app/(client)/workouts.tsx does stamp a whole save with one
+   * timestamp; a member logging as they go makes seven saves out of one visit.
+   * Checked on production: one member's 17 August is seven rows, seven
+   * timestamps, 16:14 to 17:12, one gym.
+   *
+   * Kept because the month chart's description needs SOMETHING countable and
+   * this is the honest name for it, but no screen prints it as a session count
+   * any more — `days` is what they show. See `WeekStats.days` in
+   * src/lib/streaks.ts.
+   */
   sessions: number | null;
   /** Distinct local calendar days trained. */
   days: number | null;
@@ -454,6 +467,7 @@ export function historyNote(log: WorkoutEntry[], now: number = Date.now()): stri
 export interface Lifetime {
   firstAt: string;
   lastAt: string;
+  /** Distinct `performed_at` values — SAVES, not sessions. See MonthCell.sessions. */
   sessions: number;
   days: number;
   /** Null when nothing weighted has been logged — never 0. */

@@ -125,9 +125,12 @@ type Load =
  *  leaving it in kilograms would convert the picture and not the description
  *  of it, which is the one place the two must not disagree. */
 function describeMonth(c: MonthCell, unit: WeightUnit): string {
-  if (!c.trained) return 'no sessions logged';
+  if (!c.trained) return 'nothing logged';
   if (c.volumeKg == null) return 'trained, no weights logged';
-  return `${volumeIn(c.volumeKg, unit)!.toLocaleString()} ${unit} over ${c.sessions} session${c.sessions === 1 ? '' : 's'}`;
+  // DAYS. `c.sessions` is distinct `performed_at`, which is saves rather than
+  // sessions — a member logging as they go turns one visit into seven of them.
+  // See MonthCell.sessions in src/lib/longView.ts.
+  return `${volumeIn(c.volumeKg, unit)!.toLocaleString()} ${unit} over ${c.days} day${c.days === 1 ? '' : 's'}`;
 }
 
 /**
@@ -525,13 +528,18 @@ export default function History() {
         </Text>
       )}
       <View style={{ height: sp.lg }} />
-      {/* Sessions and Lifts are lifetime counts and go blank with the hero.
+      {/* Days Trained and Lifts are lifetime counts and go blank with the hero.
           Best Month does not: it is the heaviest of the months ON THIS CHART,
           which is a true statement about the months on this chart whether or
           not there are older ones behind them — the delta names the month, so
           the reader can see the window it was picked from. */}
       <KpiRow items={[
-        { label: 'Sessions', value: whole ? fig(life.sessions) : fig(null), delta: whole ? `${fig(life.days)} day${life.days === 1 ? '' : 's'}` : 'not all read' },
+        // Was 'Sessions', showing `life.sessions` with a days delta beside it.
+        // That figure is distinct `performed_at` — saves, not sessions — so a
+        // member who logs as they go read a number several times their real
+        // one, with the true count sitting underneath it as the delta. The
+        // delta was the honest half, so it is now the figure.
+        { label: 'Days Trained', value: whole ? fig(life.days) : fig(null), delta: whole ? undefined : 'not all read' },
         { label: 'Best Month', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined, delta: best ? monthLabel(best.key) : undefined },
         { label: 'Lifts', value: whole ? fig(life.lifts) : fig(null), delta: whole ? 'with weights' : 'not all read' },
       ]} />

@@ -236,8 +236,58 @@ const runEndingAt = (end: Date, n: number): WorkoutEntry[] => {
     'the calendar week is statsSince from the moment the week opened, and nothing else');
   eq(statsSince(log, 0).workouts, 2, 'and an open window counts everything');
 
+  /* ── exercises and days are two different numbers, and there is no third ─
+   *
+   * `workouts` is log ENTRIES, and this app writes one per exercise. Home's
+   * goal ring printed that count against a goal measured in TRAINING DAYS —
+   * "7 of 4 this week · goal was 4" after a single Monday — and the Weekly
+   * Report, a document the member sends to their coach, stated "Trained 7
+   * time(s) across 1 active day(s)" and handed the same figure to the model
+   * that writes its summary.
+   *
+   * The obvious repair is a session count, and this block exists to pin why
+   * there is not one. A session was defined everywhere as a distinct
+   * `performed_at`, and app/(client)/workouts.tsx does stamp a whole save with
+   * one timestamp — so a member who logs at the end really does write one. The
+   * second case below is the member who does not, taken from production: one
+   * visit, saved movement by movement across an hour, seven timestamps. A
+   * count by timestamp calls that seven sessions, which is the number the ring
+   * was already wrong by.
+   *
+   * So `days` is the figure, and these assertions are what stops a `sessions`
+   * field being added back.
+   */
+  {
+    const at = new Date(weekOpened + 2 * HOUR).toISOString();
+    const ex = (name: string, t: string): WorkoutEntry =>
+      ({ t, exercise: name, sets: [[8, 60]] } as WorkoutEntry);
+
+    // Logged in one go: three movements, one timestamp.
+    const oneSave = [ex('Squat', at), ex('Bench', at), ex('Row', at)];
+    eq(thisWeekStats(oneSave, now).workouts, 3, 'three movements are three log entries');
+    eq(thisWeekStats(oneSave, now).days, 1, 'and one training day');
+
+    // The same session logged as it went, which is what the live rows look
+    // like: seven movements, seven timestamps, one afternoon, one gym.
+    const asTheyWent = [
+      ex('MixedCardio', new Date(weekOpened + 2 * HOUR).toISOString()),
+      ex('Treadmill / Run', new Date(weekOpened + 2 * HOUR + 10 * 60000).toISOString()),
+      ex('Hip Thrust', new Date(weekOpened + 2 * HOUR + 19 * 60000).toISOString()),
+      ex('Squat', new Date(weekOpened + 2 * HOUR + 31 * 60000).toISOString()),
+      ex('Hip abduction', new Date(weekOpened + 2 * HOUR + 32 * 60000).toISOString()),
+      ex('Calf raise', new Date(weekOpened + 2 * HOUR + 33 * 60000).toISOString()),
+      ex('Dead lift', new Date(weekOpened + 2 * HOUR + 58 * 60000).toISOString()),
+    ];
+    eq(thisWeekStats(asTheyWent, now).days, 1,
+      'one visit saved as it went is still ONE day — the figure every screen now shows');
+    eq(new Set(asTheyWent.map((e) => e.t)).size, 7,
+      'while a count by timestamp would call that same visit seven, which is why there is no sessions field');
+    ok(!('sessions' in thisWeekStats(asTheyWent, now)),
+      'WeekStats must not carry a sessions count: see its docstring for the production rows');
+  }
+
   // Nothing is invented from an empty log.
-  eq(thisWeekStats([], now).workouts, 0, 'an empty log is nought sessions');
+  eq(thisWeekStats([], now).workouts, 0, 'an empty log is nought logged movements');
   eq(thisWeekStats([], now).volumeKg, 0, 'and nought volume');
   eq(thisWeekStats([], now).unpricedSets, 0, 'with no unpriced sets to declare');
 }

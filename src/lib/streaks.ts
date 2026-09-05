@@ -247,7 +247,52 @@ export function isNewPR(log: WorkoutEntry[], entry: WorkoutEntry, history: Bodyw
 }
 
 export interface WeekStats {
+  /**
+   * Log ENTRIES in the window — one per exercise, not one per session.
+   *
+   * The name is the historical one and it has always meant this: `workouts`
+   * table rows, and this app writes one of those per movement (see
+   * `WorkoutEntry` in src/lib/mockData.ts, and `logWorkouts` in
+   * app/(client)/workouts.tsx, which maps a session's exercises to one entry
+   * each). app/(trainer)/my-training.tsx has labelled it "Exercises" all
+   * along, which is what it is.
+   *
+   * It is NOT a count of sessions and it is NOT a count of training days.
+   * Three client screens printed it as one or the other: Home's goal ring read
+   * "7 of 4 this week · goal was 4" after a single Monday of seven movements,
+   * and the Weekly Report — the document a member sends to their coach, and
+   * the fact list handed to the model that writes its summary — said "Trained
+   * 7 time(s) across 1 active day(s)". Use `sessions` or `days` for those.
+   */
   workouts: number;
+  /**
+   * There is deliberately NO `sessions` count here, and the reason is a fact
+   * about the live data rather than a preference.
+   *
+   * A first version of this interface added one, defined as distinct
+   * `performed_at` — the definition `lifetimeTotals` in src/lib/longView.ts and
+   * `sessionsOf` in src/lib/clientTraining.ts both use, and which longView
+   * states outright: "One session writes every exercise with the same
+   * performed_at". That is true of ONE write path. app/(client)/workouts.tsx
+   * stamps every exercise of a save with one `nowISO`, so logging a whole
+   * session in one go does write a single timestamp.
+   *
+   * Members do not log in one go. Checked against production: one member's
+   * 17 August is seven rows with SEVEN distinct timestamps, 16:14 to 17:12 —
+   * MixedCardio, Treadmill, Hip Thrust, Squat, Hip abduction, Calf raise, Dead
+   * lift. That is one visit to one gym, saved as they went. Distinct
+   * timestamps counts it as seven. The next day is seven more, and the day
+   * after six.
+   *
+   * So a session count derived from this data would be a count of SAVES, and
+   * it would differ from `workouts` only for the member who logs everything at
+   * the end — which is to say it would be wrong in the same direction, by
+   * nearly the same amount, while sounding precise. There is no session id to
+   * fall back on: `workouts.session_id` exists and is NULL on every row.
+   *
+   * `days` below is what this app can actually prove, and it is what every
+   * member-facing count now shows.
+   */
   volumeKg: number;
   kcal: number;
   days: number;

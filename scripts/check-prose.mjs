@@ -98,11 +98,16 @@ const KNOWN = new Map([
     'The weekly check-in row on the timeline: "82 kg · Energy 4/5 · Sleep 3/5". A check-in ' +
     'carries no weight when nobody stepped on the scales, and the dash there is the first ' +
     'field of a value strip rather than the subject of anything.' }],
-  ['app/(client)/history.tsx', { count: 3, why:
-    'Three sites, all fed by values that cannot be null. `life.days` is a Set size from ' +
-    'lifetimeTotals() in src/lib/longView.ts — a count, never absent — and it appears once in a ' +
-    'sentence and once in a KPI delta. The third is `weightDeltaIn(m.est1RM - m.prev, wu)` ' +
-    'inside a `m.prev != null` arm, where both ends are finite numbers.' }],
+  ['app/(client)/history.tsx', { count: 2, why:
+    'Two sites, both fed by values that cannot be null. `c.days` is a Set size from ' +
+    'monthlyHistory() in src/lib/longView.ts — a count, never absent — inside the `c.trained` ' +
+    'arm of describeMonth(). The other is `weightDeltaIn(m.est1RM - m.prev, wu)` inside a ' +
+    '`m.prev != null` arm, where both ends are finite numbers. ' +
+    'This was 3. The site that went was the lifetime KPI delta, which read ' +
+    '"N days" under a "Sessions" figure counting distinct `performed_at` — saves rather ' +
+    'than sessions, several times the real number for a member who logs as they go. The ' +
+    'delta was the honest half of that pair, so it became the figure and the label became ' +
+    '"Days Trained".' }],
   ['app/(client)/report.tsx', { count: 1, why:
     'The waist fact line handed to the summariser, inside `waistDShown != null && mLatest` — ' +
     'so there is a tape reading and `lengthLabel` has one to format.' }],

@@ -78,6 +78,19 @@ export default function Consistency() {
 
   const pad = (n: number) => String(n).padStart(2, '0');
   const key = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  // EXERCISES logged per day, which is what this has always counted and is now
+  // also what it is called.
+  //
+  // This app writes one `workouts` row per exercise, so `counts[day]` is a
+  // count of movements. It was labelled "Sessions" under Totals and read out to
+  // VoiceOver by `heatmapDayLabel` as "Mon 17 Aug, 7 sessions" over what was
+  // one visit to the gym.
+  //
+  // The fix is the label rather than the arithmetic, because a session count is
+  // not available: a member's real 17 August is seven rows with seven distinct
+  // `performed_at` values, saved as they went. See `WeekStats.days` in
+  // src/lib/streaks.ts. `Days Trained` beside it is the honest count and is
+  // unchanged — it was already the number of KEYS in this map.
   const counts: Record<string, number> = {};
   for (const l of log) { const k = key(new Date(l.t)); counts[k] = (counts[k] || 0) + 1; }
 
@@ -131,7 +144,7 @@ export default function Consistency() {
     ? null
     : new Date(gridBoundary.oldestISO);
 
-  const totalSessions = Object.values(counts).reduce((a, n) => a + n, 0);
+  const totalExercises = Object.values(counts).reduce((a, n) => a + n, 0);
   const trainedDays = Object.keys(counts).length;
   const freezes = freezeBudget(log);
   // Composed here before; it agreed with Home by coincidence rather than by
@@ -213,7 +226,7 @@ export default function Consistency() {
               is true of a read that came back at its row limit, which is why
               this is `countable` and the heatmap above is `known`. */}
           <KpiRow items={[
-            { label: 'Sessions', value: countable ? fig(totalSessions) : fig(null) },
+            { label: 'Exercises', value: countable ? fig(totalExercises) : fig(null) },
             { label: 'Days Trained', value: countable ? fig(trainedDays) : fig(null) },
             { label: 'Best Streak', value: countable ? fig(best) : fig(null) },
           ]} />
