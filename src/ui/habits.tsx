@@ -94,6 +94,7 @@ import { useClientData } from './clientData';
 import { useCoachNutrition } from './coachNutrition';
 import { useAssignedPrograms } from './assignedPrograms';
 import { useClientWeek } from './clientWeek';
+import { useToday } from './today';
 
 export interface Habit { id: string; label: string; icon: string; done: boolean; source: ChecklistSource }
 
@@ -273,6 +274,37 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // development and both would fire twice. That is the shape of the two bugs
   // documented further down this file.
   const doneRef = useRef<Set<string>>(new Set());
+  /**
+   * Today, kept current for as long as this provider is mounted — which is for
+   * the whole life of the app, because HabitsProvider sits at the root and is
+   * never torn down.
+   *
+   * ── what reading the clock once did ──────────────────────────────────────
+   *
+   * Everything below used to call `today()` at the moment it ran, and the
+   * hydrate below ran once. So a member whose phone was open across midnight
+   * kept yesterday's ticks in `doneRef` — and `cacheTicks` then wrote that set
+   * under `ticksKey(owner, today())`, which is now TOMORROW's key. It survived
+   * to the next launch, where `readLocalTicks` read it straight back as today's
+   * ticks: a checklist that opens already finished, for a day nobody has
+   * lived, on the screen whose whole job is to say what is still to do.
+   *
+   * The hydrate's own guard made it stick. It only replaces the tick set
+   * `if (localTicks.done.length || pendingRef.current.size)` — deliberately, so
+   * a local read cannot wipe a set the server already established — so an empty
+   * new day left yesterday's standing.
+   *
+   * `useToday` is the remedy this codebase already has, and it is safe above
+   * the navigator: its effect uses only setTimeout and AppState.
+   */
+  const day = useToday();
+  /** The day the in-memory state belongs to, so a rollover can be told from a
+   *  first run. Null until the first hydrate settles. */
+  const stateDayRef = useRef<string | null>(null);
+  /** `day` reachable from the callbacks below without adding it to every
+   *  dependency array — the same shape `uidRef` uses for the same reason. */
+  const dayRef = useRef(day);
+  dayRef.current = day;
   const pendingRef = useRef<Map<string, boolean>>(new Map());
   /**
    * The local day each waiting toggle was MADE on.
@@ -323,7 +355,9 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // an account to scope to.
   useEffect(() => {
     let cancelled = false;
-    readLocalWater(null, today()).then((w) => {
+    // `day` rather than `today()`, and in the deps below, for the same reason
+    // the main effect takes it: this provider outlives midnight.
+    readLocalWater(null, day).then((w) => {
       // `w.count > 0` deliberately, not `w != null`: this fires before the
       // account-scoped read and must not overwrite a count that read has
       // already established. A cached zero carries no information anybody is
@@ -331,7 +365,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
       if (!cancelled && w && w.count > 0 && waterRef.current === 0) { waterRef.current = w.count; setWater(w.count); }
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [day]);
 
   /** Write today's count to this device. Cheap, synchronous from the caller's
    *  point of view, and the thing that has to happen before the network is even
@@ -347,7 +381,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // fallback (see readLocalWater) and otherwise belongs to the signed-out case
   // alone, which is exactly what it held before part 109.
   const cacheWater = (n: number, at: string) => {
-    AsyncStorage.setItem(waterKey(uidRef.current, today()), JSON.stringify({ count: n, at }))
+    AsyncStorage.setItem(waterKey(uidRef.current, dayRef.current), JSON.stringify({ count: n, at }))
       .catch(() => { /* the count is correct this session either way */ });
   };
 
@@ -360,7 +394,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     const owner = uidRef.current;
     if (!owner) return;
     const payload: CachedTicks = { done: [...doneRef.current], pending: Object.fromEntries(pendingRef.current) };
-    AsyncStorage.setItem(ticksKey(owner, today()), JSON.stringify(payload))
+    AsyncStorage.setItem(ticksKey(owner, dayRef.current), JSON.stringify(payload))
       .catch(() => { /* the ticks are correct this session either way */ });
   };
 
@@ -429,7 +463,26 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
         // Local first, then the server, then whichever is more recent — the
         // same order availability.ts settled on, for the same reason: a client
         // in a basement gym still sees their morning.
-        const day = today();
+        // The provider's day, not the clock's, so this effect re-runs when the
+        // day turns over — see `day` above for what one reading of the clock
+        // did to a member whose phone stayed open.
+        //
+        // A ROLLOVER IS NOT A FIRST RUN. On a first run there is nothing in
+        // memory to protect and the guards below are right to keep what they
+        // find. On a rollover everything in memory belongs to yesterday, and
+        // the guard that stops an empty local read wiping a set would otherwise
+        // carry yesterday's ticks into today. So it is cleared here, before
+        // anything is read.
+        if (stateDayRef.current !== null && stateDayRef.current !== day) {
+          doneRef.current = new Set();
+          setDoneIds(doneRef.current);
+          pendingRef.current = new Map();
+          pendingDayRef.current = new Map();
+          setPendingCount(0);
+          waterRef.current = 0;
+          setWater(0);
+        }
+        stateDayRef.current = day;
 
         // ── today's ticks, off this device ─────────────────────────────────
         //
@@ -483,7 +536,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
         // ceiling is free and `capped()` turns "it cannot be long" from an
         // assumption into something the code checks.
         const { data, error } = await supabase.from('habit_logs').select('habit')
-          .eq('user_id', id).eq('done_on', today())
+          .eq('user_id', id).eq('done_on', day)
           .order('habit', { ascending: true }).limit(capLimit());
         if (cancelled) return;
         // null when the read failed, [] when the client genuinely has not
@@ -551,7 +604,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [authRev, readTick]);
+  }, [authRev, readTick, day]);
 
   // ── The day's targets ─────────────────────────────────────────────────────
   //
@@ -833,7 +886,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     waterRef.current = next;
     setWater(next);
     cacheWater(next, new Date().toISOString());
-    if (uidRef.current && USE_SUPABASE) void pushWater(uidRef.current, today(), next);
+    if (uidRef.current && USE_SUPABASE) void pushWater(uidRef.current, dayRef.current, next);
     // No goal means there is nothing to complete. Without this the comparison
     // coerces the null to 0, so the very first glass reads as hitting the goal.
     // markWaterDone would currently refuse it — there is no 'water' row on a
@@ -865,7 +918,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     // already answers on its own terms — un-ticking it from a minus button
     // would delete a row the coach's adherence figures are counting, from a
     // control whose label is "remove a glass".
-    if (uidRef.current && USE_SUPABASE) void pushWater(uidRef.current, today(), next);
+    if (uidRef.current && USE_SUPABASE) void pushWater(uidRef.current, dayRef.current, next);
   };
   // Counted over today's list, not over doneIds: a tick against an item the
   // coach has since retired is still in habit_logs and would otherwise push the
