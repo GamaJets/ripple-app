@@ -873,34 +873,40 @@ export default function TrainerVideos() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => { if (!upBusy) setPendUri(null); }}
           accessibilityRole="button" accessibilityLabel="Close, without saving this clip" />
-        <View style={sheet}>
-          <Text style={{ ...ty.title, color: t.ink }}>Name This Clip</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{videoUploadAvailable() ? 'It uploads to your library, and only the people you choose below can watch it.' : 'Saved to this device — turn on the backend to share it with anyone.'}</Text>
-          <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
-          <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
+        <View style={[sheet, { maxHeight: '90%' }]}>
+          {/* Two fields, the visibility note and its chips, and two buttons. With
+              the keyboard up over the name the Upload button is under the bottom of
+              the window, on the sheet whose only purpose is naming the clip before
+              it is uploaded. */}
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+            <Text style={{ ...ty.title, color: t.ink }}>Name This Clip</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{videoUploadAvailable() ? 'It uploads to your library, and only the people you choose below can watch it.' : 'Saved to this device — turn on the backend to share it with anyone.'}</Text>
+            <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
+            <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
 
-          {/* Asked here rather than after the fact, because the upload is the
-              moment the clip becomes visible to somebody. */}
-          <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>Who can see it</Text>
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>{visOf(upVis).note}</Text>
-          <View style={{ marginBottom: sp.lg }}>
-            <VisibilityChoice value={upVis} disabled={upBusy} subject="this clip" onChange={setUpVis} />
-          </View>
+            {/* Asked here rather than after the fact, because the upload is the
+                moment the clip becomes visible to somebody. */}
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>Who can see it</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>{visOf(upVis).note}</Text>
+            <View style={{ marginBottom: sp.lg }}>
+              <VisibilityChoice value={upVis} disabled={upBusy} subject="this clip" onChange={setUpVis} />
+            </View>
 
-          <Pressable onPress={saveUpload} disabled={upBusy}
-            accessibilityRole="button" accessibilityState={{ disabled: upBusy }}
-            accessibilityLabel={upBusy ? 'Uploading the clip' : (videoUploadAvailable() ? `Upload to Library, seen by: ${visOf(upVis).label}` : 'Save the clip to this device')}
-            style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm, opacity: upBusy ? 0.7 : 1 }}>
-            {upBusy ? <ActivityIndicator color={t.brandInk} /> : null}
-            {/* Title Case, like every other button on this screen and like
-                the <Cta label="Add to Library"> in the sheet beside it. Drawn
-                as a raw Pressable rather than a Cta so it can carry the
-                spinner, which is also why scripts/check-caps.mjs — which reads
-                the kit's own slots — never saw these two. */}
-            <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to Library' : 'Save Clip')}</Text>
-          </Pressable>
-          <View style={{ height: sp.sm }} />
-          <Ghost label="Cancel" onPress={() => { if (!upBusy) setPendUri(null); }} />
+            <Pressable onPress={saveUpload} disabled={upBusy}
+              accessibilityRole="button" accessibilityState={{ disabled: upBusy }}
+              accessibilityLabel={upBusy ? 'Uploading the clip' : (videoUploadAvailable() ? `Upload to Library, seen by: ${visOf(upVis).label}` : 'Save the clip to this device')}
+              style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 11, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: sp.sm, opacity: upBusy ? 0.7 : 1 }}>
+              {upBusy ? <ActivityIndicator color={t.brandInk} /> : null}
+              {/* Title Case, like every other button on this screen and like
+                  the <Cta label="Add to Library"> in the sheet beside it. Drawn
+                  as a raw Pressable rather than a Cta so it can carry the
+                  spinner, which is also why scripts/check-caps.mjs — which reads
+                  the kit's own slots — never saw these two. */}
+              <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{upBusy ? 'Uploading…' : (videoUploadAvailable() ? 'Upload to Library' : 'Save Clip')}</Text>
+            </Pressable>
+            <View style={{ height: sp.sm }} />
+            <Ghost label="Cancel" onPress={() => { if (!upBusy) setPendUri(null); }} />
+          </ScrollView>
         </View>
               </KeyboardAvoidingView>
       </Modal>

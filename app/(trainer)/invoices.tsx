@@ -1253,74 +1253,81 @@ export default function Invoices() {
           the same reason the void sheet has one. */}
       <Modal visible={!!settleTarget} animationType="slide" transparent onRequestClose={() => setSettleTarget(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }}>
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
-            <Text style={{ ...ty.title, color: t.ink }}>
-              Invoice {settleTarget ? invoiceNumber(settleTarget.seq) : ''} was paid?
-            </Text>
-            {/* WHO and HOW MUCH, under the number.
-                This sheet named the sequence number alone, and the number is
-                the one thing on the row a coach does not know by heart. "They
-                paid it" sits beside "Send" on every row of the whole-book list
-                below, the rows are number-name-amount at a glance, and this is
-                the only act on the screen that cannot be undone or worked
-                around: a settlement is written once, there is no un-settle, and
-                part 660's `coach_invoices_not_both_chk` means a mis-settled
-                invoice cannot be voided either. It leaves every chase list and
-                the outstanding figure for good.
-                So the confirmation restates the two facts a coach would use to
-                notice they were on the wrong row. `money()` returns null rather
-                than a bare figure when the currency is missing, and a dash is
-                drawn instead — the same rule the rows themselves keep. */}
-            {settleTarget ? (
-              <Text style={{ ...ty.body, color: t.ink, marginTop: 4 }}>
-                {money(settleTarget) ?? DASH} from {settleTarget.billTo}
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
+            {/* The longest confirmation in the file: the number, who and how much, a
+                six-line paragraph about what settling does, a day box, an optional
+                note field and the buttons. With the keyboard up over the note the top
+                of it — including the amount a coach would use to notice they are on
+                the wrong row — is off the top of the window. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.title, color: t.ink }}>
+                Invoice {settleTarget ? invoiceNumber(settleTarget.seq) : ''} was paid?
               </Text>
-            ) : null}
-            <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
-              This records your own statement that the money arrived. Nothing about the document changes — it still says what it said when you issued it — and this is written once: if the money later goes back out, that is a refund or a chargeback and it happened on its own day. It cannot be undone, and a settled invoice cannot be voided either.
-            </Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day it arrived</Text>
-            {/* A box that opens a month, not a box that raises a keyboard over
-                itself. The refused days are GREYED OUT in the sheet rather than
-                offered and then refused — `settleDayBlocker` has two hard ends
-                and a coach who has to tap a day to find out it is not allowed
-                is being handed the text box back with extra steps. See
-                `range` on the sheet at the foot of this file. */}
-            <Pressable onPress={() => setPick('settle')}
-              accessibilityRole="button"
-              accessibilityLabel={settleDay
-                ? 'The day the money arrived. Currently ' + settleDay + '. Opens a calendar.'
-                : 'The day the money arrived. Not set yet. Opens a calendar.'}
-              style={dayBox}>
-              <Text style={{ ...ty.body, color: settleDay ? t.ink : t.ink3, flex: 1 }}>{settleDay || today}</Text>
-              <Icon name="calendar" size={18} color={t.ink2} />
-            </Pressable>
-            {/* The refusal is kept even though the sheet no longer offers a day
-                that trips it. `settleInvoice` and part 660's function refuse on
-                the same two conditions, and the screen's copy is the
-                convenience rather than the rule — if a day ever reaches this
-                state by another route, the coach reads why here instead of
-                being told "Recorded" for a write that did not happen. */}
-            {settleTarget && settleDay.trim() && settleDayBlocker(settleTarget, settleDay.trim(), today) ? (
-              <Flag style={{ marginTop: sp.sm }}>{settleDayBlocker(settleTarget, settleDay.trim(), today)}</Flag>
-            ) : null}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>How it arrived (optional)</Text>
-            <TextInput value={settleNote} onChangeText={setSettleNote}
-              placeholder="Bank transfer" placeholderTextColor={t.ink3}
-              accessibilityLabel="How the money arrived" style={inp} />
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              Printed on the document if you send it again, in your own words. Nothing reads it for anything.
-            </Text>
-            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-              <View style={{ flex: 1 }}>
-                <Cta label="Cancel" tone={t.surface2} wide onPress={() => { setSettleTarget(null); setSettleDay(''); setSettleNote(''); }} />
+              {/* WHO and HOW MUCH, under the number.
+                  This sheet named the sequence number alone, and the number is
+                  the one thing on the row a coach does not know by heart. "They
+                  paid it" sits beside "Send" on every row of the whole-book list
+                  below, the rows are number-name-amount at a glance, and this is
+                  the only act on the screen that cannot be undone or worked
+                  around: a settlement is written once, there is no un-settle, and
+                  part 660's `coach_invoices_not_both_chk` means a mis-settled
+                  invoice cannot be voided either. It leaves every chase list and
+                  the outstanding figure for good.
+                  So the confirmation restates the two facts a coach would use to
+                  notice they were on the wrong row. `money()` returns null rather
+                  than a bare figure when the currency is missing, and a dash is
+                  drawn instead — the same rule the rows themselves keep. */}
+              {settleTarget ? (
+                <Text style={{ ...ty.body, color: t.ink, marginTop: 4 }}>
+                  {money(settleTarget) ?? DASH} from {settleTarget.billTo}
+                </Text>
+              ) : null}
+              <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
+                This records your own statement that the money arrived. Nothing about the document changes — it still says what it said when you issued it — and this is written once: if the money later goes back out, that is a refund or a chargeback and it happened on its own day. It cannot be undone, and a settled invoice cannot be voided either.
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day it arrived</Text>
+              {/* A box that opens a month, not a box that raises a keyboard over
+                  itself. The refused days are GREYED OUT in the sheet rather than
+                  offered and then refused — `settleDayBlocker` has two hard ends
+                  and a coach who has to tap a day to find out it is not allowed
+                  is being handed the text box back with extra steps. See
+                  `range` on the sheet at the foot of this file. */}
+              <Pressable onPress={() => setPick('settle')}
+                accessibilityRole="button"
+                accessibilityLabel={settleDay
+                  ? 'The day the money arrived. Currently ' + settleDay + '. Opens a calendar.'
+                  : 'The day the money arrived. Not set yet. Opens a calendar.'}
+                style={dayBox}>
+                <Text style={{ ...ty.body, color: settleDay ? t.ink : t.ink3, flex: 1 }}>{settleDay || today}</Text>
+                <Icon name="calendar" size={18} color={t.ink2} />
+              </Pressable>
+              {/* The refusal is kept even though the sheet no longer offers a day
+                  that trips it. `settleInvoice` and part 660's function refuse on
+                  the same two conditions, and the screen's copy is the
+                  convenience rather than the rule — if a day ever reaches this
+                  state by another route, the coach reads why here instead of
+                  being told "Recorded" for a write that did not happen. */}
+              {settleTarget && settleDay.trim() && settleDayBlocker(settleTarget, settleDay.trim(), today) ? (
+                <Flag style={{ marginTop: sp.sm }}>{settleDayBlocker(settleTarget, settleDay.trim(), today)}</Flag>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>How it arrived (optional)</Text>
+              <TextInput value={settleNote} onChangeText={setSettleNote}
+                placeholder="Bank transfer" placeholderTextColor={t.ink3}
+                accessibilityLabel="How the money arrived" style={inp} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                Printed on the document if you send it again, in your own words. Nothing reads it for anything.
+              </Text>
+              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+                <View style={{ flex: 1 }}>
+                  <Cta label="Cancel" tone={t.surface2} wide onPress={() => { setSettleTarget(null); setSettleDay(''); setSettleNote(''); }} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Cta label={busy ? 'Recording…' : 'Record it'} wide
+                    disabled={busy || !settleTarget || !!settleDayBlocker(settleTarget, settleDay.trim(), today)}
+                    onPress={() => { void doSettle(); }} />
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Cta label={busy ? 'Recording…' : 'Record it'} wide
-                  disabled={busy || !settleTarget || !!settleDayBlocker(settleTarget, settleDay.trim(), today)}
-                  onPress={() => { void doSettle(); }} />
-              </View>
-            </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

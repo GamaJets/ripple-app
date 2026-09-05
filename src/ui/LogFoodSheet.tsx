@@ -31,7 +31,7 @@
 // NOT NULL, so there is no row that can say "protein unknown" — the choice is a
 // fabricated zero or a question, and this is the question.
 import { useEffect, useState } from 'react';
-import { View, Text, TextInput, Modal, Pressable, Image, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Modal, Pressable, Image, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { useTheme } from './components';
 import { Field, Flag, Scrim } from './kit';
 import { sp, radius, elevation, type as ty, numeric } from '../theme/scale';
@@ -118,97 +118,103 @@ export function LogFoodSheet({ food, photoUri, title, note, onLog, onClose }: {
     <Modal visible={food != null} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Scrim onPress={onClose} />
-        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
-            <Text style={{ ...ty.title, color: t.ink }}>{title ?? 'How Much Did You Have?'}</Text>
-            <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel">
-              <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, ...elevation.e2, maxHeight: '90%' }}>
+          {/* This sheet is over the window on a small phone before the optional
+              photo and notes are counted, and the button at the foot of it is the
+              one that logs the food. Nothing here scrolled, so the keyboard simply
+              took the button away. */}
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
+              <Text style={{ ...ty.title, color: t.ink }}>{title ?? 'How Much Did You Have?'}</Text>
+              <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button" accessibilityLabel="Cancel">
+                <Text style={{ ...ty.label, fontWeight: '500', color: t.ink3 }}>Cancel</Text>
+              </Pressable>
+            </View>
+
+            {photoUri ? (
+              <Image source={{ uri: photoUri }} accessible accessibilityLabel="The meal you photographed"
+                style={{ width: '100%', height: 140, borderRadius: radius.md, backgroundColor: t.surface2, marginBottom: sp.md }} resizeMode="cover" />
+            ) : null}
+
+            {note ? <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{note}</Text> : null}
+
+            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What it was</Text>
+            <TextInput value={name} onChangeText={setName} placeholder="What was it?" placeholderTextColor={t.ink3}
+              accessibilityLabel="Food name" style={{ ...field, marginBottom: sp.md }} />
+
+            {/* Named in full with the unit. "P C F" over three boxes taught the
+                reader that the numbers here are whatever each column happens to
+                mean, next to a calorie box that is not grams. */}
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+              {([['Calories', 'kcal', kcal, setKcal], ['Protein', 'g', protein, setProtein], ['Carbs', 'g', carbs, setCarbs], ['Fat', 'g', fat, setFat]] as [string, string, string, (v: string) => void][]).map(([lbl, hint, val, set]) => (
+                <Field key={lbl} label={lbl} hint={hint} a11y={`${lbl} in ${hint === 'g' ? 'grams' : 'calories'}${per ? `, ${per}` : ''}`}>
+                  <TextInput value={val} onChangeText={set} keyboardType="decimal-pad" style={{ ...field, ...numeric, paddingHorizontal: 10 }} />
+                </Field>
+              ))}
+            </View>
+
+            {/* What one portion IS, when the source said. When it did not, the
+                control says "portions" and claims nothing about what one weighs —
+                a "per 100 g" printed over a figure that is per serving is exactly
+                the quiet wrongness this sheet exists to remove. */}
+            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>
+              How many{per ? ` · the figures above are ${per}` : ' portions'}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
+              {QUANTITIES.map((s) => {
+                const on = q.ok && q.qty === s;
+                return (
+                  <Pressable key={s} onPress={() => setQty(String(s))} accessibilityRole="button" accessibilityState={{ selected: on }}
+                    accessibilityLabel={`${s} ${s === 1 ? 'portion' : 'portions'}`}
+                    style={{ flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                    <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{s === 1 ? '1×' : `${s}×`}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {/* The free box, because three and a bit packets of rice is a real
+                thing to have eaten and a fixed ladder cannot hold every rung. */}
+            <TextInput value={qty} onChangeText={setQty} keyboardType="decimal-pad"
+              accessibilityLabel="How many portions" placeholder="1"  placeholderTextColor={t.ink3}
+              style={{ ...field, ...numeric, marginBottom: sp.md }} />
+
+            {gap ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{gap}</Text>
+            ) : null}
+            {/* A Flag, not crit text. The status colours are tuned to the 3:1 a
+                MARK needs and crit as text is 3.03–4.05:1 across the palettes —
+                and this is the sentence somebody reads when the button did not
+                do what they expected, so it is the last one that may be hard to
+                read. */}
+            {why ? (
+              <View style={{ marginBottom: sp.md }}><Flag tone={t.crit}>{why}</Flag></View>
+            ) : null}
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={scaled ? `Log ${scaled.name}, ${num(scaled.kcal)} calories` : 'Log this food'}
+              accessibilityState={{ disabled: !scaled || busy }}
+              onPress={async () => {
+                if (busy) return;
+                // Said, not swallowed. A dead button with no reason is how
+                // somebody concludes the app is broken and retypes everything.
+                if (!q.ok) { setWhy(q.reason); return; }
+                if (!edited || !Number.isFinite(edited.kcal)) { setWhy('Type the calories before logging this.'); return; }
+                if (!scaled) { setWhy(missingMacroNote(edited) ?? 'Something here cannot be read.'); return; }
+                setWhy(null);
+                setBusy(true);
+                try { if (await onLog(scaled)) onClose(); } finally { setBusy(false); }
+              }}
+              style={{ backgroundColor: scaled && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
+              {busy
+                ? <ActivityIndicator color={t.ink2} />
+                : (
+                  <Text style={{ ...ty.body, fontWeight: '600', color: scaled ? t.brandInk : t.ink3 }}>
+                    {scaled ? `Log ${num(scaled.kcal)} kcal` : 'Log This Food'}
+                  </Text>
+                )}
             </Pressable>
-          </View>
-
-          {photoUri ? (
-            <Image source={{ uri: photoUri }} accessible accessibilityLabel="The meal you photographed"
-              style={{ width: '100%', height: 140, borderRadius: radius.md, backgroundColor: t.surface2, marginBottom: sp.md }} resizeMode="cover" />
-          ) : null}
-
-          {note ? <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{note}</Text> : null}
-
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What it was</Text>
-          <TextInput value={name} onChangeText={setName} placeholder="What was it?" placeholderTextColor={t.ink3}
-            accessibilityLabel="Food name" style={{ ...field, marginBottom: sp.md }} />
-
-          {/* Named in full with the unit. "P C F" over three boxes taught the
-              reader that the numbers here are whatever each column happens to
-              mean, next to a calorie box that is not grams. */}
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
-            {([['Calories', 'kcal', kcal, setKcal], ['Protein', 'g', protein, setProtein], ['Carbs', 'g', carbs, setCarbs], ['Fat', 'g', fat, setFat]] as [string, string, string, (v: string) => void][]).map(([lbl, hint, val, set]) => (
-              <Field key={lbl} label={lbl} hint={hint} a11y={`${lbl} in ${hint === 'g' ? 'grams' : 'calories'}${per ? `, ${per}` : ''}`}>
-                <TextInput value={val} onChangeText={set} keyboardType="decimal-pad" style={{ ...field, ...numeric, paddingHorizontal: 10 }} />
-              </Field>
-            ))}
-          </View>
-
-          {/* What one portion IS, when the source said. When it did not, the
-              control says "portions" and claims nothing about what one weighs —
-              a "per 100 g" printed over a figure that is per serving is exactly
-              the quiet wrongness this sheet exists to remove. */}
-          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>
-            How many{per ? ` · the figures above are ${per}` : ' portions'}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
-            {QUANTITIES.map((s) => {
-              const on = q.ok && q.qty === s;
-              return (
-                <Pressable key={s} onPress={() => setQty(String(s))} accessibilityRole="button" accessibilityState={{ selected: on }}
-                  accessibilityLabel={`${s} ${s === 1 ? 'portion' : 'portions'}`}
-                  style={{ flex: 1, paddingVertical: 10, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
-                  <Text style={{ ...ty.label, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{s === 1 ? '1×' : `${s}×`}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {/* The free box, because three and a bit packets of rice is a real
-              thing to have eaten and a fixed ladder cannot hold every rung. */}
-          <TextInput value={qty} onChangeText={setQty} keyboardType="decimal-pad"
-            accessibilityLabel="How many portions" placeholder="1"  placeholderTextColor={t.ink3}
-            style={{ ...field, ...numeric, marginBottom: sp.md }} />
-
-          {gap ? (
-            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.md }}>{gap}</Text>
-          ) : null}
-          {/* A Flag, not crit text. The status colours are tuned to the 3:1 a
-              MARK needs and crit as text is 3.03–4.05:1 across the palettes —
-              and this is the sentence somebody reads when the button did not
-              do what they expected, so it is the last one that may be hard to
-              read. */}
-          {why ? (
-            <View style={{ marginBottom: sp.md }}><Flag tone={t.crit}>{why}</Flag></View>
-          ) : null}
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={scaled ? `Log ${scaled.name}, ${num(scaled.kcal)} calories` : 'Log this food'}
-            accessibilityState={{ disabled: !scaled || busy }}
-            onPress={async () => {
-              if (busy) return;
-              // Said, not swallowed. A dead button with no reason is how
-              // somebody concludes the app is broken and retypes everything.
-              if (!q.ok) { setWhy(q.reason); return; }
-              if (!edited || !Number.isFinite(edited.kcal)) { setWhy('Type the calories before logging this.'); return; }
-              if (!scaled) { setWhy(missingMacroNote(edited) ?? 'Something here cannot be read.'); return; }
-              setWhy(null);
-              setBusy(true);
-              try { if (await onLog(scaled)) onClose(); } finally { setBusy(false); }
-            }}
-            style={{ backgroundColor: scaled && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
-            {busy
-              ? <ActivityIndicator color={t.ink2} />
-              : (
-                <Text style={{ ...ty.body, fontWeight: '600', color: scaled ? t.brandInk : t.ink3 }}>
-                  {scaled ? `Log ${num(scaled.kcal)} kcal` : 'Log This Food'}
-                </Text>
-              )}
-          </Pressable>
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>

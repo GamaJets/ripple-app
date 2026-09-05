@@ -560,80 +560,86 @@ export default function OwnerRota() {
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Add a Shift</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
-              One row per block on the floor. Shifts are written for this week only — cover and
-              swaps are edits to a single day, not to a pattern.
-            </Text>
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, maxHeight: '90%' }}>
+            {/* Trainer chips, day chips, two hour boxes, a clock note, role chips and
+                two buttons, with no scroller — so with the keyboard up over the hour
+                boxes "Put on the rota" is below the bottom of the window and there is
+                no gesture that brings it back. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.head, color: t.ink }}>Add a Shift</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+                One row per block on the floor. Shifts are written for this week only — cover and
+                swaps are edits to a single day, not to a pattern.
+              </Text>
 
-            <Text style={lab}>Trainer</Text>
-            {trainersFailed ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                Your trainers could not be read, so nobody can be offered here — this is a failed
-                read, not a gym with no staff.
-              </Text>
-            ) : trainers === null ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>Loading trainers…</Text>
-            ) : trainers.length === 0 ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                No trainers on this gym yet, so there is nobody to roster.
-              </Text>
-            ) : (
+              <Text style={lab}>Trainer</Text>
+              {trainersFailed ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Your trainers could not be read, so nobody can be offered here — this is a failed
+                  read, not a gym with no staff.
+                </Text>
+              ) : trainers === null ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Loading trainers…</Text>
+              ) : trainers.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  No trainers on this gym yet, so there is nobody to roster.
+                </Text>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: sp.sm, paddingVertical: 2 }}>
+                  {trainers.map((x) => (
+                    <Chip key={x.id} label={x.name} on={who === x.id} tone={t.brand}
+                      onPress={() => setWho(x.id)} />
+                  ))}
+                </ScrollView>
+              )}
+
+              <Text style={{ ...lab, marginTop: sp.lg }}>Day</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ gap: sp.sm, paddingVertical: 2 }}>
-                {trainers.map((x) => (
-                  <Chip key={x.id} label={x.name} on={who === x.id} tone={t.brand}
-                    onPress={() => setWho(x.id)} />
+                {days.map((d) => (
+                  <Chip key={d} label={dayLabel(d)} on={day === d} tone={t.brand} onPress={() => setDay(d)} />
                 ))}
               </ScrollView>
-            )}
 
-            <Text style={{ ...lab, marginTop: sp.lg }}>Day</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: sp.sm, paddingVertical: 2 }}>
-              {days.map((d) => (
-                <Chip key={d} label={dayLabel(d)} on={day === d} tone={t.brand} onPress={() => setDay(d)} />
-              ))}
-            </ScrollView>
-
-            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
-              <View style={{ flex: 1 }}>
-                <Text style={lab}>Starts (hour)</Text>
-                <TextInput value={from} onChangeText={setFrom} keyboardType="number-pad" maxLength={2}
-                  style={inp} accessibilityLabel="Start hour" />
+              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={lab}>Starts (hour)</Text>
+                  <TextInput value={from} onChangeText={setFrom} keyboardType="number-pad" maxLength={2}
+                    style={inp} accessibilityLabel="Start hour" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={lab}>Finishes (hour)</Text>
+                  <TextInput value={to} onChangeText={setTo} keyboardType="number-pad" maxLength={2}
+                    returnKeyType="done" onSubmitEditing={() => { void commitAdd(); }}
+                    style={inp} accessibilityLabel="Finish hour" />
+                </View>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={lab}>Finishes (hour)</Text>
-                <TextInput value={to} onChangeText={setTo} keyboardType="number-pad" maxLength={2}
-                  returnKeyType="done" onSubmitEditing={() => { void commitAdd(); }}
-                  style={inp} accessibilityLabel="Finish hour" />
-              </View>
-            </View>
 
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              {clock.atGym
-                ? `Those hours are ${clock.zone}, the gym’s own clock — wherever you are typing them.`
-                : `Those hours are this device’s, not the gym’s — ${clock.note}.`}
-            </Text>
-
-            <Text style={{ ...lab, marginTop: sp.lg }}>On for</Text>
-            <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.lg }}>
-              {ROLES.map((r) => (
-                <Chip key={r.key} label={r.label} on={role === r.key} tone={t.brand}
-                  onPress={() => setRole(r.key)} />
-              ))}
-            </View>
-
-            <Pressable disabled={!who || busy} onPress={commitAdd}
-              accessibilityRole="button" accessibilityLabel="Save shift"
-              accessibilityState={{ disabled: !who || busy }}
-              style={{ backgroundColor: who && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: who && !busy ? t.brandInk : t.ink3 }}>
-                {busy ? 'Saving…' : 'Put on the rota'}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {clock.atGym
+                  ? `Those hours are ${clock.zone}, the gym’s own clock — wherever you are typing them.`
+                  : `Those hours are this device’s, not the gym’s — ${clock.note}.`}
               </Text>
-            </Pressable>
-            <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+
+              <Text style={{ ...lab, marginTop: sp.lg }}>On for</Text>
+              <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap', marginBottom: sp.lg }}>
+                {ROLES.map((r) => (
+                  <Chip key={r.key} label={r.label} on={role === r.key} tone={t.brand}
+                    onPress={() => setRole(r.key)} />
+                ))}
+              </View>
+
+              <Pressable disabled={!who || busy} onPress={commitAdd}
+                accessibilityRole="button" accessibilityLabel="Save shift"
+                accessibilityState={{ disabled: !who || busy }}
+                style={{ backgroundColor: who && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+                <Text style={{ ...ty.label, fontWeight: '600', color: who && !busy ? t.brandInk : t.ink3 }}>
+                  {busy ? 'Saving…' : 'Put on the rota'}
+                </Text>
+              </Pressable>
+              <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

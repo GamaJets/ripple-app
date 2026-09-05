@@ -171,23 +171,28 @@ export default function SavedMessages() {
       <Modal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
-            <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>
-              {editing?.id ? 'Edit This Message' : 'A New Saved Message'}
-            </Text>
-            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What to call it</Text>
-            <TextInput value={title} onChangeText={setTitle} placeholder="Welcome" placeholderTextColor={t.ink3}
-              style={{ ...inp, marginBottom: sp.md }} />
-            <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>The message</Text>
-            <TextInput value={body} onChangeText={setBody} multiline maxLength={MAX_TEMPLATE_BODY}
-              placeholder="Hey {name} — " placeholderTextColor={t.ink3}
-              style={{ ...inp, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.sm }} />
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
-              {TOKENS.map((x) => `${x.token} becomes ${x.means}`).join('. ')}.
-            </Text>
-            <Cta label={busy ? 'Saving…' : 'Save'} wide onPress={() => { void save(); }} disabled={busy} />
-            <View style={{ height: sp.sm }} />
-            <Ghost label="Cancel" onPress={() => setEditing(null)} />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
+            {/* The message box alone is 120pt, and Save sits under it. Writing into
+                that box is exactly when the keyboard is up, and that is exactly when
+                Save was off the bottom of the window with no way to reach it. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>
+                {editing?.id ? 'Edit This Message' : 'A New Saved Message'}
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>What to call it</Text>
+              <TextInput value={title} onChangeText={setTitle} placeholder="Welcome" placeholderTextColor={t.ink3}
+                style={{ ...inp, marginBottom: sp.md }} />
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>The message</Text>
+              <TextInput value={body} onChangeText={setBody} multiline maxLength={MAX_TEMPLATE_BODY}
+                placeholder="Hey {name} — " placeholderTextColor={t.ink3}
+                style={{ ...inp, minHeight: 120, textAlignVertical: 'top', marginBottom: sp.sm }} />
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
+                {TOKENS.map((x) => `${x.token} becomes ${x.means}`).join('. ')}.
+              </Text>
+              <Cta label={busy ? 'Saving…' : 'Save'} wide onPress={() => { void save(); }} disabled={busy} />
+              <View style={{ height: sp.sm }} />
+              <Ghost label="Cancel" onPress={() => setEditing(null)} />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

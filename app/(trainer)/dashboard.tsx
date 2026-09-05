@@ -3023,99 +3023,105 @@ export default function TrainerClients() {
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setAddOpen(false)} />
-          <View style={sheet(t)}>
-            <Text style={{ ...ty.title, color: t.ink }}>Add Client</Text>
-            {/* Conditional on the coaching type, because the flat sentence was
-                contradicted by this sheet's own caption four rows further down.
-                Seen on an iPhone 17 Pro with the sheet at its defaults: the
-                header promised "become bookable in your schedule" while the
-                note under the selected Online chip said "They get no booking
-                calendar" — and Online is the default, so the two sentences
-                disagreed on first open, every time. `booksInPerson` is the same
-                predicate the calendar uses to decide who has slots to book. */}
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>
-              They join your roster{booksInPerson(newMode) ? ' and become bookable in your schedule' : ''}.
-            </Text>
-            <SheetHead t={t} title="Name" />
-            <TextInput value={newName} onChangeText={setNewName} placeholder="Client name" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.lg }} />
-            <SheetHead t={t} title="Email · optional, records an invite" />
-            <TextInput value={newEmail} onChangeText={setNewEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ ...field(t), marginBottom: sp.lg }} />
-            <SheetHead t={t} title="Goal" />
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
-              {['Fat loss', 'Build muscle', 'Tone'].map((g) => (
-                <Chip key={g} t={t} label={g} on={newGoal === g} onPress={() => setNewGoal(g)} />
-              ))}
-            </View>
-            <SheetHead t={t} title="Coaching Type" />
-            <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
-              {COACHED_MODES.map((id) => (
-                <Chip key={id} t={t} label={COACHED_MODE_SHORT[id]} on={newMode === id} onPress={() => setNewMode(id)} />
-              ))}
-            </View>
-            {/* What the chip above does, for the one that is selected. Three
-                delivery names in a row are three words until something says
-                which client screens each of them turns on. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>{COACHED_MODE_NOTE_COACH[newMode]}</Text>
-            <View style={{ flexDirection: 'row', gap: sp.md }}>
-              <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
-              <View style={{ flex: 2 }}>
-                <Cta label="Add Client" wide onPress={async () => {
-                  if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; }
-                  // Awaited and READ, like sendInvite two lines down already
-                  // was. Firing this and moving on is why a coach could add
-                  // somebody, watch them appear, and find them gone at the next
-                  // launch: the row is added to local state first and the
-                  // server write can refuse without anything on screen
-                  // changing. If it did not land, say so and keep the sheet
-                  // open with what they typed still in it.
-                  const added = await addClient(newName, newGoal, newMode);
-                  if (!added) {
-                    Alert.alert(
-                      'Not saved',
-                      `${newName.trim()} is showing on this phone but was not recorded, so they will be gone when you next open the app. Check your connection and try again.`,
-                    );
-                    return;
-                  }
-                  const em = newEmail.trim();
-                  const wanted = !!em && em.includes('@');
-                  // Awaited and read. sendInvite resolves false when the write
-                  // was refused, and this used to announce success either way.
-                  const invited = wanted ? await sendInvite(em, newMode) : false;
-                  setAddOpen(false);
-                  const nm = newName.trim();
-                  // The code goes IN the alert, because this is the moment the
-                  // coach needs it. This used to end on "tell them yourself so
-                  // they know to install it" without giving them anything to
-                  // tell — the coaching code lived behind a different button,
-                  // on a different sheet, also called "Add a client". A tester
-                  // asked "is this the only way? I don't see a trainer's code".
-                  //
-                  // It also matters that the code is the RELIABLE path: the
-                  // email invite only links if they sign up with that address
-                  // spelled exactly the same way, and nothing tells either side
-                  // when it does not.
-                  const codeLine = myCode
-                    ? '\n\nYour coaching code is ' + myCode + '. That works whoever they are and whatever address they sign up with — send it to them.'
-                    : '';
-                  const buttons: any[] = [{ text: invited || !wanted ? 'Great' : 'OK' }];
-                  if (myCode) {
-                    buttons.unshift({
-                      text: 'Share code',
-                      onPress: () => Share.share({
-                        message: inviteMessage(myCode),
-                      }).catch(() => {}),
-                    });
-                  }
-                  Alert.alert('Client added',
-                    (!wanted
-                      ? nm + ' is now on your roster.'
-                      : invited
-                        ? nm + ' is on your roster. Repple does not send email — ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address.'
-                        : nm + ' is on your roster, but the invite for ' + em + ' was NOT recorded, so they will not link to you when they sign in.') + codeLine,
-                    buttons);
-                }} />
+          <View style={sheet(t, { maxHeight: '90%' })}>
+            {/* Two fields, two chip rows and a note, and the whole sheet had to fit
+                the window because nothing in it scrolled. With the keyboard up over
+                Name the sheet is taller than what is left, and this one overflows
+                upwards — the field being typed into goes off the top. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.title, color: t.ink }}>Add Client</Text>
+              {/* Conditional on the coaching type, because the flat sentence was
+                  contradicted by this sheet's own caption four rows further down.
+                  Seen on an iPhone 17 Pro with the sheet at its defaults: the
+                  header promised "become bookable in your schedule" while the
+                  note under the selected Online chip said "They get no booking
+                  calendar" — and Online is the default, so the two sentences
+                  disagreed on first open, every time. `booksInPerson` is the same
+                  predicate the calendar uses to decide who has slots to book. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.xl }}>
+                They join your roster{booksInPerson(newMode) ? ' and become bookable in your schedule' : ''}.
+              </Text>
+              <SheetHead t={t} title="Name" />
+              <TextInput value={newName} onChangeText={setNewName} placeholder="Client name" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.lg }} />
+              <SheetHead t={t} title="Email · optional, records an invite" />
+              <TextInput value={newEmail} onChangeText={setNewEmail} placeholder="client@email.com" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="email-address" style={{ ...field(t), marginBottom: sp.lg }} />
+              <SheetHead t={t} title="Goal" />
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg }}>
+                {['Fat loss', 'Build muscle', 'Tone'].map((g) => (
+                  <Chip key={g} t={t} label={g} on={newGoal === g} onPress={() => setNewGoal(g)} />
+                ))}
               </View>
-            </View>
+              <SheetHead t={t} title="Coaching Type" />
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.sm }}>
+                {COACHED_MODES.map((id) => (
+                  <Chip key={id} t={t} label={COACHED_MODE_SHORT[id]} on={newMode === id} onPress={() => setNewMode(id)} />
+                ))}
+              </View>
+              {/* What the chip above does, for the one that is selected. Three
+                  delivery names in a row are three words until something says
+                  which client screens each of them turns on. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xl }}>{COACHED_MODE_NOTE_COACH[newMode]}</Text>
+              <View style={{ flexDirection: 'row', gap: sp.md }}>
+                <View style={{ flex: 1 }}><Ghost label="Cancel" onPress={() => setAddOpen(false)} /></View>
+                <View style={{ flex: 2 }}>
+                  <Cta label="Add Client" wide onPress={async () => {
+                    if (!newName.trim()) { Alert.alert('Add a name', 'Enter the client name.'); return; }
+                    // Awaited and READ, like sendInvite two lines down already
+                    // was. Firing this and moving on is why a coach could add
+                    // somebody, watch them appear, and find them gone at the next
+                    // launch: the row is added to local state first and the
+                    // server write can refuse without anything on screen
+                    // changing. If it did not land, say so and keep the sheet
+                    // open with what they typed still in it.
+                    const added = await addClient(newName, newGoal, newMode);
+                    if (!added) {
+                      Alert.alert(
+                        'Not saved',
+                        `${newName.trim()} is showing on this phone but was not recorded, so they will be gone when you next open the app. Check your connection and try again.`,
+                      );
+                      return;
+                    }
+                    const em = newEmail.trim();
+                    const wanted = !!em && em.includes('@');
+                    // Awaited and read. sendInvite resolves false when the write
+                    // was refused, and this used to announce success either way.
+                    const invited = wanted ? await sendInvite(em, newMode) : false;
+                    setAddOpen(false);
+                    const nm = newName.trim();
+                    // The code goes IN the alert, because this is the moment the
+                    // coach needs it. This used to end on "tell them yourself so
+                    // they know to install it" without giving them anything to
+                    // tell — the coaching code lived behind a different button,
+                    // on a different sheet, also called "Add a client". A tester
+                    // asked "is this the only way? I don't see a trainer's code".
+                    //
+                    // It also matters that the code is the RELIABLE path: the
+                    // email invite only links if they sign up with that address
+                    // spelled exactly the same way, and nothing tells either side
+                    // when it does not.
+                    const codeLine = myCode
+                      ? '\n\nYour coaching code is ' + myCode + '. That works whoever they are and whatever address they sign up with — send it to them.'
+                      : '';
+                    const buttons: any[] = [{ text: invited || !wanted ? 'Great' : 'OK' }];
+                    if (myCode) {
+                      buttons.unshift({
+                        text: 'Share code',
+                        onPress: () => Share.share({
+                          message: inviteMessage(myCode),
+                        }).catch(() => {}),
+                      });
+                    }
+                    Alert.alert('Client added',
+                      (!wanted
+                        ? nm + ' is now on your roster.'
+                        : invited
+                          ? nm + ' is on your roster. Repple does not send email — ' + em + ' is recorded as an invite, and they link to you the first time they sign in to Repple with that address.'
+                          : nm + ' is on your roster, but the invite for ' + em + ' was NOT recorded, so they will not link to you when they sign in.') + codeLine,
+                      buttons);
+                  }} />
+                </View>
+              </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -3221,100 +3227,108 @@ export default function TrainerClients() {
       <Modal visible={bcOpen} transparent animationType="slide" onRequestClose={() => setBcOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable style={SCRIM} onPress={() => setBcOpen(false)} />
-          <View style={sheet(t)}>
-            {/* Was "Broadcast to All Clients", which is the name of a
-                DIFFERENT screen — app/(trainer)/broadcast.tsx, whose own
-                subtitle is "Send one message to a whole segment of your
-                clients". So a coach met two all-client tools both called
-                Broadcast, and was sent from one to the other to do the thing
-                neither of them does. These are a NOTICE (posted once, seen on
-                every dashboard) and a MESSAGE (written into each person's
-                thread, with a push). Named for what they are. */}
-            <Text style={{ ...ty.title, color: t.ink }}>Post a Notice</Text>
-            {/* This copy has now been wrong in both directions, which is worth
-                recording.
+          <View style={sheet(t, { maxHeight: '90%' })}>
+            {/* Post a Notice is the tallest sheet in this file — a five-line
+                explanation, a 90pt box, a switch row, the button and the last three
+                notices posted. On a 4.7" phone with the keyboard up that is well past
+                the window, and the sheet has no scroller of its own to reach the rest
+                with. Same shape as the sheets in app/(trainer)/receipts.tsx: a capped
+                height and a scroller inside it. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              {/* Was "Broadcast to All Clients", which is the name of a
+                  DIFFERENT screen — app/(trainer)/broadcast.tsx, whose own
+                  subtitle is "Send one message to a whole segment of your
+                  clients". So a coach met two all-client tools both called
+                  Broadcast, and was sent from one to the other to do the thing
+                  neither of them does. These are a NOTICE (posted once, seen on
+                  every dashboard) and a MESSAGE (written into each person's
+                  thread, with a push). Named for what they are. */}
+              <Text style={{ ...ty.title, color: t.ink }}>Post a Notice</Text>
+              {/* This copy has now been wrong in both directions, which is worth
+                  recording.
 
-                It first promised "Everyone on your roster sees this on their
-                dashboard" and confirmed "Sent" over an in-memory store with no
-                table behind it — a coach believing they had told forty clients
-                about a cancelled class. It was corrected to say the note stayed
-                on this device, which was true of the store as it then was.
+                  It first promised "Everyone on your roster sees this on their
+                  dashboard" and confirmed "Sent" over an in-memory store with no
+                  table behind it — a coach believing they had told forty clients
+                  about a cancelled class. It was corrected to say the note stayed
+                  on this device, which was true of the store as it then was.
 
-                `announcements` is real now (part 109): a row addressed to this
-                coach's current roster, which their clients read on their own
-                dashboards. So the correction became the lie — a coach could pin
-                a note believing it private and put it in front of every client
-                they have. That is worse than the original, because the original
-                over-promised reach and this one under-promised it.
+                  `announcements` is real now (part 109): a row addressed to this
+                  coach's current roster, which their clients read on their own
+                  dashboards. So the correction became the lie — a coach could pin
+                  a note believing it private and put it in front of every client
+                  they have. That is worse than the original, because the original
+                  over-promised reach and this one under-promised it.
 
-                The rule this file keeps relearning: the sentence describes what
-                the write does TODAY, and it moves when the write moves. */}
-            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard, in their notifications, and in their Notices — where it stays after today. It is not a message and does not land in anyone’s thread; for that, use Broadcast.</Text>
-            <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.md }} />
+                  The rule this file keeps relearning: the sentence describes what
+                  the write does TODAY, and it moves when the write moves. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard, in their notifications, and in their Notices — where it stays after today. It is not a message and does not land in anyone’s thread; for that, use Broadcast.</Text>
+              <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.md }} />
 
-            {/* The push is its own decision and the label says what it does.
-                Before this, a notice reached nobody at all; the temptation on
-                fixing that is to push every one of them, and a coach who can
-                ring forty phones at three in the morning should have to choose
-                it. There is no scheduler in this app and nothing records what
-                timezone anybody is in, so a "sends in the morning" option would
-                be a promise nothing here could keep — the honest control says
-                NOW, and lets the words be judged against that. */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('coach', null)}</Text>
-              </View>
-              <Switch value={bcPush} onValueChange={setBcPush} />
-            </View>
-
-            {/* Awaited, and the answer read. `addAnnouncement` reaches a server
-                now, so announcing "Posted" on the tap would be the same class of
-                claim this modal has already made twice. What it reports is what
-                the fan-out COUNTED — rows notify_users() actually wrote — and
-                never the size of the roster, which is the false figure
-                app/(owner)/promotions.tsx used to print. */}
-            <View pointerEvents={bcBusy ? 'none' : 'auto'} style={{ opacity: bcBusy ? 0.6 : 1 }}>
-              <Cta label={bcBusy ? 'Posting…' : 'Post to My Clients'} wide onPress={async () => {
-                if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; }
-                setBcBusy(true);
-                let res;
-                try { res = await addAnnouncement(bcText, { push: bcPush }); } finally { setBcBusy(false); }
-                if (!res.ok || !res.delivery) {
-                  // The sheet stays open with the text in it: they wrote it once.
-                  Alert.alert('Not posted', 'That could not be posted, so your clients have not seen it. Your words are still here — try again in a moment.');
-                  return;
-                }
-                const summary = deliverySummary(res.delivery);
-                setBcText(''); setBcPush(false); setBcOpen(false);
-                Alert.alert('Posted', `${summary}\n\nTo write into people’s threads instead — everyone, or one tag — use Broadcast.`,
-                  [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]);
-              }} />
-            </View>
-
-            {/* What this coach has already posted. A notice used to be
-                write-only from here — nothing in the coach's app showed one
-                back — so the only way to check whether Thursday's cancellation
-                went out was to post it again. */}
-            <View style={{ marginTop: sp.lg }}>
-              <Text style={{ ...ty.micro, color: t.ink3 }}>Posted before</Text>
-              {noticeStatus === 'error' ? (
-                // An empty list under 'error' is unknown, not "you have posted
-                // none" — src/ui/loadStatus.ts.
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
-                  Your posted notices could not be read just now. This is not a statement that you have none.
-                </Text>
-              ) : myNotices.length === 0 ? (
-                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
-                  {noticeStatus === 'loading' ? 'Reading your notices…' : 'Nothing posted yet.'}
-                </Text>
-              ) : myNotices.slice(0, 3).map((a) => (
-                <View key={a.id} style={{ marginTop: sp.sm }}>
-                  <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={2}>{a.body}</Text>
-                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{inboxAge(a.at)}</Text>
+              {/* The push is its own decision and the label says what it does.
+                  Before this, a notice reached nobody at all; the temptation on
+                  fixing that is to push every one of them, and a coach who can
+                  ring forty phones at three in the morning should have to choose
+                  it. There is no scheduler in this app and nothing records what
+                  timezone anybody is in, so a "sends in the morning" option would
+                  be a promise nothing here could keep — the honest control says
+                  NOW, and lets the words be judged against that. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.lg }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('coach', null)}</Text>
                 </View>
-              ))}
-            </View>
+                <Switch value={bcPush} onValueChange={setBcPush} />
+              </View>
+
+              {/* Awaited, and the answer read. `addAnnouncement` reaches a server
+                  now, so announcing "Posted" on the tap would be the same class of
+                  claim this modal has already made twice. What it reports is what
+                  the fan-out COUNTED — rows notify_users() actually wrote — and
+                  never the size of the roster, which is the false figure
+                  app/(owner)/promotions.tsx used to print. */}
+              <View pointerEvents={bcBusy ? 'none' : 'auto'} style={{ opacity: bcBusy ? 0.6 : 1 }}>
+                <Cta label={bcBusy ? 'Posting…' : 'Post to My Clients'} wide onPress={async () => {
+                  if (!bcText.trim()) { Alert.alert('Write something', 'Enter your announcement.'); return; }
+                  setBcBusy(true);
+                  let res;
+                  try { res = await addAnnouncement(bcText, { push: bcPush }); } finally { setBcBusy(false); }
+                  if (!res.ok || !res.delivery) {
+                    // The sheet stays open with the text in it: they wrote it once.
+                    Alert.alert('Not posted', 'That could not be posted, so your clients have not seen it. Your words are still here — try again in a moment.');
+                    return;
+                  }
+                  const summary = deliverySummary(res.delivery);
+                  setBcText(''); setBcPush(false); setBcOpen(false);
+                  Alert.alert('Posted', `${summary}\n\nTo write into people’s threads instead — everyone, or one tag — use Broadcast.`,
+                    [{ text: 'Open Broadcast', onPress: () => router.push('/(trainer)/broadcast') }, { text: 'Done', style: 'cancel' }]);
+                }} />
+              </View>
+
+              {/* What this coach has already posted. A notice used to be
+                  write-only from here — nothing in the coach's app showed one
+                  back — so the only way to check whether Thursday's cancellation
+                  went out was to post it again. */}
+              <View style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>Posted before</Text>
+                {noticeStatus === 'error' ? (
+                  // An empty list under 'error' is unknown, not "you have posted
+                  // none" — src/ui/loadStatus.ts.
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
+                    Your posted notices could not be read just now. This is not a statement that you have none.
+                  </Text>
+                ) : myNotices.length === 0 ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
+                    {noticeStatus === 'loading' ? 'Reading your notices…' : 'Nothing posted yet.'}
+                  </Text>
+                ) : myNotices.slice(0, 3).map((a) => (
+                  <View key={a.id} style={{ marginTop: sp.sm }}>
+                    <Text style={{ ...ty.label, color: t.ink2 }} numberOfLines={2}>{a.body}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{inboxAge(a.at)}</Text>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

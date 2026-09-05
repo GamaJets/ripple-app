@@ -531,58 +531,63 @@ export default function OwnerEquipment() {
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Add Equipment</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
-              One row per kind of kit. Use quantity for identical units.
-            </Text>
-
-            <Text style={lab}>Name</Text>
-            <TextInput value={name} onChangeText={setName} autoFocus placeholder="e.g. Concept2 rower"
-              placeholderTextColor={t.ink3} returnKeyType="next" style={inp} accessibilityLabel="Equipment name" />
-
-            <Text style={{ ...lab, marginTop: sp.md }}>Category</Text>
-            <TextInput value={category} onChangeText={setCategory} placeholder="e.g. Cardio — used by the class capacity check"
-              placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Category" />
-
-            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
-              <View style={{ flex: 1 }}>
-                <Text style={lab}>Quantity</Text>
-                <TextInput value={qty} onChangeText={setQty} keyboardType="number-pad" style={inp} accessibilityLabel="Quantity" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={lab}>Service every (days)</Text>
-                <TextInput value={interval} onChangeText={setInterval} keyboardType="number-pad"
-                  placeholder="Optional" placeholderTextColor={t.ink3} returnKeyType="done"
-                  onSubmitEditing={() => { void commitAdd(); }} style={inp} accessibilityLabel="Service interval in days" />
-              </View>
-            </View>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
-              Leave the interval blank for kit that needs no schedule. That is recorded as a
-              decision, not as a missing service.
-            </Text>
-
-            {/* The refusal was drawn and never said. This control's only
-                statement that it will not act is a grey fill, and a grey fill
-                is exactly what a screen reader does not have: VoiceOver read
-                "Add to the register" identically whether the name field was
-                filled in or empty, and a double-tap did nothing with no
-                explanation. `accessibilityState.disabled` is the announcement
-                — src/lib/a11y.ts and the `Cta` in src/ui/kit.tsx, which has
-                carried it since it was written. The hint says WHY, because
-                "dimmed" on its own is a fact about the button rather than
-                about what the person has to do. */}
-            <Pressable disabled={!name.trim() || busy} onPress={commitAdd}
-              accessibilityRole="button"
-              accessibilityLabel="Add this item to the equipment register"
-              accessibilityState={{ disabled: !name.trim() || busy, busy }}
-              accessibilityHint={!name.trim() ? 'Give the item a name first.' : undefined}
-              style={{ backgroundColor: name.trim() && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-              <Text style={{ ...ty.label, fontWeight: '600', color: name.trim() && !busy ? t.brandInk : t.ink3 }}>
-                {busy ? 'Adding…' : 'Add to the register'}
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, maxHeight: '90%' }}>
+            {/* Four fields, two paragraphs and two buttons with nothing scrolling, so
+                with the keyboard up over Name the "Add to the register" button is
+                below the window. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.head, color: t.ink }}>Add Equipment</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+                One row per kind of kit. Use quantity for identical units.
               </Text>
-            </Pressable>
-            <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+
+              <Text style={lab}>Name</Text>
+              <TextInput value={name} onChangeText={setName} autoFocus placeholder="e.g. Concept2 rower"
+                placeholderTextColor={t.ink3} returnKeyType="next" style={inp} accessibilityLabel="Equipment name" />
+
+              <Text style={{ ...lab, marginTop: sp.md }}>Category</Text>
+              <TextInput value={category} onChangeText={setCategory} placeholder="e.g. Cardio — used by the class capacity check"
+                placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Category" />
+
+              <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={lab}>Quantity</Text>
+                  <TextInput value={qty} onChangeText={setQty} keyboardType="number-pad" style={inp} accessibilityLabel="Quantity" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={lab}>Service every (days)</Text>
+                  <TextInput value={interval} onChangeText={setInterval} keyboardType="number-pad"
+                    placeholder="Optional" placeholderTextColor={t.ink3} returnKeyType="done"
+                    onSubmitEditing={() => { void commitAdd(); }} style={inp} accessibilityLabel="Service interval in days" />
+                </View>
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm, marginBottom: sp.lg }}>
+                Leave the interval blank for kit that needs no schedule. That is recorded as a
+                decision, not as a missing service.
+              </Text>
+
+              {/* The refusal was drawn and never said. This control's only
+                  statement that it will not act is a grey fill, and a grey fill
+                  is exactly what a screen reader does not have: VoiceOver read
+                  "Add to the register" identically whether the name field was
+                  filled in or empty, and a double-tap did nothing with no
+                  explanation. `accessibilityState.disabled` is the announcement
+                  — src/lib/a11y.ts and the `Cta` in src/ui/kit.tsx, which has
+                  carried it since it was written. The hint says WHY, because
+                  "dimmed" on its own is a fact about the button rather than
+                  about what the person has to do. */}
+              <Pressable disabled={!name.trim() || busy} onPress={commitAdd}
+                accessibilityRole="button"
+                accessibilityLabel="Add this item to the equipment register"
+                accessibilityState={{ disabled: !name.trim() || busy, busy }}
+                accessibilityHint={!name.trim() ? 'Give the item a name first.' : undefined}
+                style={{ backgroundColor: name.trim() && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+                <Text style={{ ...ty.label, fontWeight: '600', color: name.trim() && !busy ? t.brandInk : t.ink3 }}>
+                  {busy ? 'Adding…' : 'Add to the register'}
+                </Text>
+              </Pressable>
+              <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>

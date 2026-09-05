@@ -635,130 +635,137 @@ export default function OwnerMembers() {
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
-          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
-            <Text style={{ ...ty.head, color: t.ink }}>Open a Membership</Text>
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
-              Find someone in your gym who does not already hold an active membership.
-            </Text>
-
-            {/* The start date this sheet is about to write, and whose calendar
-                it is. Said here rather than nowhere: the date never appeared on
-                screen at all, and it is the date the billing anniversary falls
-                on for as long as the membership runs. Nothing is drawn when the
-                gym has set a zone and it was read — there is no disclosure to
-                make then. */}
-            {clockNote ? (
-              <View style={{ marginBottom: sp.lg }}>
-                <Flag tone={t.warn}>{`This membership will be recorded as starting ${dayWindow.day} — ${clockNote}`}</Flag>
-              </View>
-            ) : null}
-
-            <Text style={lab}>Member</Text>
-            {picked ? (
-              <Pressable onPress={() => { setPicked(null); setFound(null); setSearchFailed(false); setSearch(''); }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
-                <Icon name="check" size={16} color={t.brand} />
-                <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{picked.name}</Text>
-                <Text style={{ ...ty.caption, color: t.ink3 }}>change</Text>
-              </Pressable>
-            ) : (
-              <>
-                <TextInput value={search} onChangeText={runSearch} autoFocus
-                  placeholder="Type at least two letters of their name"
-                  placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Search for a member" />
-                {searchFailed ? (
-                  <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
-                    The lookup failed, so this cannot tell you whether they have an account. Do
-                    not read it as “not found” — check your connection and type the name again.
-                  </Flag>
-                ) : found !== null ? (
-                  found.length === 0 ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-                      {searchCut
-                        ? `More than ${SEARCH_LIMIT} people match that, and every one this lookup saw already holds an active membership — which is not the same as everyone who matches. Type more of the name.`
-                        : 'Nobody matching, or everyone matching already holds an active membership.'}
-                    </Text>
-                  ) : (
-                    <View style={{ marginTop: sp.sm, maxHeight: 190 }}>
-                      {/* Said above the list rather than under it, because the
-                          list scrolls and this is the part that stops somebody
-                          concluding a name is not in the gym. */}
-                      {searchCut ? (
-                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-                          The first {SEARCH_LIMIT} matches, in name order &mdash; there are more. If the person
-                          you want is not here, type more of their name.
-                        </Text>
-                      ) : null}
-                      <ScrollView keyboardShouldPersistTaps="handled">
-                        {found.map((c, i) => (
-                          <Pressable key={c.id} onPress={() => setPicked(c)}
-                            style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.surface3 }}>
-                            <Text style={{ ...ty.body, color: t.ink }}>{c.name}</Text>
-                          </Pressable>
-                        ))}
-                      </ScrollView>
-                    </View>
-                  )
-                ) : null}
-              </>
-            )}
-
-            <Text style={{ ...lab, marginTop: sp.lg }}>Plan</Text>
-            {/* Gated on 'failed' rather than on `failed`: a stale screen has
-                the price book from the earlier read and can offer it. An owner
-                who pulled to refresh in a lift should not then be told their
-                plans are unreadable while they are listed two lines down. */}
-            {state === 'failed' && plans.length === 0 ? (
-              // The price book rides on the same read as the register, so when
-              // that read failed there is no basis for "no plans set up yet" —
-              // an owner who has plans would be told they have none and open
-              // the membership unpriced, which is how a paying member ends up
-              // contributing nothing to MRR.
-              <Flag tone={t.crit}>
-                Your plans could not be read, so none can be offered here. Opening a membership
-                now would leave it with no plan attached even if you have one.
-              </Flag>
-            ) : plans.length === 0 ? (
-              <Text style={{ ...ty.caption, color: t.ink3 }}>
-                No plans set up yet. The membership can still be opened without one — recurring
-                revenue will read as a dash until a priced plan is attached.
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, maxHeight: '90%' }}>
+            {/* The state this sheet is in while it is being used — search field
+                focused, keyboard up, the 190pt results list showing — is taller than
+                the window, and "Open membership" sat under the bottom of it. The
+                results list keeps its own scroller inside this one; it is capped at
+                190pt so the two do not fight over the same gesture. */}
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+              <Text style={{ ...ty.head, color: t.ink }}>Open a Membership</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+                Find someone in your gym who does not already hold an active membership.
               </Text>
-            ) : (
-              <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
-                {plans.filter((p) => p.active).map((p) => {
-                  const on = planId === p.id;
-                  return (
-                    <Pressable key={p.id} onPress={() => setPlanId(on ? null : p.id)}
-                      style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
-                      <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>
-                        {p.name} · {money(p.priceCents, p.currency) ?? '—'}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
 
-            <View style={{ marginTop: sp.lg }}>
-              {/* Disabled by colour only, and colour is the one thing a screen
-                  reader does not get: this read as an ordinary "Open
-                  membership" button whether or not anybody had been picked, and
-                  a double-tap did nothing and said nothing. See src/lib/a11y.ts
-                  and the `Cta` in src/ui/kit.tsx, which announces its own
-                  disabled state; these three hand-rolled sheet buttons in the
-                  owner app were the ones that did not. */}
-              <Pressable disabled={!picked || busy} onPress={commitMembership}
-                accessibilityRole="button"
-                accessibilityLabel={picked ? `Open a membership for ${picked.name ?? 'this member'}` : 'Open membership'}
-                accessibilityState={{ disabled: !picked || busy, busy }}
-                accessibilityHint={!picked ? 'Search for a member and choose one first.' : undefined}
-                style={{ backgroundColor: picked && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
-                <Text style={{ ...ty.label, fontWeight: '600', color: picked && !busy ? t.brandInk : t.ink3 }}>
-                  {busy ? 'Opening…' : 'Open membership'}
+              {/* The start date this sheet is about to write, and whose calendar
+                  it is. Said here rather than nowhere: the date never appeared on
+                  screen at all, and it is the date the billing anniversary falls
+                  on for as long as the membership runs. Nothing is drawn when the
+                  gym has set a zone and it was read — there is no disclosure to
+                  make then. */}
+              {clockNote ? (
+                <View style={{ marginBottom: sp.lg }}>
+                  <Flag tone={t.warn}>{`This membership will be recorded as starting ${dayWindow.day} — ${clockNote}`}</Flag>
+                </View>
+              ) : null}
+
+              <Text style={lab}>Member</Text>
+              {picked ? (
+                <Pressable onPress={() => { setPicked(null); setFound(null); setSearchFailed(false); setSearch(''); }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
+                  <Icon name="check" size={16} color={t.brand} />
+                  <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{picked.name}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>change</Text>
+                </Pressable>
+              ) : (
+                <>
+                  <TextInput value={search} onChangeText={runSearch} autoFocus
+                    placeholder="Type at least two letters of their name"
+                    placeholderTextColor={t.ink3} style={inp} accessibilityLabel="Search for a member" />
+                  {searchFailed ? (
+                    <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
+                      The lookup failed, so this cannot tell you whether they have an account. Do
+                      not read it as “not found” — check your connection and type the name again.
+                    </Flag>
+                  ) : found !== null ? (
+                    found.length === 0 ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                        {searchCut
+                          ? `More than ${SEARCH_LIMIT} people match that, and every one this lookup saw already holds an active membership — which is not the same as everyone who matches. Type more of the name.`
+                          : 'Nobody matching, or everyone matching already holds an active membership.'}
+                      </Text>
+                    ) : (
+                      <View style={{ marginTop: sp.sm, maxHeight: 190 }}>
+                        {/* Said above the list rather than under it, because the
+                            list scrolls and this is the part that stops somebody
+                            concluding a name is not in the gym. */}
+                        {searchCut ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+                            The first {SEARCH_LIMIT} matches, in name order &mdash; there are more. If the person
+                            you want is not here, type more of their name.
+                          </Text>
+                        ) : null}
+                        <ScrollView keyboardShouldPersistTaps="handled">
+                          {found.map((c, i) => (
+                            <Pressable key={c.id} onPress={() => setPicked(c)}
+                              style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.surface3 }}>
+                              <Text style={{ ...ty.body, color: t.ink }}>{c.name}</Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    )
+                  ) : null}
+                </>
+              )}
+
+              <Text style={{ ...lab, marginTop: sp.lg }}>Plan</Text>
+              {/* Gated on 'failed' rather than on `failed`: a stale screen has
+                  the price book from the earlier read and can offer it. An owner
+                  who pulled to refresh in a lift should not then be told their
+                  plans are unreadable while they are listed two lines down. */}
+              {state === 'failed' && plans.length === 0 ? (
+                // The price book rides on the same read as the register, so when
+                // that read failed there is no basis for "no plans set up yet" —
+                // an owner who has plans would be told they have none and open
+                // the membership unpriced, which is how a paying member ends up
+                // contributing nothing to MRR.
+                <Flag tone={t.crit}>
+                  Your plans could not be read, so none can be offered here. Opening a membership
+                  now would leave it with no plan attached even if you have one.
+                </Flag>
+              ) : plans.length === 0 ? (
+                <Text style={{ ...ty.caption, color: t.ink3 }}>
+                  No plans set up yet. The membership can still be opened without one — recurring
+                  revenue will read as a dash until a priced plan is attached.
                 </Text>
-              </Pressable>
-              <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
-            </View>
+              ) : (
+                <View style={{ flexDirection: 'row', gap: sp.sm, flexWrap: 'wrap' }}>
+                  {plans.filter((p) => p.active).map((p) => {
+                    const on = planId === p.id;
+                    return (
+                      <Pressable key={p.id} onPress={() => setPlanId(on ? null : p.id)}
+                        style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 8 }}>
+                        <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink2 }}>
+                          {p.name} · {money(p.priceCents, p.currency) ?? '—'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+
+              <View style={{ marginTop: sp.lg }}>
+                {/* Disabled by colour only, and colour is the one thing a screen
+                    reader does not get: this read as an ordinary "Open
+                    membership" button whether or not anybody had been picked, and
+                    a double-tap did nothing and said nothing. See src/lib/a11y.ts
+                    and the `Cta` in src/ui/kit.tsx, which announces its own
+                    disabled state; these three hand-rolled sheet buttons in the
+                    owner app were the ones that did not. */}
+                <Pressable disabled={!picked || busy} onPress={commitMembership}
+                  accessibilityRole="button"
+                  accessibilityLabel={picked ? `Open a membership for ${picked.name ?? 'this member'}` : 'Open membership'}
+                  accessibilityState={{ disabled: !picked || busy, busy }}
+                  accessibilityHint={!picked ? 'Search for a member and choose one first.' : undefined}
+                  style={{ backgroundColor: picked && !busy ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.label, fontWeight: '600', color: picked && !busy ? t.brandInk : t.ink3 }}>
+                    {busy ? 'Opening…' : 'Open membership'}
+                  </Text>
+                </Pressable>
+                <Ghost label="Cancel" onPress={() => setAddOpen(false)} />
+              </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
