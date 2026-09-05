@@ -32,6 +32,34 @@ import { settledLanded } from '@lib/readLanded';
 import { changedFailure } from '@lib/changedRows';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchEquipment, capacityFor, type Equipment } from '@lib/gymEquipment';
+import { tellTheCancelledRoom, type ClassOffSend } from '@lib/classOff';
+import { classOffConfirmation } from '@lib/notifyCopy';
+
+/**
+ * How this console sends one push: straight at the send-push edge function,
+ * with the signed-in owner's own JWT.
+ *
+ * There is no `sendPushChecked` here — that lives in src/ui/pushNotifications.ts
+ * and reaches expo-notifications, which Next.js cannot import. This wrapper is
+ * only the send; the inbox row is written by the trigger before this runs, so
+ * recording one here would be the second row for one event.
+ *
+ * `ok` means send-push accepted the call, never that anything was delivered:
+ * Expo's receipt is a separate fetch minutes later and nothing polls for it.
+ * `partial` is send-push saying its own paged read of push_tokens ran short,
+ * which makes any count built from it a floor rather than a total.
+ */
+const sendPush: ClassOffSend = async (userIds, title, body, data, channel) => {
+  try {
+    const { data: res, error } = await supabase.functions.invoke('send-push', {
+      body: { user_ids: userIds, title, body, data, ...(channel ? { channel } : {}) },
+    });
+    if (error) return { ok: false };
+    return { ok: true, partial: !!(res as { partial?: boolean } | null)?.partial };
+  } catch {
+    return { ok: false };
+  }
+};
 import {
   fetchClasses, createClass, createSeries, deleteClass,
   cancelClass, restoreClass, cancelSeriesFrom, updateClass, updateSeriesFrom,
@@ -331,13 +359,36 @@ export default function Timetable() {
     // somebody who cleared the box, and `cancelClass` refuses that with its own
     // sentence rather than filing a cancellation nobody explained.
     if (why === null) return;
-    cancelClass(supabase, c.id, why)
-      .then(() => { setErr(null); refresh(); })
-      .catch((x: any) => setErr(writeFailedText(x, {
-        what: 'Calling off that class',
-        unchanged: 'it is still on the timetable',
-        howToCheck: 'Reload this page: the timetable shows whether the class is actually called off. Members are told from the stored row, not from this screen.',
-      })));
+    void (async () => {
+      try {
+        await cancelClass(supabase, c.id, why);
+      } catch (x: any) {
+        setErr(writeFailedText(x, {
+          what: 'Calling off that class',
+          unchanged: 'it is still on the timetable',
+          howToCheck: 'Reload this page: the timetable shows whether the class is actually called off. Members are told from the stored row, not from this screen.',
+        }));
+        return;
+      }
+      // ── this console used to send nothing ─────────────────────────────
+      //
+      // The prompt above promises "Everybody booked or waiting is sent this",
+      // and until now that promise was kept by the database: the trigger wrote
+      // the inbox rows and notifications_dispatch_push turned each one into its
+      // own push. That is also why the coach app's members got TWO — the
+      // handset sent an aggregated push and the dispatcher sent per-class ones
+      // on top. Part 2392 stops the dispatcher pushing these rows, so this
+      // screen has to send what it was already claiming to send.
+      //
+      // The failure is reported and not swallowed. A cancellation nobody was
+      // told about is the room arriving at a locked door, and the owner is the
+      // only person who can still fix it.
+      const told = await tellTheCancelledRoom(supabase, [c.id], c.title, why, me?.id ?? null, sendPush);
+      setErr(told.people === null || (told.people > 0 && told.pushed < told.people)
+        ? classOffConfirmation(1, told.people, told.pushed, told.partial)
+        : null);
+      refresh();
+    })();
   };
 
   const putBack = (c: GymClass) => {

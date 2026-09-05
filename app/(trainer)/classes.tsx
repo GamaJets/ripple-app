@@ -73,11 +73,9 @@ import { assertChanged } from '../../src/lib/changedRows';
 // way every other push in this product does. The ROW stays the trigger's:
 // src/lib/notifyInbox.ts refuses to record this one, so a member gets one
 // notification and not two differently-worded copies of the same cancellation.
-import {
-  classOffBuckets, classOffConfirmation, classOffNotification,
-} from '../../src/lib/notifyCopy';
-import { readByIds } from '../../src/lib/idLookup';
+import { classOffConfirmation } from '../../src/lib/notifyCopy';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
+import { tellTheCancelledRoom } from '../../src/lib/classOff';
 import { supabase } from '../../src/lib/supabase';
 
 // The weekday name, the date order and the clock were all this file's own, and
@@ -371,78 +369,18 @@ export default function TrainerClasses() {
   const tellTheRoom = useCallback(async (
     classIds: readonly string[], classTitle: string, why: string,
   ): Promise<{ people: number | null; pushed: number; partial: boolean }> => {
-    if (!classIds.length) return { people: 0, pushed: 0, partial: false };
     let me: string | null = null;
     // A failed read of our own id costs the coach one notification about their
     // own cancellation. A failed read of the roster costs twelve people theirs,
-    // which is why only the second one is reported.
+    // which is why only the second one is reported — and that is reported by
+    // tellTheCancelledRoom, as `people: null`.
     try { me = (await supabase.auth.getUser()).data?.user?.id ?? null; } catch { me = null; }
-    // ── Why this is `readByIds` and not one capped `.in()` ─────────────────
-    //
-    // It was `.in('class_id', classIds).limit(capLimit())`, and both halves of
-    // that were bounds nobody had checked against the thing being read.
-    //
-    // The id list is a whole SERIES. `cancelSeriesFrom` hands back every
-    // remaining occurrence, and a weekly class booked out three years ahead is
-    // 156 of them — past `ID_CHUNK`, where a single `.in()` truncates the
-    // filter or 414s, both in silence. The row list is every booking across all
-    // of them: forty people a week for a year is two thousand rows, and 1,001
-    // of them came back. Neither failure said anything.
-    //
-    // What it cost: `people` is printed to the coach as "N people had booked",
-    // and `pushed` decides whether the confirmation says "a push was queued to
-    // all of them". A truncated read makes both numbers smaller AND sends
-    // fewer notifications, so the coach is told a reassuring figure about a
-    // room that is partly still expecting a class. `readByIds` chunks the ids
-    // and pages each chunk to the end; `id` is the primary key and supplies the
-    // total order `readAll` requires.
-    let rows: { userId: string; classId: string }[];
-    try {
-      const read = await readByIds<{ id: string; user_id: unknown; class_id: unknown }>(
-        classIds as string[],
-        (chunk, from, to) => supabase
-          .from('class_bookings')
-          .select('id, user_id, class_id')
-          .in('class_id', chunk)
-          .order('id', { ascending: true })
-          .range(from, to),
-        'who had booked these classes',
-      );
-      rows = read
-        .map((r) => ({
-          userId: String(r?.user_id ?? '').trim(),
-          classId: String(r?.class_id ?? '').trim(),
-        }))
-        .filter((r) => r.userId && r.classId && r.userId !== me);
-    } catch {
-      // Including a set too big to read honestly. `people: null` is already the
-      // "we could not read who had booked" sentence, and it is the right one:
-      // the classes ARE off, and the coach has to tell the room themselves.
-      return { people: null, pushed: 0, partial: false };
-    }
-    // Grouped by how many of THEIR OWN bookings went, so nine weeks of a series
-    // is one notification per person rather than nine, and nobody is told a
-    // figure about somebody else's diary. See src/lib/notifyCopy.ts.
-    const buckets = classOffBuckets(rows);
-    let people = 0;
-    let pushed = 0;
-    // send-push pages `push_tokens` and reports `partial` when a chunk of that
-    // read failed or ran off its page ceiling. It was thrown away here, so a
-    // send that reached an unknown fraction of a full room was reported to the
-    // coach as "a push was queued to all of them" — the truncation-as-total
-    // defect this screen's `readByIds` was added to fix, one layer further out.
-    // ANY bucket reporting it makes the whole sentence's claim a floor: the
-    // buckets are one cancellation seen from several diaries, not several
-    // events, and the coach acts on the sentence as a whole.
-    let partial = false;
-    for (const b of buckets) {
-      people += b.userIds.length;
-      const n = classOffNotification(classTitle, b.classes, why);
-      const res = await sendPushChecked(b.userIds, n.title, n.body, { route: n.route });
-      if (res.ok) pushed += b.userIds.length;
-      if (res.partial) partial = true;
-    }
-    return { people, pushed, partial };
+    // The body of this function moved to src/lib/classOff.ts unchanged, so
+    // studio-web can send the SAME aggregated notification instead of leaning
+    // on the database dispatcher — which is what made this screen's push the
+    // second of two. See that file's header and part 2392.
+    return tellTheCancelledRoom(supabase, classIds, classTitle, why, me,
+      (ids, title, body, data, channel) => sendPushChecked(ids, title, body, data, channel as any));
   }, []);
 
   const callOff = (c: GymClass) => {
