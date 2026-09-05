@@ -201,7 +201,14 @@ export default function OwnerOverview() {
   // can tell it from a month that really was quiet. `sessions30` is already null
   // under a failed read; the `loading` half is added here because a sum over a
   // roster still in flight is a zero for the same reason and keeps for as long.
-  const { series, labels, delta, months } = useSessionsHistory(trainersUnknown ? null : sessions30);
+  // `status` was destructured away here and on the revenue screen, and it is
+  // the one available LoadStatus on this screen that was not gated. Under
+  // 'error' the hook skips the merge and lets THIS DEVICE'S CACHE stand alone,
+  // and the delta and the "Not enough history yet" sentence were both computed
+  // over it — the second of those being a claim about the gym made over months
+  // that were never read.
+  const { series, labels, delta, months, status: histStatus } = useSessionsHistory(trainersUnknown ? null : sessions30);
+  const histWhole = isWhole(histStatus);
   const [sel, setSel] = useState<TrainerLike | null>(null);
 
   // Client load per trainer. The old version split revenue by Repple plan,
@@ -402,6 +409,8 @@ export default function OwnerOverview() {
             ? 'Reading your roster…'
             : trainersUnread
             ? 'Your trainers could not be read'
+            : !histWhole
+            ? 'Your recorded months could not be read'
             : delta !== 0
             ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} vs last month`
             : roll.payroll30 == null
@@ -439,9 +448,16 @@ export default function OwnerOverview() {
               be drawn as one line. It was printed with a dollar sign in front
               of it, so a month up twelve sessions read "+$12 vs last mo". */}
           <SectionHead title="Sessions Trend"
-            note={delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'}
+            note={!histWhole ? 'your months could not be read'
+              : delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo`
+              : 'Tracking started'}
             onPress={() => router.push('/(owner)/revenue')} />
-          {months >= 2 ? (
+          {!histWhole ? (
+            /* Not "not enough history". That sentence is a claim about this
+               gym, and under a failed read the only months in hand are the
+               ones this handset happened to keep. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your recorded months could not be read, so the trend is held back. Pull down to try again.</Text>
+          ) : months >= 2 ? (
             /* The series goes in WITH its holes, and the months go in with it.
                This was `series.filter((v) => v != null)` over a hand-rolled
                label row, which drew four points across the width while

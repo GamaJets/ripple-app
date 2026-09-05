@@ -120,7 +120,14 @@ export default function OwnerRevenue() {
   // quiet, and the trend carries it forever. `sessions30` off the provider is
   // already null under a failed read; the `loading` half is ours, because a read
   // still in flight is no more a zero than a refused one is.
-  const { series, labels, delta, months } = useSessionsHistory(trainersUnknown ? null : sessions30);
+  // `status` was destructured away by both callers of this hook, and it is the
+  // one available LoadStatus on this screen that was not gated. Under 'error'
+  // the hook says so in as many words — it skips the merge and lets THIS
+  // DEVICE'S CACHE stand alone — and the growth rate, the six-month forecast
+  // and the "Not enough history yet" sentence were all computed over it with
+  // nothing on screen to say the account's months had not been read.
+  const { series, labels, delta, months, status: histStatus } = useSessionsHistory(trainersUnknown ? null : sessions30);
+  const histWhole = isWhole(histStatus);
 
   // Monthly growth rate from the accumulating history (geometric, clamped).
   // `n` is the number of months ACTUALLY recorded, not the window length. It
@@ -135,7 +142,10 @@ export default function OwnerRevenue() {
   // today's figure is unknown — and the growth rate divides by today's figure.
   // Forecasting from an unread month projects the gym to zero and puts a
   // confident "−50%/mo" on the screen.
-  const canForecast = !trainersUnknown && n >= 2 && first > 0;
+  // `histWhole` joins the two conditions that were already here for the same
+  // reason: a forecast is a claim about the gym's history, and a history read
+  // that did not land is not a short history.
+  const canForecast = histWhole && !trainersUnknown && n >= 2 && first > 0;
   let growth = canForecast ? Math.pow(roll.sessions30 / first, 1 / (n - 1)) - 1 : 0;
   growth = Math.max(-0.5, Math.min(0.5, growth));
   const forecast = Array.from({ length: 6 }, (_, i) => Math.round(roll.sessions30 * Math.pow(1 + growth, i + 1)));
@@ -385,8 +395,15 @@ export default function OwnerRevenue() {
               last mo" under a heading saying Sessions, and an owner had no way
               to know which of the two the screen meant. */}
           <SectionHead title="Sessions Trend"
-            note={delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo` : 'Tracking started'} />
-          {months >= 2 ? (
+            note={!histWhole ? 'your months could not be read'
+              : delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} session${Math.abs(delta) === 1 ? '' : 's'} vs last mo`
+              : 'Tracking started'} />
+          {!histWhole ? (
+            /* Not "not enough history": the sentence below is a claim about
+               this gym, and under a failed read the only months in hand are
+               the ones this handset happened to keep. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>Your recorded months could not be read, so the trend and the forecast are held back. Pull down to try again.</Text>
+          ) : months >= 2 ? (
             /* With the holes, and with the months. See the same note on the
                owner dashboard: filtering the nulls out drew the line over four
                points and the labels over six, so each point was reported under
