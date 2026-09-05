@@ -265,6 +265,22 @@ export interface InvoiceCurrency {
  * somebody chose, and an invoice with the wrong three letters on it is worse
  * than no invoice, because it reads as a considered figure and it is a
  * different amount of money.
+ *
+ * ── A link that did not answer stops the chain; it does not hand over ─────
+ *
+ * At every step, the FAILURE is checked before the emptiness — the rule
+ * `resolveMyCurrency` in src/lib/currencySource.ts states in those words. A
+ * link that could not be read has not said "nothing", it has said nothing, and
+ * the link beneath it answers a different question. So a packages read that
+ * errored or truncated returns no currency at all rather than the gym's, in the
+ * same way a failed profile read has always stopped rather than reaching
+ * `trainers.currency`. See the long note at the packages read for what the
+ * missing half of that rule cost.
+ *
+ * That means an invoice cannot be issued while a link is unreadable, and that
+ * is the intended outcome: the number comes out of a gapless per-coach
+ * sequence and the document is immutable once issued, so "try again in a
+ * moment" is recoverable and a wrong three letters is not.
  */
 export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
   if (!USE_SUPABASE) return { currency: null, source: null, status: 'ready', gap: null };
@@ -285,20 +301,57 @@ export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
     // the WHOLE set. `.limit(capLimit())` hands back a prefix, and a prefix that
     // happens to be all one currency says "unanimous" about a coach whose next
     // package is priced in another — which puts the wrong three letters on an
-    // invoice and makes it a different amount of money. A truncated read here
-    // knows less than an empty one, so it falls through to the gym.
+    // invoice and makes it a different amount of money.
+    //
+    // ── A packages read that did not come back whole STOPS the chain ──────
+    //
+    // It used to fall through to the gym on both a truncated read and a FAILED
+    // one, and return `status: 'ready'` with the gym's code. Only the
+    // truncation half was ever argued, in a comment that ended "a truncated
+    // read here knows less than an empty one, so it falls through to the gym" —
+    // and that is the opposite of the rule this function applies twenty lines
+    // below, where a failed PROFILE read stops rather than consulting the link
+    // beneath it, and the opposite of `resolveMyCurrency` in
+    // src/lib/currencySource.ts, whose whole statement of the precedence rule
+    // is "the failure is checked before the emptiness, at every step".
+    //
+    // What it costs is not a wrong sentence, it is a wrong document. Link 1 is
+    // the coach's own packages and it BEATS the gym: a coach pricing in GBP
+    // inside an AED gym is pricing in GBP. When that read fails, whether link 1
+    // would have answered is unknown — so the gym's code is not the fallback,
+    // it is a different link's answer standing in for one nobody read.
+    // `currencyGapOfStatus` cannot catch it either: it short-circuits on
+    // `input.currency` and a code was found, so no gap is reported, no blocker
+    // is raised, and `issueInvoice` sends that code as `p_currency`. Part 941's
+    // chain takes what the caller states in preference to everything below it,
+    // so the server does not re-resolve and does not disagree. The coach issues
+    // AED 480 where they meant GBP 480 — on a document that is immutable and
+    // numbered out of a gapless per-coach sequence, so it cannot be edited and
+    // cannot be deleted, only voided in the coach's own record while the client
+    // holds the copy.
+    //
+    // Refusing is therefore the cheap outcome and it is the one taken. The
+    // screen already has the words: 'error' reads as "your currency could not
+    // be read … try again in a moment" and 'partial' as "could not be
+    // established, because part of the read did not come back", neither of
+    // which sends anybody to a gym owner over a setting that is already
+    // correct. Nothing is invented, and no currency is stated that nobody chose.
     const pkgPage = capped((pkgRes.data ?? []) as { currency: string | null }[]);
-    if (!pkgRes.error && !pkgPage.truncated) {
-      const codes = new Set(
-        pkgPage.rows
-          .map((p) => (p.currency || '').trim().toUpperCase())
-          .filter((c) => c.length >= 3),
-      );
-      // Unanimous or nothing. A coach with packages in two currencies has not
-      // told us which one this invoice is in, and picking the commoner of the
-      // two would be a guess wearing a statistic.
-      if (codes.size === 1) return { currency: [...codes][0], source: 'packages', status: 'ready', gap: null };
-    }
+    if (pkgRes.error) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
+    // 'unreadable' of the six, because what this is is UNKNOWN rather than
+    // "none is set" — which is the only distinction `MyCurrencyGap` has to
+    // carry here. The 'partial' status is what the screen actually prints from,
+    // and it says truncation in its own words.
+    if (pkgPage.truncated) return { currency: null, source: null, status: 'partial', gap: 'unreadable' };
+    const codes = new Set(
+      pkgPage.rows
+        .map((p) => (p.currency || '').trim().toUpperCase())
+        .filter((c) => c.length >= 3),
+    );
+    // Unanimous or nothing. A coach with packages in two currencies has not
+    // told us which one this invoice is in, and picking the commoner of the
+    // two would be a guess wearing a statistic.
+    if (codes.size === 1) return { currency: [...codes][0], source: 'packages', status: 'ready', gap: null };
 
     // The profile read is what says whether there is a gym at all, so a failure
     // of it is UNKNOWN and stops here. Falling through to `trainers.currency`
@@ -307,7 +360,13 @@ export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
     if (profRes.error) return { currency: null, source: null, status: 'error', gap: 'unreadable' };
 
     const tid = (profRes.data as { tenant_id: string | null } | null)?.tenant_id ?? null;
-    const partial: LoadStatus = pkgRes.error || pkgPage.truncated ? 'partial' : 'ready';
+    // Everything from here down is reached only with the packages read WHOLE —
+    // it answered, and it either had nothing to say or did not agree with
+    // itself. So the links below are a genuine fallback and 'ready' is the
+    // truth about them. The old `partial` here covered a packages read that had
+    // failed or truncated, and it covered only the branches that end with NO
+    // code; the branches that found one returned 'ready' regardless, which is
+    // where the wrong currency got out.
 
     if (tid) {
       const { data: ten, error: tenErr } = await supabase.from('tenants').select('currency').eq('id', tid).maybeSingle();
@@ -325,7 +384,7 @@ export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
       if (code.length >= 3) return { currency: code, source: 'gym', status: 'ready', gap: null };
       // A gym with no currency is the owner's to fix, and it stays that way.
       // `trainers.currency` is deliberately not reached from here.
-      return { currency: null, source: null, status: partial, gap: 'gym-unset' };
+      return { currency: null, source: null, status: 'ready', gap: 'gym-unset' };
     }
 
     // No gym. Only now is the coach's own column consulted.
@@ -334,20 +393,20 @@ export async function fetchInvoiceCurrency(): Promise<InvoiceCurrency> {
       // An unapplied part 940 is a deploy step, not a failed read. Reported as
       // 'error' it becomes "try again in a moment" about a thing that will
       // never come true until somebody runs the part.
-      if (isMissingColumn(trErr)) return { currency: null, source: null, status: partial, gap: 'unavailable' };
+      if (isMissingColumn(trErr)) return { currency: null, source: null, status: 'ready', gap: 'unavailable' };
       reportError('coachInvoices.currency.own', trErr);
       return { currency: null, source: null, status: 'error', gap: 'unreadable' };
     }
     // `trainers_self_rw` is `for all using (auth.uid() = id)`, so a coach can
     // always see their own row. No row here is genuinely no row, not RLS — and
     // it is a real state: there is nowhere for a currency to be kept.
-    if (!tr) return { currency: null, source: null, status: partial, gap: 'nowhere' };
+    if (!tr) return { currency: null, source: null, status: 'ready', gap: 'nowhere' };
     const own = ((tr as { currency: string | null }).currency || '').trim().toUpperCase();
     if (own.length >= 3) return { currency: own, source: 'own', status: 'ready', gap: null };
 
     // Read fine, no gym, and they have not chosen. THEY fix this, in Settings,
     // and there is no owner anywhere in the sentence.
-    return { currency: null, source: null, status: partial, gap: 'own-unset' };
+    return { currency: null, source: null, status: 'ready', gap: 'own-unset' };
   } catch (e) {
     reportError('coachInvoices.currency', e);
     return { currency: null, source: null, status: 'error', gap: 'unreadable' };

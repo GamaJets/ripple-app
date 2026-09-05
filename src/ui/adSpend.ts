@@ -32,6 +32,7 @@ import { authNonce } from '../lib/authNonce';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { appLink } from '../lib/deepLink';
+import { capLimit, capped } from '../lib/rowCap';
 import type { LoadStatus } from './loadStatus';
 import type { UnmatchReason } from '../lib/adMatch';
 import {
@@ -231,6 +232,16 @@ export type AdSpendRead = {
   sources: SpendSource[];
   /** The figure across every connected channel, or the reason there is none. */
   combined: Combined;
+  /**
+   * Whether the itemised unmatched ads came back whole.
+   *
+   * False makes `status` 'partial' rather than 'ready', and the screen shows
+   * the rows it has under the run's OWN count and total — which are recorded
+   * per run by record_ad_run() and are therefore facts about all of the ads,
+   * not about the page of them that arrived. The list is a prefix; the figures
+   * above it are not.
+   */
+  unmatchedWhole: boolean;
   reason?: string;
 };
 
@@ -238,6 +249,7 @@ const blank = (c: AdChannel): ChannelState => ({ channel: c, account: null, run:
 const EMPTY = (): Omit<AdSpendRead, 'status' | 'combined'> => ({
   channels: AD_CHANNELS.map(blank),
   sources: [],
+  unmatchedWhole: true,
 });
 
 /** PostgREST hands bigint back as a string; only a finite number is a figure. */
@@ -355,20 +367,59 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
       .filter((s) => s.run?.status === 'ok')
       .map((s) => s.run!.id);
 
+    // Whole until a read says otherwise. With no OK run there are no unmatched
+    // rows to be short of, which is a complete answer rather than an unknown.
+    let unmatchedWhole = true;
+
     if (okRunIds.length) {
+      // ── Both row reads are capped, and the two truncations mean different
+      //    things ──────────────────────────────────────────────────────────
+      //
+      // Neither of these had a `.limit()` or an `.order()`. PostgREST answers
+      // an unbounded request with at most 1000 rows and says nothing about it
+      // (src/lib/rowCap.ts), so both were capable of coming back a prefix, in
+      // whatever order the planner chose, indistinguishable from a whole set.
+      //
+      // A truncated MATCHED read is a wrong TOTAL: `combineChannelSpend` adds
+      // these rows up and the sum would be short by an unknown amount, which is
+      // this screen's one prohibited outcome — every channel looks cheaper than
+      // it is. There is no authoritative per-code figure to fall back on, so the
+      // whole read is refused, exactly as a failed read of the same rows is.
+      //
+      // A truncated UNMATCHED read is NOT a wrong figure. record_ad_run() puts
+      // the count and the sum of every unmatched ad on the run itself, so the
+      // amount and the number of ads are known whatever the list does; only the
+      // itemisation is a prefix. That is 'partial': the rows are shown, and the
+      // screen says the list is not all of them.
+      //
+      // Both are ordered biggest-spend-first with the primary key as the tie —
+      // a prefix has to be a deterministic one, and the ads worth acting on are
+      // the expensive ones.
       const { data: matchedRows, error: matchedErr } = await supabase
         .from('coach_ad_code_spend')
         .select('run_id, code_id, code, amount_cents, currency, ads, applied')
-        .in('run_id', okRunIds);
+        .in('run_id', okRunIds)
+        .order('amount_cents', { ascending: false })
+        .order('run_id', { ascending: true })
+        .order('code', { ascending: true })
+        .limit(capLimit());
       if (matchedErr) {
         reportError('adSpend.matched', matchedErr);
         return failed('We could not read what the last checks matched, so nothing below is a figure.');
+      }
+      const matchedPage = capped((matchedRows ?? []) as any[]);
+      if (matchedPage.truncated) {
+        reportError('adSpend.matched', new Error('coach_ad_code_spend came back at its row limit'));
+        return failed('Your checks matched more spend to your codes than we can read in one go, so any total here would be short by an unknown amount. Nothing is shown rather than a figure that is too small.');
       }
 
       const { data: unmatchedRows, error: unmatchedErr } = await supabase
         .from('coach_ad_unmatched')
         .select('run_id, ad_id, ad_name, destination_url, amount_cents, currency, reason')
-        .in('run_id', okRunIds);
+        .in('run_id', okRunIds)
+        .order('amount_cents', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: true })
+        .limit(capLimit());
       if (unmatchedErr) {
         reportError('adSpend.unmatched', unmatchedErr);
         // Deliberately fails the WHOLE read. Showing the matched spend while the
@@ -377,10 +428,13 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
         return failed('We could not read the ads that could not be matched to a code, so the figures above would not be all of your spend. Nothing is shown rather than part of it.');
       }
 
+      const unmatchedPage = capped((unmatchedRows ?? []) as any[]);
+      unmatchedWhole = !unmatchedPage.truncated;
+
       const byRun = new Map<string, ChannelState>();
       for (const s of states.values()) if (s.run) byRun.set(s.run.id, s);
 
-      for (const m of (matchedRows ?? []) as any[]) {
+      for (const m of matchedPage.rows) {
         const s = byRun.get(String(m.run_id));
         if (!s) continue;
         s.matched.push({
@@ -392,7 +446,7 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
           applied: !!m.applied,
         });
       }
-      for (const u of (unmatchedRows ?? []) as any[]) {
+      for (const u of unmatchedPage.rows) {
         const s = byRun.get(String(u.run_id));
         if (!s) continue;
         s.unmatched.push({
@@ -411,7 +465,13 @@ export async function fetchAdSpend(): Promise<AdSpendRead> {
     }
 
     const channels = AD_CHANNELS.map((c) => states.get(c)!);
-    return { status: 'ready', channels, sources: shapedSources, combined: combineChannelSpend(channels.map(asChannelRun)) };
+    return {
+      status: unmatchedWhole ? 'ready' : 'partial',
+      channels,
+      sources: shapedSources,
+      combined: combineChannelSpend(channels.map(asChannelRun)),
+      unmatchedWhole,
+    };
   } catch (e) {
     reportError('adSpend.read', e);
     return failed('Your ad spend could not be read, so nothing here is a figure.');

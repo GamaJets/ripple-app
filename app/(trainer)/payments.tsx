@@ -228,7 +228,7 @@
 // so a currency this screen chose would be wrong for half the gyms running it.
 // A gym that has not set one cannot put a package on sale, and is told that,
 // rather than being given a price with a unit invented for it.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -238,6 +238,8 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value, numeric } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
+import { reportError } from '../../src/lib/reportError';
+import { isoDate } from '../../src/lib/format';
 import { payoutStage, canOnboard } from '../../src/lib/payoutAccount';
 import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, adjustPackCredit, fetchMyPromoCodes, createPromoCode, archivePromoCode, fetchMyDisputes, type ConnectStatus, type TrainerPackage, type CoachPurchase, type CoachDispute } from '../../src/lib/connect';
 // A chargeback is the one thing on this screen with a clock on it. See
@@ -382,6 +384,25 @@ const billingWords = (p: TrainerPackage): string => {
   const what = p.billing_interval ? '' : p.sessions ? ` · ${p.sessions} sessions` : ' · one-off membership';
   return `${price ?? fig(null)}${what}`;
 };
+
+/**
+ * A `timestamptz` as the READER's calendar day, or null when there is none to
+ * read.
+ *
+ * Every timestamp on this screen arrives from PostgREST serialised in UTC, and
+ * the first ten characters of that string are Greenwich's day rather than
+ * anybody else's. `isoDate` is built from the local getters, so this is the day
+ * the coach holding the phone is standing in. See the note at the chargeback
+ * row, which is the one place it decides whether somebody answers in time.
+ *
+ * Null rather than a guess on anything unparseable: the caller has a sentence
+ * for "no date", and inventing today's would be the one outright lie available.
+ */
+function dayOf(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? isoDate(new Date(ms)) : null;
+}
 
 export default function TrainerPayments() {
   const t = useTheme();
@@ -1005,7 +1026,28 @@ export default function TrainerPayments() {
   const [editErr, setEditErr] = useState<string | null>(null);
   const [subCount, setSubCount] = useState<number | null>(null);
 
+  /* Whose answer is allowed to land.
+   *
+   * `void countActiveSubscribers(p.id).then(setSubCount)` had no request
+   * identity on it, and these reads do not come back in the order they went
+   * out. Open package A's sheet, close it, open B: A's answer arrives second
+   * and sets the count for B. `repriceNote(0)` then states "Nobody is currently
+   * subscribed at the old price" over a package with five subscribers on it —
+   * in the one warning on this screen that exists to be read BEFORE a coach
+   * changes what people are charged, and whose whole point (see the header of
+   * src/lib/packageEdit.ts) is that a reprice must never happen quietly.
+   *
+   * Same idiom as `wanted` in src/ui/clientAttendance.ts and
+   * app/(trainer)/class-checkin.tsx. Dropping the stale answer is the whole of
+   * it: `subCount` stays null, and null is already its own sentence — "whether
+   * anybody is subscribed at the old price could not be read" — which is the
+   * honest thing to say about a package nothing has answered for yet. */
+  const wantedPkg = useRef<string | null>(null);
+
   const openEdit = (p: TrainerPackage) => {
+    // Set before the read starts, so an answer for the previously opened
+    // package that is still in flight fails its check on arrival.
+    wantedPkg.current = p.id;
     setEditing(p);
     setEditName(p.name);
     // Shown in MAJOR units, which is what the coach thinks in and what the Add
@@ -1031,7 +1073,13 @@ export default function TrainerPayments() {
     setEditPrice(majorFromMinor(p.price_cents, p.currency));
     setEditErr(null);
     setSubCount(null);
-    void countActiveSubscribers(p.id).then(setSubCount);
+    void countActiveSubscribers(p.id).then(
+      (n) => { if (wantedPkg.current === p.id) setSubCount(n); },
+      // `countActiveSubscribers` answers null rather than throwing on every
+      // failure it knows about, but a rejection here would otherwise be an
+      // unhandled one and the sheet would sit on null with nothing logged.
+      (e) => { if (wantedPkg.current === p.id) setSubCount(null); reportError('payments.subCount', e); },
+    );
   };
 
   /** The patch as typed, or null when the price box does not hold a number.
@@ -1558,9 +1606,38 @@ export default function TrainerPayments() {
               {(disputesStatus === 'error' ? [] : disputes).map((d, i) => {
                 const over = isClosed(d.status, d.closed_at);
                 const tone = disputeTone({ evidenceDueBy: d.evidence_due_by, status: d.status, closedAt: d.closed_at });
+                // Parsed, not sliced. `client_disputes.evidence_due_by` is a
+                // `timestamptz` — confirmed against the live schema, and part
+                // 611 declares it as one — so PostgREST serialises it in UTC
+                // and `String(...).slice(0, 10)` was GREENWICH's calendar day.
+                // A coach in Dubai (UTC+4) whose evidence is due 01:30 on 6
+                // September holds 2026-09-05T21:30Z, and this row named the
+                // 5th: a day early on the one deadline on this screen that
+                // costs the whole amount plus a fee if it is missed. In Los
+                // Angeles it runs the other way and names a day the coach does
+                // not have.
+                //
+                // check-utc-day.mjs deliberately does not flag this shape —
+                // its header says whether a slice is wrong "depends entirely
+                // on what column `iso` came from" and needs the schema, not
+                // the line. The schema says it is wrong. Fixed the way
+                // app/(owner)/deletions.tsx was.
+                //
+                // The reader's own day, because this screen reads no gym
+                // timezone and no tenant has one set — the same fallback
+                // deletions.tsx, financials.tsx and equipment.tsx take.
+                //
+                // It also puts the two halves of this sentence back on one
+                // calendar. `deadlineLine` computes "due within the DAY" and
+                // "due TOMORROW" from `Date.parse(evidenceDueBy)`, the true
+                // instant, while `when` was UTC's day — so the row could say
+                // "due within the DAY, by 5 September" to a coach for whom the
+                // deadline falls on the 6th, a sentence that contradicts
+                // itself in the half a hurrying reader trusts.
+                const dueDay = dayOf(d.evidence_due_by);
                 const due = deadlineLine(
                   { evidenceDueBy: d.evidence_due_by, status: d.status, closedAt: d.closed_at },
-                  d.evidence_due_by ? expiryDayLabel(String(d.evidence_due_by).slice(0, 10)) : null,
+                  dueDay ? expiryDayLabel(dueDay) : null,
                 );
                 return (
                   <View key={d.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>

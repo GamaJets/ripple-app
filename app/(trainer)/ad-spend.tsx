@@ -93,6 +93,7 @@ const EMPTY_READ: AdSpendRead = {
   channels: AD_CHANNELS.map((c) => ({ channel: c, account: null, run: null, matched: [], unmatched: [] })),
   sources: [],
   combined: { ok: false, reason: 'no-channels', missing: [], currencies: [], channels: [] },
+  unmatchedWhole: true,
 };
 
 export default function TrainerAdSpend() {
@@ -209,7 +210,16 @@ export default function TrainerAdSpend() {
      false. See the ChannelCard note below. */
   const anyChannelSetUp = AD_CHANNELS.some((c) => !!channelClientId(c));
   const combined = read.combined;
-  const settled = read.status === 'ready';
+  // Finished, not necessarily whole. 'partial' here means one thing and one
+  // thing only — the itemised unmatched ads came back a prefix — because a
+  // truncated MATCHED read is refused outright in fetchAdSpend rather than
+  // reported as a smaller total. Everything on this screen except that one list
+  // is therefore as good under 'partial' as under 'ready', and blanking it all
+  // would take working figures away to say nothing about the list.
+  const settled = read.status === 'ready' || read.status === 'partial';
+  /** How many ads could not be placed against a code, and whether that number
+   *  is a count or a floor. See `unmatchedCount` at the foot of the file. */
+  const unmatched = unmatchedCount(read);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
@@ -463,16 +473,30 @@ export default function TrainerAdSpend() {
           <Section>
             <SectionHead
               title="Not matched to any code"
-              note={unmatchedCount(read) ? `${num(unmatchedCount(read))} ${unmatchedCount(read) === 1 ? 'ad' : 'ads'}` : undefined}
+              note={unmatched.n
+                ? `${unmatched.exact ? '' : 'At least '}${num(unmatched.n)} ${unmatched.n === 1 ? 'ad' : 'ads'}`
+                : undefined}
             />
-            {unmatchedCount(read) === 0 ? (
+            {unmatched.n === 0 ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
-                Every ad these checks saw pointed at one of your join links, so all of the spend they found is credited to a
-                code.
+                {unmatched.exact
+                  ? 'Every ad these checks saw pointed at one of your join links, so all of the spend they found is credited to a code.'
+                  : 'How many ads these checks could not place is not known, so this does not say that all of your spend is credited to a code. Check again and the number comes back.'}
               </Text>
             ) : (
               <View>
                 <Text style={{ ...ty.label, color: t.ink3 }}>{UNMATCHED_NOTE}</Text>
+                {/* The list is a prefix and the figures above it are not. Said
+                    where the list is, because the count and the per-channel
+                    total come off the run itself and are about all of them. */}
+                {!read.unmatchedWhole ? (
+                  <View style={{ marginTop: sp.md }}>
+                    <Flag tone={t.warn}>
+                      Too many ads went unmatched to list them all here. The most expensive of them are below, and the
+                      figures above cover every one — what is short is the list, not the money.
+                    </Flag>
+                  </View>
+                ) : null}
                 {read.channels.filter((s) => s.run?.status === 'ok' && s.unmatched.length > 0).map((s) => (
                   <View key={s.channel} style={{ marginTop: sp.lg }}>
                     <Rule />
@@ -618,9 +642,34 @@ export default function TrainerAdSpend() {
   );
 }
 
-/** Every unmatched ad across every channel that answered. */
-function unmatchedCount(read: AdSpendRead): number {
-  return read.channels.reduce((n, s) => n + (s.run?.status === 'ok' ? s.unmatched.length : 0), 0);
+/**
+ * How many ads the checks could not place, and whether that is a count or a
+ * floor.
+ *
+ * This used to be `s.unmatched.length` summed, printed flatly as "1,000 ads" —
+ * which is the row cap wearing a total's clothes. `coach_ad_unmatched` had no
+ * `.limit()` on it, so PostgREST's silent 1000-row ceiling was the number a
+ * coach read as the number of ads outside their codes, and the true figure
+ * could be any larger number at all.
+ *
+ * The count is on the RUN. record_ad_run() sets `unmatched_ads` from every row
+ * it inserted, so it is a fact about all of the ads that could not be placed,
+ * whatever the list below manages to fetch — the same reason `unmatchedCents`
+ * is read off the run rather than added up from the rows. Where a run does not
+ * carry one, the rows are counted instead, and that is a floor whenever the
+ * list came back truncated; `exact` false is what makes the screen say so, in
+ * the words `paymentsFloorLine` uses for the same shape of fact.
+ */
+function unmatchedCount(read: AdSpendRead): { n: number; exact: boolean } {
+  let n = 0;
+  let exact = true;
+  for (const s of read.channels) {
+    if (s.run?.status !== 'ok') continue;
+    if (s.run.unmatchedAds != null) { n += s.run.unmatchedAds; continue; }
+    n += s.unmatched.length;
+    if (!read.unmatchedWhole) exact = false;
+  }
+  return { n, exact };
 }
 
 /**
