@@ -43,7 +43,7 @@ import { classRoster } from '../lib/classAttendance';
 import { entryToRow } from '../lib/workoutRow';
 import type { WorkoutEntry } from '../lib/mockData';
 import {
-  dropSent, enqueueAct, floorQueueKey, readFloorQueue,
+  dropSent, enqueueAct, floorQueueKey, readFloorQueue, singleFlight,
   type FloorAct, type QueuedAct,
 } from '../lib/floorQueue';
 
@@ -246,8 +246,38 @@ async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
   }
 }
 
-/** Send everything queued for this account. Returns what happened, so a screen
- *  can say "3 went up" rather than refreshing silently.
+interface FlushResult { sent: number; refused: number; kept: number }
+
+/**
+ * The latch. See `singleFlight` in src/lib/floorQueue.ts for what ran twice
+ * without it, and why joining is the right answer rather than booking a second
+ * pass.
+ */
+const flight = singleFlight<FlushResult>();
+
+/**
+ * Send everything queued for this account, or join the pass already doing it.
+ *
+ * SINGLE FLIGHT, and it has to be. There are four ways in — the app's flush
+ * registry (src/lib/offlineQueue.ts), `FloorQueueSync`, the effect inside
+ * `useFloorQueue` on each of the four screens that own this queue, and the
+ * coach's own send button — and two of them fire in the SAME commit on an
+ * ordinary cold launch into the trainer app, because the layout mounts
+ * `FloorQueueSync` and the screen under it mounts `useFloorQueue`. Nothing
+ * comes out of `acts` until after the first await, so two concurrent passes
+ * take the same batch and send every act in it twice.
+ *
+ * Returns what happened, so a screen can say "3 went up" rather than refreshing
+ * silently. A joined caller gets the running pass's answer, which is the true
+ * one: it is the pass that is actually emptying the queue.
+ */
+function flushAll(uid: string): Promise<FlushResult> {
+  if (!owner || owner !== uid) return Promise.resolve({ sent: 0, refused: 0, kept: 0 });
+  return flight.run(uid, () => drain(uid));
+}
+
+/** One pass. Only ever entered through `flushAll`, which is what stops two of
+ *  these running over the same queue.
  *
  *  ── Why the device is written after every act and not at the end ──────────
  *
@@ -279,7 +309,7 @@ async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
  *  a coach is reading should be what is actually still on the phone, not what
  *  was on it when the drain started.
  */
-async function flushAll(uid: string): Promise<{ sent: number; refused: number; kept: number }> {
+async function drain(uid: string): Promise<FlushResult> {
   if (!owner || owner !== uid) return { sent: 0, refused: 0, kept: 0 };
   let sent = 0, refused = 0, kept = 0;
   // Snapshotted, because a tap during the flush appends to `acts` and iterating

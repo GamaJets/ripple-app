@@ -12,9 +12,16 @@
 //     counted as "waiting to send" for the life of the install.
 import {
   FLOOR_CAP, actLine, dropSent, enqueueAct, floorFullLine, floorPendingNote, floorQueueKey,
-  flushResultLine, keptOfflineLine, readFloorQueue, refusedLine, registerVisibilityLine, supersedeKey,
+  flushResultLine, keptOfflineLine, readFloorQueue, refusedLine, registerVisibilityLine, singleFlight,
+  supersedeKey,
   type FloorAct, type QueuedAct,
 } from './floorQueue';
+
+// Failed until it is proved otherwise. The last section of this file asserts
+// on promises, and a suite that starts at 0 reports a hang as a pass: node
+// exits quietly the moment the loop drains, with nothing printed and nothing
+// checked. Cleared on the last line.
+process.exitCode = 1;
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -325,5 +332,66 @@ const unknown = registerVisibilityLine(0, false);
 ok(!/Your gym owner sees attendance/.test(unknown), 'an unread queue never claims the gym has it');
 ok(/not known/.test(unknown), 'it says the answer is unknown');
 
-if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('floorQueue: ok');
+
+/* ── one drain at a time ────────────────────────────────────────────────── */
+
+// The cold launch that sent every act twice. app/(trainer)/_layout.tsx mounts
+// `FloorQueueSync` and the screen under it mounts `useFloorQueue`, so two
+// callers reach `flushAll` in the same commit — and nothing leaves `acts` until
+// after the first await, so both took the same batch. Two of the three acts
+// survive being sent twice; a session log does not, and the client ends up with
+// the hour in their history twice with no way to delete either.
+//
+// Asynchronous, so the epilogue is inside it: these assertions are about
+// promises, and a suite whose checks are still pending when node's loop drains
+// reports a hang as a pass.
+async function drainsOnce(): Promise<void> {
+  const flight = singleFlight<number>();
+  let starts = 0;
+  let release: (() => void) | null = null;
+  const job = () => {
+    starts += 1;
+    return new Promise<number>((res) => { release = () => res(starts); });
+  };
+
+  const first = flight.run('coach-a', job);
+  const second = flight.run('coach-a', job);
+  eq(starts, 1, 'a second caller for the same account does not start a second pass');
+  eq(flight.busy(), 'coach-a', 'the gate names whose pass is in flight');
+  ok(first === second, 'it is handed the pass already running, not a new one');
+
+  release!();
+  eq(await first, 1, 'both callers get that pass\'s answer');
+  eq(await second, 1, 'both of them, not just the one that started it');
+  eq(flight.busy(), null, 'the gate opens once the pass has settled');
+
+  // Chained, not joined: a pass asked for after the last one settled is a fresh
+  // one, or a coach pressing send twice would be told nothing happened.
+  const third = flight.run('coach-a', job);
+  eq(starts, 2, 'a pass asked for after the previous one settled runs');
+  release!();
+  await third;
+
+  // A gym's front-desk phone signs in and out all day. One coach's drain must
+  // never be handed back to the next coach as though it were theirs.
+  let bStarts = 0;
+  const a = flight.run('coach-a', () => new Promise<number>((res) => { release = () => res(0); }));
+  const b = flight.run('coach-b', () => { bStarts += 1; return Promise.resolve(0); });
+  ok(a !== b, 'a different account does not join somebody else\'s pass');
+  eq(bStarts, 1, 'it runs its own');
+  release!();
+  await a; await b;
+
+  // A throwing pass must not leave the gate shut. A latch held by a failure is
+  // a queue that never drains again until the app is killed.
+  let threw = false;
+  try { await flight.run('coach-c', async () => { throw new Error('no signal'); }); } catch { threw = true; }
+  ok(threw, 'a pass that throws still rejects its callers');
+  eq(flight.busy(), null, 'and does not leave the gate shut behind it');
+}
+
+void drainsOnce().then(() => {
+  if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
+  console.log('floorQueue: ok');
+  process.exitCode = 0;
+}, (e) => { console.error(e); process.exit(1); });

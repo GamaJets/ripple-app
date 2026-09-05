@@ -483,3 +483,84 @@ export function flushResultLine(r: { sent: number; refused: number; kept: number
   if (parts.length === 0) return null;
   return parts.join(' ');
 }
+
+/* ── one drain at a time ───────────────────────────────────────────────── */
+
+/**
+ * A gate that lets one pass run at a time and joins every other caller to it.
+ *
+ * ── The doubled session this closes ───────────────────────────────────────
+ *
+ * `flushAll` in src/ui/floorQueue.ts has four ways in and no latch between
+ * them: the app's own flush registry (src/lib/offlineQueue.ts), `FloorQueueSync`
+ * in app/(trainer)/_layout.tsx, the `useEffect` inside `useFloorQueue` on each
+ * of the four screens that own this queue, and the `flush` a coach can press.
+ * Two of those fire in the SAME commit on an ordinary cold launch — the trainer
+ * layout mounts `FloorQueueSync` and the screen under it mounts `useFloorQueue`
+ * — so both read the device, both take `[...acts]` as their batch, and both
+ * send every act in it, because nothing is dropped from `acts` until after the
+ * first `await`.
+ *
+ * Two of the three acts survive that: a class tick is an RPC that SETS a state,
+ * and a session outcome is an UPDATE matched on the session. A SESSION LOG does
+ * not. It is an INSERT of rows the server keys itself, with no client-minted id
+ * and nothing to conflict on, so the second pass files a second copy of an hour
+ * of somebody's training on a day they trained once — and `supersedeKey` above
+ * already says what that costs: "what a client ends up with is the session in
+ * their history twice … and the client cannot delete either: their coach typed
+ * them."
+ *
+ * ── Why joining, and not booking another pass ─────────────────────────────
+ *
+ * The same argument `flushAllOrJoin` makes in src/lib/offlineQueue.ts. These
+ * callers are not carrying news — they are four subscribers to one event, or a
+ * screen sequencing itself behind the queue — and the pass in flight has not
+ * finished, so it has not yet reported that anything is unsent. An act appended
+ * DURING a pass is not lost either: `attempt` only queues after its own direct
+ * write came back 'unsent', which means the running pass is about to meet the
+ * same silence and stop, and the next reconnect or foreground takes it.
+ *
+ * Keyed, because the account is what a floor queue belongs to. A pass running
+ * for one coach must never be handed back to a different one as though it were
+ * theirs — a shared gym phone signs in and out all day.
+ */
+export interface Flight<T> {
+  /** Run `job`, or join the pass already in flight for this key. */
+  run: (key: string, job: () => Promise<T>) => Promise<T>;
+  /** The key of the pass in flight, or null. For assertions. */
+  busy: () => string | null;
+}
+
+export function singleFlight<T>(): Flight<T> {
+  // Keyed, so two accounts cannot be conflated. In practice only one is ever
+  // in flight — src/ui/floorQueue.ts turns away any uid that is not the queue's
+  // current owner before it gets here — but a map is what makes that a fact
+  // about this file rather than an assumption about its caller.
+  const running = new Map<string, Promise<T>>();
+
+  const run = (key: string, job: () => Promise<T>): Promise<T> => {
+    const already = running.get(key);
+    if (already) return already;
+    // The latch is taken BEFORE the job starts, not after. An async function
+    // body runs synchronously only up to its first await, so assigning from the
+    // result of the call would leave a window in which a second caller starts a
+    // second pass over the same queue — which is the whole of what this exists
+    // to prevent.
+    let settle: (v: T) => void = () => { /* replaced below, before any await */ };
+    let fail: (e: unknown) => void = () => { /* as above */ };
+    const pass = new Promise<T>((res, rej) => { settle = res; fail = rej; });
+    running.set(key, pass);
+    // Released before the promise settles, so a caller that chains another pass
+    // onto this one gets a fresh one rather than this same settled promise
+    // handed straight back. Released on the failure path too: a latch held by a
+    // throw is a queue that never drains again until the app is killed.
+    const done = () => { if (running.get(key) === pass) running.delete(key); };
+    void (async () => {
+      try { const v = await job(); done(); settle(v); }
+      catch (e) { done(); fail(e); }
+    })();
+    return pass;
+  };
+
+  return { run, busy: () => (running.size ? [...running.keys()][0] : null) };
+}

@@ -274,6 +274,29 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // documented further down this file.
   const doneRef = useRef<Set<string>>(new Set());
   const pendingRef = useRef<Map<string, boolean>>(new Map());
+  /**
+   * The local day each waiting toggle was MADE on.
+   *
+   * `persist` used to read `today()` at the moment it ran, and `flushQueue`
+   * runs on the reconnect edge and on returning to the foreground — neither of
+   * which is the moment the member ticked anything. A checklist worked through
+   * in a basement gym at 23:50 and flushed on the walk home at 00:05 was
+   * written with `done_on` set to the NEXT day: the tick landed on a day the
+   * member had not lived yet, and their coach's adherence for the night they
+   * actually trained still read as missed.
+   *
+   * The un-tick half is worse. The DELETE is matched on `done_on`, so after
+   * midnight it matched nothing — and this file reads a delete that removed no
+   * rows as 'stored', because removing a tick that is not there IS the un-tick.
+   * So the member was told their correction had saved while yesterday's row sat
+   * in the table still ticked.
+   *
+   * Written and cleared strictly beside `pendingRef` by `markPending`, so the
+   * two cannot drift. Not part of `CachedTicks`: the cache is keyed on the day
+   * already (`ticksKey`), so anything read back off the device at launch is by
+   * construction today's, which is what the fallback says.
+   */
+  const pendingDayRef = useRef<Map<string, string>>(new Map());
   // The same count, in state, because `unsent` is rendered and a ref changing
   // re-renders nothing. Only ever written beside `pendingRef`.
   const [pendingCount, setPendingCount] = useState(0);
@@ -351,8 +374,8 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
 
   /** Record, or clear, a toggle the server has not taken. */
   const markPending = (id: string, done: boolean | null) => {
-    if (done === null) pendingRef.current.delete(id);
-    else pendingRef.current.set(id, done);
+    if (done === null) { pendingRef.current.delete(id); pendingDayRef.current.delete(id); }
+    else { pendingRef.current.set(id, done); pendingDayRef.current.set(id, today()); }
     setPendingCount(pendingRef.current.size);
     cacheTicks();
   };
@@ -416,6 +439,11 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
         const localTicks = await readLocalTicks(id, day);
         if (cancelled) return;
         pendingRef.current = new Map(Object.entries(localTicks.pending));
+        // Cleared with it. These came off the device under `ticksKey(owner,
+        // day)`, so their day is `day` by construction; anything left in here
+        // is the previous account's or the previous run's and must not be
+        // carried onto a habit that happens to share an id.
+        pendingDayRef.current = new Map();
         setPendingCount(pendingRef.current.size);
         if (localTicks.done.length || pendingRef.current.size) {
           doneRef.current = new Set(localTicks.done);
@@ -488,7 +516,10 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
           // on the next launch.
           for (const [habit, on] of [...pendingRef.current]) {
             if (cancelled) return;
-            settle(habit, on, await persist(id, habit, on));
+            // The day the toggle was made on, never the day it is being sent
+            // on. `day` is this hydrate's own `today()`, which is right for the
+            // toggles just read off the device: they were cached under it.
+            settle(habit, on, await persist(id, habit, on, pendingDayRef.current.get(habit) ?? day));
           }
         }
 
@@ -641,17 +672,22 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
    * not there IS the un-tick. Zero rows back means the row is already gone,
    * which is the state the client asked for, so it counts as stored rather
    * than as a refusal.
+   *
+   * `day` is passed in and never read from the clock here. It is the day the
+   * member made the toggle on, which is not the day a queued one is sent on —
+   * see `pendingDayRef` for what reading `today()` on this line did to a
+   * checklist worked through before midnight and flushed after it.
    */
-  const persist = async (owner: string, id: string, done: boolean): Promise<WriteOutcome> => {
+  const persist = async (owner: string, id: string, done: boolean, day: string): Promise<WriteOutcome> => {
     try {
       if (done) {
         const { data, error } = await supabase.from('habit_logs')
-          .upsert({ user_id: owner, habit: id, done_on: today() }, { onConflict: 'user_id,habit,done_on' })
+          .upsert({ user_id: owner, habit: id, done_on: day }, { onConflict: 'user_id,habit,done_on' })
           .select('habit');
         return classifyWrite(error as any, data ? data.length : 0);
       }
       const { data, error } = await supabase.from('habit_logs')
-        .delete().eq('user_id', owner).eq('habit', id).eq('done_on', today())
+        .delete().eq('user_id', owner).eq('habit', id).eq('done_on', day)
         .select('habit');
       const out = classifyWrite(error as any, data ? data.length : 0);
       return out === 'refused' && !error ? 'stored' : out;
@@ -703,7 +739,11 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     const owner = uidRef.current;
     if (!USE_SUPABASE || !owner) return;
     for (const [habit, on] of [...pendingRef.current]) {
-      const out = await persist(owner, habit, on);
+      // The day the member ticked it, not the day this flush is running on.
+      // See `pendingDayRef`: this is the queue whose stamp used to be taken at
+      // send time, and a flush fires on the walk home, which is often the other
+      // side of midnight from the gym.
+      const out = await persist(owner, habit, on, pendingDayRef.current.get(habit) ?? today());
       settle(habit, on, out);
       // Stop at the first silence: the rest would meet the same one, and every
       // attempt past it is a toggle re-offered to a connection that is not
@@ -737,7 +777,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     // "waiting to send" that nothing will ever pick up.
     if (!USE_SUPABASE || !uidRef.current) return false;
     markPending(id, nd);
-    const out = await persist(uidRef.current, id, nd);
+    const out = await persist(uidRef.current, id, nd, pendingDayRef.current.get(id) ?? today());
     settle(id, nd, out);
     return out === 'stored';
   };
@@ -754,7 +794,8 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     const owner = uidRef.current;
     if (!USE_SUPABASE || !owner) return;
     markPending('water', true);
-    void persist(owner, 'water', true).then((out) => settle('water', true, out));
+    void persist(owner, 'water', true, pendingDayRef.current.get('water') ?? today())
+      .then((out) => settle('water', true, out));
   };
   // A sanity ceiling on the counter, not a goal. It was a bare 20, which was
   // above the old constant 8 and below the 30 the column now permits — so a
