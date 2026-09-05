@@ -657,16 +657,71 @@ Deno.serve(async (req) => {
         // where Repple's coaches pay Repple.
         const trainerId = await trainerOf(sub.customer as string, (sub.metadata as any)?.trainer_id);
         if (trainerId) {
-          const { error } = await service.from('subscriptions').upsert({
+          // ORDERED, for the reason stated at `eventAt` above and by the same
+          // three writes `writeConnectSub` uses. This was a bare upsert with no
+          // ordering token at all — `client_subscriptions` and
+          // `client_disputes` honoured the invariant and this table did not.
+          //
+          // Last-writer-wins is not survivable here, and the replay ledger is
+          // not the answer. A coach's card fails (status past_due, created T1);
+          // some other write in that same delivery errors, `fail()` answers 500
+          // and Stripe schedules a retry with backoff. The coach pays, an
+          // `active` event created T2 is delivered and succeeds. The T1 retry
+          // then lands — and the ledger CANNOT stop it, because a 500'd event
+          // is deliberately never recorded, which is the behaviour that keeps
+          // money from being dropped. Without a guard that retry puts the coach
+          // back to past_due, and no further event is coming to correct it.
+          //
+          // What that row is: studio-web/lib/platform.ts reads it for the
+          // owner's platform book, src/lib/billing.ts for the coach's own
+          // billing screen, and owner-metrics counts `status = 'active'` for
+          // the platform's live subscriber count. All three would have been
+          // reading a state Stripe had already left.
+          const row: Record<string, unknown> = {
             trainer_id: trainerId,
             stripe_subscription_id: sub.id,
             plan: sub.items?.data?.[0]?.price?.nickname ?? sub.items?.data?.[0]?.price?.id ?? null,
             status: sub.status,
             current_period_end: sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null,
             cancel_at_period_end: !!sub.cancel_at_period_end,
+            stripe_event_at: eventAt,
             updated_at: new Date().toISOString(),
-          });
-          if (error) return fail('subscriptions', error.message);
+          };
+
+          // `onConflict` stated rather than inferred. The row is keyed on
+          // `trainer_id` and part 2340 restores the `unique` on
+          // `stripe_subscription_id` that setup.sql has always declared and the
+          // live table had lost, so this table now carries two unique indexes
+          // and which one an upsert resolves on must not be left to PostgREST
+          // to pick. The second one is not a conflict target here and is not
+          // meant to be: it exists so one Stripe subscription cannot be filed
+          // against two coaches, and a violation of it SHOULD 500 rather than
+          // be merged away, because the only way to reach it is an event whose
+          // `trainer_id` metadata disagrees with `billing_customers`.
+          const { error: insErr } = await service.from('subscriptions')
+            .upsert(row, { onConflict: 'trainer_id', ignoreDuplicates: true });
+          if (insErr) return fail('subscriptions', insErr.message);
+
+          // Two plain filters rather than one `.or(...)`, for the reason
+          // spelled out in `writeConnectSub`: an ISO timestamp inside
+          // PostgREST's or() grammar is a value full of the punctuation that
+          // grammar parses on.
+          //
+          // `.lte`, not `.lt` — a redelivery of the SAME event carries the same
+          // `event.created`, and rewriting the identical row is the idempotency
+          // the replay ledger is insuring rather than replacing.
+          const { error: updErr } = await service.from('subscriptions').update(row)
+            .eq('trainer_id', trainerId).lte('stripe_event_at', eventAt);
+          if (updErr) return fail('subscriptions', updErr.message);
+
+          // The row the ordering token cannot rank: one written before part
+          // 2340 added the column. There are none in production — this table is
+          // empty and no payment event has ever been delivered — but a coach
+          // seeded by hand would otherwise be frozen out of every update for
+          // ever, which is a worse failure than the one being fixed.
+          const { error: nullErr } = await service.from('subscriptions').update(row)
+            .eq('trainer_id', trainerId).is('stripe_event_at', null);
+          if (nullErr) return fail('subscriptions', nullErr.message);
         }
       }
     } else if (event.type === 'account.updated') {
@@ -1609,8 +1664,37 @@ Deno.serve(async (req) => {
         //
         // The invoice says what was billed; the SUBSCRIPTION says what the
         // client is now — trialing, active, past_due, unpaid. Re-read it rather
-        // than infer it, and stamp it as current-as-of-now, because that is
-        // what a live re-read is. Monthly, so the round-trip is cheap.
+        // than infer it. Monthly, so the round-trip is cheap.
+        //
+        // STAMPED WITH `eventAt`, NOT THE WALL CLOCK, and this line used to
+        // read `new Date().toISOString()` on the argument that a live re-read
+        // is current-as-of-now. That is true of the DATA and false of the
+        // ORDERING TOKEN, which is the only thing `stripe_event_at` is.
+        //
+        // `stripe_event_at` is not "when we learned this". It is the position
+        // of a write in Stripe's `event.created` sequence, and it is the only
+        // clock `writeConnectSub`'s `.lte(...)` guard compares against. Every
+        // other writer of this column fills it from `eventAt`. Filling it here
+        // from the handler's wall clock puts a reading from a different clock
+        // into a column whose whole purpose is to be comparable, and that
+        // clock is always AHEAD: between `event.created` and this line sit a
+        // cold start, the `stripe.subscriptions.retrieve` above and several
+        // PostgREST round trips, commonly 2-5 seconds.
+        //
+        // What that cost, exactly. Dunning exhausts: `invoice.payment_failed`
+        // created at T, then `customer.subscription.updated`→canceled created
+        // at T+2. The invoice event is handled first and stamps the row T+Δ.
+        // The cancellation arrives with at = T+2 < T+Δ, so BOTH of
+        // `writeConnectSub`'s updates match nothing, it returns null with no
+        // error, the handler answers 200 and the replay ledger records the
+        // event as handled. Nothing retries, and after a cancellation no
+        // further `customer.subscription.*` event is ever sent — so the row
+        // keeps `past_due` or `active` for the life of the database.
+        //
+        // Stamping `eventAt` cannot lose a newer state either: if some later
+        // event has already written the row, its `stripe_event_at` is later
+        // than ours by construction and the guard rejecting us is the guard
+        // working. DO NOT revert this to a wall clock.
         //
         // IN THE SUBSCRIPTION'S OWN ACCOUNT CONTEXT. This is the single line
         // that direct charges break hardest. A subscription created on a
@@ -1627,7 +1711,7 @@ Deno.serve(async (req) => {
         // invoice can arrive before the subscription has been mirrored.
         if (INVOICE_ACTIONABLE.has(event.type) && subId) {
           const fresh = await stripe.subscriptions.retrieve(subId, eventAccount ? { stripeAccount: eventAccount } : undefined);
-          const why = await writeConnectSub(fresh, new Date().toISOString());
+          const why = await writeConnectSub(fresh, eventAt);
           if (why) return fail('client_subscriptions', why);
         }
       } else {
@@ -1641,7 +1725,29 @@ Deno.serve(async (req) => {
         // a client's declined card as the COACH failing to pay Repple, and
         // recording none of the money.
         const trainerId = await trainerOf(inv.customer as string, (inv.subscription_details?.metadata as any)?.trainer_id);
-        const { error } = await service.from('invoices').upsert({
+
+        // ORDERED, and this is the widest of the three unguarded writes.
+        //
+        // `INVOICE_ACTIONABLE` gates the Connect branch above; nothing gates
+        // this one, so EVERY `invoice.*` type writes here — `invoice.created`
+        // (a draft), `.finalized`, `.updated`, `.voided`, `.payment_failed`,
+        // `.paid` — all keyed on nothing but the invoice id, all
+        // last-writer-wins. The set is left alone deliberately: a voided or
+        // uncollectible platform invoice is something the owner's book has to
+        // be able to say, so the fix is to ORDER these writes, not to drop
+        // some of them.
+        //
+        // A retried `invoice.payment_failed`, or the `invoice.created` draft
+        // itself, landing after `invoice.paid` regressed `status` — and
+        // `status` is read in two places that then disagree with Stripe:
+        // src/lib/billing.ts's `fetchFailedInvoices` filters
+        // `status in ('open','uncollectible')` for the owner's failed-payments
+        // callout, so a paid invoice reappears as a dunning item; and
+        // owner-metrics counts `(r.status ?? 'paid') === 'paid'` for revenue30,
+        // so the same invoice drops out of the month's revenue. One stale
+        // retry, and the platform is chasing money it has already been paid
+        // while reporting that it was never paid.
+        const invRow: Record<string, unknown> = {
           id: inv.id,
           trainer_id: trainerId,
           amount_due: inv.amount_due,
@@ -1649,8 +1755,21 @@ Deno.serve(async (req) => {
           status: inv.status,
           attempt_count: inv.attempt_count,
           hosted_invoice_url: inv.hosted_invoice_url,
-        });
-        if (error) return fail('invoices', error.message);
+          stripe_event_at: eventAt,
+        };
+
+        // Insert-if-absent, then the two guarded updates — the same three
+        // writes as `writeConnectSub` and the platform subscription above, in
+        // the same order and for the same reasons.
+        const { error: insErr } = await service.from('invoices')
+          .upsert(invRow, { onConflict: 'id', ignoreDuplicates: true });
+        if (insErr) return fail('invoices', insErr.message);
+        const { error: updErr } = await service.from('invoices').update(invRow)
+          .eq('id', inv.id).lte('stripe_event_at', eventAt);
+        if (updErr) return fail('invoices', updErr.message);
+        const { error: nullErr } = await service.from('invoices').update(invRow)
+          .eq('id', inv.id).is('stripe_event_at', null);
+        if (nullErr) return fail('invoices', nullErr.message);
       }
     }
   } catch (e) {
