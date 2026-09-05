@@ -63,6 +63,9 @@ import {
   inboxControls, clearReadPrompt, deletedNote, clearedNote,
 } from '../lib/notifyInbox';
 import { writeFailure } from '../lib/wroteRows';
+// Counts of rows in a table with no ceiling. See the notes on `unreadBadge`
+// and on `onMarkAll` below: `1204` unseparated is what this exists to stop.
+import { num } from '../lib/format';
 // 44pt, and the arithmetic that gets a small control there. See
 // ROW_CONTROL_SIZE below.
 import { hitSlopFor } from '../lib/a11y';
@@ -540,7 +543,17 @@ export function useNotifications(group: AppVariant): InboxValue {
       // count so it can say which happened. `count == null` is a failure though
       // — it means nobody counted — which is what writeFailure checks for.
       if (res.error || res.count == null) return { ok: false, changed: 0 };
-      setItems(listRef.current.filter((i) => !i.read), me);
+      // Painted only when the server says it deleted something. A DELETE the
+      // policy filtered out answers 204 with a count of zero and no error —
+      // indistinguishable, at this line, from "nothing was marked read" — so
+      // stripping the read rows unconditionally took them off a screen the
+      // server still held them behind, under a dialog that had just said
+      // "Delete 3 read notifications?" and a note that then said "Nothing was
+      // deleted. There was nothing marked read to remove." The rows came back
+      // at the next launch. When the count really is zero there is nothing on
+      // screen this would have removed anyway, so the only case this changes is
+      // the refusal.
+      if (res.count > 0) setItems(listRef.current.filter((i) => !i.read), me);
       return { ok: true, changed: res.count };
     } catch { return { ok: false, changed: 0 }; }
   }, []);
@@ -702,11 +715,18 @@ export function NotificationInbox(f: InboxFraming) {
       // Three outcomes, three sentences. The middle one is the one that gets
       // written as "Done" everywhere else in this codebase and is the reason
       // the RPC returns a count at all.
+      // Through num(), for the same reason the badge above is: this is a count
+      // of rows in a table with no ceiling, and a gym pushing an offer a day to
+      // a member who never opens the inbox reaches four digits in three years.
+      // The bell said "1,204 unread" and this line said "Marked 1204 as read"
+      // about the same rows — src/lib/notifyInbox.ts names this exact case.
       setNote(!res.ok
         ? 'Could not mark them read — the server did not answer. Nothing has changed.'
         : res.changed === 0
           ? 'Nothing was unread.'
-          : `Marked ${res.changed} as read.`);
+          : res.changed === 1
+            ? 'Marked one as read.'
+            : `Marked ${num(res.changed)} as read.`);
     } finally { setBusy(false); }
   };
 
@@ -776,7 +796,21 @@ export function NotificationInbox(f: InboxFraming) {
           setBusy(true);
           try {
             const res = await clearRead();
-            setNote(clearedNote(res.ok, res.changed));
+            // The zero-count case has two meanings and the shared sentence can
+            // only carry one. `clearedNote` says "There was nothing marked read
+            // to remove", which is true of an inbox with no read rows and false
+            // of one the policy refused — a bulk DELETE that matched nothing
+            // answers 204 with a count of zero exactly as a filtered one does.
+            // This screen is the only place that knows which of the two it was
+            // looking at, because it counted the read rows to put the figure in
+            // the confirmation. When it named a figure and none of them came
+            // off, it says so rather than repeating a sentence the person can
+            // see is wrong.
+            setNote(res.ok && res.changed === 0 && readCount > 0
+              ? (readCount === 1
+                ? 'Nothing was deleted. The read notification is still in your inbox — the server did not remove it.'
+                : `Nothing was deleted. Those ${num(readCount)} read notifications are still in your inbox — the server did not remove them.`)
+              : clearedNote(res.ok, res.changed));
           } finally { setBusy(false); }
         } },
       ],

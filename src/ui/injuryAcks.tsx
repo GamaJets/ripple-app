@@ -32,7 +32,12 @@ interface Value {
    *  screen to escape. */
   refresh: () => Promise<void>;
   /** The keys acknowledged for a client, or null if this coach has never
-   *  acknowledged anything for them. Null and [] are different answers. */
+   *  acknowledged anything for them. Null and [] are different answers.
+   *
+   *  Read this ONLY under `status === 'ready'`. Under 'partial' the map is a
+   *  page of the coach's acknowledgements and a null is "not in the page we
+   *  got", not "never acknowledged"; under 'error' it is nothing at all.
+   *  `guardInjuries` checks the status before it looks. */
   acknowledged: (clientId: string) => string[] | null;
   /** Record that the coach has read exactly these disclosures. Returns false
    *  if the write did not land, so a caller never reports a confirmation the
@@ -55,19 +60,49 @@ export function InjuryAcksProvider({ children }: { children: ReactNode }) {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
       if (!uid) { if (alive()) { setRows({}); setStatus('ready'); } return; }
+      // ── The probe row, and the order that makes it mean anything ─────────
+      //
+      // `.limit(capLimit())` asks for one row past the cap so that a full page
+      // and a truncated one stop looking identical (src/lib/rowCap.ts). That
+      // was already here; what was not is anybody looking at the answer. The
+      // probe row was merged into the map like data — which src/lib/rowCap.ts
+      // says in as many words it is not — and 'ready' was set whatever came
+      // back, so 'partial' was unreachable.
+      //
+      // What that costs is specific. Past the cap, a client whose row fell off
+      // the end reads back as `null` from `acknowledged()`, documented above as
+      // "this coach has never acknowledged anything for them" — so
+      // `guardInjuries` refuses Assign with the wrong sentence, telling a coach
+      // to go and read disclosures they have already confirmed instead of that
+      // the list could not be read whole. It fails safe, and it needs one
+      // trainer with more than a thousand acknowledged clients, but it is
+      // wrong in a way nobody on the screen can tell.
+      //
+      // The `.order()` is what makes it deterministic. Without one Postgres
+      // promises nothing about which thousand of the rows come back, so WHICH
+      // clients read as unacknowledged changed between launches. `client_id` is
+      // unique within a trainer's rows (the table's conflict target is
+      // trainer_id,client_id), so ordering on it alone is a total order.
       const { data, error } = await supabase
         .from('injury_acknowledgements')
         .select('client_id, acknowledged_injuries')
         .eq('trainer_id', uid)
+        .order('client_id')
         .limit(capLimit());
       if (!alive()) return;
       if (error) { reportError('injuryAcks.read', error); setRows({}); setStatus('error'); return; }
+      const page = capped(data ?? []);
       const next: Record<string, string[]> = {};
-      for (const r of data ?? []) {
+      for (const r of page.rows) {
         next[(r as any).client_id] = Array.isArray((r as any).acknowledged_injuries) ? (r as any).acknowledged_injuries : [];
       }
       setRows(next);
-      setStatus('ready');
+      // The rows are real and the map may be held; what may NOT happen is a
+      // guard reading a missing client out of it as an unacknowledged one.
+      // src/lib/injuryGate.ts treats 'partial' as 'error' and refuses Assign
+      // with the sentence that says the injuries could not be read, which is
+      // the true statement about a coach with more clients than came back.
+      setStatus(page.truncated ? 'partial' : 'ready');
     } catch (e) { if (alive()) { reportError('injuryAcks.read', e); setStatus('error'); } }
   }, []);
 

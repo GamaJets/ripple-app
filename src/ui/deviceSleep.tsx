@@ -46,7 +46,7 @@ import { reportError } from '../lib/reportError';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { useAuthRevision } from './authRevision';
-import type { LoadStatus } from './loadStatus';
+import { worstStatus, type LoadStatus } from './loadStatus';
 import { useRecoverRead } from './readRefresh';
 import { useToday } from './today';
 import { localDate } from '../lib/localDate';
@@ -74,7 +74,27 @@ export function DeviceSleepProvider({ children }: { children: ReactNode }) {
   const linkRev = useLinkRevision();
   const authRev = useAuthRevision();
   const [reads, setReads] = useState<SleepRead[]>([]);
-  const [status, setStatus] = useState<LoadStatus>('loading');
+  // ── Two reads, two statuses ──────────────────────────────────────────────
+  //
+  // The device walk and the read of the kept nights are separate requests that
+  // fail separately, and for a while only the walk's outcome was published.
+  // A member signing in on a second handset holds nothing in memory, so when
+  // WHOOP answered with last night alone and the stored-nights read was
+  // refused, readiness was scored over ONE night under 'ready' — and
+  // `deviceSleepTrust` in src/lib/readinessBreakdown.ts, which is handed this
+  // status, told them the devices had read fine. The refused half was
+  // invisible, and because `needsRefetch` only fires on 'error' nothing ever
+  // went back for it.
+  //
+  // They are NOT one `setStatus` shared between the two effects. The effects
+  // race — the walk is keyed on the connected devices, the stored read on the
+  // auth revision — so a bare `setStatus('error')` from the stored read is
+  // overwritten by the walk's 'ready' whenever the walk lands second, which is
+  // the ordinary case. Each half records its own outcome and the published
+  // status is the worse of them, which cannot be lost to ordering.
+  const [walkStatus, setWalkStatus] = useState<LoadStatus>('loading');
+  const [storedStatus, setStoredStatus] = useState<LoadStatus>('loading');
+  const status = worstStatus(walkStatus, storedStatus);
   // The nights already kept for this account. Deliberately separate state from
   // `reads`: they answer different questions — what the devices say NOW, and
   // what they said before — and folding them together is how a stored night
@@ -87,17 +107,17 @@ export function DeviceSleepProvider({ children }: { children: ReactNode }) {
   const sentRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    setStatus('loading');
+    setWalkStatus('loading');
     try {
       const next = await readSleepFromDevices(wear.states, DEVICE_SLEEP_NIGHTS);
       setReads(next);
-      setStatus('ready');
+      setWalkStatus('ready');
     } catch (e) {
       // readSleepFromDevices catches per provider, so reaching here means the
       // walk itself broke. Still not an empty night: still unknown.
       reportError('deviceSleep.read', e);
       setReads([]);
-      setStatus('error');
+      setWalkStatus('error');
     }
   }, [wear.states]);
 
@@ -111,35 +131,60 @@ export function DeviceSleepProvider({ children }: { children: ReactNode }) {
   // them cannot be reached at all. This is the order src/ui/availability.ts
   // settled on and src/ui/wellness.tsx follows: the stored copy goes up, the
   // live read refreshes it, and `status` says which is being looked at.
+  // Split out of the effect rather than left inside it, so `refresh` and the
+  // recovery below can actually run it again. While it was inline the only
+  // thing either of them re-ran was the device walk, and a stored read refused
+  // once stayed refused for the life of the process — this provider is mounted
+  // in app/_layout.tsx and never unmounts, so nothing else was ever going to
+  // ask a second time.
+  //
+  // Superseded by generation rather than by a captured `cancelled` flag,
+  // because there are now two callers and the later one has to win: a
+  // pull-to-refresh landing while the launch read is still in flight must not
+  // have the older answer write over it.
+  const storedRun = useRef(0);
+  const loadStored = useCallback(async () => {
+    const run = ++storedRun.current;
+    const live = () => storedRun.current === run;
+    setStoredStatus('loading');
+    let id: string | null = null;
+    try {
+      // getSession() reads local storage rather than the network, and REJECTS
+      // for nobody signed in — which is a true answer, not a failed read.
+      const { data: sess } = await supabase.auth.getSession();
+      id = sess?.session?.user?.id ?? null;
+    } catch { /* no local session; treated as signed out below */ }
+    if (!live()) return;
+    // Signed out, or a build with no backend: there is no kept week to read and
+    // no absent server to misreport. 'ready' with nothing in it, which is the
+    // same answer src/ui/deviceHrv.ts gives to the same question.
+    if (!id || !USE_SUPABASE) { setUid(null); setStored([]); setStoredStatus('ready'); return; }
+    setUid(id);
+    const { data, error } = await supabase.from('device_sleep_nights')
+      .select('night, minutes_asleep, provider, source_id, source_name, family, basis')
+      .eq('user_id', id)
+      .gte('night', recentNights(DEVICE_SLEEP_NIGHTS).slice(-1)[0] ?? '')
+      .order('night', { ascending: false });
+    if (!live()) return;
+    // A failed read leaves `stored` as it was and adds nothing. It must NOT
+    // clear what is already held: an empty list here would take the week off
+    // the screen, which is the exact disappearance this table exists to stop.
+    // What it does now is SAY so, which is the half that was missing — holding
+    // the old rows silently under 'ready' is how one night got scored as a week.
+    if (error) { reportError('deviceSleep.stored', error); setStoredStatus('error'); return; }
+    const rows = (data ?? []).map(rowToStored).filter((n): n is StoredNight => n != null);
+    setStored(rows);
+    setStoredStatus('ready');
+  }, []);
+
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      let id: string | null = null;
-      try {
-        // getSession() reads local storage rather than the network, and REJECTS
-        // for nobody signed in — which is a true answer, not a failed read.
-        const { data: sess } = await supabase.auth.getSession();
-        id = sess?.session?.user?.id ?? null;
-      } catch { /* no local session; treated as signed out below */ }
-      if (cancelled) return;
-      sentRef.current = new Set();
-      if (!id || !USE_SUPABASE) { setUid(null); setStored([]); return; }
-      setUid(id);
-      const { data, error } = await supabase.from('device_sleep_nights')
-        .select('night, minutes_asleep, provider, source_id, source_name, family, basis')
-        .eq('user_id', id)
-        .gte('night', recentNights(DEVICE_SLEEP_NIGHTS).slice(-1)[0] ?? '')
-        .order('night', { ascending: false });
-      if (cancelled) return;
-      // A failed read leaves `stored` as it was and adds nothing. It must NOT
-      // clear what is already held: an empty list here would take the week off
-      // the screen, which is the exact disappearance this table exists to stop.
-      if (error) { reportError('deviceSleep.stored', error); return; }
-      const rows = (data ?? []).map(rowToStored).filter((n): n is StoredNight => n != null);
-      setStored(rows);
-    })();
-    return () => { cancelled = true; };
-  }, [authRev]);
+    // Cleared here and not inside `loadStored`, because a refresh is not a new
+    // account: resetting it on every pull-to-refresh would re-send the whole
+    // week to the server each time somebody dragged the screen down.
+    sentRef.current = new Set();
+    void loadStored();
+    return () => { storedRun.current += 1; };
+  }, [authRev, loadStored]);
 
   // What the devices said today, before anything kept is folded in. Kept
   // separate because only these may be written back — see below.
@@ -177,8 +222,14 @@ export function DeviceSleepProvider({ children }: { children: ReactNode }) {
   // Only after a read that actually succeeded, and only the nights a named
   // device measured. A night nobody recorded, and a night we failed to read,
   // are two different absences; neither becomes a row.
+  //
+  // Gated on the WALK, not on the published status. What may be written back is
+  // decided by whether the devices answered; a refused read of the kept nights
+  // says nothing about tonight's measurement, and letting it hold up the write
+  // would mean the one failure the table exists to survive also stopped the
+  // table being filled.
   useEffect(() => {
-    if (!USE_SUPABASE || !uid || status !== 'ready') return;
+    if (!USE_SUPABASE || !uid || walkStatus !== 'ready') return;
     const keep = storableNights(fresh).filter((n) => !sentRef.current.has(`${n.night}:${n.minutesAsleep}`));
     if (!keep.length) return;
     let cancelled = false;
@@ -204,7 +255,7 @@ export function DeviceSleepProvider({ children }: { children: ReactNode }) {
       });
     })();
     return () => { cancelled = true; };
-  }, [uid, status, fresh]);
+  }, [uid, walkStatus, fresh]);
 
   // ── When the signal comes back, this read is run again ───────────────────
   //
@@ -224,19 +275,26 @@ export function DeviceSleepProvider({ children }: { children: ReactNode }) {
   // app" — and again as "Reconnected whoop and it says need to connect whoop."
   // Both were fixed by making the effect re-run on a change nobody had to
   // notice. This is the third of those changes: coming back into signal.
-  useRecoverRead('deviceSleep', status, () => { void load(); });
+  // Both halves, not just the walk. `refreshStale` only calls this while the
+  // status is 'error', and a stored read that was refused is now one of the two
+  // things that can put it there — so re-running the device walk alone would
+  // arrive at a provider that is still in 'error' about the half nobody asked
+  // again, and burn an attempt doing it.
+  const refresh = useCallback(() => { void load(); void loadStored(); }, [load, loadStored]);
+
+  useRecoverRead('deviceSleep', status, refresh);
 
   /**
    * Memoised, because an object literal here republished the context on every
    * render of this provider — and `wear.states` is replaced on every
    * sixty-second wearable sync, so that is not a rare event. Every consumer of
    * `useDeviceSleep` re-rendered on each of them whether or not a night had
-   * changed. `load` is already a `useCallback`, so it is stable for as long as
-   * the connected devices are.
+   * changed. `refresh` is already a `useCallback` over two more of them, so it
+   * is stable for as long as the connected devices are.
    */
   const value = useMemo(
-    () => ({ reads, nights, status, refresh: load }),
-    [reads, nights, status, load],
+    () => ({ reads, nights, status, refresh }),
+    [reads, nights, status, refresh],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

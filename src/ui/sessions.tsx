@@ -612,14 +612,42 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const removeSession: SessionsValue['removeSession'] = async (id) => {
+    // Where the row was, so a deletion the server refuses can be undone rather
+    // than leaving a real session invisible until the app is relaunched. The
+    // same shape src/ui/roster.tsx uses for `removeClient`, and every other
+    // optimistic removal in this folder — clientTags, coachExercises, wellness,
+    // invites, programTemplates — restores the same way.
+    //
+    // The count was already checked and the boolean already honest; what was
+    // missing is what the SCREEN does with a refusal. `releaseSession` two
+    // functions above makes the argument for the other half of it: "Painting
+    // the slot open first meant a refused cancellation left the screen showing
+    // a free slot that was still somebody's booked session." A refused DELETE
+    // is the same failure one step further on — PostgREST answers a delete that
+    // matched nothing with a 204 and `error: null`, no rows and no realtime
+    // event, so a stale row or another trainer's slot the policy filters simply
+    // vanished off the calendar and was back at the next launch.
+    const at = sessions.findIndex((x) => x.id === id);
+    const removed = at >= 0 ? sessions[at] : null;
+    const putBack = () => {
+      if (!removed) return;
+      setSessions((p) => (p.some((x) => x.id === id) ? p : [...p.slice(0, at), removed, ...p.slice(at)]));
+    };
     setSessions((p) => p.filter((x) => x.id !== id));
+    // No backend to refuse it: the row is off the calendar and stays off. Still
+    // false, because the documented contract is "true only when the row was
+    // actually deleted server-side" and `releaseSession` above answers the same
+    // question the same way.
     if (!USE_SUPABASE) return false;
     try {
       // Same reason as above: a delete the policy filters out reports no error
       // and removes nothing, leaving the session to reappear on next launch.
       const { data, error } = await supabase.from('sessions').delete().eq('id', id).select('id');
-      return !error && !!data && data.length > 0;
-    } catch { return false; }
+      if (!error && !!data && data.length > 0) return true;
+      if (error) reportError('sessions.remove', error);
+      putBack();
+      return false;
+    } catch (e) { reportError('sessions.remove', e); putBack(); return false; }
   };
 
   const rescheduleMyBooking: SessionsValue['rescheduleMyBooking'] = async (fromId, toId) => {
