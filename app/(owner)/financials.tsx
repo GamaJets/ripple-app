@@ -64,11 +64,12 @@ import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE, type TotalMoney } fro
 // The "joined this month" check compares against `memberships.started_on`,
 // which app/(owner)/members.tsx writes on the gym's own calendar.
 import { fetchGymZone, gymDay } from '../../src/lib/gymZone';
-import { isoDate } from '../../src/lib/format';
+import { isoDate, num, num1 } from '../../src/lib/format';
 // When the register was read, whether the phone can reach us, and a way to ask
 // again — the three things nineteen of the twenty owner screens did without.
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const KEY = 'repple.owner.financials';
 // One formatter for the whole owner app, rather than 'AED ' typed here and '$'
@@ -477,10 +478,10 @@ export default function Financials() {
   const kpis: [string, string][] = r ? [
     ['Revenue / mo', money(fin.revenue)],
     ['Net profit', money(r.netProfit)],
-    ['Margin', r.marginPct.toFixed(0) + '%'],
+    ['Margin', num(r.marginPct) + '%'],
     ['MRR', money(fin.mrr)],
     ['Members', fin.members.toLocaleString()],
-    ['Churn', r.churnPct.toFixed(1) + '%'],
+    ['Churn', num1(r.churnPct) + '%'],
     // A gym that neither grew nor shrank reads "No change", not "+0.0%". The
     // `>= 0` arm put a plus on a month in which nothing happened.
     ['Net growth', deltaLabel(r.growthPct, { since: null, unit: '%' })],
@@ -533,7 +534,7 @@ export default function Financials() {
             reading order, so a screen reader announced the screen and then
             offered the way out of it. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial Checks</Text>
@@ -696,8 +697,8 @@ export default function Financials() {
               figure={fig(r.score)}
               unit="/100"
               note={cur
-                ? `Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${r.marginPct.toFixed(0)}% margin`
-                : `Grade ${r.grade} · a ${r.marginPct.toFixed(0)}% net margin. The amounts are not written here because this gym has not set its currency.`}
+                ? `Grade ${r.grade} · ${money(r.netProfit)} net profit on a ${num(r.marginPct)}% margin`
+                : `Grade ${r.grade} · a ${num(r.marginPct)}% net margin. The amounts are not written here because this gym has not set its currency.`}
               arc={r.score / 100}
               arcLabel="health score"
             />

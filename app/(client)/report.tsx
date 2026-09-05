@@ -20,7 +20,7 @@
 // in the unit the account reads in. Body fat does not: it is a percentage, and
 // a percentage does not have a unit system.
 import { View, Text, ScrollView } from 'react-native';
-import { num } from '../../src/lib/format';
+import { num, num1 } from '../../src/lib/format';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -52,6 +52,7 @@ import { isWhole } from '../../src/ui/loadStatus';
 // The day this screen judges against, kept live across midnight. See the
 // note at `useNow()` below.
 import { useNow } from '../../src/ui/today';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function WeeklyReport() {
   const t = useTheme();
@@ -199,7 +200,7 @@ export default function WeeklyReport() {
     // this app cannot count sessions: see the note on `WeekStats.days` in
     // src/lib/streaks.ts for the production rows that settle it.
     trainingWhole ? `Trained on ${wk.days} day(s) this week.` : '',
-    trainingWhole ? `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${num(wk.kcal)} kcal.` : '',
+    trainingWhole ? `Volume ${num1(wk.volumeKg / 1000)} tonnes, ~${num(wk.kcal)} kcal.` : '',
     // Said to the model too, for the same reason the caveats above and below
     // are: the fact lines are its only source, so a tonnage handed over bare is
     // one it will describe as the whole of their week's work.
@@ -258,7 +259,7 @@ export default function WeeklyReport() {
     // underneath the KPI row says which sets are missing and why.
     else if (wk.days > 0) bits.push(volNote
       ? `You trained on ${wk.days} day${wk.days === 1 ? '' : 's'} this week.`
-      : `You trained on ${wk.days} day${wk.days === 1 ? '' : 's'} this week, moving ${(wk.volumeKg / 1000).toFixed(1)} tonnes of volume.`);
+      : `You trained on ${wk.days} day${wk.days === 1 ? '' : 's'} this week, moving ${num1(wk.volumeKg / 1000)} tonnes of volume.`);
     else bits.push('No logged workouts this week — a fresh chance to get one on the board.');
     if (trainingWhole && streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'} — keep it alive.`);
     // Gated on the CONVERTED change: a fifth of a kilogram is under half a
@@ -404,7 +405,7 @@ export default function WeeklyReport() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>{c.name ? `${c.name.split(' ')[0]} · ${range}` : range}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Weekly Report</Text>
@@ -447,7 +448,7 @@ export default function WeeklyReport() {
             // src/lib/units.ts does not define and which differs from a tonne
             // by 10% — close enough to be mistaken for the same number and
             // wrong enough to matter. A tonne of bar work is understood.
-            { label: 'Volume', value: `${(wk.volumeKg / 1000).toFixed(1)}`, unit: 't', delta: `${wk.kcal.toLocaleString()} kcal` },
+            { label: 'Volume', value: num1(wk.volumeKg / 1000), unit: 't', delta: `${wk.kcal.toLocaleString()} kcal` },
             { label: 'Streak', value: `${streak}`, unit: streak === 1 ? 'day' : 'days', delta: streak > 0 ? 'running' : 'not started', good: streak > 0 },
             // ── the board this count is taken over needs TWO reads ────────
             //

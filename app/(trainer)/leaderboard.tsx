@@ -45,6 +45,7 @@ import { useRoster } from '../../src/ui/roster';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Leaderboard() {
   // The COACH's unit, not the client's. This screen is read by the coach.
@@ -127,7 +128,7 @@ export default function Leaderboard() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your roster</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Leaderboard</Text>

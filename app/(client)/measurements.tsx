@@ -40,7 +40,7 @@ import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote 
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
 import { useClientData } from '../../src/ui/clientData';
 import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
-import { END_ALIGN } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 // Which tape sites a goal has an opinion about. A waist and a hip measurement
 // follow the fat, so Fat Loss and Tone want them down; a chest, an arm and a
@@ -200,7 +200,7 @@ export default function Measurements() {
     <Text style={{ ...ty.micro, color: t.ink3 }}>Tape measurements in {lu}</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Body Measurements</Text>
    </View>
-   <Ghost icon="back" onPress={() => router.back()} />
+   <Ghost icon={BACK_ICON} onPress={() => router.back()} />
   </View>
 
   {/* ── the hero: waist, when there is one ──────────────────────────── */}

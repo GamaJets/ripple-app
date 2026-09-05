@@ -84,6 +84,7 @@ import { Fetched, useFetched } from '@/components/Fetched';
 import { toCsv } from '@lib/gymExport';
 import { saveText } from '@/lib/save';
 import { Banner } from '@/components/Banner';
+import { num1 } from '@/lib/num';
 
 const EMPTY: CloseRecord = {
   payments: sliceLoading(),
@@ -1418,7 +1419,7 @@ function Reconciliation({ c, rec }: { c: MonthClose; rec: CloseRecord }) {
             </p>
             {c.check.gapCents != null && c.check.r.state === 'differs' ? (
               <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--ink3)' }}>
-                The difference is {(c.check.r.driftPct! * 100).toFixed(1)}% of what the
+                The difference is {num1(c.check.r.driftPct! * 100)}% of what the
                 register expected. It is shown, not absorbed: no figure on this page
                 has been adjusted to make the two agree.
               </p>

@@ -65,6 +65,7 @@ import { goalOfKind, goalOnBody } from '../../src/lib/goalOnBody';
 import { Rule, Section, SectionHead, Ghost, Notice, Spark } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, type as ty, numeric, value } from '../../src/theme/scale';
+import { BACK_ICON } from '../../src/ui/direction';
 
 interface MetricDef {
   key: string; label: string; unit: string; better: 'up' | 'down';
@@ -169,7 +170,7 @@ export default function BodyTrends() {
             </Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Composition Trends</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         {/* Said once, at the top, and only when the figures below genuinely do

@@ -31,6 +31,8 @@ import { gradeLift } from '../../src/lib/strengthLevel';
 import { STRENGTH_LIFTS, countsFor } from '../../src/lib/strengthLifts';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { BACK_ICON } from '../../src/ui/direction';
+import { num2 } from '../../src/lib/format';
 
 const LEVELS = ['Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
 
@@ -120,7 +122,7 @@ export default function Standards() {
     <Text style={{ ...ty.micro, color: t.ink3 }}>Best lifts vs bodyweight · approximate</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Strength Standards</Text>
    </View>
-   <Ghost icon="back" onPress={() => router.back()} />
+   <Ghost icon={BACK_ICON} onPress={() => router.back()} />
   </View>
 
   <Rule />
@@ -149,7 +151,7 @@ export default function Standards() {
             a real lift is not a small multiple, it is a missing bodyweight
             wearing the clothes of one. */}
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginStart: 4 }}>
-         {wu}{grade.kind === 'graded' ? ` · ${grade.ratio.toFixed(2)}×` : ''}
+         {wu}{grade.kind === 'graded' ? ` · ${num2(grade.ratio)}×` : ''}
         </Text>
        </View>
       ) : (

@@ -87,6 +87,8 @@
  * written before the set, and prescribing an RPE of 2 is prescribing nothing.
  * `feel` in src/lib/mockData.ts is the post-hoc side and has its own vocabulary.
  */
+import { numUpTo } from './format';
+
 export const RPE_MIN = 6;
 
 /** Ten is the top of the scale by definition: no further rep was possible. */
@@ -181,7 +183,7 @@ export function rpeMeaning(rpe: number | null | undefined): string | null {
   if (left <= 0) return 'no further rep was possible';
   if (left < 1) return 'about half a rep left';
   if (left === 1) return 'one rep left';
-  return `about ${left % 1 === 0 ? left : left.toFixed(1)} reps left`;
+  return `about ${numUpTo(left, 1)} reps left`;
 }
 
 /* ── %1RM ─────────────────────────────────────────────────────────────────── */

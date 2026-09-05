@@ -93,6 +93,7 @@ import {
   openInAppBrowser, IN_APP_BROWSER_UNAVAILABLE_NOTE,
 } from '../../src/ui/nativeModules';
 import { injuryDocKind, injuryDocRoute, OPENS_IN_APP_NOTE } from '../../src/lib/injuryDocView';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const SEVS: { id: InjurySeverity; label: string }[] = [
   { id: 'mild', label: 'Mild' }, { id: 'moderate', label: 'Moderate' }, { id: 'severe', label: 'Severe' },
@@ -442,7 +443,7 @@ export default function InjuryDoc() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Injuries</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Read a Document</Text>

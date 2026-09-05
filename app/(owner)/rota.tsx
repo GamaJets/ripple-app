@@ -43,7 +43,8 @@ import {
 import { rotaClock, rotaTimeLabel } from '../../src/lib/rotaClock';
 import { fetchGymZone } from '../../src/lib/gymZone';
 import { calendarDateText } from '../../src/lib/gymWhen';
-import { BACK_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { numUpTo } from '../../src/lib/format';
 
 const ROLES: { key: ShiftRole; label: string }[] = [
   { key: 'floor', label: 'Floor' },
@@ -76,7 +77,7 @@ function dayLabel(dateIso: string, long = false): string {
 /** Hours as a figure a human reads — 7.5 stays 7.5, 8 does not become 8.0. */
 function hrs(n: number | null): string | null {
   if (n == null) return null;
-  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  return numUpTo(n, 1);
 }
 
 /**
@@ -357,7 +358,7 @@ export default function OwnerRota() {
 
         {/* ── the week being read ────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-          <Ghost icon="back" a11yLabel="Previous week" onPress={() => setWeek((w) => shiftWeek(w, -1))} />
+          <Ghost icon={BACK_ICON} a11yLabel="Previous week" onPress={() => setWeek((w) => shiftWeek(w, -1))} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
               {dayLabel(days[0] ?? week)} – {dayLabel(days[6] ?? week)}
@@ -367,7 +368,7 @@ export default function OwnerRota() {
             </Text>
           </View>
           {week !== thisWeek ? <Ghost label="Today" onPress={() => setWeek(thisWeek)} /> : null}
-          <Ghost icon="chevron" a11yLabel="Next week" onPress={() => setWeek((w) => shiftWeek(w, 1))} />
+          <Ghost icon={FORWARD_ICON} a11yLabel="Next week" onPress={() => setWeek((w) => shiftWeek(w, 1))} />
         </View>
 
         {/* Whose clock every time and every column on this screen is drawn on.

@@ -125,6 +125,8 @@ import {
 } from '../../src/lib/planVsActual';
 import { historyBoard, historyLine, blockSpanLine } from '../../src/lib/programHistory';
 import { reviewProgram, checksLine, type Finding } from '../../src/lib/programReview';
+import { BACK_ICON } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 // Written out here, on one line, rather than imported from the library beside
 // the logic that consumes them. scripts/check-schema.mjs resolves a select list
@@ -172,6 +174,10 @@ const CHIP_SHORT: Record<Attribution, string> = {
 
 export default function ClientTraining() {
   const t = useTheme();
+  // Movement names on this screen come out of the client's LOG and out of the
+  // programme JSON, both of which store the English identity. A German coach
+  // reads the library in German and read this screen in English.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const r = useRoster();
   // Whose id "You logged it" is allowed to mean. Null while the session is
@@ -629,7 +635,7 @@ export default function ClientTraining() {
     return (
       <View key={`${e.id ?? e.exercise}-${i}`}
         style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.exercise}</Text>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(e.exercise)}</Text>
         {lifted ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{lifted}</Text> : null}
         {cardio ? <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>{cardio}</Text> : null}
         {!lifted && !cardio ? (
@@ -758,7 +764,7 @@ export default function ClientTraining() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>{fullName || 'Your book'}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Their Training</Text>
@@ -927,7 +933,7 @@ export default function ClientTraining() {
                             <Text style={{ ...ty.label, width: 14, color: m.coverage === 'logged' ? t.good : m.coverage === 'not-logged' ? t.warn : t.ink3 }}>
                               {m.coverage === 'logged' ? '\u2713' : m.coverage === 'not-logged' ? '\u00b7' : '?'}
                             </Text>
-                            <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{m.name}</Text>
+                            <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{movement(m.name)}</Text>
                             <Text style={{ ...ty.caption, color: t.ink3 }}>
                               {m.coverage === 'logged'
                                 ? `logged ${m.daysLogged} day${m.daysLogged === 1 ? '' : 's'}`
@@ -967,7 +973,7 @@ export default function ClientTraining() {
                                   : lc.verdict === 'under' ? t.warn
                                   : lc.verdict === 'over' ? t.brand : t.ring,
                               }} />
-                              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>{m.name}</Text>
+                              <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }} numberOfLines={1}>{movement(m.name)}</Text>
                               <Text style={{ ...ty.caption, color: t.ink3 }}>
                                 {did ? `${wrote} prescribed, ${did} logged` : `${wrote} prescribed, nothing logged`}
                               </Text>
@@ -1171,7 +1177,10 @@ export default function ClientTraining() {
                                 <View style={{ height: 3, borderRadius: 2, width: `${most ? Math.round((g.sets / most) * 100) : 0}%`, backgroundColor: t.brand }} />
                               </View>
                               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-                                {g.exercises.slice(0, 3).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
+                                {/* Names in the reader's language, joined in the
+                                    sentence's — see the same note in
+                                    app/(client)/history.tsx. */}
+                                {g.exercises.slice(0, 3).map(movement).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
                               </Text>
                             </View>
                           );

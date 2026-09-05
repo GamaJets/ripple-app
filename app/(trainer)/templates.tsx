@@ -68,6 +68,7 @@ import {
 import { assignCtaLabel } from '../../src/lib/assignPicker';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import type { Injury } from '../../src/lib/injuries';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Templates() {
   const t = useTheme();
@@ -306,7 +307,7 @@ export default function Templates() {
             and there is no other way back from here. See the same correction
             in src/ui/FeedbackScreen.tsx. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your library</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Templates</Text>

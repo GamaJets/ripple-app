@@ -147,6 +147,7 @@ import {
   chooseInstagramPage, connectInstagram, disconnectInstagram, publishCardToInstagram,
   useMyInstagram, type PageChoice,
 } from '../../src/ui/instagram';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** How far back "my week" looks. Two spans, because a quiet week is a real
  *  thing and a coach should be able to widen the window rather than be told
@@ -708,7 +709,7 @@ export default function ShareKit() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Marketing</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share Kit</Text>

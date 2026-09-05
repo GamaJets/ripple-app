@@ -30,6 +30,7 @@ import { useSettings } from '../../src/ui/settings';
 import { scheduleLocal } from '../../src/ui/pushNotifications';
 import type { GymClass } from '../../src/lib/classesMock';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
+import { BACK_ICON } from '../../src/ui/direction';
 
 // The weekday name and the date order were this file's own. `DOW` was a
 // hardcoded English array and the fallback read `${d.getDate()}/${d.getMonth() + 1}`,
@@ -211,7 +212,7 @@ export default function Classes() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick your location and book a spot. Full classes have a waitlist.</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         {/* The other half of the same subject, and the half the member has never

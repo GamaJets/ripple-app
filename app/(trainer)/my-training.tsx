@@ -50,6 +50,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, Notice, PartialRead, Field, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { exerciseSlug } from '../../src/lib/exerciseId';
@@ -69,6 +70,7 @@ import { num } from '../../src/lib/format';
 import { localDate } from '../../src/lib/localDate';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { appLocale } from '../../src/lib/locale';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** How many days back "Recent" reaches. Beyond a fortnight this stops being a
  *  log a coach reads and starts being a history screen, which is not what this
@@ -326,6 +328,9 @@ export default function MyTraining() {
   // been taken, and leaving it there just covers the form.
 
   const cat = useExerciseCatalogue();
+  // The coach's OWN logged rows carry the English name — the same identity a
+  // client's log carries. Read in their language, written in the catalogue's.
+  const { textOf: movement } = useMovementName();
   // Two reads: the trainer's own workout log, and the movement catalogue the
   // name suggestions are drawn from. The log is the point — a session logged
   // on another handset is the thing this screen is missing.
@@ -363,7 +368,7 @@ export default function MyTraining() {
     return (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
         <View style={{ flex: 1 }}>
-          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.exercise}</Text>
+          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(e.exercise)}</Text>
           {/* No line rather than an invented one. A cardio row carries no sets,
               and "0 × 0" would be a session nobody did. */}
           {line ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{line}</Text> : null}
@@ -385,7 +390,7 @@ export default function MyTraining() {
 
           {/* ── header. Whose log this is, said before anything else ─────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-            <Ghost icon="back" onPress={() => router.back()} />
+            <Ghost icon={BACK_ICON} onPress={() => router.back()} />
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Your own log, not a client&rsquo;s</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>My Training</Text>
@@ -487,12 +492,17 @@ export default function MyTraining() {
             {exSuggestions.length ? (
               <View style={{ marginBottom: sp.sm, backgroundColor: t.surface, borderRadius: radius.sm, overflow: 'hidden' }}>
                 {exSuggestions.map((r: CatalogueRow, i: number) => (
+                  // The row READS in the coach's own language and WRITES the
+                  // English name. `r.name` is the identity — it is what
+                  // exercises.id is the slug of and what a logged set is
+                  // stored under — so onPress keeps it and only the two
+                  // strings a person sees move to `display`.
                   <Pressable key={r.id} onPress={() => setExercise(r.name)}
-                    accessibilityRole="button" accessibilityLabel={`Use ${r.name}`}
+                    accessibilityRole="button" accessibilityLabel={`Use ${r.display.text}`}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: sp.md, paddingVertical: sp.sm,
                       borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                     <ExerciseThumb uri={thumbFor(r)} t={t} size={34} />
-                    <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{r.name}</Text>
+                    <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{r.display.text}</Text>
                     {r.group ? <Text style={{ ...ty.caption, color: t.ink3 }}>{r.group}</Text> : null}
                   </Pressable>
                 ))}

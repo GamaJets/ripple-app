@@ -35,6 +35,7 @@ import { weightDeltaIn } from '../../src/lib/units';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, type as ty } from '../../src/theme/scale';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Social() {
  const t = useTheme();
@@ -103,7 +104,7 @@ export default function Social() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon="back" onPress={() => router.back()} />
+ <Ghost icon={BACK_ICON} onPress={() => router.back()} />
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.micro, color: t.ink3 }}>Your story, your call</Text>
  <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share</Text>

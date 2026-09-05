@@ -203,6 +203,34 @@ eq(matchExercises(index, 'bench press').length, 1,
 eq(matchExercises(index, '').length, 3, 'an empty box is not a filter');
 eq(matchExercises(index, 'deadlift').length, 0, 'a movement nobody has done returns nothing rather than everything');
 
+/* ── the SHOWN name is searchable too ─────────────────────────────────────
+ *
+ * A log row stores the English name, because English is the identity — it is
+ * what `exercises.id` is the slug of. The list on screen shows the reader's own
+ * language where the catalogue has it. Matching only the stored name answered
+ * "Nothing logged matches that" about a movement that was on screen a second
+ * earlier; matching only the shown one would lose every coach and every member
+ * who learned the movement as "Bench Press" and types that. Both, therefore —
+ * the same rule `matchesSearch` in src/lib/catalogueLocale.ts already applies
+ * to the catalogue itself.
+ */
+const german = (e: { name: string }) =>
+  e.name.toUpperCase() === 'BENCH PRESS' ? 'Bankdrücken' : null;
+eq(matchExercises(index, 'Bankdrücken', german).length, 1,
+  'a German member finds the movement by the name they are reading');
+eq(matchExercises(index, 'Bankdrücken', german)[0]?.name, 'BENCH PRESS',
+  'and what comes back is still keyed by the English identity');
+eq(matchExercises(index, 'bench', german).length, 1,
+  'while the English name goes on working, which is what a coach types');
+eq(matchExercises(index, 'Bankdrücken').length, 0,
+  'with no resolver, nothing has changed: the translated name is not searchable');
+eq(matchExercises(index, 'deadlift', german).length, 0,
+  'and a resolver does not widen a query into a movement nobody has done');
+eq(matchExercises(index, '', german).length, 3, 'an empty box is still not a filter');
+eq(matchExercises(index, 'squat', () => null).length,
+  matchExercises(index, 'squat').length,
+  'a resolver that knows no translation is the same as no resolver at all');
+
 /* ── 5 · what a failed and a truncated read may say ───────────────────────── */
 
 const trail = exerciseOutings([

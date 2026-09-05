@@ -64,6 +64,7 @@ import {
 import {
   HAS_NATIVE_DOCUMENT_PICKER, DOCUMENT_PICKER_UNAVAILABLE_NOTE, pickDocument,
 } from '../../src/ui/nativeModules';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const BUCKET = 'coach-docs';
 /** Long enough to read a waiver, short enough that a leaked link is stale. */
@@ -453,7 +454,7 @@ export default function CoachDocumentsScreen() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your paperwork</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Documents</Text>

@@ -34,7 +34,8 @@ import type { WorkoutEntry } from '../../src/lib/mockData';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/hr';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
-import { FORWARD_ICON, turn } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON, turn } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
@@ -74,6 +75,10 @@ function timeLabel(iso: string) {
 
 export default function Activity() {
   const t = useTheme();
+  // "Logged Barbell Back Squat" in a German member's own feed, under a library
+  // that calls the same movement Kniebeuge. The stored `e.exercise` is the
+  // identity and is untouched; only the sentence moves.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const [open, setOpen] = useState<number | null>(null);
   const [hrFor, setHrFor] = useState<{ title: string; startISO: string; durationMin: number } | null>(null);
@@ -170,9 +175,9 @@ export default function Activity() {
       // is what the app does everywhere else it has no figure.
       const mins = typeof e.sessionMins === 'number' && Number.isFinite(e.sessionMins) && e.sessionMins > 0
         ? Math.round(e.sessionMins) : null;
-      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${e.exercise}` : `Logged ${e.exercise}`, sub: e.sets.map((_s, i) => setText(e, i)).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: mins == null ? undefined : { title: e.exercise, startISO: e.t, durationMin: mins } });
+      events.push({ at: e.t, icon: pr ? 'trophy' : 'dumbbell', title: pr ? `New PR — ${movement(e.exercise)}` : `Logged ${movement(e.exercise)}`, sub: e.sets.map((_s, i) => setText(e, i)).join(' · '), route: pr ? '/(client)/records' : '/(client)/trends', hr: mins == null ? undefined : { title: movement(e.exercise), startISO: e.t, durationMin: mins } });
     } else if (e.cardio) {
-      events.push({ at: e.t, icon: 'heart', title: `Logged ${e.exercise}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: e.cardio.mins > 0 ? { title: e.exercise, startISO: e.t, durationMin: e.cardio.mins } : undefined });
+      events.push({ at: e.t, icon: 'heart', title: `Logged ${movement(e.exercise)}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: e.cardio.mins > 0 ? { title: movement(e.exercise), startISO: e.t, durationMin: e.cardio.mins } : undefined });
     }
   }
   // Streak milestone (as of now), off the ONE streak figure — see
@@ -216,7 +221,7 @@ export default function Activity() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Everything across your training</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Activity</Text>

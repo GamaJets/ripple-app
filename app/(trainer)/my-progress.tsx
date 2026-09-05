@@ -86,7 +86,7 @@ import { agoLabel, dayLabel, shortDayLabel, daysBetween, STALE_AFTER_DAYS } from
 import { useToday } from '../../src/ui/today';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { num1 } from '../../src/lib/format';
-import { END_ALIGN } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 // The range a human weighs, in the kilograms this app stores. Metric because
 // the record is metric; the bounds are converted for whichever unit the coach
@@ -414,7 +414,7 @@ export default function MyProgress() {
 
           {/* ── header. Whose body this is, said before anything else ─────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-            <Ghost icon="back" onPress={() => router.back()} />
+            <Ghost icon={BACK_ICON} onPress={() => router.back()} />
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Your own body, not a client&rsquo;s</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>My Progress</Text>

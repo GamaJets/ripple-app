@@ -77,6 +77,7 @@ import {
 import { worstStatus } from '../../src/ui/loadStatus';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const DASH = '—';
 
@@ -232,7 +233,7 @@ export default function TrainerAdSpend() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What your ads cost</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Ad Spend</Text>

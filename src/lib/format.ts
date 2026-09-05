@@ -310,3 +310,42 @@ export function num1(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—';
   return n.toLocaleString(appLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
+
+/**
+ * The same, keeping two — for a rate, a ratio or a multiple, where the
+ * hundredth is what distinguishes one answer from the next.
+ *
+ * The sites this was written for all read `x.toFixed(2)`, and `toFixed` is not
+ * a formatter: it is `Number.prototype`'s own decimal spelling and it writes a
+ * FULL STOP in every locale there has ever been. So a coach in Berlin read
+ * "0.25 kg/wk" on the goal pace line and "1,204.5 kg" from `num1` four lines
+ * above it — two different decimal separators, in the same paragraph, both
+ * printed by this app. In German the first of those is not a quarter of a
+ * kilogram; a full stop is the THOUSANDS separator, so a slow cut reads as
+ * twenty-five kilograms a week to anybody who parses it the way their own
+ * language taught them.
+ */
+export function num2(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return n.toLocaleString(appLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * A figure with AT MOST `places` decimals — trailing zeros dropped.
+ *
+ * The difference from `num1`/`num2` is whether a whole number is allowed to
+ * look whole. "8 hours" and "1 serving" are right; "8.0 hours" and "1.00
+ * servings" read as a machine talking. Two screens wrote this by hand as
+ * `.toFixed(2).replace(/0$/, '').replace(/\.$/, '')`, which is both an English
+ * decimal point and a trim that cannot find a comma — so on a German handset
+ * the trim silently stopped working as well as the point being wrong.
+ *
+ * `places` is clamped to Intl's own 0-20 range rather than trusted, because the
+ * constructor throws a RangeError outside it and a throw inside a formatter
+ * takes out whichever screen was drawing a figure.
+ */
+export function numUpTo(n: number | null | undefined, places: number): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  const dp = Math.min(20, Math.max(0, Math.trunc(places) || 0));
+  return n.toLocaleString(appLocale(), { maximumFractionDigits: dp });
+}

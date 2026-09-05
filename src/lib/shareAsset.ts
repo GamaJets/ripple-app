@@ -72,6 +72,7 @@
 //    gym name and a graphic with half a word hanging off it.
 
 import { mayPublishPhoto, type PublishConsent } from './photoPublish';
+import { numUpTo } from './format';
 
 /* ── canvas sizes ──────────────────────────────────────────────────────────── */
 
@@ -384,7 +385,7 @@ export function hoursLabel(minutes: number): string {
   if (minutes < 60) return `${Math.round(minutes)} min`;
   const h = minutes / 60;
   const rounded = Math.round(h * 10) / 10;
-  return Number.isInteger(rounded) ? `${rounded} hrs` : `${rounded.toFixed(1)} hrs`;
+  return `${numUpTo(rounded, 1)} hrs`;
 }
 
 /* ── the week card ─────────────────────────────────────────────────────────── */

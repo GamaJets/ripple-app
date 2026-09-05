@@ -54,6 +54,7 @@ import { readByIds } from '@lib/idLookup';
 import { sumTaken, combineTaken, minorMoney, type Taken } from '@lib/coachMoney';
 import { Banner } from '@/components/Banner';
 import { Fetched, useFetched } from '@/components/Fetched';
+import { num1 } from '@/lib/num';
 
 /** The cash window. Ninety days is a quarter: long enough that a month with one
  *  odd week does not read as a trend, short enough to still be this year's gym. */
@@ -1359,7 +1360,7 @@ function totalOf(rows: { amountCents: number | null; currency: string | null }[]
  */
 function share(part: number | null, whole: number | null): string | null {
   if (part == null || whole == null || whole === 0) return null;
-  return `${((part / whole) * 100).toFixed(1)}%`;
+  return `${num1((part / whole) * 100)}%`;
 }
 
 /** Did this membership cover the day the money arrived? Plain ISO date strings,

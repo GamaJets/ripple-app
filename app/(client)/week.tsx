@@ -29,7 +29,7 @@ import { useClientWeek } from '../../src/ui/clientWeek';
 import { clientWeekLine } from '../../src/lib/clientBlock';
 import { weekLabel } from '../../src/lib/programBlock';
 import { WEEK_DAYS, jsDayForIndex, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 // Which of the movements the plan names have actually appeared in the log.
 // `planVsActual` has done this arithmetic since it was written and its only
 // reader was the coach's client-training screen; `myPlanWeek` is the member's
@@ -173,7 +173,7 @@ export default function ThisWeek() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }} numberOfLines={1}>{program.title}{coachProgram ? ' · coach plan' : ''}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>This Week</Text>

@@ -24,6 +24,7 @@ import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import type { LoadStatus } from '../../src/ui/loadStatus';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * The ceiling `my_promo_redemptions()` takes, mirrored so a read that came back
@@ -150,7 +151,7 @@ export default function Offers() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Membership</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Offers</Text>

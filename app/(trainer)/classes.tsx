@@ -77,6 +77,7 @@ import { classOffConfirmation } from '../../src/lib/notifyCopy';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { tellTheCancelledRoom } from '../../src/lib/classOff';
 import { supabase } from '../../src/lib/supabase';
+import { BACK_ICON } from '../../src/ui/direction';
 
 // The weekday name, the date order and the clock were all this file's own, and
 // all three were English and British. `DOW` was a hardcoded array; the fallback
@@ -630,7 +631,7 @@ export default function TrainerClasses() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your branches</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes</Text>

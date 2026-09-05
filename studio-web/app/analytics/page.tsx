@@ -105,6 +105,7 @@ import { readAll } from '@lib/rowCap';
 // rule one level down ('gbp', ' GBP ' and 'GBP' are one currency, '' and null
 // are one silence) and is what the payments are grouped by instead.
 import { money, normaliseCurrency } from '@lib/gymRecord';
+import { num1 } from '@/lib/num';
 
 const DAY = 86400000;
 
@@ -620,7 +621,7 @@ export default function Analytics() {
         key: b.key, label: b.label, members, share,
         note: share != null ? ''
           : roster.length === 0 ? 'no active membership on the books'
-            : `${roster.length} active member${roster.length === 1 ? '' : 's'} — one is worth ${p == null ? '—' : p.toFixed(1)} points`,
+            : `${roster.length} active member${roster.length === 1 ? '' : 's'} — one is worth ${num1(p)} points`,
       };
     });
   }, [visitsCounted, doorNote, memberships.state, roster, visitsByMember]);
@@ -753,7 +754,7 @@ export default function Analytics() {
         />
         <Kpi
           label="Visits per member · 30 days"
-          text={avgVisits == null ? null : avgVisits.toFixed(1)}
+          text={avgVisits == null ? null : num1(avgVisits)}
           note={avgNote}
         />
         <Kpi
@@ -1112,7 +1113,7 @@ function Joiners({ months, state, undatedJoins }: {
     { key: 'churn', header: 'Churn', value: (m) => m.churn, numeric: true,
       render: (m) => m.churn == null
         ? <span className="dash">— {m.churnNote}</span>
-        : <span>{(m.churn * 100).toFixed(1)}%</span> },
+        : <span>{num1(m.churn * 100)}%</span> },
   ];
 
   return (
@@ -1277,7 +1278,7 @@ function retention(
     // Nothing is withheld by saying so plainly instead.
     note: p == null
       ? 'nobody joined in this month'
-      : `${c.total} member${c.total === 1 ? '' : 's'} — one is worth ${p.toFixed(1)} points`,
+      : `${c.total} member${c.total === 1 ? '' : 's'} — one is worth ${num1(p)} points`,
   };
 }
 

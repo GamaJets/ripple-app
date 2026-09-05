@@ -50,6 +50,7 @@ import { departureSectionNote } from '../lib/departureSection';
 import { isWhole, type LoadStatus } from './loadStatus';
 import { appLocale } from '../lib/locale';
 import { num } from '../lib/format';
+import { BACK_ICON } from './direction';
 
 /* ── the sheet ─────────────────────────────────────────────────────────────── */
 
@@ -114,7 +115,7 @@ export function EndReasonSheet({
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={onCancel} a11yLabel="Close without recording anything" />
+          <Ghost icon={BACK_ICON} onPress={onCancel} a11yLabel="Close without recording anything" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>{heading}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>{name}</Text>

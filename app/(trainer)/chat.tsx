@@ -63,6 +63,7 @@ import {
   blockActionLabel, blockConfirm, blockedComposerNote, canSendInto, unblockConfirm,
   reportFiledLine, REPORT_EXPLAINER, REPORT_OPTIONS, type ReportCategory,
 } from '../../src/lib/threadSafety';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** The clip itself, in its own component so the player hook receives a settled
  *  URL — a signature arrives asynchronously and a hook cannot wait for one. */
@@ -350,7 +351,7 @@ export default function CoachChat() {
 
       {/* ── header ───────────────────────────────────────────────────────── */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
-        <Ghost icon="back" onPress={() => router.back()} />
+        <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         {/* The client's face, read for the CLIENT's id via
             `profiles_trainer_read` and from nowhere else. On the roster path the
             hook is handed no id and does no work, so there is nothing to draw

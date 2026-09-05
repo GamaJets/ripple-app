@@ -42,6 +42,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Card, Ghost, ListRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { shareSessionNatively } from '../../src/lib/social';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function ShareSessionClip() {
   const t = useTheme();
@@ -76,7 +77,7 @@ export default function ShareSessionClip() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Marketing</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share a Session</Text>

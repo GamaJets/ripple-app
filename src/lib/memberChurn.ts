@@ -36,6 +36,7 @@
 // messiest records. Both halves are drawn from the same population here.
 import { monthWindow, recentMonths, monthEnded, type MonthWindow } from './monthEnd';
 import { rateOf, pointsPerMember, monthOfDate } from './gymRetention';
+import { num1 } from './format';
 
 /**
  * The one membership field set this module reads.
@@ -228,7 +229,7 @@ export function churnMonths(
       churn = rateOf(churnable, opening);
       if (churn == null) {
         const p = pointsPerMember(opening);
-        churnNote = `${opening} on the books — one leaver would move it ${p == null ? '—' : p.toFixed(1)} points`;
+        churnNote = `${opening} on the books — one leaver would move it ${num1(p)} points`;
       }
     }
 

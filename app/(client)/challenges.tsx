@@ -49,7 +49,7 @@ import {
 import { notifySuccess } from '../../src/ui/haptics';
 // This sentence sits where the Join/Leave control was, at the trailing edge of
 // the row, so it follows the reading direction rather than a physical side.
-import { END_ALIGN } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 const EMPTY_BOARD: BoardResult = { rows: [], status: 'loading', message: null };
 
@@ -120,7 +120,7 @@ export default function Challenges() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>You, and everyone else in it</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Challenges</Text>

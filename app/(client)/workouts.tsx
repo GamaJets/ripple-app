@@ -148,6 +148,7 @@ import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, read
 import { distanceUnitFor, distanceUnitName, type DistanceUnit } from '../../src/lib/distance';
 import { WEEK_DAYS, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 import { BACK_ICON, FORWARD_ARROW, FORWARD_ICON, turn } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 /** The day strip and the month sheet's column heads, in the order
  *  src/lib/weekStart.ts draws a week. Both are on this screen, and before this
@@ -928,6 +929,22 @@ export default function Train() {
   const injHiddenSet = new Set(injHidden);
   const isInjHidden = (e: ProgramExercise) => injHiddenSet.has(uid(e)) && !injRevealed.includes(uid(e));
   const nameOf = (e: ProgramExercise) => swaps[uid(e)] || injAutoMap[uid(e)] || e.name;
+  // ── the name to READ, which is not the name to WRITE ────────────────────
+  //
+  // `nameOf` is the identity: it is the route parameter the exercise screen is
+  // opened with, the key `suggestForExercise` and `priorBest1RM` look a record
+  // up by, and the string written into `exercise` on every set this screen
+  // logs. It must stay English, because English is what `exercises.id` is the
+  // slug of.
+  //
+  // `shownName` is the same movement in the reader's own language. A German
+  // member browsing the Library read "Kniebeuge" and then opened the workout
+  // they were about to do, where the same movement said "Barbell Back Squat" —
+  // the app translating the catalogue it browses and not the one it trains
+  // from. Every site below that a person READS or HEARS goes through this one;
+  // every site that identifies a movement still goes through `nameOf`.
+  const { textOf: movement } = useMovementName();
+  const shownName = (e: ProgramExercise) => movement(nameOf(e));
   // Progress-photo focus areas bubble matching muscle groups to the top of today.
   //
   // Sorted in BLOCKS, not in exercises. A superset is a run of neighbours
@@ -1033,14 +1050,14 @@ export default function Train() {
     const putBack = () => setPendingRemoval((ids) => ids.filter((x) => x !== key));
     toast.remove({
       id: key,
-      text: `${l.exercise} removed from your log.`,
+      text: `${movement(l.exercise)} removed from your log.`,
       onUndo: putBack,
       onCommit: async () => {
         if (!(await removeWorkout(l))) {
           // Still an alert, and deliberately: this one says the log is not
           // what the screen just showed, and the entry is back on it.
           putBack();
-          Alert.alert('Not deleted', `${l.exercise} is still in your log — we could not reach the server to remove it.`);
+          Alert.alert('Not deleted', `${movement(l.exercise)} is still in your log — we could not reach the server to remove it.`);
         }
       },
     });
@@ -1076,7 +1093,7 @@ export default function Train() {
     const _u = uid(e);
     const hasSets = (logged[_u] || []).length > 0;
     Alert.alert(
-      'Remove ' + nameOf(e) + '?',
+      'Remove ' + shownName(e) + '?',
       hasSets
         ? 'It comes off today, and the sets you logged against it are discarded.'
         : 'It comes off today only. The rest of your programme is unchanged.',
@@ -1760,7 +1777,7 @@ export default function Train() {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                         <Icon name="heart" size={15} color={t.crit} />
                         <View style={{ flex: 1 }}>
-                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, textDecorationLine: 'line-through' }} numberOfLines={1}>{e.name}</Text>
+                          <Text style={{ ...ty.body, fontWeight: '500', color: t.ink3, textDecorationLine: 'line-through' }} numberOfLines={1}>{movement(e.name)}</Text>
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Hidden to protect your {inj ? areaLabel(inj.injury.area).toLowerCase() : 'injury'} (severe) — no safe swap in your plan.</Text>
                         </View>
                         <Ghost label="Show Anyway" onPress={() => setInjRevealed((prev) => [...prev, _id])} />
@@ -1857,11 +1874,11 @@ export default function Train() {
                           eye; this is the only version a screen reader gets.
                           The group badge is a sibling, above, and is read on its
                           own, so it is not repeated here. */}
-                      <Pressable accessibilityRole="button" accessibilityLabel={(open ? 'Collapse ' : 'Expand ') + nameOf(e) + (meth ? `, ${meth.label.toLowerCase()}` : '')} onPress={() => setExpanded((p) => ({ ...p, [_id]: !open }))} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                      <Pressable accessibilityRole="button" accessibilityLabel={(open ? 'Collapse ' : 'Expand ') + shownName(e) + (meth ? `, ${meth.label.toLowerCase()}` : '')} onPress={() => setExpanded((p) => ({ ...p, [_id]: !open }))} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                         <View style={{ flex: 1 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             {done ? <Icon name="check" size={15} color={t.brand} /> : null}
-                            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{nameOf(e)}</Text>
+                            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{shownName(e)}</Text>
                             {meth ? (
                               <View style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2 }}>
                                 <Text style={{ ...ty.caption, fontWeight: '600', color: t.ink2 }}>{meth.short}</Text>
@@ -1891,7 +1908,7 @@ export default function Train() {
                             <Text style={{ ...ty.caption, ...numeric, color: t.ink2, marginTop: 2 }}>{intOne}</Text>
                           ) : null}
                         </View>
-                        <Pressable accessibilityRole="button" accessibilityLabel={'Remove ' + nameOf(e)} onPress={() => removeExercise(e)} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
+                        <Pressable accessibilityRole="button" accessibilityLabel={'Remove ' + shownName(e)} onPress={() => removeExercise(e)} hitSlop={8} style={{ padding: 4 }}><Icon name="minus" size={16} color={t.ink3} /></Pressable>
                         <View style={{ transform: [{ rotate: turn(open ? 90 : 0) }] }}><Icon name={FORWARD_ICON} size={16} color={t.ink3} /></View>
                       </Pressable>
                       {sets.length > 0 ? (
@@ -1920,11 +1937,11 @@ export default function Train() {
                               the same question its sibling asks. */}
                           <Pressable
                             accessibilityRole="button"
-                            accessibilityLabel={`Clear the sets you logged for ${nameOf(e)}`}
+                            accessibilityLabel={`Clear the sets you logged for ${shownName(e)}`}
                             hitSlop={hitSlopFor(27)}
                             onPress={() => Alert.alert(
                               'Clear these sets?',
-                              `The ${(logged[_id] || []).length} set${(logged[_id] || []).length === 1 ? '' : 's'} you have typed against ${nameOf(e)} today are discarded. Nothing else on your plan changes.`,
+                              `The ${(logged[_id] || []).length} set${(logged[_id] || []).length === 1 ? '' : 's'} you have typed against ${shownName(e)} today are discarded. Nothing else on your plan changes.`,
                               [
                                 { text: 'Keep them', style: 'cancel' },
                                 { text: 'Clear', style: 'destructive', onPress: () => { setLogged((prev) => { const n = { ...prev }; delete n[_id]; return n; }); tapLight(); } },
@@ -1940,7 +1957,7 @@ export default function Train() {
                           {autoFrom ? (
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
                               <Icon name="swap" size={13} color={t.brand} />
-                              <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>Auto-swapped from {e.name} to protect you</Text>
+                              <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>Auto-swapped from {movement(e.name)} to protect you</Text>
                             </View>
                           ) : null}
                           {/* ── what the coach actually wrote, set by set ──
@@ -2048,8 +2065,8 @@ export default function Train() {
                                 {canQuickLog(e) ? (
                                   <Pressable accessibilityRole="button"
                                     accessibilityLabel={prescribedSeconds(e.reps) != null
-                                      ? `Log a ${prescribedSeconds(e.reps)} second hold of ${nameOf(e)}`
-                                      : `Log ${quickReps(e.reps)} reps at ${fig(liftLabel(sug.weight, wu))} of ${nameOf(e)}`}
+                                      ? `Log a ${prescribedSeconds(e.reps)} second hold of ${shownName(e)}`
+                                      : `Log ${quickReps(e.reps)} reps at ${fig(liftLabel(sug.weight, wu))} of ${shownName(e)}`}
                                     onPress={() => quickLog(e)}
                                     style={{ backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 6 }}>
                                     <Text style={{ ...ty.caption, fontWeight: '600', color: t.brand }}>Log this</Text>
@@ -2068,7 +2085,7 @@ export default function Train() {
                                 a clip is recorded against it, so "Kettlebell Windmill" can
                                 genuinely have a demo — hiding the button meant a client
                                 whose coach had filmed exactly that could never reach it. */}
-                            <Pressable accessibilityLabel={'Watch a demonstration of ' + nameOf(e)} accessibilityRole="button" onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: nameOf(e), from: 'clientWorkouts' } })} hitSlop={hitSlopFor(38)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
+                            <Pressable accessibilityLabel={'Watch a demonstration of ' + shownName(e)} accessibilityRole="button" onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: nameOf(e), from: 'clientWorkouts' } })} hitSlop={hitSlopFor(38)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="video" size={15} color={t.ink2} /></Pressable>
                             {/* A pencil on every row. It used to be a pencil
                                 only on exercises the member had typed, and a
                                 SWAP arrow on everything the coach had planned —
@@ -2076,9 +2093,9 @@ export default function Train() {
                                 change the sets, the reps or the load at all.
                                 Swapping the movement is a different intention
                                 and keeps its own button beside this one. */}
-                            <Pressable accessibilityRole="button" accessibilityLabel={'Edit sets, reps and weight for ' + nameOf(e)} onPress={() => openEditFor(e)} hitSlop={hitSlopFor(38)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
+                            <Pressable accessibilityRole="button" accessibilityLabel={'Edit sets, reps and weight for ' + shownName(e)} onPress={() => openEditFor(e)} hitSlop={hitSlopFor(38)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="pencil" size={15} color={flag ? t.s3 : t.ink2} /></Pressable>
                             {!isCustom ? (
-                              <Pressable accessibilityRole="button" accessibilityLabel={'Swap ' + nameOf(e) + ' for another movement'} onPress={() => setSwapFor(e)} hitSlop={hitSlopFor(38)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={t.ink2} /></Pressable>
+                              <Pressable accessibilityRole="button" accessibilityLabel={'Swap ' + shownName(e) + ' for another movement'} onPress={() => setSwapFor(e)} hitSlop={hitSlopFor(38)} style={{ width: 38, height: 38, backgroundColor: t.surface2, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' }}><Icon name="swap" size={15} color={t.ink2} /></Pressable>
                             ) : null}
                           </View>
                           {/* Opened on the hold box for a movement the plan
@@ -2345,7 +2362,7 @@ export default function Train() {
                 {i > 0 ? <Rule /> : null}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{l.exercise}</Text>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }} numberOfLines={1}>{movement(l.exercise)}</Text>
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
                       {/* Through setListLabel: a hold reads as a clock, never as
                           "45×— kg". The draft chips have always got this right
@@ -2357,12 +2374,12 @@ export default function Train() {
                         : 'Logged'}
                     </Text>
                   </View>
-                  <Pressable accessibilityRole="button" accessibilityLabel={'Edit or replace ' + l.exercise} onPress={() => { tapLight(); setEditEntry(l); }} hitSlop={8}
+                  <Pressable accessibilityRole="button" accessibilityLabel={'Edit or replace ' + movement(l.exercise)} onPress={() => { tapLight(); setEditEntry(l); }} hitSlop={8}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                     <Icon name="pencil" size={14} color={t.ink2} />
                     <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink }}>Edit</Text>
                   </Pressable>
-                  <Pressable accessibilityRole="button" accessibilityLabel={'Delete ' + l.exercise} onPress={() => deleteEntry(l)} hitSlop={8} style={{ padding: 4 }}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={'Delete ' + movement(l.exercise)} onPress={() => deleteEntry(l)} hitSlop={8} style={{ padding: 4 }}>
                     <Icon name="minus" size={16} color={t.crit} />
                   </Pressable>
                 </View>
@@ -2509,13 +2526,16 @@ export default function Train() {
           accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, ...elevation.e2 }}>
           {swapFor && (<View>
-            <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>Swap {nameOf(swapFor)}</Text>
+            <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>Swap {shownName(swapFor)}</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>Alternatives that hit the same muscles</Text>
             {[swapFor.name, ...swapFor.alternatives].map((alt, ai) => { const on = nameOf(swapFor) === alt; return (
               <View key={alt}>
                 {ai > 0 ? <Rule /> : null}
                 <Pressable onPress={() => { setSwaps({ ...swaps, [uid(swapFor)]: alt }); setSwapFor(null); }} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: on ? '500' : '400', color: t.ink, textTransform: 'capitalize' }}>{alt}</Text>{on && <Icon name="check" size={16} color={t.brand} />}
+                  {/* The alternative READS in the reader's language; `alt` is
+                      still what gets written into `swaps`, and swaps are read
+                      back by `nameOf` as the identity of the movement. */}
+                  <Text style={{ ...ty.body, fontWeight: on ? '500' : '400', color: t.ink, textTransform: 'capitalize' }}>{movement(alt)}</Text>{on && <Icon name="check" size={16} color={t.brand} />}
                 </Pressable>
               </View>); })}
           </View>)}
@@ -2650,15 +2670,15 @@ export default function Train() {
                           {i > 0 ? <Rule /> : null}
                           <View style={{ paddingVertical: sp.md }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize', flex: 1 }}>{l.exercise}</Text>
-                              <Pressable accessibilityLabel={'Edit ' + l.exercise} onPress={() => setEditEntry(l)} hitSlop={8} style={{ padding: 4, marginEnd: sp.sm }}><Icon name="pencil" size={16} color={t.ink3} /></Pressable>
+                              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize', flex: 1 }}>{movement(l.exercise)}</Text>
+                              <Pressable accessibilityLabel={'Edit ' + movement(l.exercise)} onPress={() => setEditEntry(l)} hitSlop={8} style={{ padding: 4, marginEnd: sp.sm }}><Icon name="pencil" size={16} color={t.ink3} /></Pressable>
                               {/* Confirmed, then verified. The confirm was already
                                   here; what was missing is that the row left the
                                   screen whether or not the server had removed it,
                                   so a refused delete looked done and the session
                                   was back — with its volume and calories — at the
                                   next launch. */}
-                              <Pressable accessibilityLabel={'Delete ' + l.exercise} onPress={() => deleteEntry(l)} hitSlop={8} style={{ padding: 4, marginEnd: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
+                              <Pressable accessibilityLabel={'Delete ' + movement(l.exercise)} onPress={() => deleteEntry(l)} hitSlop={8} style={{ padding: 4, marginEnd: -4 }}><Icon name="minus" size={16} color={t.crit} /></Pressable>
                             </View>
                             {l.sets ? (
                               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
@@ -2681,7 +2701,7 @@ export default function Train() {
                                 <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{attributionLine(l, null, true)}</Text>
                               </View>
                             ) : null}
-                            <Pressable onPress={() => { tapLight(); setHrEntry(l); }} accessibilityRole="button" accessibilityLabel={'Heart rate for ' + l.exercise} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md, alignSelf: 'flex-start', backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                            <Pressable onPress={() => { tapLight(); setHrEntry(l); }} accessibilityRole="button" accessibilityLabel={'Heart rate for ' + movement(l.exercise)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md, alignSelf: 'flex-start', backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                               <Icon name="heart" size={13} color={t.brand} />
                               <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Heart Rate</Text>
                             </Pressable>
@@ -3321,6 +3341,11 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
 function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, injuryStatus, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; /** Replace one movement for the rest of the plan, through the same `swaps` map the plan screen writes. Optional so a caller with no plan to write to still gets a runner. */ onSwap?: (e: ProgramExercise, alt: string) => void; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; /** How the read that produced `injuries` went. An empty list under anything but 'ready' means UNKNOWN, and the caution line below is drawn off that list — so without this the runner draws "no injury applies here" for a member whose disclosure never arrived. */ injuryStatus: LoadStatus; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
+  // The same split the plan screen makes: `nameOf` is the identity written
+  // into every logged set and looked up by, `shownName` is the movement in the
+  // reader's own language. See the note beside `shownName` in Train().
+  const { textOf: movement } = useMovementName();
+  const shownName = (e: ProgramExercise) => movement(nameOf(e));
   // The day the recap below dates its outing against.
   //
   // `useToday()` rather than a `todayKey()` in the render body, for the reason
@@ -4314,7 +4339,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
             <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>{exGroup.label} · {exGroup.position} of {exGroup.size}</Text>
           </View>
         ) : null}
-        <Text style={{ ...ty.title, color: t.ink, marginTop: exGroup ? sp.xs : sp.xl, textTransform: 'capitalize' }}>{nameOf(ex)}</Text>
+        <Text style={{ ...ty.title, color: t.ink, marginTop: exGroup ? sp.xs : sp.xl, textTransform: 'capitalize' }}>{shownName(ex)}</Text>
         {/* How the sets are performed. The short marker is what fits beside a
             movement name; the full label is what a screen reader reads, because
             "RP" is not a word and nobody should have to know it. */}
@@ -4479,7 +4504,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
             leaving the session. */}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={(demoOpen ? 'Hide the demonstration of ' : 'See a demonstration of ') + nameOf(ex)}
+          accessibilityLabel={(demoOpen ? 'Hide the demonstration of ' : 'See a demonstration of ') + shownName(ex)}
           onPress={() => { setDemoOpen((v) => !v); tapLight(); }}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.xl }}
         >
@@ -4502,7 +4527,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
         {canSwap ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Swap ${nameOf(ex)} for another movement`}
+            accessibilityLabel={`Swap ${shownName(ex)} for another movement`}
             accessibilityHint="The rack may be taken. Your session and everything you have logged stay as they are."
             onPress={() => { setSwapOpen(true); tapLight(); }}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.lg, minHeight: MIN_TARGET }}
@@ -4527,7 +4552,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 32 }}>
             {ex ? (
               <View>
-                <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>Swap {nameOf(ex)}</Text>
+                <Text style={{ ...ty.head, color: t.ink, textTransform: 'capitalize' }}>Swap {shownName(ex)}</Text>
                 <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>
                   Your sets, your clock and your time in each zone all stay where they are. Your plan keeps the swap, so it is the movement you did that goes into your record.
                 </Text>
@@ -4539,11 +4564,11 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
                         key={alt}
                         accessibilityRole="button"
                         accessibilityState={{ selected: on }}
-                        accessibilityLabel={on ? `${alt}, the movement you are on` : `Swap to ${alt}`}
+                        accessibilityLabel={on ? `${movement(alt)}, the movement you are on` : `Swap to ${movement(alt)}`}
                         onPress={() => { if (!on) onSwap?.(ex, alt); setSwapOpen(false); }}
                         style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md, minHeight: MIN_TARGET }}
                       >
-                        <Text style={{ ...ty.body, color: on ? t.ink : t.ink2, fontWeight: on ? '600' : '400', textTransform: 'capitalize', flex: 1 }}>{alt}</Text>
+                        <Text style={{ ...ty.body, color: on ? t.ink : t.ink2, fontWeight: on ? '600' : '400', textTransform: 'capitalize', flex: 1 }}>{movement(alt)}</Text>
                         {/* A tick, not a colour. The selected row is the one the
                             member is standing at, and a brand-tinted row says
                             nothing to a screen reader or to anybody who cannot

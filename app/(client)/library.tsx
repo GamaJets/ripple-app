@@ -70,7 +70,7 @@ import { liftLabel, readLift } from '../../src/lib/units';
 import { bodyweightSetLabel } from '../../src/lib/bodyweightSets';
 import { frameUrls } from '../../src/lib/exerciseMedia';
 import { signMedia, needsSigning } from '../../src/ui/signedMedia';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 export default function Library() {
  const toast = useToast();
@@ -289,7 +289,7 @@ export default function Library() {
    <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-     <Ghost icon="back" onPress={goBack} />
+     <Ghost icon={BACK_ICON} onPress={goBack} />
      <View style={{ flex: 1 }}>
       <Text style={{ ...ty.micro, color: t.ink3 }}>How-to clips from your coach</Text>
       <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>

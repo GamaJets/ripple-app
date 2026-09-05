@@ -77,6 +77,7 @@ import { useAuth } from '../../src/ui/auth';
 import { coverageFor, coverageLine } from '../../src/lib/videoCoverage';
 import { clipOwner, canManageClip, canRemoveClip } from '../../src/lib/clipOwner';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { num } from '../../src/lib/format';
 import { isAcademyClip } from '../../src/lib/exerciseId';
@@ -425,6 +426,10 @@ export default function TrainerVideos() {
   // "nothing is illustrated", and telling a coach that while their clients
   // watch animations is exactly the claim this screen got wrong.
   const cat = useExerciseCatalogue();
+  // `v.name` is the English name stored on the coach's exercise_videos row —
+  // the identity every lookup here is keyed on. `movement()` is what the row
+  // says out loud.
+  const { textOf: movement } = useMovementName();
   const illustratedSlugs = useMemo(
     () => (cat.status === 'ready'
       ? new Set(cat.rows.filter((r) => r.hasDemo).map((r) => exerciseSlug(r.name)))
@@ -847,14 +852,14 @@ export default function TrainerVideos() {
               <View key={v.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                   <Pressable onPress={() => tapRow(v)} hitSlop={6} accessibilityRole="button"
-                    accessibilityLabel={v.uploaded ? (open ? `Stop watching ${v.name}` : `Play ${v.name}`) : `Add a clip for ${v.name}`}
+                    accessibilityLabel={v.uploaded ? (open ? `Stop watching ${movement(v.name)}` : `Play ${movement(v.name)}`) : `Add a clip for ${movement(v.name)}`}
                     style={({ pressed }) => ({ width: 46, height: 36, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.6 : 1 })}>
                     {v.uploaded ? <Icon name={open ? 'minus' : 'play'} size={17} color={t.brand} /> : <Icon name="plus" size={17} color={t.ink3} />}
                   </Pressable>
 
                   <Pressable onPress={() => tapRow(v)} style={{ flex: 1 }} accessibilityRole="button"
-                    accessibilityLabel={`${v.name}, ${v.group}. ${v.uploaded ? (mine ? `Seen by: ${vis.label}` : 'Recorded') : 'Not recorded yet'}`}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{v.name}</Text>
+                    accessibilityLabel={`${movement(v.name)}, ${v.group}. ${v.uploaded ? (mine ? `Seen by: ${vis.label}` : 'Recorded') : 'Not recorded yet'}`}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{movement(v.name)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
                       {v.group}{v.uploaded ? '' : ' · not recorded yet'}{localOnly ? ' · this phone only' : ''}
                     </Text>
@@ -862,7 +867,7 @@ export default function TrainerVideos() {
 
                   {mine ? (
                     <Pressable onPress={() => setOpenId(open ? null : v.id)} hitSlop={6} accessibilityRole="button"
-                      accessibilityLabel={`Who can see ${v.name}: ${vis.label}. Change this`}
+                      accessibilityLabel={`Who can see ${movement(v.name)}: ${vis.label}. Change this`}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: sp.xs, paddingHorizontal: sp.sm, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
                       {busy ? <ActivityIndicator size="small" color={t.ink3} /> : <Icon name={v.visibility === 'private' ? 'eye-off' : 'eye'} size={13} color={t.ink3} />}
                       <Text style={{ ...ty.caption, color: t.ink2 }} numberOfLines={1}>{vis.chip}</Text>

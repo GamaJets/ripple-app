@@ -65,7 +65,7 @@ import {
 import { useToday } from '../../src/ui/today';
 import { localDate } from '../../src/lib/localDate';
 import { appLocale } from '../../src/lib/locale';
-import { END_ALIGN } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 /** A bare ISO date as a member reads it. Local, because a date column means a
  *  calendar day in the reader's own life — see src/lib/localDate.ts. */
@@ -266,7 +266,7 @@ export default function Membership() {
                 no idea why. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_NO_CHANGED_NOTE}</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         <Rule />

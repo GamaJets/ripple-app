@@ -39,6 +39,7 @@ import { matchesSearch, fallbackTag } from '../../src/lib/catalogueLocale';
 import { catalogueValue as cap } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { BACK_ICON } from '../../src/ui/direction';
 
 
 /** The equipment chip standing for rows where the catalogue records none.
@@ -204,7 +205,7 @@ export default function OwnerLibrary() {
         keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={goBack} />
+          <Ghost icon={BACK_ICON} onPress={goBack} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What the platform can teach your members</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>

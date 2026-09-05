@@ -114,7 +114,7 @@ import { sendPushChecked } from '../../src/ui/pushNotifications';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * The four outcomes, in the order a person would consider them.
@@ -851,12 +851,12 @@ export default function TrainerSessions() {
             beside Invoices and Statement which both draw the circled `‹`
             that every other screen in this app uses.
 
-            `Ghost icon="back"` is that control. It carries the ring, the
+            `Ghost icon={BACK_ICON}` is that control. It carries the ring, the
             44pt target and `BACK_ICON`, so it mirrors correctly in RTL
             without this screen knowing about direction at all — which is the
             whole point of src/ui/direction. */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Mark Sessions</Text>
         </View>
 

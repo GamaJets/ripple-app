@@ -56,6 +56,7 @@ import {
   fetchGymAgreements, fetchMySignatures,
   SIGNING_RULE, NOT_REPPLE, type MemberAgreement,
 } from '../../src/lib/gymSigning';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function ClientGymAgreementsScreen() {
   const t = useTheme();
@@ -197,7 +198,7 @@ export default function ClientGymAgreementsScreen() {
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>From your gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Paperwork</Text>

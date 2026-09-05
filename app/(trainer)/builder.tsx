@@ -113,6 +113,7 @@ import { foldsAfterRemoval, foldsForNewProgramme } from '../../src/lib/foldedDay
 import { notifySuccess } from '../../src/ui/haptics';
 import { WEEK_DAYS } from '../../src/lib/weekStart';
 import { FORWARD_ICON } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { DateSheet } from '../../src/ui/DateSheet';
 
 /** The week, in the order src/lib/weekStart.ts draws one. This is the order a
@@ -490,6 +491,12 @@ export default function Builder() {
   // search rather than the megabyte behind them. The detail screen fetches the
   // one row a coach actually opens.
   const cat = useExerciseCatalogue();
+  // The PICKER below already reads in the coach's own language — every row it
+  // lists carries `.display` from useExerciseCatalogue. The programme it
+  // BUILDS did not: `e.name` is the English name frozen into the template
+  // JSON when the movement was added, and it is what every lookup on this
+  // screen is keyed on, so it stays. `movement()` is the same name to read.
+  const { textOf: movement } = useMovementName();
   const [custom, setCustom] = useState('');
   // Drawn in pages. Six hundred rows mounted inside a bottom sheet is a visibly
   // janky scroll on an older phone, and nobody reads past the first screenful
@@ -2541,11 +2548,11 @@ export default function Builder() {
                         gets, which is the point — and it carries Record a clip
                         for the movements this coach wants in their own words. */}
                     <Pressable onPress={() => previewExercise(e.name)} accessibilityRole="button"
-                      accessibilityLabel={`What ${e.name} is`}
+                      accessibilityLabel={`What ${movement(e.name)} is`}
                       style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                       <ExerciseThumb uri={thumbFor(rowFor(e.name) ?? { thumbPath: null })} t={t} />
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.name}</Text>
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(e.name)}</Text>
                         {/* The muscle group, and — separately — the set group.
                             Two different meanings of the word "group" that
                             happened to collide in this file, kept apart on
@@ -2606,7 +2613,7 @@ export default function Builder() {
                       <View
                         accessible
                         accessibilityRole="adjustable"
-                        accessibilityLabel={`Reorder ${e.name}. Position ${ei + 1} of ${d.exercises.length}. Hold and drag, or use the arrows.`}
+                        accessibilityLabel={`Reorder ${movement(e.name)}. Position ${ei + 1} of ${d.exercises.length}. Hold and drag, or use the arrows.`}
                         onStartShouldSetResponder={() => true}
                         onMoveShouldSetResponder={() => true}
                         onResponderGrant={(ev) => beginDrag(di, ei, ev.nativeEvent.pageY)}
@@ -2642,7 +2649,7 @@ export default function Builder() {
                         cannot do anything is still something to aim at. */}
                     {d.exercises.findIndex((x) => x.key === e.key) > 0 ? (
                       <Pressable onPress={() => moveExercise(di, e.key, -1)} accessibilityRole="button"
-                        accessibilityLabel={`Move ${e.name} earlier in ${d.day}`} hitSlop={6}
+                        accessibilityLabel={`Move ${movement(e.name)} earlier in ${d.day}`} hitSlop={6}
                         style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
                                  backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
                         <Text style={{ ...ty.label, color: t.ink2 }}>▲</Text>
@@ -2650,14 +2657,14 @@ export default function Builder() {
                     ) : null}
                     {d.exercises.findIndex((x) => x.key === e.key) < d.exercises.length - 1 ? (
                       <Pressable onPress={() => moveExercise(di, e.key, 1)} accessibilityRole="button"
-                        accessibilityLabel={`Move ${e.name} later in ${d.day}`} hitSlop={6}
+                        accessibilityLabel={`Move ${movement(e.name)} later in ${d.day}`} hitSlop={6}
                         style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
                                  marginStart: 6, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.ring }}>
                         <Text style={{ ...ty.label, color: t.ink2 }}>▼</Text>
                       </Pressable>
                     ) : null}
                     <Pressable onPress={() => removeExercise(di, e.key)} accessibilityRole="button"
-                      accessibilityLabel={`Remove ${e.name} from ${d.day}`} hitSlop={6}
+                      accessibilityLabel={`Remove ${movement(e.name)} from ${d.day}`} hitSlop={6}
                       style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
                                marginStart: sp.lg, backgroundColor: t.surface2, borderWidth: hairline, borderColor: t.crit }}>
                       {/* The critical tone is the BORDER, not the glyph. As ink
@@ -2705,7 +2712,7 @@ export default function Builder() {
                             <TextInput value={row.reps}
                               onChangeText={(v) => patchRows(di, e.key, (x) => patchSetRow(x, ri, { reps: v }))}
                               placeholder="8-10" placeholderTextColor={t.ink3}
-                              accessibilityLabel={`Reps in set ${row.n} of ${e.name}`}
+                              accessibilityLabel={`Reps in set ${row.n} of ${movement(e.name)}`}
                               style={[inp, { width: 74, paddingVertical: 7, paddingHorizontal: 10 }]} />
                             {/* The same text-draft as the single Weight field
                                 below, and for the same reason: re-deriving the
@@ -2723,7 +2730,7 @@ export default function Builder() {
                               }}
                               onBlur={() => setLoadDraft((prev) => { const n = { ...prev }; delete n[rk]; return n; })}
                               keyboardType="decimal-pad" placeholder="optional" placeholderTextColor={t.ink3}
-                              accessibilityLabel={`Weight for set ${row.n} of ${e.name}, in ${u === 'kg' ? 'kilograms' : 'pounds'}`}
+                              accessibilityLabel={`Weight for set ${row.n} of ${movement(e.name)}, in ${u === 'kg' ? 'kilograms' : 'pounds'}`}
                               style={[inp, { width: 84, paddingVertical: 7, paddingHorizontal: 10 }]} />
                             {/* How THIS set is performed — the thing the
                                 per-exercise field could only say once. A
@@ -2732,7 +2739,7 @@ export default function Builder() {
                                 marker is what fits; the full label is what is
                                 read out, because "RP" is not a word. */}
                             <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: ri })} accessibilityRole="button"
-                              accessibilityLabel={`How set ${row.n} of ${e.name} is performed — currently ${rm.label}`}
+                              accessibilityLabel={`How set ${row.n} of ${movement(e.name)} is performed — currently ${rm.label}`}
                               style={{ minWidth: 34, alignItems: 'center', paddingHorizontal: sp.sm, paddingVertical: 7, borderRadius: radius.sm, backgroundColor: t.surface2 }}>
                               <Text style={{ ...ty.caption, fontWeight: '600', color: badgeFor(row.method) ? t.ink : t.ink3 }}>{rm.short}</Text>
                             </Pressable>
@@ -2741,7 +2748,7 @@ export default function Builder() {
                                 and removing the movement has its own control. */}
                             {rows.list.length > 1 ? (
                               <Pressable onPress={() => patchRows(di, e.key, (x) => removeSetRow(x, ri))} accessibilityRole="button"
-                                accessibilityLabel={`Remove set ${row.n} of ${e.name}`} hitSlop={8}
+                                accessibilityLabel={`Remove set ${row.n} of ${movement(e.name)}`} hitSlop={8}
                                 style={{ paddingHorizontal: sp.xs, paddingVertical: sp.xs }}>
                                 <Text style={{ ...ty.body, color: t.ink3 }}>×</Text>
                               </Pressable>
@@ -2751,7 +2758,7 @@ export default function Builder() {
                       })}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.sm }}>
                         <Pressable onPress={() => patchRows(di, e.key, (x) => addSetRow(x))} accessibilityRole="button"
-                          accessibilityLabel={`Add a set to ${e.name}`}
+                          accessibilityLabel={`Add a set to ${movement(e.name)}`}
                           style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
                           <Text style={{ ...ty.caption, color: t.ink2 }}>Add Set</Text>
                         </Pressable>
@@ -2869,7 +2876,7 @@ export default function Builder() {
                         <Text style={{ ...ty.caption, color: t.ink3 }}>{offer.reason}</Text>
                         {label && !same ? (
                           <Pressable onPress={() => patchEx(di, e.key, { loadKg: offer.weightKg, loadUnit: u })}
-                            accessibilityRole="button" accessibilityLabel={`${label} for ${e.name}`}
+                            accessibilityRole="button" accessibilityLabel={`${label} for ${movement(e.name)}`}
                             style={{ alignSelf: 'flex-start', marginTop: sp.xs, paddingHorizontal: sp.md, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: t.surface2 }}>
                             <Text style={{ ...ty.label, color: t.ink2 }}>{label}</Text>
                           </Pressable>
@@ -2884,7 +2891,7 @@ export default function Builder() {
                       no numbers on it. */}
                   <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
                     <Pressable onPress={() => patchRows(di, e.key, (x) => addSetRow(x))} accessibilityRole="button"
-                      accessibilityLabel={`Write out the sets of ${e.name} one by one, so each can have its own weight`}
+                      accessibilityLabel={`Write out the sets of ${movement(e.name)} one by one, so each can have its own weight`}
                       style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
                       <Text style={{ ...ty.caption, color: t.ink2 }}>Add Set</Text>
                     </Pressable>
@@ -2955,7 +2962,7 @@ export default function Builder() {
                         if (!r.ok) Alert.alert('Check that effort target', r.why);
                       }}
                       keyboardType="decimal-pad" placeholder="8.5" placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Prescribed effort for ${e.name}, on the RPE scale`}
+                      accessibilityLabel={`Prescribed effort for ${movement(e.name)}, on the RPE scale`}
                       style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
                     <Text style={{ ...ty.caption, color: t.ink3, marginStart: sp.sm }}>% of 1RM</Text>
                     <TextInput
@@ -2974,7 +2981,7 @@ export default function Builder() {
                         if (!r.ok) Alert.alert('Check that percentage', r.why);
                       }}
                       keyboardType="number-pad" placeholder="75" placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Prescribed share of a one-rep max for ${e.name}, as a whole percentage`}
+                      accessibilityLabel={`Prescribed share of a one-rep max for ${movement(e.name)}, as a whole percentage`}
                       style={[inp, { width: 58, paddingVertical: 7, paddingHorizontal: 10 }]} />
                     <Text style={{ ...ty.caption, color: t.ink3, marginStart: sp.sm }}>Tempo</Text>
                     <TextInput
@@ -2994,7 +3001,7 @@ export default function Builder() {
                       }}
                       autoCapitalize="characters" autoCorrect={false}
                       placeholder="3-1-1-0" placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Prescribed rep speed for ${e.name}, as down, pause, up and pause`}
+                      accessibilityLabel={`Prescribed rep speed for ${movement(e.name)}, as down, pause, up and pause`}
                       style={[inp, { width: 84, paddingVertical: 7, paddingHorizontal: 10 }]} />
                   </View>
                   {/* The tempo IN WORDS, under the box, while they type. The
@@ -3049,7 +3056,7 @@ export default function Builder() {
                       keyboardType="number-pad"
                       placeholder={String(DEFAULT_REST_SEC)}
                       placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Rest between sets of ${e.name}, in seconds`}
+                      accessibilityLabel={`Rest between sets of ${movement(e.name)}, in seconds`}
                       style={[inp, { width: 68, paddingVertical: 7, paddingHorizontal: 10 }]} />
                     <Text style={{ ...ty.caption, color: t.ink3 }}>
                       {e.restSec != null ? `sec · ${restClock(e.restSec)}` : `sec · default ${restClock(DEFAULT_REST_SEC)}`}
@@ -3061,14 +3068,14 @@ export default function Builder() {
                         join, and where the two are already in one run. */}
                     {canJoinNext(d.exercises, ei) ? (
                       <Pressable onPress={() => groupWithNext(di, ei)} accessibilityRole="button"
-                        accessibilityLabel={`Perform ${e.name} back to back with ${d.exercises[ei + 1]?.name}`}
+                        accessibilityLabel={`Perform ${movement(e.name)} back to back with ${movement(d.exercises[ei + 1]?.name)}`}
                         style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
                         <Text style={{ ...ty.caption, color: t.ink2 }}>Group with next</Text>
                       </Pressable>
                     ) : null}
                     {isGrouped(d.exercises, ei) ? (
                       <Pressable onPress={() => ungroup(di, ei)} accessibilityRole="button"
-                        accessibilityLabel={`Take ${e.name} out of the ${gb?.label.toLowerCase() ?? 'group'}`}
+                        accessibilityLabel={`Take ${movement(e.name)} out of the ${gb?.label.toLowerCase() ?? 'group'}`}
                         style={{ paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring }}>
                         <Text style={{ ...ty.caption, color: t.ink2 }}>Ungroup</Text>
                       </Pressable>
@@ -3097,7 +3104,7 @@ export default function Builder() {
                           {rows.tabled ? 'Set type · every set unless a row says otherwise' : 'Set type'}
                         </Text>
                         <Pressable onPress={() => setMethodOpenFor({ di, key: e.key, row: null })} accessibilityRole="button"
-                          accessibilityLabel={`Set type for ${e.name}${rows.tabled ? ', applied to every set unless a row says otherwise' : ''} — currently ${m.label}. ${m.blurb} Opens the list of set types.`}
+                          accessibilityLabel={`Set type for ${movement(e.name)}${rows.tabled ? ', applied to every set unless a row says otherwise' : ''} — currently ${m.label}. ${m.blurb} Opens the list of set types.`}
                           style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: sp.sm,
                                    minHeight: MIN_TARGET, paddingHorizontal: sp.lg, paddingVertical: sp.sm,
                                    borderRadius: radius.pill, borderWidth: hairline, borderColor: t.ring, backgroundColor: t.surface2 }}>
@@ -3118,7 +3125,7 @@ export default function Builder() {
                       onChangeText={(v) => patchEx(di, e.key, { note: v })}
                       placeholder="Cue, tempo, setup — they see this at the machine…"
                       placeholderTextColor={t.ink3}
-                      accessibilityLabel={`Your notes on ${e.name}`}
+                      accessibilityLabel={`Your notes on ${movement(e.name)}`}
                       multiline
                       style={[inp, { minHeight: 44, textAlignVertical: 'top', paddingVertical: 9 }]} />
                   </View>

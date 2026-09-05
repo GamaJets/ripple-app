@@ -75,7 +75,7 @@ import {
 } from '../../src/lib/dataExport';
 import { reportError } from '../../src/lib/reportError';
 import { appLocale } from '../../src/lib/locale';
-import { END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from '../../src/ui/direction';
 
 /**
  * Which phone the rest-timer sound note is about.
@@ -447,7 +447,7 @@ export default function Settings() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Settings</Text>

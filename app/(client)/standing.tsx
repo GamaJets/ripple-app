@@ -78,6 +78,7 @@ import { useThreadPeerName } from '../../src/ui/messaging';
 import type { TrainingSession } from '../../src/lib/types';
 import type { CancellationPolicy } from '../../src/lib/booking';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
+import { BACK_ICON } from '../../src/ui/direction';
 
 // The reader's own clock, deliberately. `nextAt` is an instant — the moment the
 // session starts — and the member is being told when to turn up, which is a
@@ -413,7 +414,7 @@ export default function StandingAppointments() {
               The same hour every week, booked for you without either of you asking again.
             </Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         <Rule />

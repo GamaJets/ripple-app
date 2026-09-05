@@ -55,6 +55,7 @@ import {
   dwellMinutes, staffScopeNote, STAFF_RECORD_NOTE,
   type AttendanceEvent, type ClassOutcome,
 } from '../../src/lib/attendance';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** A timestamp as the day it happened, in the coach's own zone — they are the
  *  reader, the same call app/(trainer)/leaderboard.tsx makes about units. */
@@ -234,7 +235,7 @@ export default function ClientAttendanceScreen() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Their Attendance</Text>

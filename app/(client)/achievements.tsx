@@ -25,6 +25,7 @@ import { volumeIn } from '../../src/lib/units';
 import { BADGES, badgeFigures, badgeState, type BadgeState } from '../../src/lib/badges';
 import { useBadgeWatch } from '../../src/ui/badgeWatch';
 import { Confetti } from '../../src/ui/Confetti';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Achievements() {
   const t = useTheme();
@@ -127,7 +128,7 @@ export default function Achievements() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Earned from your log</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Achievements</Text>

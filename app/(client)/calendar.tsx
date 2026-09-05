@@ -128,6 +128,7 @@ import { sendPush, sendPushChecked } from '../../src/ui/pushNotifications';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { useThreadPeerName } from '../../src/ui/messaging';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -243,6 +244,9 @@ function logDetail(e: WorkoutEntry, wu: WeightUnit): string {
 
 export default function Calendar() {
   const t = useTheme();
+  // The reader's own language for the movement, English where the catalogue
+  // has no translation. The stored name is untouched — it is the identity.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const now = new Date();
   const wu = useSettings().weightUnit;
@@ -878,7 +882,7 @@ export default function Calendar() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.push('/(client)/dashboard')} />
+          <Ghost icon={BACK_ICON} onPress={() => router.push('/(client)/dashboard')} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Personal training</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Book Sessions</Text>
@@ -1435,7 +1439,7 @@ export default function Calendar() {
                         <Icon name={KIND_ICON[kind]} size={17} color={KIND_DOT[kind]} />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Logged {e.exercise}</Text>
+                        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Logged {movement(e.exercise)}</Text>
                         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{KIND_LABEL[kind]} · {logDetail(e, wu)}</Text>
                       </View>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeLabel(e.t)}</Text>

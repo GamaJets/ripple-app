@@ -116,7 +116,7 @@ import {
   zoneMovedNote, QUIET_HELD_NOT_DELAYED, QUIET_ZONE_NOTE, QUIET_ORDER_NOTE,
   type QuietHours,
 } from '../../src/lib/quietHours';
-import { END_ALIGN } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 /** A label and its value. `value` is already a string — see `fig`. */
 function Line({ t, label, value, first }: { t: Theme; label: string; value: string; first?: boolean }) {
@@ -713,7 +713,7 @@ export default function TrainerSettings() {
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Settings</Text>
@@ -1130,7 +1130,7 @@ export default function TrainerSettings() {
               onPress={() => { if (files.length > 0) setFilesOpen(true); }} />
           ) : null}
           {pending?.requestedAt ? (
-            <ListRow icon="back" title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
+            <ListRow icon={BACK_ICON} title={withdrawing ? 'Withdrawing…' : 'Withdraw My Deletion Request'}
               note="Keep your account. You can withdraw right up until the deletion is carried out."
               onPress={withdraw} />
           ) : (

@@ -50,6 +50,7 @@ import { fmtDay } from '../../src/lib/format';
 // and it was a plain <Text>. `telUrl` decides what may be offered as a call —
 // never a handle, never a number with an extension welded on.
 import { telUrl, DIAL_UNAVAILABLE_NOTE } from '../../src/lib/dialling';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** A label out of one of the option lists, or the raw id where a document
  *  written by a later build carries something this one does not know. Printing
@@ -144,7 +145,7 @@ export default function ClientIntakeScreen() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Before you train them</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }} numberOfLines={1}>

@@ -38,6 +38,7 @@ import { deltaLabel } from './deltaLabel';
 // The one formatter that knows how many places a currency has. See `moneyIn`
 // below for what this file was doing instead.
 import { wholeMoney } from './coachMoney';
+import { num, num1 } from './format';
 
 export interface FinInputs {
   // MAJOR units, in the gym's own currency — whatever `tenants.currency` says
@@ -221,19 +222,19 @@ export function reviewFinances(f: FinInputs, currency: string | null): FinReview
   const strengths: FinFlag[] = [];
   const improvements: FinFlag[] = [];
 
-  if (marginPct >= 20) strengths.push({ tone: 'good', title: `Healthy ${marginPct.toFixed(0)}% net margin`, detail: m(netProfit) ? `You keep ${m(netProfit)} of every month's ${m(f.revenue)} — strong operating discipline.` : `You keep ${marginPct.toFixed(0)}% of every month's revenue — strong operating discipline. The amounts are not written here because this gym has not set its currency.` });
-  else if (marginPct >= 8) improvements.push({ tone: 'watch', title: `Margin is moderate at ${marginPct.toFixed(0)}%`, detail: m(netProfit) ? `Net profit is ${m(netProfit)}/mo. Review your largest cost lines (staff, rent, platform) — a few points of margin compounds fast.` : `Net profit is ${marginPct.toFixed(0)}% of revenue. Review your largest cost lines (staff, rent, platform) — a few points of margin compounds fast.` });
-  else improvements.push({ tone: 'risk', title: `Thin margin at ${marginPct.toFixed(0)}%`, detail: m(netProfit) ? `Only ${m(netProfit)} of ${m(f.revenue)} is profit. Prioritise cost review or a modest membership price increase before adding overhead.` : `Only ${marginPct.toFixed(0)}% of revenue is profit. Prioritise cost review or a modest membership price increase before adding overhead.` });
+  if (marginPct >= 20) strengths.push({ tone: 'good', title: `Healthy ${num(marginPct)}% net margin`, detail: m(netProfit) ? `You keep ${m(netProfit)} of every month's ${m(f.revenue)} — strong operating discipline.` : `You keep ${num(marginPct)}% of every month's revenue — strong operating discipline. The amounts are not written here because this gym has not set its currency.` });
+  else if (marginPct >= 8) improvements.push({ tone: 'watch', title: `Margin is moderate at ${num(marginPct)}%`, detail: m(netProfit) ? `Net profit is ${m(netProfit)}/mo. Review your largest cost lines (staff, rent, platform) — a few points of margin compounds fast.` : `Net profit is ${num(marginPct)}% of revenue. Review your largest cost lines (staff, rent, platform) — a few points of margin compounds fast.` });
+  else improvements.push({ tone: 'risk', title: `Thin margin at ${num(marginPct)}%`, detail: m(netProfit) ? `Only ${m(netProfit)} of ${m(f.revenue)} is profit. Prioritise cost review or a modest membership price increase before adding overhead.` : `Only ${num(marginPct)}% of revenue is profit. Prioritise cost review or a modest membership price increase before adding overhead.` });
 
-  if (churnPct <= 3) strengths.push({ tone: 'good', title: `Low churn (${churnPct.toFixed(1)}%/mo)`, detail: `Members are staying — retention is your cheapest growth lever and it's working.` });
-  else if (churnPct <= 6) improvements.push({ tone: 'watch', title: `Churn to watch (${churnPct.toFixed(1)}%/mo)`, detail: `You lose ${f.churnedMembers} members/mo. A win-back offer and a check-in on low-attendance members could recover several of them.` });
-  else improvements.push({ tone: 'risk', title: `High churn (${churnPct.toFixed(1)}%/mo)`, detail: `Losing ${f.churnedMembers}/mo drags growth. Target at-risk members with a personalised offer and re-engagement push — this is your #1 opportunity.` });
+  if (churnPct <= 3) strengths.push({ tone: 'good', title: `Low churn (${num1(churnPct)}%/mo)`, detail: `Members are staying — retention is your cheapest growth lever and it's working.` });
+  else if (churnPct <= 6) improvements.push({ tone: 'watch', title: `Churn to watch (${num1(churnPct)}%/mo)`, detail: `You lose ${f.churnedMembers} members/mo. A win-back offer and a check-in on low-attendance members could recover several of them.` });
+  else improvements.push({ tone: 'risk', title: `High churn (${num1(churnPct)}%/mo)`, detail: `Losing ${f.churnedMembers}/mo drags growth. Target at-risk members with a personalised offer and re-engagement push — this is your #1 opportunity.` });
 
-  if (growthPct >= 1.5) strengths.push({ tone: 'good', title: `Growing ${growthPct.toFixed(1)}% net this month`, detail: `${f.newMembers} joined vs ${f.churnedMembers} left. Momentum is positive — good time to invest in referrals or a new branch.` });
+  if (growthPct >= 1.5) strengths.push({ tone: 'good', title: `Growing ${num1(growthPct)}% net this month`, detail: `${f.newMembers} joined vs ${f.churnedMembers} left. Momentum is positive — good time to invest in referrals or a new branch.` });
   else if (netAdds >= 0) improvements.push({ tone: 'watch', title: `Flat growth (${deltaLabel(growthPct, { since: null, unit: '%', noChange: 'no change' })})`, detail: `New joins barely outpace churn. A referral push and a class-led trial could lift acquisition.` });
   else improvements.push({ tone: 'risk', title: `Shrinking membership`, detail: `You lost ${Math.abs(netAdds)} net members. Fix retention first, then drive acquisition — a promotion pushed to lapsed members is a fast win.` });
 
-  if (recurringShare >= 70) strengths.push({ tone: 'good', title: `${recurringShare.toFixed(0)}% recurring revenue`, detail: `Predictable membership income de-risks the business.` });
+  if (recurringShare >= 70) strengths.push({ tone: 'good', title: `${num(recurringShare)}% recurring revenue`, detail: `Predictable membership income de-risks the business.` });
   if (f.ptRevenue + f.classRevenue < f.revenue * 0.15) improvements.push({ tone: 'watch', title: `Ancillary revenue is light`, detail: m(f.ptRevenue + f.classRevenue) ? `PT + classes are only ${m(f.ptRevenue + f.classRevenue)}/mo. Promote packs and premium classes to members already in the door — high margin, low cost.` : `PT + classes are under a sixth of revenue. Promote packs and premium classes to members already in the door — high margin, low cost.` });
 
   // `grade >= 'A'` was a string comparison, and every grade from A to E sorts at
@@ -273,7 +274,7 @@ export function reviewFinances(f: FinInputs, currency: string | null): FinReview
       ? `The business is losing money${m(-netProfit) ? ` at ${m(-netProfit)}/mo` : ''}`
       : 'The business is breaking even';
   const summary = score >= 85
-    ? `Your gym is in strong financial health (${grade}). ${m(netProfit) ? `${m(netProfit)}/mo profit on a ` : 'A '}${marginPct.toFixed(0)}% margin, low churn and positive growth. Keep protecting retention and reinvest into what's working.`
+    ? `Your gym is in strong financial health (${grade}). ${m(netProfit) ? `${m(netProfit)}/mo profit on a ` : 'A '}${num(marginPct)}% margin, low churn and positive growth. Keep protecting retention and reinvest into what's working.`
     : score >= 55
     ? `Solid but improvable (${grade}). ${standing}, but ${churnPct > 4 ? 'churn' : 'margin'} is the lever to pull next. Focus there and the score climbs quickly.`
     : `Needs attention (${grade}). ${attention} — tackle the risk items below first; each one directly lifts profitability.`;

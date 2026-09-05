@@ -64,6 +64,7 @@ import {
   gymCanSell, offerFor, passNote, offerMoney, orderNote, orderIsLive, dayLabel,
   type GymAccountFacts, type GymPlan, type GymPassOffer, type GymOrder,
 } from '../../src/lib/memberBuy';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** How a plan's price reads, with its own interval beside it. The interval is a
  *  word about the PLAN, not a promise that anything recurs: nothing bought here
@@ -214,7 +215,7 @@ export default function GymPlans() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Plans &amp; Passes</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What your gym sells, and what you are on now.</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         {/* ── can the gym take a card at all ──────────────────────────────

@@ -16,6 +16,7 @@ import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
 import { MIN_TARGET } from '../lib/a11y';
 import { submitAppFeedback } from './appFeedback';
 import { notifySuccess } from './haptics';
+import { BACK_ICON } from './direction';
 
 const CATS = ['Bug', 'Confusing', 'Idea', 'Praise'];
 
@@ -71,7 +72,7 @@ export default function FeedbackScreen({ audience }: { audience: string }) {
             is not decoration: without one the button is announced as "button"
             and there is no other back affordance on this screen. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Feedback</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Send Feedback</Text>

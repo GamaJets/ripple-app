@@ -55,6 +55,7 @@ import { buildPlan, catalogSize, mealAt, slotsFor, type Allergen, type PlanInput
 import { weekdayOfIso } from './dayPlan';
 import { WEEK_DAYS, dayIndexInWeek, jsDayForIndex } from './weekStart';
 import type { LoadStatus } from '../ui/loadStatus';
+import { numUpTo } from './format';
 
 /** Bumped only when a stored plan's shape changes in a way a reader must know
  *  about. `parsePlan` refuses anything it does not recognise rather than
@@ -457,7 +458,11 @@ export function guardPlan(
  * advice: no judgement is offered about either figure.
  */
 export function planServingNote(servings: number, baseKcal: number, targetKcal: number): string {
-  const mult = servings.toFixed(2).replace(/0$/, '').replace(/\.$/, '');
+  // `toFixed(2)` here wrote an English full stop and then trimmed a trailing
+  // zero that a comma locale never produces, so a German coach read "1.75×"
+  // beside figures this app writes with a comma. numUpTo does both jobs in the
+  // reader's own language.
+  const mult = numUpTo(servings, 2);
   if (servings === 1) {
     return `These meals come to ${baseKcal.toLocaleString()} kcal at one serving each, which is what their target asks for. Their app serves them as written.`;
   }

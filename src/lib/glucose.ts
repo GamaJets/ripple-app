@@ -23,6 +23,8 @@
 // display unit, converted at the two edges (here, and the input parser).
 
 /** The two units a person may read their sugars in. */
+import { num1 } from './format';
+
 export type GlucoseUnit = 'mmol/L' | 'mg/dL';
 
 /**
@@ -83,7 +85,7 @@ export interface GlucoseReading {
  */
 export function formatGlucose(mmol: number | null | undefined, unit: GlucoseUnit): string {
   if (typeof mmol !== 'number' || !Number.isFinite(mmol)) return '—';
-  return unit === 'mg/dL' ? String(Math.round(mmolToMgdl(mmol))) : mmol.toFixed(1);
+  return unit === 'mg/dL' ? String(Math.round(mmolToMgdl(mmol))) : num1(mmol);
 }
 
 /**

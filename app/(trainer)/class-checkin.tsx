@@ -63,6 +63,7 @@ import {
 import { countRegister, registerArc, registerLine } from '../../src/lib/classRegister';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useRefreshOnFocus } from '../../src/ui/refreshOnFocus';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function ClassCheckin() {
   const t = useTheme();
@@ -389,7 +390,7 @@ export default function ClassCheckin() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>{title}{branch ? ' · ' + branch : ''}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Check-in</Text>

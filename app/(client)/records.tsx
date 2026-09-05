@@ -24,6 +24,8 @@ import { useClientData } from '../../src/ui/clientData';
 import { isWhole } from '../../src/ui/loadStatus';
 import { Rule, Section, SectionHead, Hero, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { BACK_ICON } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 export default function Records() {
  const t = useTheme();
@@ -115,10 +117,15 @@ export default function Records() {
   // anyone with a belted pull-up, a weighted dip or a loaded plank.
   return liftLabel(pr.addedKg, wu);
  };
+ // A record is stored under its ENGLISH name — that is the identity, and it is
+ // what `key` and every lookup on this screen still use. `movement()` is what
+ // the reader sees and hears: a German member reading "Kniebeuge" in the
+ // library was told their own record for it was for "Barbell Back Squat".
+ const { textOf: movement } = useMovementName();
  const prSpoken = (pr: ReturnType<typeof personalRecords>[number], rank: number): string => {
   const best = bestSetLabel(pr, setLoad(pr), setAdded(pr), 'spoken');
   const one = est1RMIn(pr.est1RM, wu);
-  const parts = [`${rank}. ${pr.exercise}`];
+  const parts = [`${rank}. ${movement(pr.exercise)}`];
   if (one != null) parts.push(`estimated one rep max ${one} ${wu}`);
   parts.push(`best set ${best}`, `on ${dstr(pr.at)}`);
   return parts.join(', ');
@@ -127,13 +134,13 @@ export default function Records() {
   *  was held on top and is never presented as the whole of it. */
  const holdSpoken = (h: { exercise: string; secs: number; loadKg: number; bodyweight: boolean; at: string }): string => {
   const added = h.loadKg > 0 ? liftLabel(h.loadKg, wu) : null;
-  return `${h.exercise}, ${timedSetLabel(h.secs, added, h.bodyweight)}, on ${dstr(h.at)}`;
+  return `${movement(h.exercise)}, ${timedSetLabel(h.secs, added, h.bodyweight)}, on ${dstr(h.at)}`;
  };
  /** The same, for the reps board. Reps are always known there, so the only
   *  withholdable clause is the belt. */
  const repSpoken = (r: { exercise: string; reps: number; addedKg: number; at: string }): string => {
   const added = r.addedKg ? liftLabel(r.addedKg, wu) : null;
-  return `${r.exercise}, ${bodyweightSetLabel(r.reps, r.addedKg, added)}, on ${dstr(r.at)}`;
+  return `${movement(r.exercise)}, ${bodyweightSetLabel(r.reps, r.addedKg, added)}, on ${dstr(r.at)}`;
  };
  const G = layout.gutter;
 
@@ -147,7 +154,7 @@ export default function Records() {
     <Text style={{ ...ty.micro, color: t.ink3 }}>Best estimated 1-rep max per lift</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal Records</Text>
    </View>
-   <Ghost icon="back" onPress={() => router.back()} />
+   <Ghost icon={BACK_ICON} onPress={() => router.back()} />
   </View>
 
   {/* An empty PR board has three causes and only one of them is "you have not
@@ -269,7 +276,7 @@ export default function Records() {
       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{i + 1}</Text>
       <View style={{ flex: 1 }}>
-       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{pr.exercise}</Text>
+       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(pr.exercise)}</Text>
        <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>Best set {bestSetLabel(pr, setLoad(pr), setAdded(pr))} · {dstr(pr.at)}</Text>
       </View>
       <View style={{ alignItems: 'flex-end' }}>
@@ -297,7 +304,7 @@ export default function Records() {
        accessibilityLabel={repSpoken(r)}
        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
        <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{r.exercise}</Text>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(r.exercise)}</Text>
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
          {/* delta-ok: the plus is not a movement, it is the weight hung off a belt. Nothing here changed from anything. */}
          {r.addedKg > 0 ? `+${fig(liftLabel(r.addedKg, wu))} added · ` : 'At bodyweight · '}{dstr(r.at)}
@@ -334,7 +341,7 @@ export default function Records() {
        accessibilityLabel={holdSpoken(h)}
        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
        <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{h.exercise}</Text>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(h.exercise)}</Text>
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
          {/* delta-ok: the plus is a plate on a belt, not a change in anything. */}
          {h.loadKg > 0

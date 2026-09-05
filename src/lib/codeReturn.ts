@@ -21,7 +21,7 @@
 // down would otherwise show an infinite return and win every comparison. An
 // unread revenue figure is not no revenue. Both arrive here as null and leave
 // as a dash.
-import { num } from './format';
+import { num, num1 } from './format';
 import { currencyDecimals, majorFromMinor, readMinorAmount } from './coachMoney';
 import { money } from './gymRecord';
 import type { LoadStatus } from '../ui/loadStatus';
@@ -494,7 +494,7 @@ export function returnLine(status: LoadStatus, row: CodeReturnRow): string {
   if (status !== 'ready') return '';
   const r = codeReturn(row);
   if (!r.known) return r.note;
-  const back = r.back != null ? ` That is ${r.back.toFixed(1)}× what you put in.` : '';
+  const back = r.back != null ? ` That is ${num1(r.back)}× what you put in.` : '';
   if (r.net.cents >= 0) {
     return `${money(r.net.cents, r.net.currency) ?? '—'} more than it cost you.${back}`;
   }

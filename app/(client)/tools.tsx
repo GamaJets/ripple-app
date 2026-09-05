@@ -66,6 +66,7 @@ import {
 } from '../../src/lib/units';
 import { est1RM } from '../../src/lib/streaks';
 import { BARS, loadBar } from '../../src/lib/plateMath';
+import { BACK_ICON } from '../../src/ui/direction';
 
 function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
  // Empty, not "60". A prefilled number on a screen that used to assume
@@ -423,7 +424,7 @@ export default function Tools() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon="back" onPress={() => router.back()} />
+ <Ghost icon={BACK_ICON} onPress={() => router.back()} />
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.micro, color: t.ink3 }}>Calculators for the gym floor</Text>
  <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Lifting Tools</Text>

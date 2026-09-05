@@ -60,6 +60,7 @@ import { useNow } from '../../src/ui/today';
 // taken on Thursday for Tuesday's class is written exactly like one taken at
 // the door. The coach was simply never handed the tap. See src/lib/registerGaps.ts.
 import { missingRegisters, peopleWaiting, gapsHeading, gapsNote, gapLine } from '../../src/lib/registerGaps';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** The three windows, in days. Rolling, and the labels come from the module so
  *  the heading and the query cannot disagree about which one is on screen. */
@@ -184,7 +185,7 @@ export default function MyRegister() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your classes</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Register</Text>

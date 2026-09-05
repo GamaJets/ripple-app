@@ -28,8 +28,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { appLocale } from '../lib/locale';
 import {
-  catalogueLocale, indexTranslations, type TranslationLocale, type Translated,
+  catalogueLocale, displayName, indexTranslations,
+  type DisplayString, type TranslationLocale, type Translated,
 } from '../lib/catalogueLocale';
+import { exerciseSlug } from '../lib/exerciseId';
 import { capLimit, capped } from '../lib/rowCap';
 import { useAuthRevision } from './authRevision';
 
@@ -45,6 +47,31 @@ export function useCatalogueLocale(): TranslationLocale | null {
 }
 
 const EMPTY: ReadonlyMap<string, Translated> = new Map();
+
+/* ── one read per language per app run, however many screens ask ───────────
+ *
+ * This hook started with two callers — the library list and the catalogue
+ * picker — and now has a dozen: every screen that shows a movement name reads
+ * it, and app/(client)/workouts.tsx mounts it twice on its own (the plan and
+ * the session runner are separate components). For a German or Spanish reader
+ * that was a dozen identical requests for the same 583 rows, several of them
+ * in flight at the same moment on the screen a member opens mid-set.
+ *
+ * So the language is cached for the process, keyed by locale AND by the auth
+ * revision — the second half matters, because the read is policy-scoped `to
+ * authenticated` and a run that happened while signed out came back empty with
+ * no error. Caching THAT would keep the whole app in English for the life of
+ * the process, which is the exact defect `authRev` was added to end. A new
+ * revision is a new key, so a sign-in re-reads.
+ *
+ * `inFlight` is the other half: without it a screen with three of these mounts
+ * fires three requests before the first resolves and caches nothing. A failed
+ * read is NOT cached — it resolves to EMPTY for its own callers and the next
+ * mount tries again, because "we could not reach the server" is not an answer
+ * about what a movement is called.
+ */
+const cache = new Map<string, ReadonlyMap<string, Translated>>();
+const inFlight = new Map<string, Promise<ReadonlyMap<string, Translated> | null>>();
 
 /**
  * Every translation in the reader's language, keyed by exercise id.
@@ -76,39 +103,50 @@ export function useCatalogueTranslations(): {
 
   const load = useCallback(async () => {
     if (!locale) { setById(EMPTY); setSettled(true); return; }
-    try {
-      const { data, error } = await supabase
-        .from('exercise_translations')
-        .select('exercise_id, locale, name, description')
-        .eq('locale', locale)
-        .limit(capLimit());
-      // eslint-disable-next-line -- no-error-ok: a failure here must not take the library down.
-      // Every name falls back to English AND IS MARKED as English, which is what
-      // the reader saw before this read existed. Silently dropped rather than
-      // reported precisely because it is not a wrong answer: nothing on screen
-      // claims to be translated.
-      //
-      // This used to say "the table may not exist yet (part 790 is unapplied)".
-      // Part 790 IS applied — `public.exercise_translations` exists on this
-      // project (counted live, 3 Sep 2026). What is still true is the OUTCOME,
-      // for a different reason: the table holds zero rows, because parts 791
-      // (German) and 792 (Spanish) have not been loaded. So this read succeeds
-      // and returns nothing, `byId` is empty, and every name renders as English
-      // and says so — the same screen, reached down a healthy path rather than
-      // an errored one. The 42P01 branch is kept for a deployment without 790.
-      if (error) { setById(EMPTY); setSettled(true); return; }
-      const page = capped(data);
-      setById(indexTranslations(
-        page.rows.map((r: any) => ({
-          exerciseId: r.exercise_id, locale: r.locale, name: r.name, description: r.description,
-        })),
-        locale,
-      ));
-      setSettled(true);
-    } catch {
-      setById(EMPTY);
-      setSettled(true);
-    }
+    const key = `${locale}\u0000${authRev}`;
+    const hit = cache.get(key);
+    if (hit) { setById(hit); setSettled(true); return; }
+    const running = inFlight.get(key);
+    if (running) { setById((await running) ?? EMPTY); setSettled(true); return; }
+    const fetching = (async (): Promise<ReadonlyMap<string, Translated> | null> => {
+      try {
+        const { data, error } = await supabase
+          .from('exercise_translations')
+          .select('exercise_id, locale, name, description')
+          .eq('locale', locale)
+          .limit(capLimit());
+        // eslint-disable-next-line -- no-error-ok: a failure here must not take the library down.
+        // Every name falls back to English AND IS MARKED as English, which is what
+        // the reader saw before this read existed. Silently dropped rather than
+        // reported precisely because it is not a wrong answer: nothing on screen
+        // claims to be translated.
+        //
+        // This used to say "the table may not exist yet (part 790 is unapplied)".
+        // Part 790 IS applied — `public.exercise_translations` exists on this
+        // project (counted live, 3 Sep 2026). What is still true is the OUTCOME,
+        // for a different reason: the table holds zero rows, because parts 791
+        // (German) and 792 (Spanish) have not been loaded. So this read succeeds
+        // and returns nothing, `byId` is empty, and every name renders as English
+        // and says so — the same screen, reached down a healthy path rather than
+        // an errored one. The 42P01 branch is kept for a deployment without 790.
+        if (error) return null;
+        const page = capped(data);
+        return indexTranslations(
+          page.rows.map((r: any) => ({
+            exerciseId: r.exercise_id, locale: r.locale, name: r.name, description: r.description,
+          })),
+          locale,
+        );
+      } catch {
+        return null;
+      }
+    })();
+    inFlight.set(key, fetching);
+    let got: ReadonlyMap<string, Translated> | null = null;
+    try { got = await fetching; } finally { inFlight.delete(key); }
+    if (got) cache.set(key, got);
+    setById(got ?? EMPTY);
+    setSettled(true);
     // Re-armed on sign-in for the same reason useExerciseCatalogue is: the read
     // policy is `to authenticated`, providers mount before the session is
     // restored, and a run that happened while signed out comes back empty with
@@ -166,4 +204,60 @@ export function useExerciseTranslation(exerciseId: string | null | undefined): {
   }, [id, locale]);
 
   return { locale, byId };
+}
+
+/**
+ * Translating a movement name that arrived as a NAME rather than as a row.
+ *
+ * ── the gap this closes ───────────────────────────────────────────────────
+ *
+ * `useExerciseCatalogue` hands every row a `.display`, and the two library
+ * screens use it. Nothing else could: the screens a member actually trains
+ * from do not hold catalogue rows at all. A workout log row carries an
+ * `exercise` COLUMN — a string — and a programme day carries a
+ * `ProgramExercise.name` frozen into the template JSON when the coach built
+ * it. Both are the English name, because the English name is the identity
+ * (see src/lib/catalogueLocale.ts), and both were rendered raw.
+ *
+ * The consequence was not subtle. A German member opened Library and read
+ * "Kniebeuge mit Langhantel"; they then opened the workout they were about to
+ * do, and the same movement said "Barbell Back Squat" — the app translating
+ * the catalogue it browses and not the one it trains from. Their history,
+ * their records and their trends said the English name too.
+ *
+ * ── how a name becomes an id ──────────────────────────────────────────────
+ *
+ * `exerciseSlug()`, which is exactly how every other screen in this app
+ * resolves a stored name back to a catalogue row — it is what
+ * `exercises.id` IS. So a name that is in the catalogue translates, and a
+ * name a coach typed by hand does not resolve to any row and comes back as
+ * itself, flagged as a fallback. That flag is honest and the caller decides
+ * whether to render it: a list of six hundred catalogue rows marks them (see
+ * `fallbackTag`), and a programme of eight movements a coach chose does not
+ * need a badge on every line.
+ *
+ * ── one read, not one per row ─────────────────────────────────────────────
+ *
+ * Backed by `useCatalogueTranslations`, so a screen showing forty movements
+ * asks the server once. An English reader asks nothing and gets a function
+ * that hands every name straight back.
+ */
+export function useMovementName(): {
+  /** The name to show, and the truth about which language it is in. */
+  nameOf: (english: string | null | undefined) => DisplayString;
+  /** Just the text, for the many sites that only render a string. */
+  textOf: (english: string | null | undefined) => string;
+  locale: TranslationLocale | null;
+  settled: boolean;
+} {
+  const { locale, byId, settled } = useCatalogueTranslations();
+  const nameOf = useCallback(
+    (english: string | null | undefined): DisplayString => {
+      const base = String(english ?? '');
+      return displayName(base, exerciseSlug(base), byId, locale);
+    },
+    [byId, locale],
+  );
+  const textOf = useCallback((english: string | null | undefined) => nameOf(english).text, [nameOf]);
+  return { nameOf, textOf, locale, settled };
 }

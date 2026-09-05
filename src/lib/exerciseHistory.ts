@@ -508,11 +508,31 @@ export function exerciseIndex(
  * codebase to "are these the same movement" and it is `exerciseSlug`; a fuzzy
  * matcher here would be a second one, and the two would part company on the
  * first hyphen.
+ *
+ * ── the translated name ───────────────────────────────────────────────────
+ *
+ * `shownName` is the name the row is DISPLAYED under when that is not the
+ * English one, and a query matches either. A German member reads "Kniebeuge"
+ * in the list and types "Kniebeuge" into the box above it; matching only the
+ * English slug answered "Nothing logged matches that" about a movement that
+ * was on screen a second earlier. Matching only the shown name would be the
+ * opposite failure, because most coaches — and most members who have trained
+ * anywhere else — learned the movement as "Back Squat" and type that. Both,
+ * therefore, which is the same rule `matchesSearch` in
+ * src/lib/catalogueLocale.ts already applies to the catalogue itself.
+ *
+ * Optional: a screen with no translations passes nothing and the behaviour is
+ * exactly what it was.
  */
-export function matchExercises(index: readonly ExerciseSummary[], query: string): ExerciseSummary[] {
+export function matchExercises(
+  index: readonly ExerciseSummary[],
+  query: string,
+  shownName?: (e: ExerciseSummary) => string | null | undefined,
+): ExerciseSummary[] {
   const words = exerciseSlug(query).split('-').filter(Boolean);
   if (!words.length) return [...index];
-  return index.filter((e) => words.every((w) => e.slug.includes(w)));
+  const hits = (slug: string) => !!slug && words.every((w) => slug.includes(w));
+  return index.filter((e) => hits(e.slug) || (!!shownName && hits(exerciseSlug(shownName(e) || ''))));
 }
 
 /* ── where it has gone ────────────────────────────────────────────────────── */

@@ -97,6 +97,7 @@ import { isoDate } from '@lib/format';
 // clock and not whichever laptop is open.
 import { gymDay } from '@lib/gymZone';
 import { Banner as SharedBanner, type BannerTone } from '@/components/Banner';
+import { num } from '@/lib/num';
 
 /**
  * What a read is when it holds no rows: still in flight, or refused.
@@ -965,7 +966,7 @@ function Documents({ documents, members, ccy, zone, tenantId, me, onChange }: {
         ? <span className="dash">no expiry recorded</span>
         : <span style={{ color: d.expiresOn <= today ? 'var(--crit)' : undefined }}>{d.expiresOn}</span> },
     { key: 'size', header: 'Size', value: (d) => d.sizeBytes, numeric: true,
-      render: (d) => d.sizeBytes == null ? <span className="dash">—</span> : `${(d.sizeBytes / 1024).toFixed(0)} KB` },
+      render: (d) => d.sizeBytes == null ? <span className="dash">—</span> : `${num(d.sizeBytes / 1024)} KB` },
     // Who the DATABASE will let read this, not who this screen chooses to show
     // it to. The rule is `gym_doc_readable()` in supabase/parts/390 and this
     // column only reports it.

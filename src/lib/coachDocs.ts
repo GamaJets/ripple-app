@@ -30,7 +30,7 @@
 // document people have already signed — a re-issue is a new document and a
 // retirement of the old one, which the immutability trigger in part 135
 // enforces whatever a screen believes.
-import { fmtDay } from './format';
+import { fmtDay, num1 } from './format';
 import { BRAND } from './brands';
 
 /** Matches the bucket's `file_size_limit` and `coach_documents_bytes_chk`. The
@@ -149,7 +149,7 @@ export function sizeLabel(bytes: number | null | undefined): string {
   if (!b) return '—';
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${Math.round(b / 1024)} KB`;
-  return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+  return `${num1(b / (1024 * 1024))} MB`;
 }
 
 /* ── The documents themselves ─────────────────────────────────────────────── */

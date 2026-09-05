@@ -38,6 +38,7 @@ import { useCheckIns } from '../../src/ui/checkins';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isPending } from '../../src/lib/wellnessSync';
 import { unsentNote } from '../../src/lib/offlineQueue';
+import { BACK_ICON } from '../../src/ui/direction';
 
 // The range a human weighs, in the kilograms this app stores. Kept in metric
 // because the record is metric; the two bounds are converted for whichever unit
@@ -173,7 +174,7 @@ export default function CheckIn() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             {/* Said "Daily" over a title reading "Weekly Check-in", above a
                 line calling it a weekly pulse. One of the three had to move and

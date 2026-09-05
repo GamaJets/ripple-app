@@ -66,7 +66,7 @@ import { View, Text, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { BRAND } from '../../src/lib/brands';
-import { num } from '../../src/lib/format';
+import { num, num1 } from '../../src/lib/format';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -85,6 +85,7 @@ import { useDeviceHrv } from '../../src/ui/deviceHrv';
 import { hrvBuildingLine, hrvTrendLine } from '../../src/lib/hrvTrend';
 import { awaitingNote, liveFootnote, permissionsNote } from '../../src/lib/wearables/liveNotes';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** "3m ago" for the last sync stamp. */
 function ago(ts?: number): string {
@@ -333,7 +334,7 @@ export default function TrainerDevices() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your tracking</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; Devices</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         {/* ── what your own devices are reporting today ──────────────────── */}
@@ -513,7 +514,7 @@ export default function TrainerDevices() {
                         {/* One decimal, because WHOOP's own app shows one and a
                             rounded 14 and a rounded 15 are a meaningfully
                             different day on a 0–21 logarithmic scale. */}
-                        {m.strain != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.strain.toFixed(1)} strain</Text> : null}
+                        {m.strain != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num1(m.strain)} strain</Text> : null}
                         {/* The raw night, beside its own device and nothing
                             else. The COMPARISON lives on the Today panel above,
                             against this coach's own baseline; what this row

@@ -34,6 +34,7 @@
 // screen and forgotten.
 
 import type { LoadStatus } from '../ui/loadStatus';
+import { num1 } from './format';
 
 export const MIN_RATING = 1;
 export const MAX_RATING = 5;
@@ -103,7 +104,7 @@ export function ratingDisplay(summary: RatingSummary | null, status: LoadStatus)
 /** One decimal, and never rounded up to a number the ratings cannot reach. */
 export function formatAverage(avg: number): string {
   const clamped = Math.min(MAX_RATING, Math.max(MIN_RATING, avg));
-  return (Math.round(clamped * 10) / 10).toFixed(1);
+  return num1(Math.round(clamped * 10) / 10);
 }
 
 /** The short text on a directory row. Null when nothing may honestly be said. */

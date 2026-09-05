@@ -49,6 +49,8 @@ import { ackState, programmeChoiceState } from '../../src/lib/injuryGate';
 import { useMyInjuryAcks } from '../../src/ui/injuryAcks';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { fmtDay, num } from '../../src/lib/format';
+import { BACK_ICON } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 const SEVS: { id: InjurySeverity; label: string }[] = [
   { id: 'mild', label: 'Mild' }, { id: 'moderate', label: 'Moderate' }, { id: 'severe', label: 'Severe' },
@@ -56,6 +58,9 @@ const SEVS: { id: InjurySeverity; label: string }[] = [
 
 export default function Injuries() {
   const t = useTheme();
+  // The movements the coach acknowledged loading are recorded under their
+  // English names, and this screen is the member's own record of that decision.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const c = useClientData();
   const [open, setOpen] = useState(false);
@@ -171,7 +176,7 @@ export default function Injuries() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Training</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Injuries & Limitations</Text>
@@ -278,7 +283,10 @@ export default function Injuries() {
                     <View key={i}>
                       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{fmtDay(ch.at)}</Text>
                       <Text style={{ ...ty.label, color: t.ink2, marginTop: 2 }}>
-                        {ch.movements.slice(0, 6).map((m) => `${m.exercise} (${areaLabel(m.area).toLowerCase()})`).join(', ')}
+                        {/* The movement in the reader's language; the join stays
+                            English, because the sentence around it is — see
+                            namesOf() in src/lib/wearables/liveNotes.ts. */}
+                        {ch.movements.slice(0, 6).map((m) => `${movement(m.exercise)} (${areaLabel(m.area).toLowerCase()})`).join(', ')}
                         {ch.movements.length > 6 ? ` and ${num(ch.movements.length - 6)} more` : ''}
                       </Text>
                     </View>

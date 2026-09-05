@@ -56,7 +56,7 @@ export default function TrainerExercise() {
   const { name: raw, from } = useLocalSearchParams<{ name?: string; from?: string }>();
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
-  const { detail, status, signedOut, reload: reloadDetail } = useExerciseDetail(name);
+  const { detail, display, status, signedOut, reload: reloadDetail } = useExerciseDetail(name);
   // `status` as well as the clips. It was destructured away, and the negative
   // this screen prints — "Nobody has filmed this movement" — is a claim about
   // the WHOLE library, so it needs the whole library. Under 'error' the list is
@@ -111,9 +111,18 @@ export default function TrainerExercise() {
           </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What your client sees</Text>
-            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }} numberOfLines={2}>{detail?.name || name || 'Exercise'}</Text>
+            {/* What the client sees, in the language they see it in — this
+                screen's whole claim is that it shows their view, and it was
+                showing the English name to a German coach whose German client
+                reads the translated one. `display.note` says when the
+                catalogue has no translation, so an English name is never
+                passed off as a German one. The identity is still `name`. */}
+            <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }} numberOfLines={2}>{display?.name.text || detail?.name || name || 'Exercise'}</Text>
           </View>
         </View>
+        {display?.note ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: -sp.md, marginBottom: sp.lg }}>{display.note}</Text>
+        ) : null}
 
         {/* ── the demonstration ─────────────────────────────────────────── */}
         {status === 'loading' ? (

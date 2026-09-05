@@ -82,6 +82,7 @@ import {
   CLIENT_END_CONFIRM_TITLE, clientEndConfirmBody, clientEndOutcomeLine,
   type EndReason,
 } from '../../src/lib/endCoaching';
+import { BACK_ICON } from '../../src/ui/direction';
 
 interface CoachProfile {
   id: string;
@@ -333,7 +334,7 @@ export default function MyCoach() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Coaching</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Coach</Text>

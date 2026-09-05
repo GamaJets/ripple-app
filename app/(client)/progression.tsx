@@ -23,6 +23,8 @@ import { suggestProgression, type ProgressAction } from '../../src/lib/progressi
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { Rule, Section, SectionHead, KpiRow, Notice, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { BACK_ICON } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 const META: Record<ProgressAction, { label: string; icon: string; color: (t: any) => string }> = {
   increase: { label: 'Add Load', icon: 'trending', color: (t) => t.brand },
@@ -33,6 +35,9 @@ const META: Record<ProgressAction, { label: string; icon: string; color: (t: any
 
 export default function Progression() {
   const t = useTheme();
+  // The reader's own language for the movement, English where the catalogue
+  // has no translation. The stored name is untouched — it is the identity.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const { log, status: logStatus, reload } = useWorkoutLog();
   // A failed read used to strand this screen for the whole session: the only
@@ -61,7 +66,7 @@ export default function Progression() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>From your logged lifts</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Next-session Targets</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         <Rule />
@@ -136,7 +141,7 @@ export default function Progression() {
                       <Icon name={m.icon as any} size={17} color={c} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{tip.exercise}</Text>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(tip.exercise)}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Last: {fig(liftLabel(tip.lastWeight, wu))} × {tip.lastReps}</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>

@@ -48,6 +48,7 @@ import { assertWhole, capLimit, readAll } from './rowCap';
 import { readByIds } from './idLookup';
 import { writeFailure } from './wroteRows';
 import { attributionOf, type SignatureAttribution } from './gymSigning';
+import { num1 } from './format';
 
 type Queryable = { from: (table: string) => any; storage?: any };
 
@@ -436,7 +437,7 @@ export function documentBlocker(
   if (!title.trim()) return 'Give it a title. A bucket full of IMG_4471.jpg is a folder, not a record.';
   if (!file) return 'Choose the file.';
   if (file.size > MAX_DOCUMENT_BYTES) {
-    return `That file is ${(file.size / 1048576).toFixed(1)} MB and the limit is 25 MB. A scan at 300dpi is usually under 5 — the setting to change is the scanner's, not this.`;
+    return `That file is ${num1(file.size / 1048576)} MB and the limit is 25 MB. A scan at 300dpi is usually under 5 — the setting to change is the scanner's, not this.`;
   }
   if (file.size === 0) return 'That file is empty.';
   if (file.type && !DOCUMENT_MIME.includes(file.type)) {

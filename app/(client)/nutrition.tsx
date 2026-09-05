@@ -13,7 +13,7 @@
 // logged now — the app says it could not read the photo rather than making a
 // number up.
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { num } from '../../src/lib/format';
+import { num, numUpTo } from '../../src/lib/format';
 import { fmtFullDay } from '../../src/lib/format';
 import { PLAN_WEEKDAYS, planDayIndex, planDayOverride, planStale } from '../../src/lib/mealPlan';
 import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
@@ -76,7 +76,7 @@ import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } f
 import { useSettings } from '../../src/ui/settings';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { weightLabel, kgToLb, type WeightUnit } from '../../src/lib/units';
-import { FORWARD_ICON, turn } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON, turn } from '../../src/ui/direction';
 
 const DIETS: Diet[] = ['meat', 'vegetarian', 'vegan', 'paleo', 'keto'];
 const DIET_LABEL: Record<Diet, string> = { meat: 'Meat', vegetarian: 'Veggie', vegan: 'Vegan', paleo: 'Paleo', keto: 'Keto' };
@@ -133,7 +133,7 @@ const DAY_TYPES = [
  * places the metric side has always shown.
  */
 const rateIn = (kgPerWeek: number, unit: WeightUnit) =>
-  Math.abs(unit === 'lb' ? kgToLb(kgPerWeek) : kgPerWeek).toFixed(2).replace(/0$/, '').replace(/\.$/, '');
+  numUpTo(Math.abs(unit === 'lb' ? kgToLb(kgPerWeek) : kgPerWeek), 2);
 // Through the app's own resolver rather than the device's, like every other
 // date in this app. This one is the deadline the whole calorie target is
 // explained by.
@@ -771,7 +771,7 @@ export default function Nutrition() {
                 ? 'Reading your diet and the foods you asked to avoid…'
                 : 'Your diet and the foods you asked to avoid could not be read, so there is no plan to build from them. A week of meals put together without your exclusions is not a caveat on your plan — it is the wrong food — so it is not shown. Pull down to try again.'}</Text>
             </View>
-            <Ghost icon="back" onPress={() => router.back()} />
+            <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           </View>
           <Rule />
           <Section>

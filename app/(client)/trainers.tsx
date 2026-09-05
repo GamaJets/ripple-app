@@ -102,7 +102,7 @@ import { readSessionFee, sessionFeeAmount, sessionFeeShort, sessionFeeNote, type
 // and a broken circle in a directory reads as a coach who has not bothered.
 import { avatarSource } from '../../src/lib/avatarImage';
 import { useToday, useNow } from '../../src/ui/today';
-import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
 
 // `n.split(' ').map((x) => x[0]).join('')` is the obvious version and it is
 // the `String(null)` mistake in another costume: any run of two spaces yields
@@ -860,7 +860,7 @@ export default function FindTrainer() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Find a Trainer</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Enter your coach's code, or browse everyone coaching on {BRAND.label}.</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         {/* ── your coach, and the way out ─────────────────────────────────

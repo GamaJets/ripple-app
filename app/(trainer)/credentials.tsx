@@ -65,6 +65,7 @@ import {
 import { useReviewAsks, type AskRow } from '../../src/ui/reviewAsks';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { useThread } from '../../src/ui/messaging';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const EMPTY: CredentialDraft = {
   kind: 'certification', title: '', issuer: '', reference: '', issuedOn: '', expiresOn: '',
@@ -225,7 +226,7 @@ export default function TrainerCredentials() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 48 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your profile</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Credentials & Reviews</Text>
@@ -721,7 +722,7 @@ function AskSheet({ row, onClose, onSent }: {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={onClose} a11yLabel="Close without sending" />
+          <Ghost icon={BACK_ICON} onPress={onClose} a11yLabel="Close without sending" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Draft — nothing sent yet</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{row.name ?? 'Client'}</Text>

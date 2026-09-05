@@ -51,6 +51,7 @@ import {
   fetchMySubscriptions, myCoachId, subscribeToPackage, cancelSubscription, resumeSubscription,
   openSubscriptionPortal, pkgMoney, pkgPriceLine, statusLabel, isLive, type ClientSubscription,
 } from '../../src/lib/subscriptions';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function ClientPackages() {
   const t = useTheme();
@@ -474,7 +475,7 @@ export default function ClientPackages() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Memberships &amp; Packs</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What you've bought from your coach and what's left.</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} /> : (

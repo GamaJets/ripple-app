@@ -72,7 +72,7 @@ import type { Program } from '../../src/lib/programs';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
 import { notifySuccess } from '../../src/ui/haptics';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 /** What a member's chip says. Never "not assigned yet" off an unread
  *  `assigned_programs` — that is the sentence a coach acts on by assigning. */
@@ -347,7 +347,7 @@ export default function Groups() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Write it once</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Program Groups</Text>

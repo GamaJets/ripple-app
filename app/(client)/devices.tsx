@@ -14,7 +14,7 @@
 // importer above it. The line described behaviour the code no longer has.
 import { useState, useEffect, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
-import { num } from '../../src/lib/format';
+import { num, num1 } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -55,6 +55,7 @@ import { useSettings } from '../../src/ui/settings';
 import { useDeviceHrv } from '../../src/ui/deviceHrv';
 import { hrvBuildingLine, hrvTrendLine } from '../../src/lib/hrvTrend';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
+import { BACK_ICON } from '../../src/ui/direction';
 
 type MetricKey = 'kcal' | 'hr' | 'hrv' | 'steps' | 'source';
 
@@ -582,7 +583,7 @@ export default function Devices() {
     <Text style={{ ...ty.micro, color: t.ink3 }}>Wearables</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; Devices</Text>
    </View>
-   <Ghost icon="back" onPress={() => router.back()} />
+   <Ghost icon={BACK_ICON} onPress={() => router.back()} />
   </View>
 
   {/* ── the hero: today's live burn, when a device is feeding it ─────── */}
@@ -1104,7 +1105,7 @@ export default function Devices() {
            {/* One decimal, because WHOOP's own app shows one and a rounded 14
                and a rounded 15 are a meaningfully different day on a 0–21
                logarithmic scale. */}
-           {m.strain != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{m.strain.toFixed(1)} strain</Text> : null}
+           {m.strain != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num1(m.strain)} strain</Text> : null}
            {m.hrv != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{Math.round(m.hrv)} ms HRV</Text> : null}
           </View>
          );

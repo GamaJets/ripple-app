@@ -58,7 +58,8 @@ import { formatSleepHours, markNightsUnread, type MergedNight, type SleepRead } 
 import type { ProviderId } from '../../src/lib/wearables/types';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { readNumber } from '../../src/lib/units';
-import { END_ALIGN, FORWARD_ICON, turn } from '../../src/ui/direction';
+import { num1 } from '../../src/lib/format';
+import { BACK_ICON, END_ALIGN, FORWARD_ICON, turn } from '../../src/ui/direction';
 
 const MOBILITY = [
  { name: 'Full-body warm-up', dur: '6 min', moves: ['Leg swings ×10/side', 'World’s greatest stretch ×5/side', 'Cat-cow ×10', 'Band pull-aparts ×15', 'Bodyweight squats ×10'] },
@@ -312,7 +313,7 @@ export default function Recovery() {
  // typeface as a confirmed one. Both render as a dash, which is the standing
  // rule for a number the record cannot stand behind.
  const sleepWhole = isWhole(sleepStatus);
- const avgSleep = sleepWhole && sleep.length ? (sleep.reduce((a, s) => a + s.hours, 0) / sleep.length).toFixed(1) : '—';
+ const avgSleep = sleepWhole && sleep.length ? num1(sleep.reduce((a, s) => a + s.hours, 0) / sleep.length) : '—';
  // Null when the client has not set a goal, because there is no percentage of
  // a goal that does not exist. Left as it was, `cups / goalCups` coerces the
  // null to 0: any glass logged divides by zero and gives Infinity, which
@@ -379,7 +380,7 @@ export default function Recovery() {
     <Text style={{ ...ty.micro, color: t.ink3 }}>Heart rate, hydration, sleep &amp; mobility</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Recovery</Text>
    </View>
-   <Ghost icon="back" onPress={() => router.back()} />
+   <Ghost icon={BACK_ICON} onPress={() => router.back()} />
   </View>
 
   {/* ── readiness: the number the home screen leads with, taken apart ─

@@ -53,7 +53,7 @@
 // one hero figure plus hairline-separated sections, and the Georgia serif
 // header is gone.
 import { useState, useEffect, useCallback } from 'react';
-import { num } from '../../src/lib/format';
+import { num, num1 } from '../../src/lib/format';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
@@ -322,7 +322,7 @@ export default function OwnerGrowth() {
                   </Text>
                   <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
                     +{mo.joined} · −{mo.left}
-                    {mo.churn == null ? '' : ` · ${(mo.churn * 100).toFixed(1)}%`}
+                    {mo.churn == null ? '' : ` · ${num1(mo.churn * 100)}%`}
                   </Text>
                 </View>
                 {/* The reason, in the month's own words, wherever there is no

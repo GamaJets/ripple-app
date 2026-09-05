@@ -34,7 +34,7 @@ import { useBrand } from '../../src/ui/brand';
 import { shownStreak, longestStreak, personalRecords } from '../../src/lib/streaks';
 import { charsPerLine, wrapLines } from '../../src/lib/shareAsset';
 import { sharePngAsset, imageShareBlocker } from '../../src/lib/social';
-import { FORWARD_CHAR } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_CHAR } from '../../src/ui/direction';
 
 /**
  * The card as an EXPORTABLE GRAPHIC, drawn in SVG so `toDataURL` can turn it
@@ -331,7 +331,7 @@ export default function Cards() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Screenshot & share your wins</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Milestone Cards</Text>

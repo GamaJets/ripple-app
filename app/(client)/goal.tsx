@@ -32,7 +32,7 @@ import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightToKg, weightDeltaIn, kgToLb, readNumber, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { useGoalTracker, type GoalSaved } from '../../src/ui/goalTracker';
-import { fmtFullDay } from '../../src/lib/format';
+import { fmtFullDay, num2 } from '../../src/lib/format';
 // The chip's span turned into a day on the MEMBER'S calendar. See the header of
 // that file for the two whole-day errors the expression this replaced carried.
 import { targetDayIn } from '../../src/lib/goalDeadline';
@@ -48,6 +48,7 @@ import {
   GOAL_METRIC, MEASURED_KINDS, MIN_TREND_DAYS,
   type GoalKind, type GoalTarget, type MeasuredKind, type Point,
 } from '../../src/lib/goalTargets';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const KIND_TAB: { kind: GoalKind; label: string }[] = [
   ...MEASURED_KINDS.map((k) => ({ kind: k as GoalKind, label: k === 'weight' ? 'Weight' : k === 'bodyfat' ? 'Body Fat' : 'Muscle' })),
@@ -105,7 +106,7 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit): stri
   // parenthetical rather than quoting a figure it has just contradicted.
   const pace = (v: number) => {
     const r = rate(v);
-    return deltaMoved(r, 2) ? ` (${deltaSign(r, 2)}${Math.abs(r).toFixed(2)} ${unit}/wk)` : '';
+    return deltaMoved(r, 2) ? ` (${deltaSign(r, 2)}${num2(Math.abs(r))} ${unit}/wk)` : '';
   };
   switch (p.kind) {
     case 'reached':
@@ -292,7 +293,7 @@ export default function Goal() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Progress</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Goals</Text>

@@ -15,6 +15,7 @@ import { Icon } from '../../src/ui/Icon';
 import { ListRow, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { OWNER_NAV, searchNav } from '../../src/lib/features';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Explore() {
   const t = useTheme();
@@ -28,7 +29,7 @@ export default function Explore() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Owner portal</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Explore</Text>

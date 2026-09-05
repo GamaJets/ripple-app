@@ -60,13 +60,15 @@
 
 /** Bytes as a person reads them. Null in, "size unknown" out — never "0 B",
  *  which beside a photograph reads as an empty file not worth saving. */
+import { num, num1 } from './format';
+
 export function fileSizeLabel(bytes: number | null | undefined): string {
   if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return 'size unknown';
   if (bytes < 1024) return `${Math.round(bytes)} B`;
   const kb = bytes / 1024;
-  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  if (kb < 1024) return `${kb < 10 ? num1(kb) : num(kb)} KB`;
   const mb = kb / 1024;
-  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+  return `${mb < 10 ? num1(mb) : num(mb)} MB`;
 }
 
 /**

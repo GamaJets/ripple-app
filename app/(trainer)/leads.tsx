@@ -72,6 +72,7 @@ import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { fetchMyCoachBrand } from '../../src/ui/coachBrand';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { appLocale } from '../../src/lib/locale';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** A date as a coach reads one. Unknown stays unknown. */
 function when(iso: string | null): string {
@@ -368,7 +369,7 @@ export default function TrainerLeads() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Who asked and did not join</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Enquiries</Text>

@@ -58,6 +58,7 @@ import {
   COACH_DOC_ACCEPT_RULE, COACH_DOC_ACCESS_ENDS_NOTE, COACH_DOC_NOT_REPPLE, docLine, outstanding,
   outstandingCount, shapeDocs, sizeLabel, type CoachDoc, type RawCoachDoc,
 } from '../../src/lib/coachDocs';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const BUCKET = 'coach-docs';
 /** Long enough to read a waiver, short enough that a leaked link is stale. */
@@ -252,7 +253,7 @@ export default function ClientCoachDocumentsScreen() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>From your coach</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Paperwork</Text>

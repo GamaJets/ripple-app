@@ -68,6 +68,7 @@ import {
   coachClientReportDoc, coachReportShareBlurb, sessionTally, countableRows,
   type CoachSessionRow, type ReportScan, type ReportMeasureEntry, type ReportInjury,
 } from '../../src/lib/coachClientReport';
+import { BACK_ICON } from '../../src/ui/direction';
 
 // Written out here rather than imported from a shared constant:
 // scripts/check-schema.mjs resolves a select list that arrives as a named
@@ -450,7 +451,7 @@ export default function ClientReport() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>{fullName || 'Pick a client'}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Their record</Text>

@@ -34,6 +34,7 @@ import {
   nextPosition, TOKENS, MAX_TEMPLATE_BODY,
   type MessageTemplate,
 } from '../../src/lib/messageTemplates';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function SavedMessages() {
   const t = useTheme();
@@ -105,7 +106,7 @@ export default function SavedMessages() {
             announced it as "button". The house form is in
             src/ui/FeedbackScreen.tsx, which carries the whole argument. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your own words, kept</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Saved Messages</Text>

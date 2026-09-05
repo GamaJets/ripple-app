@@ -102,6 +102,8 @@ import { ExerciseHistoryPanel } from '../../src/ui/ExerciseHistory';
 // than a column on the workout row.
 import { muscleBoard, unmatchedNote } from '../../src/lib/muscleVolume';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { BACK_ICON } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 /* ── the read ─────────────────────────────────────────────────────────────
  * Three states, never two. See the header.
@@ -252,6 +254,10 @@ function GridLegend({ t }: { t: Theme }) {
 
 export default function History() {
   const t = useTheme();
+  // Both boards below name movements out of the LOG, where the name is the
+  // English identity. This screen already read the catalogue in the reader's
+  // language for its muscle board and showed English names beside it.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const { log: localLog } = useWorkoutLog();
   // Every figure below is a lifted load or a sum of them. The bars, the grid
@@ -358,7 +364,7 @@ export default function History() {
         <Text style={{ ...ty.micro, color: t.ink3 }}>How far you have come</Text>
         <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your History</Text>
       </View>
-      <Ghost icon="back" onPress={() => router.back()} />
+      <Ghost icon={BACK_ICON} onPress={() => router.back()} />
     </View>
   );
   const frame = (children: ReactNode) => (
@@ -633,7 +639,7 @@ export default function History() {
         <View key={`${m.exercise}-${m.at}`}
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{m.exercise}</Text>
+            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(m.exercise)}</Text>
             <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
               {fig(liftLabel(m.weight, wu))} × {m.reps} · {dstr(m.at)}
             </Text>
@@ -719,6 +725,10 @@ function MuscleSection({ log, unit, weightSeries }: {
   const t = useTheme();
   const [days, setDays] = useState<7 | 28>(7);
   const { rows, status, signedOut } = useExerciseCatalogue();
+  // muscleBoard() groups by the log's own English names, so the list of
+  // movements under each group is English even though the catalogue rows this
+  // section reads carry a `.display`.
+  const { textOf: movement } = useMovementName();
   /* `useNow()`, and it is IN the dependency list. `Date.now()` in the memo body
    * with `[log, rows, days, weightSeries, status]` around it is a window whose
    * start is fixed at the moment this section first mounted: History is reached
@@ -796,7 +806,10 @@ function MuscleSection({ log, unit, weightSeries }: {
               <View style={{ height: 3, borderRadius: 2, width: `${most ? Math.round((g.sets / most) * 100) : 0}%`, backgroundColor: t.brand }} />
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
-              {g.exercises.slice(0, 3).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
+              {/* The names translate; the JOIN does not. A list stitched with a German
+                  conjunction inside an English sentence is worse than either —
+                  see namesOf() in src/lib/wearables/liveNotes.ts. */}
+              {g.exercises.slice(0, 3).map(movement).join(', ')}{g.exercises.length > 3 ? `, and ${g.exercises.length - 3} more` : ''}
             </Text>
             {g.unpricedSets > 0 ? (
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>

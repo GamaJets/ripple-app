@@ -85,6 +85,7 @@ import type { Diet, Goal } from '../../src/lib/types';
 import { readFoodEdit } from '../../src/lib/entryEdit';
 import { searchCommonFoods, type CommonFood } from '../../src/lib/foods';
 import { num } from '../../src/lib/format';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * Whether this account has anywhere to PUT a meal.
@@ -440,7 +441,7 @@ export default function MyNutrition() {
 
           {/* ── header. Whose day this is, said before anything else ──────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-            <Ghost icon="back" onPress={() => router.back()} />
+            <Ghost icon={BACK_ICON} onPress={() => router.back()} />
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Your own meals, not a client&rsquo;s</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>My Nutrition</Text>

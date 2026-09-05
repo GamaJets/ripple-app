@@ -28,6 +28,7 @@ import { subscribeToPlan, openBillingPortal, fetchMySubscription, PRICE_IDS, typ
 import { trialDisagreement, TRIAL_NOT_YET_ENFORCED } from '../../src/lib/trialGate';
 import { useTrialReading } from '../../src/ui/trialReading';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const STATUS_LABEL: Record<string, string> = { active: 'Active', trialing: 'Trial', past_due: 'Past due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Incomplete' };
 
@@ -114,7 +115,7 @@ export default function TrainerBilling() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your Repple plan</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Billing</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Your Repple plan, payment method and invoices.

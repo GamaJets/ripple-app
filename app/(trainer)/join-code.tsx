@@ -57,6 +57,7 @@ import {
   HOW_THEY_USE_IT, type CodeRead,
 } from '../../src/lib/handOutCode';
 import { codeCountLine } from '../../src/lib/joinCodes';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function CoachJoinCode() {
   const t = useTheme();
@@ -118,7 +119,7 @@ export default function CoachJoinCode() {
         refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Bring somebody in</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Code</Text>

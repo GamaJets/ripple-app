@@ -78,6 +78,7 @@ import { sp, layout, radius, hairline, type as ty } from '../theme/scale';
 import type { LoadStatus } from './loadStatus';
 import { useAuthRevision } from './authRevision';
 import { useLive } from './realtime';
+import { BACK_ICON } from './direction';
 
 export interface InboxItem {
   id: string;
@@ -835,7 +836,7 @@ export function NotificationInbox(f: InboxFraming) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={t.ink3} />}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" a11yLabel="Back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>{f.kicker}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{f.title}</Text>

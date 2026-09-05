@@ -82,6 +82,7 @@ import {
   BODY_METRICS, DIRECTION_CAVEAT,
   type BodyHistory, type BodyScanRow, type ManualRow, type ManualEntry, type MetricSeries,
 } from '../../src/lib/clientBody';
+import { BACK_ICON } from '../../src/ui/direction';
 
 // `source` rides along with the three figures because "InBody (OCR)" and
 // "InBody (manual)" are different amounts of trust in a reading, and a coach
@@ -328,7 +329,7 @@ export default function ClientBody() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Body Composition</Text>

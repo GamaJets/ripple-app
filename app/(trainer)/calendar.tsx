@@ -176,6 +176,7 @@ import {
 import { BRAND } from '../../src/lib/brands';
 import { fmtDay, fmtTime, monthNames, monthNamesShort, weekdayNameShort } from '../../src/lib/format';
 import { useAuth } from '../../src/ui/auth';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 // ── the weekday, the month and the clock, in the reader's own language ─────
 //
@@ -2867,9 +2868,9 @@ export default function TrainerSchedule() {
         {/* ── month grid ─────────────────────────────────────────────────── */}
         <Section>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.lg }}>
-            <Ghost icon="back" onPress={() => shiftMonth(-1)} />
+            <Ghost icon={BACK_ICON} onPress={() => shiftMonth(-1)} />
             <Text style={{ ...ty.head, color: t.ink }}>{MON[viewMonth]} {viewYear}</Text>
-            <Ghost icon="chevron" onPress={() => shiftMonth(1)} />
+            <Ghost icon={FORWARD_ICON} onPress={() => shiftMonth(1)} />
           </View>
 
           <View style={{ flexDirection: 'row', marginBottom: sp.sm }}>
@@ -3524,7 +3525,7 @@ export default function TrainerSchedule() {
                               <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{tap.why}</Text>
                             ) : null}
                           </View>
-                          {tap.can ? <Icon name="chevron" size={16} color={t.ink3} /> : null}
+                          {tap.can ? <Icon name={FORWARD_ICON} size={16} color={t.ink3} /> : null}
                         </Pressable>
                       </View>
                     );

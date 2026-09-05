@@ -85,6 +85,8 @@ import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { localDate } from '../../src/lib/localDate';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { BACK_ICON } from '../../src/ui/direction';
+import { num2 } from '../../src/lib/format';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
@@ -134,7 +136,7 @@ function projectionLine(goal: GoalTarget, series: Point[], wu: WeightUnit, who: 
   // coach as the basis of a finish date for somebody else's body.
   const pace = (v: number) => {
     const r = rate(v);
-    return deltaMoved(r, 2) ? ` (${deltaSign(r, 2)}${Math.abs(r).toFixed(2)} ${unit}/wk)` : '';
+    return deltaMoved(r, 2) ? ` (${deltaSign(r, 2)}${num2(Math.abs(r))} ${unit}/wk)` : '';
   };
   switch (p.kind) {
     case 'reached':
@@ -492,7 +494,7 @@ export default function ClientGoals() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Working Toward</Text>

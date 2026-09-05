@@ -80,6 +80,7 @@ import {
 import { paceNote } from '../../src/lib/interventions';
 import { cadenceLine, overdueNote } from '../../src/lib/cadence';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** The mark beside a verdict. A coloured dot beside ink text, never coloured
  *  text: the scale reserves status colour for status and none of these clears
@@ -201,7 +202,7 @@ export default function Nudges() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Quiet Clients</Text>
@@ -613,7 +614,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={onClose} a11yLabel="Close without sending" />
+          <Ghost icon={BACK_ICON} onPress={onClose} a11yLabel="Close without sending" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Draft — nothing sent yet</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>{nudge.name ?? 'Client'}</Text>
@@ -694,7 +695,7 @@ function WhySheet({ name, drift, evidence, onClose }: {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={onClose} />
+          <Ghost icon={BACK_ICON} onPress={onClose} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Why they are here</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>{name ?? 'Client'}</Text>

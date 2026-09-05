@@ -33,6 +33,7 @@ import { Flag } from '../../src/ui/kit';
 import { CUISINES, PORTIONS, searchDishes, estimateDish, type Dish } from '../../src/lib/restaurant';
 import { Rule, Section, SectionHead, KpiRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Restaurant() {
   const t = useTheme();
@@ -77,7 +78,7 @@ export default function Restaurant() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Eating Out</Text>

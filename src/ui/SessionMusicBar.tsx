@@ -193,6 +193,7 @@ export function SessionMusicBar() {
           src/lib/direction.ts. */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, direction: 'ltr' }}>
         <Pressable onPress={() => command(spotifyPrevious)} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button" accessibilityLabel="Previous track" hitSlop={8}>
+          {/* rtl-ok: transport, not navigation — see the note above this row. */}
           <Icon name="back" size={18} color={t.ink2} />
         </Pressable>
         <Pressable
@@ -210,6 +211,8 @@ export function SessionMusicBar() {
           {busy ? <ActivityIndicator size="small" color={t.brandInk} /> : <Icon name={now.isPlaying ? 'minus' : 'play'} size={16} color={t.brandInk} />}
         </Pressable>
         <Pressable onPress={() => command(spotifyNext)} disabled={busy} accessibilityState={{ disabled: busy }} accessibilityRole="button" accessibilityLabel="Next track" hitSlop={8}>
+          {/* rtl-ok: the same glyph flipped by scaleX is skip-FORWARD in the
+              track, and it must not mirror either. See the note above this row. */}
           <View style={{ transform: [{ scaleX: -1 }] }}><Icon name="back" size={18} color={t.ink2} /></View>
         </Pressable>
       </View>

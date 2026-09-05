@@ -53,6 +53,7 @@ import type { WorkoutEntry } from '../lib/mockData';
 import { setsSummary } from '../lib/ownTraining';
 import { dayLabel } from '../lib/adherence';
 import { num } from '../lib/format';
+import { useMovementName } from './catalogueTranslations';
 import { liftLabel, liftDeltaIn, est1RMIn, volumeIn, type WeightUnit } from '../lib/units';
 import { deltaLabel } from '../lib/deltaLabel';
 import {
@@ -119,8 +120,12 @@ function readQualifier(covers: boolean, windowDays: number | null): string {
 }
 
 /** One movement's row in the list of what somebody has been doing. */
-function MovementRow({ e, unit, windowDays, picked, onPress }: {
-  e: ExerciseSummary; unit: WeightUnit; windowDays: number | null; picked: boolean; onPress: () => void;
+function MovementRow({ e, shown, unit, windowDays, picked, onPress }: {
+  e: ExerciseSummary;
+  /** The name to READ. `e.name` stays the identity the log is keyed on; this
+   *  is the reader's own language where the catalogue has it. */
+  shown: string;
+  unit: WeightUnit; windowDays: number | null; picked: boolean; onPress: () => void;
 }) {
   const t = useTheme();
   const best = est1RMIn(e.best1RMKg, unit);
@@ -129,7 +134,7 @@ function MovementRow({ e, unit, windowDays, picked, onPress }: {
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: picked }}
-      accessibilityLabel={e.name}
+      accessibilityLabel={shown}
       style={{
         flexDirection: 'row', alignItems: 'center', gap: sp.md,
         paddingVertical: sp.md, paddingHorizontal: sp.md,
@@ -138,7 +143,7 @@ function MovementRow({ e, unit, windowDays, picked, onPress }: {
       }}
     >
       <View style={{ flex: 1 }}>
-        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{e.name}</Text>
+        <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{shown}</Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
           {/* `recordDays` is `days` offered as a fact about the person, and it
               is null under a windowed or a cut read. The figure is shown
@@ -534,7 +539,12 @@ export function ExerciseHistoryPanel({ log, status, windowDays, unit, voice, his
   // is withheld unless the read covered the whole record.
   const readShape = useMemo<ExerciseRead>(() => ({ status, windowDays }), [status, windowDays]);
   const index = useMemo(() => (log ? exerciseIndex(log, history, readShape) : []), [log, history, readShape]);
-  const matches = useMemo(() => matchExercises(index, q), [index, q]);
+  // The list reads in the reader's own language and the SEARCH accepts either
+  // name — see matchExercises in src/lib/exerciseHistory.ts. `e.slug` is
+  // untouched: it is what a picked movement is identified by and what every
+  // trail below is keyed on.
+  const { textOf } = useMovementName();
+  const matches = useMemo(() => matchExercises(index, q, (e) => textOf(e.name)), [index, q, textOf]);
   const chosen = useMemo(() => index.find((e) => e.slug === picked) ?? null, [index, picked]);
 
   const whole = status === 'ready';
@@ -626,7 +636,7 @@ export function ExerciseHistoryPanel({ log, status, windowDays, unit, voice, his
       ) : (
         <View style={{ marginTop: sp.sm }}>
           {shown.map((e) => (
-            <MovementRow key={e.slug} e={e} unit={unit} windowDays={windowDays} picked={e.slug === picked}
+            <MovementRow key={e.slug} e={e} shown={textOf(e.name)} unit={unit} windowDays={windowDays} picked={e.slug === picked}
               onPress={() => setPicked(e.slug === picked ? null : e.slug)} />
           ))}
         </View>

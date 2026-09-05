@@ -88,6 +88,7 @@ import {
   COMPUTED_SEGMENTS, segmentDef, segmentMembers, unassessed, unassessedNote,
   type ClientFacts, type SegmentKey,
 } from '../../src/lib/segments';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Broadcast() {
   const t = useTheme();
@@ -370,7 +371,7 @@ export default function Broadcast() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your clients</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Broadcast</Text>

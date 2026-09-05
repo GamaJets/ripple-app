@@ -41,6 +41,7 @@ import {
   coachSummaryLine, referrerLine, CONVERSION_RULE,
   COACH_REWARD_NOTE, COACH_REFERRAL_PRIVACY_NOTE,
 } from '../../src/lib/referralCredit';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function CoachReferrals() {
   const t = useTheme();
@@ -85,7 +86,7 @@ export default function CoachReferrals() {
       >
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Who Brings You Clients</Text>

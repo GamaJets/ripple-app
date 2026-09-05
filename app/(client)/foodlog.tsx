@@ -83,6 +83,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useWearables } from '../../src/ui/wearables';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, ListRow, Flag, Field, KpiRow, fig } from '../../src/ui/kit';
 import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { BACK_ICON } from '../../src/ui/direction';
 
 type Food = { n: string; k: number; p: number; c: number; f: number };
 type Logged = Food & { via: string };
@@ -723,7 +724,7 @@ export default function FoodLog() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon="back" onPress={() => router.back()} />
+ <Ghost icon={BACK_ICON} onPress={() => router.back()} />
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
  <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Food Log</Text>

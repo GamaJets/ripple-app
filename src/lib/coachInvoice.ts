@@ -91,7 +91,7 @@ import { LOGO_CSS, logoImgHtml } from './coachLogo';
 // The date formatter, for the same reason the money formatter above is
 // imported rather than rewritten: an invoice is the last place in this app that
 // may have a second opinion about how a date is written.
-import { fmtPointDay } from './format';
+import { fmtPointDay, numUpTo } from './format';
 import { localDate } from './localDate';
 import { isoDay } from './weekStart';
 
@@ -1045,7 +1045,7 @@ export function readTaxRate(text: string | null | undefined): TypedRate {
  *  which is a statement they did not make. */
 export function taxRateLabel(pct: number | null | undefined): string | null {
   if (pct == null || !Number.isFinite(pct)) return null;
-  return `${Number(pct.toFixed(3))}%`;
+  return `${numUpTo(pct, 3)}%`;
 }
 
 /** Whether this document carries anything the coach stated about tax, and so

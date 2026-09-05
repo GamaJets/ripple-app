@@ -101,7 +101,7 @@ import { intakeLine, intakePrompt } from '../../src/lib/intake';
 import { useClientPaperwork } from '../../src/ui/clientPaperwork';
 import { useNow, useToday } from '../../src/ui/today';
 import { paperworkLine, paperworkItemLine, paperworkOutstanding } from '../../src/lib/clientPaperwork';
-import { fmtDay } from '../../src/lib/format';
+import { fmtDay, num1 } from '../../src/lib/format';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { useAuthRevision } from '../../src/ui/authRevision';
 import { useAuth } from '../../src/ui/auth';
@@ -185,7 +185,7 @@ import {
   type FollowUpRead,
 } from '../../src/lib/interventions';
 import type { WorkoutEntry } from '../../src/lib/mockData';
-import { END_ALIGN } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 const GOAL_COLS = 'id, kind, target_value, title, target_date, achieved_at, created_at';
 // The summary row's read, and no more: enough to count the days trained, date
@@ -1427,7 +1427,7 @@ export default function ClientScreen() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs, textTransform: 'capitalize' }} numberOfLines={1}>
@@ -1823,9 +1823,9 @@ export default function ClientScreen() {
               <>
                 <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
                   {[
-                    { label: 'Latest', v: gl.summary.latest ? gl.summary.latest.mmol.toFixed(1) : null },
-                    { label: 'Average', v: gl.summary.averageMmol == null ? null : gl.summary.averageMmol.toFixed(1) },
-                    { label: 'Highest', v: gl.summary.highestMmol == null ? null : gl.summary.highestMmol.toFixed(1) },
+                    { label: 'Latest', v: gl.summary.latest ? num1(gl.summary.latest.mmol) : null },
+                    { label: 'Average', v: gl.summary.averageMmol == null ? null : num1(gl.summary.averageMmol) },
+                    { label: 'Highest', v: gl.summary.highestMmol == null ? null : num1(gl.summary.highestMmol) },
                     { label: 'In range', v: gl.summary.inTypicalPct == null ? null : `${gl.summary.inTypicalPct}%` },
                   ].map((k) => (
                     <View key={k.label} style={{ flex: 1 }}>
@@ -1886,7 +1886,7 @@ export default function ClientScreen() {
                         honest long-term fix is two labelled fields rather than
                         a glyph between them. Recorded rather than papered over. */}
                     <Text style={{ ...ty.label, color: t.ink3 }}>
-                      {x.before ? x.before.mmol.toFixed(1) : '—'} → {x.peak ? x.peak.mmol.toFixed(1) : '—'}
+                      {x.before ? num1(x.before.mmol) : '—'} → {x.peak ? num1(x.peak.mmol) : '—'}
                     </Text>
                     <Text style={{ ...ty.label, color: t.ink, width: 48, textAlign: END_ALIGN }}>
                       {/* A rise of 0.04 mmol/L formatted as "0.0" and was

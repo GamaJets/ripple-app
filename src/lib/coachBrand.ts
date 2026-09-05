@@ -17,6 +17,7 @@ import {
   AA_TEXT, INK_ON_DARK, INK_ON_LIGHT, contrastRatio, readableInkOn,
 } from './a11y';
 import { BRAND } from './brands';
+import { num1 } from './format';
 
 /* ── the colour ───────────────────────────────────────────────────────────── */
 
@@ -118,7 +119,7 @@ export function parseCoachBrandColor(input: string | null | undefined): BrandCol
     // reaches 3.4 and white reaches 4.1 can see which direction to move in.
     const onBlack = contrastRatio(INK_ON_LIGHT, six);
     const onWhite = contrastRatio(INK_ON_DARK, six);
-    const fmt = (n: number | null) => (n == null ? 'nothing measurable' : `${n.toFixed(1)}:1`);
+    const fmt = (n: number | null) => (n == null ? 'nothing measurable' : `${num1(n)}:1`);
     return {
       kind: 'bad',
       reason: `Your clients could not read a button label on that colour. Dark text on it reaches ${fmt(onBlack)} and light text reaches ${fmt(onWhite)}, and a label needs ${AA_TEXT}:1. Try a darker or a lighter shade of it.`,

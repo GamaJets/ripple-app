@@ -69,7 +69,7 @@ import {
   selectionFromParams, COMPARE_DISCLAIMER,
 } from '../../src/lib/photoCompare';
 import { shareText } from '../../src/lib/exportShare';
-import { END_ALIGN } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 /** Expo Router hands a repeated query param back as an array and a single one
  *  as a string. Neither shape is special-cased at the two call sites. */
@@ -210,7 +210,7 @@ export default function Compare() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>Progress photos</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Before &amp; After</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         <Rule />

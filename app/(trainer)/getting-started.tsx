@@ -50,7 +50,7 @@ import {
   coachSetupRows, coachSetupHeading, coachSetupNote, coachSetupNext, NOT_YOUR_SETUP,
   type CoachSetupRow,
 } from '../../src/lib/coachFirstRun';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 export default function CoachGettingStarted() {
   const t = useTheme();
@@ -109,7 +109,7 @@ export default function CoachGettingStarted() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md, paddingBottom: sp.lg }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Getting started</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{coachSetupHeading(rows)}</Text>

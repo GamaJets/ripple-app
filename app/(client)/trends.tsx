@@ -33,6 +33,8 @@ import { fmtAxisDay } from '../../src/lib/format';
 // The local calendar day of an instant, so one movement done twice in an
 // afternoon is one point on the trend rather than two.
 import { dayKeyOf } from '../../src/lib/entryEdit';
+import { BACK_ICON } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 const WEEKS = 10;
 
@@ -50,6 +52,9 @@ function bestOf(e: WorkoutEntry, history: BodyweightHistory): number {
 
 export default function Trends() {
   const t = useTheme();
+  // The reader's own language for the movement, English where the catalogue
+  // has no translation. The stored name is untouched — it is the identity.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   // Every figure on this screen is a lifted load or a sum of them, and the
@@ -216,7 +221,7 @@ export default function Trends() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>See your training move over time</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Trends</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         {/* ── the hero: this week's tonnage ──────────────────────────────── */}
@@ -300,10 +305,13 @@ export default function Trends() {
                     // the delta, the best set — is about the chip that is lit,
                     // and a member who cannot see the fill was reading numbers
                     // with no subject attached to them.
+                    // The chip READS in the reader's language and the selection
+                    // stays keyed on `n`, the English name the log is written
+                    // under — see useMovementName in src/ui/catalogueTranslations.
                     <Pressable key={n} onPress={() => setSel(n)}
-                      accessibilityRole="button" accessibilityLabel={n} accessibilityState={{ selected: on }}
+                      accessibilityRole="button" accessibilityLabel={movement(n)} accessibilityState={{ selected: on }}
                       style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
-                      <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{n}</Text>
+                      <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{movement(n)}</Text>
                     </Pressable>
                   );
                 })}

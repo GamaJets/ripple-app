@@ -23,6 +23,7 @@ import { volumeHeadline } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 import { useToday } from '../../src/ui/today';
 import { dayKeyOf } from '../../src/lib/entryEdit';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function RestDay() {
   const t = useTheme();
@@ -127,7 +128,7 @@ export default function RestDay() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What your log suggests</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>When to Rest</Text>

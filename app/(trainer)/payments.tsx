@@ -286,6 +286,7 @@ import { accountTypeOf, accountForObject } from '../../src/lib/directCharges';
 // Why a credit did not move, in the words every other draw site uses. One copy
 // of those sentences, in the pure module that owns the outcome union.
 import { drawReason } from '../../src/lib/packDraw';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const INTERVALS: { key: BillingInterval | null; label: string }[] = [
   { key: null, label: 'One-off' },
@@ -1395,7 +1396,7 @@ export default function TrainerPayments() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>Getting paid</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Payments</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Get paid by your clients — memberships &amp; session packs.

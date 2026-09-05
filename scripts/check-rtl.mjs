@@ -141,6 +141,29 @@ const RADII = [
  *  flagged and marked rather than quietly exempted. */
 const GLYPH = /[›‹→←»«]/;
 
+/**
+ * A directional icon named as a STRING LITERAL.
+ *
+ * The glyph rule above covers the chevron a row draws as text. It could not
+ * see the other spelling of the same decision, which is much the commoner one:
+ * `<Ghost icon="back" …>` and `<Icon name="chevron" …>`. Those are the two
+ * paths in src/ui/Icon.tsx that point somewhere — `back` points left, `chevron`
+ * points right — and react-native-svg mirrors neither, so a back button written
+ * that way points AWAY from the direction it takes an Arabic reader.
+ *
+ * It was not a hypothetical. The sweep that added this file converted 83 style
+ * properties and left 128 of these, on 118 files: the back control of very
+ * nearly every screen in all three apps. app/(trainer)/sessions.tsx even
+ * carried a comment saying its Ghost "mirrors correctly in RTL" directly above
+ * a `Ghost icon="back"` that could not.
+ *
+ * Every other name in IconName is a picture of a thing — a bell, a flame, a
+ * ruler — and has no side. `play` is the third that points, and it is
+ * deliberately absent: media transport does not mirror (see UNMIRRORED in
+ * src/lib/direction.ts), so asking for it would be asking for the wrong fix.
+ */
+const ICON_LITERAL = /\b(?:icon|name)\s*=\s*(['"])(back|chevron)\1/;
+
 /** How far apart the two halves of a pair may sit and still count as one
  *  style object. Four lines covers every multi-line style literal in this
  *  tree; a pair further apart than that is not being read as a pair by a
@@ -361,6 +384,16 @@ for (const file of files) {
     if (GLYPH.test(line)) {
       say('a directional glyph', 'FORWARD_CHAR / BACK_CHAR / FORWARD_ARROW from src/ui/direction');
     }
+
+    const icon = ICON_LITERAL.exec(line);
+    if (icon) {
+      say(
+        `a directional icon named '${icon[2]}'`,
+        icon[2] === 'back'
+          ? 'BACK_ICON from src/ui/direction (or FORWARD_ICON, if it points forward)'
+          : 'FORWARD_ICON from src/ui/direction (or BACK_ICON, if it points back)',
+      );
+    }
   });
 }
 
@@ -371,7 +404,8 @@ if (findings.length) {
     console.error(`  ${f.text.slice(0, 130)}`);
   }
   console.error(`\n${findings.length} problem${findings.length === 1 ? '' : 's'}.`);
-  console.error('Use the logical property, or — if this genuinely must not mirror — write');
+  console.error('Use the logical property or the resolved icon, or — if this genuinely must not');
+  console.error('mirror — write');
   console.error('`// rtl-ok: <why>` on the line or in the comment above it. src/lib/direction.ts');
   console.error('lists what does not mirror and argues each entry.');
   process.exit(1);

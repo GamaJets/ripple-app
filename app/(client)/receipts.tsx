@@ -43,6 +43,7 @@ import { reportError } from '../../src/lib/reportError';
 import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../../src/lib/readCache';
 import { amount, fetchMyPayments, methodLabel, totalsByCurrency, type MemberPayment } from '../../src/lib/memberRecord';
 import { appLocale } from '../../src/lib/locale';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** A timestamptz as the day it happened, in the reader's own zone. A payment
  *  carries an instant, not a calendar date, so this one is parsed normally. */
@@ -132,7 +133,7 @@ export default function Receipts() {
         refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Membership</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Payments</Text>

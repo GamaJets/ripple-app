@@ -70,6 +70,7 @@ import {
   programmeCaveat, planNote, DAYS_AHEAD, DAYS_BEHIND,
   type CoachPlanDay, type ScheduledFocus,
 } from '../../src/lib/coachWeek';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** A day type's mark colour. A mark beside ink-coloured text, never coloured
  *  text: the scale reserves status colour for status and none of these clears
@@ -259,7 +260,7 @@ export default function ClientWeek() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Their Week</Text>

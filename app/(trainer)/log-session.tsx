@@ -142,6 +142,7 @@ import type { MyCurrency } from '../../src/lib/currencySource';
 import { notifySuccess } from '../../src/ui/haptics';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { BACK_ICON } from '../../src/ui/direction';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 
 /** The same starter list the program builder offers. */
 const LIB = [
@@ -171,6 +172,11 @@ const mkKey = () => `ex-${SEQ++}`;
 
 export default function LogSession() {
   const t = useTheme();
+  // `x.name` and `r.name` are what gets WRITTEN into the client's log, so they
+  // stay the English identity — `addExercise(x.name)` below is untouched.
+  // `movement()` is the same movement in the coach's own language, which is
+  // what the picker and the rows they are typing into should say.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   // The unit the COACH reads in. The field was hardcoded "kg", so a coach
   // thinking in pounds typed 135 and wrote 135 kg into a client's history.
@@ -1006,9 +1012,9 @@ export default function LogSession() {
             {rows.map((r) => (
               <View key={r.key} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{r.name}</Text>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{movement(r.name)}</Text>
                   <Pressable onPress={() => removeRow(r.key)} hitSlop={8} accessibilityRole="button"
-                    accessibilityLabel={`Remove ${r.name}`}
+                    accessibilityLabel={`Remove ${movement(r.name)}`}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 }}>
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
                     <Text style={{ ...ty.caption, color: t.ink2 }}>Remove</Text>
@@ -1030,10 +1036,10 @@ export default function LogSession() {
                     <Text style={{ ...ty.caption, color: t.ink3, width: 46 }}>Set {i + 1}</Text>
                     <TextInput value={s.reps} onChangeText={(v) => patchSet(r.key, i, { reps: v })}
                       keyboardType="numeric"
-                      accessibilityLabel={`${r.name} set ${i + 1} reps`} style={[inp, { flex: 1 }]} />
+                      accessibilityLabel={`${movement(r.name)} set ${i + 1} reps`} style={[inp, { flex: 1 }]} />
                     <TextInput value={s.kg} onChangeText={(v) => patchSet(r.key, i, { kg: v })}
                       keyboardType="decimal-pad"
-                      accessibilityLabel={`${r.name} set ${i + 1} weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}`} style={[inp, { flex: 1 }]} />
+                      accessibilityLabel={`${movement(r.name)} set ${i + 1} weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}`} style={[inp, { flex: 1 }]} />
                   </View>
                 ))}
                 <Pressable onPress={() => addSet(r.key)} hitSlop={8} accessibilityRole="button"
@@ -1150,7 +1156,7 @@ export default function LogSession() {
                 <Pressable key={x.name} onPress={() => addExercise(x.name)}
                   style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
                     paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{x.name}</Text>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(x.name)}</Text>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>{x.group}</Text>
                 </Pressable>
               ))}

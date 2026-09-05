@@ -26,6 +26,7 @@ import { Rule, Section, SectionHead, Ghost } from '../src/ui/kit';
 import { sp, layout, type as ty } from '../src/theme/scale';
 import { VARIANT, VARIANT_LABEL } from '../src/lib/variant';
 import { tabsFor, topicsFor, GUIDE_INTRO, type GuideSection } from '../src/lib/guideContent';
+import { BACK_ICON } from '../src/ui/direction';
 
 /**
  * That this screen has been opened. Read by app/(client)/getting-started.tsx,
@@ -84,7 +85,7 @@ export default function Guide() {
             src/ui/FeedbackScreen.tsx for the argument. "Done" stays where it
             is: somebody who read to the end should not have to scroll back. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>User guide</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 2 }}>{VARIANT_LABEL[VARIANT]}</Text>

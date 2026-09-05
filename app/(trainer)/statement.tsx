@@ -64,6 +64,7 @@ import {
 import { fetchStatementInput } from '../../src/ui/coachStatement';
 import { DateSheet } from '../../src/ui/DateSheet';
 import { MIN_TARGET } from '../../src/lib/a11y';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * A whole year, one quarter of it, or two dates the coach types.
@@ -344,7 +345,7 @@ export default function StatementOfRecord() {
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>For your accountant</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Statement of Record</Text>

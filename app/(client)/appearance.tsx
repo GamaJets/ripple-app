@@ -35,6 +35,7 @@ import { sp, layout, radius, hairline, type as ty, fontScale } from '../../src/t
 import { metaByKey, paletteForScheme, type Theme } from '../../src/theme/tokens';
 import { fontScaleNote } from '../../src/lib/typeScale';
 import { switchLabel } from '../../src/lib/a11y';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * A real switch, announced as one. Copied in shape from the Toggle on
@@ -102,7 +103,7 @@ export default function Appearance() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Account</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Appearance</Text>

@@ -55,6 +55,7 @@ import { Fetched } from '../../src/ui/fetched';
 import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useToday } from '../../src/ui/today';
+import { BACK_ICON } from '../../src/ui/direction';
 
 export default function OwnerRevenue() {
   const t = useTheme();
@@ -285,7 +286,7 @@ export default function OwnerRevenue() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           {/* Not "Platform revenue". Every figure below is this gym's own —
               sessions its coaches delivered, at its own session fee — and
               "the platform" is what a trainer pays Repple, which the header of

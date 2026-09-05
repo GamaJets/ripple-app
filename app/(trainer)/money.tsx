@@ -146,6 +146,7 @@ import {
 } from '../../src/lib/clientValue';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { isWhole } from '../../src/ui/loadStatus';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** The month a period figure covers, in the words a person uses for it. */
 const monthName = (d: Date): string => d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
@@ -482,7 +483,7 @@ export default function CoachMoney() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What comes in, and what goes out</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Money</Text>

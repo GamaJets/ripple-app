@@ -62,6 +62,7 @@ import {
   emptyIntake, intakeProgress, readinessDisclosed,
   type Intake, type TrainingPlace, type TrainingYears, type WorkKind, type YesNo,
 } from '../../src/lib/intake';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7];
 const MINS = [30, 45, 60, 75, 90];
@@ -301,7 +302,7 @@ export default function IntakeScreen() {
         showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Before you start</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Your Intake</Text>

@@ -95,6 +95,7 @@ import {
   withdrawnNote, emptyReason, inboxNote, checkedNote, gapNote, stamp,
   type Inbox, type InboxPhoto,
 } from '../../src/lib/photoInbox';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** How often the screen wakes up. It re-renders the tiles (so a link that has
  *  just lapsed stops being drawn the moment it lapses rather than at the next
@@ -300,7 +301,7 @@ export default function ClientPhotos() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Sent to you</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Progress Photos</Text>
@@ -428,7 +429,7 @@ export default function ClientPhotos() {
           {opened ? (
             <View style={{ flex: 1, paddingHorizontal: layout.gutter, paddingBottom: sp.xl }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
-                <Ghost icon="back" a11yLabel="Close photo" onPress={() => setOpen(null)} />
+                <Ghost icon={BACK_ICON} a11yLabel="Close photo" onPress={() => setOpen(null)} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ ...ty.micro, color: t.ink3 }}>Sent by {firstName}</Text>
                   <Text style={{ ...ty.head, color: t.ink, marginTop: 2 }}>

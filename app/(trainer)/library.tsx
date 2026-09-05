@@ -81,7 +81,7 @@ import {
 import { liftIn } from '../../src/lib/units';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { type LoadStatus } from '../../src/ui/loadStatus';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 
 const ALL = 'All';
@@ -311,7 +311,7 @@ export default function TrainerLibrary() {
         keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={goBack} />
+          <Ghost icon={BACK_ICON} onPress={goBack} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Everything you can put in a programme</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>
@@ -479,14 +479,17 @@ export default function TrainerLibrary() {
                         <View style={{ flexDirection: 'row', marginBottom: sp.md }}>
                           <Ghost
                             label={askedFor === r.name ? 'Hide Your Roster' : 'Across Your Roster'}
-                            a11yLabel={`Show every client on your book against ${r.name}`}
+                            a11yLabel={`Show every client on your book against ${r.display.text}`}
                             onPress={() => { void askRoster(r.name); }} />
                         </View>
 
                         {askedFor === r.name ? (
                           <View style={{ marginBottom: sp.lg }}>
                             <Text style={{ ...ty.caption, color: t.ink3 }}>
-                              {rosterExerciseLine(rosterAsk, rosterStatus, rosterJudged, r.name)}
+                              {/* The sentence names the movement, so it names
+                                  it the way this row does — `r.name` is still
+                                  what the ask is keyed on above. */}
+                              {rosterExerciseLine(rosterAsk, rosterStatus, rosterJudged, r.display.text)}
                             </Text>
                             {/* The judgement is named and so is its evidence.
                                 "Stalled" means one thing — logged in both halves

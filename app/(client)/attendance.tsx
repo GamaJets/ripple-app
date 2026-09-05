@@ -38,6 +38,7 @@ import { appLocale } from '../../src/lib/locale';
 import { dateParts } from '../../src/lib/localDate';
 import { useMyAttendance, RHYTHM_WEEKS } from '../../src/ui/attendance';
 import { dwellMinutes, rhythmWeekLabel, type AttendanceEvent, type ClassOutcome } from '../../src/lib/attendance';
+import { BACK_ICON } from '../../src/ui/direction';
 
 // The weekday used to be this file's own English array — 'Sun' through 'Sat',
 // hand-written beside a date string that was hardcoded to en-GB. Both are the
@@ -178,7 +179,7 @@ export default function Attendance() {
         refreshControl={pull}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Attendance</Text>

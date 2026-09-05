@@ -92,6 +92,7 @@ import { bulkReport, selectAllOffer, type WriteOutcome } from '../../src/lib/bul
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { hitSlopFor } from '../../src/lib/a11y';
+import { BACK_ICON } from '../../src/ui/direction';
 
 interface Item {
   id: string; label: string; icon: string; active: boolean; sort: number;
@@ -519,7 +520,7 @@ export default function CoachChecklists() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Their Checklists</Text>

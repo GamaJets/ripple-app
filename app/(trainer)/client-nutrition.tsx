@@ -91,7 +91,7 @@ import {
 } from '../../src/lib/mealPlan';
 import type { Diet, Goal } from '../../src/lib/types';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
-import { FORWARD_ARROW } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ARROW } from '../../src/ui/direction';
 
 const CLIENT_COLS = 'diet, meals_per_day, avoid, goal, activity, manual_weight_kg, manual_body_fat_pct';
 const SCAN_COLS = 'taken_at, weight_kg, body_fat_pct, skeletal_muscle_kg';
@@ -474,7 +474,7 @@ export default function ClientNutrition() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Nutrition</Text>

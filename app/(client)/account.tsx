@@ -54,7 +54,7 @@ import { reportError } from '../../src/lib/reportError';
 import {
   MIN_PASSWORD, changeEmail, changePassword, emailProblem, endOtherSessions, passwordProblem, pendingEmail,
 } from '../../src/lib/accountSecurity';
-import { END_ALIGN } from '../../src/ui/direction';
+import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
 /** Have we read the account's own state, and what did it say. `'failed'` is
  *  kept apart from `null` for the reason settings.tsx keeps them apart: a read
@@ -234,7 +234,7 @@ export default function Account() {
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Settings</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Account & Sign-in</Text>

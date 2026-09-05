@@ -72,6 +72,7 @@ import { myCurrencyLine } from '../../src/lib/currencySource';
 import { DateSheet } from '../../src/ui/DateSheet';
 import { Icon } from '../../src/ui/Icon';
 import { MIN_TARGET } from '../../src/lib/a11y';
+import { BACK_ICON } from '../../src/ui/direction';
 
 const DASH = '—';
 
@@ -647,7 +648,7 @@ export default function Invoices() {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} a11yLabel="Back" />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} a11yLabel="Back" />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your own paperwork</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Invoices</Text>

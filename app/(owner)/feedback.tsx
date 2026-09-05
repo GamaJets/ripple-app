@@ -25,6 +25,8 @@ import { SkeletonList } from '../../src/ui/Skeleton';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { BACK_ICON } from '../../src/ui/direction';
+import { num1 } from '../../src/lib/format';
 
 const CAT_COLOR = (t: any, c: string | null) => c === 'Bug' ? t.crit : c === 'Praise' ? t.brand : c === 'Confusing' ? t.warn : t.ink3;
 
@@ -115,7 +117,7 @@ export default function OwnerFeedback() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>What testers are telling you</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Feedback</Text>
@@ -129,7 +131,7 @@ export default function OwnerFeedback() {
         {/* ── the hero: the one number that summarises the inbox ─────────── */}
         <Hero
           label="Average Rating"
-          figure={avg == null ? '—' : avg.toFixed(1)}
+          figure={num1(avg)}
           unit={avg == null ? undefined : '/ 5'}
           arc={avg == null ? undefined : avg / 5}
           arcLabel="of five stars"

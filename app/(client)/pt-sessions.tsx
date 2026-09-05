@@ -84,6 +84,7 @@ import {
 } from '../../src/lib/sessionHistory';
 import { appLocale } from '../../src/lib/locale';
 import type { Theme } from '../../src/theme/tokens';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /**
  * The date and time beside Approve and Dispute.
@@ -375,7 +376,7 @@ export default function PtSessions() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal Training</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Sessions your trainer has delivered. Approving confirms it with them, and any comment you add goes with it.</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         {/* ── what is left, and where it comes from ───────────────────────

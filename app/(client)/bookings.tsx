@@ -74,6 +74,7 @@ import { buildIcs, shareIcs, type IcsEvent } from '../../src/lib/exportShare';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { useThreadPeerName } from '../../src/ui/messaging';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
+import { BACK_ICON } from '../../src/ui/direction';
 
 // NOTE: this screen used to filter and book against a hardcoded `CLIENT_ID = 'c1'`,
 // a leftover from the mock-data era. The real client id is the Supabase user id.
@@ -719,7 +720,7 @@ export default function Bookings() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>My Bookings</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Your upcoming classes and personal-training sessions, all in one place.</Text>
           </View>
-          <Ghost icon="back" onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
         </View>
 
         <Rule />
