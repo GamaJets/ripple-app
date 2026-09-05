@@ -274,7 +274,10 @@ export default function OwnerEquipment() {
      */
     const write = async (reason: string | null) => {
       try {
-        await setStatus(supabase, e.id, next, undefined, reason);
+        // `today` is `gymTodayWindow(zone).day` — the same day this screen
+        // hands `recordService`, so `out_of_service_since` and
+        // `last_serviced_on` are written in one calendar rather than two.
+        await setStatus(supabase, e.id, next, undefined, reason, today);
         await load();
       } catch (err) {
         reportError('equipment.status', err);

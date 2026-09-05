@@ -21,7 +21,7 @@
 import { normalise, terms, matches, searchRows, searchNote } from './consoleSearch';
 import { weeklyOccurrences, isCancelled, classesThatRan, placesLeft, splitRoster, type GymClass, type NewClass, type RosterEntry } from './gymSchedule';
 import {
-  busiestSlots, visitsByWeekday, wasSwept, SWEEP_NOTE,
+  busiestSlots, visitsByWeekday, visitsByHour, visitsPerDay, wasSwept, SWEEP_NOTE,
   admissionCheck, currentlyInside, duplicateOpenVisits, wasOverridden,
   OVERRIDE_PREFIX, RESCAN_MINUTES, OPEN_VISIT_HOURS,
   readPending, addPending, dropPending, partitionPending, pendingNote, pendingKey,
@@ -758,6 +758,60 @@ const mem = (id: string, status: string, lastSeenDays: number | null): SegmentMe
     'the unattributed line says so rather than being dressed up as somebody’s entry');
   ok(noteAttribution(n({ writtenByName: null })).includes('account has since gone'),
     'and an author whose account was deleted is named as that, not as nobody');
+}
+
+/* ── whose clock the footfall is bucketed on ──────────────────────── */
+//
+// The Door screen's "When the gym is busy" panel drew every bar off
+// `getHours()` and `getDay()` — the READER's clock — while `gymHour`'s own doc
+// named this histogram as the figure those getters get wrong by however far the
+// reader is from the gym. The panel exists to answer a staffing question and the
+// rota beside it IS drawn on the gym's clock, so the two disagreed and somebody
+// got rostered against the wrong one.
+//
+// One instant, two gyms. The assertions are on the ZONE and not on the process
+// timezone, so they mean the same thing wherever this suite is run — which is
+// the property a multi-timezone runner cannot supply for a clock bug that is
+// the same size everywhere.
+{
+  // 22:30 UTC on Saturday 5 September 2026.
+  //   Dubai (UTC+4)        → 02:30, SUNDAY the 6th
+  //   Los Angeles (UTC-7)  → 15:30, SATURDAY the 5th
+  const one = [{ enteredAt: '2026-09-05T22:30:00.000Z' }];
+
+  const dubaiHours = visitsByHour(one, 'Asia/Dubai');
+  eq(dubaiHours[2].visits, 1, 'a 22:30 UTC arrival is a 02:00 arrival at a gym in Dubai');
+  eq(dubaiHours[15].visits, 0, 'and is not also counted in the afternoon');
+
+  const laHours = visitsByHour(one, 'America/Los_Angeles');
+  eq(laHours[15].visits, 1, 'the same instant is a 15:00 arrival at a gym in Los Angeles');
+  eq(laHours[2].visits, 0, 'the two gyms do not share a bucket');
+
+  // The weekday, which is the one that puts a person on the floor on the wrong
+  // DAY rather than merely at the wrong hour. WEEK_DAYS opens on Sunday.
+  eq(visitsByWeekday(one, 'Asia/Dubai')[0].visits, 1, 'in Dubai that arrival is on the Sunday');
+  eq(visitsByWeekday(one, 'America/Los_Angeles')[6].visits, 1,
+    'and in Los Angeles it is still the Saturday — one instant, two weekdays, and a rota is written per weekday');
+
+  const slot = busiestSlots(one, 5, 'Asia/Dubai')[0];
+  eq(slot.weekday, 0, 'the staffing slot carries the gym’s weekday');
+  eq(slot.hour, 2, 'and the gym’s hour');
+  eq(slot.days, 1, 'averaged over the gym’s calendar days, not the reader’s');
+
+  eq(visitsPerDay(one, 'Asia/Dubai')[0].day, '2026-09-06', 'the day series is the gym’s day');
+  eq(visitsPerDay(one, 'America/Los_Angeles')[0].day, '2026-09-05',
+    'and the same row belongs to the previous day at a gym seven hours the other way');
+
+  // No zone is not a refusal. A gym that has not filled in the setting still
+  // gets a working panel, drawn on the reader's clock — and the screen prints
+  // `whoseClockNote` beside it saying so. That fallback is `rotaClock`'s rule,
+  // and it is asserted here as agreement with the reader's own getters rather
+  // than against a fixed hour, so it holds under every TZ the suite runs in.
+  const reader = new Date('2026-09-05T22:30:00.000Z');
+  eq(visitsByHour(one, null)[reader.getHours()].visits, 1,
+    'with no zone the bar is the reader’s own hour, which is what the note beside it claims');
+  eq(visitsByHour(one)[reader.getHours()].visits, 1,
+    'and the zone argument is optional, so every existing caller keeps the behaviour it had');
 }
 
 /* ── a broadcast that leaves a record ─────────────────────────────────────── */

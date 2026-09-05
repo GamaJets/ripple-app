@@ -14,7 +14,7 @@ import { supabase, writeFailed, loadMe, ME_UNREADABLE, type Me } from '@/lib/sup
 // the two are usually the same clock — and it is also the screen an owner opens
 // from another country, where they are not, and where "today" deciding whether
 // a pass is still good makes the difference a member is turned away over.
-import { gymDateTimeText, gymTimeText } from '@lib/gymWhen';
+import { gymDateTimeText, gymTimeText, whoseClockNote } from '@lib/gymWhen';
 import { gymDay, parseGymZone } from '@lib/gymZone';
 // `Unresolved` comes from here rather than being declared at the bottom of
 // this file. Seven console screens held a byte-identical copy, every one of
@@ -32,7 +32,7 @@ import {
   fetchVisits, checkIn, checkOut, summariseVisits, dwellMinutes,
   sweepStaleVisits, isAccountedFor, currentlyInside, duplicateOpenVisits,
   busiestSlots, visitsByHour, visitsByWeekday, averageDwellMinutes,
-  admissionCheck, doorAdmission, wasOverridden, OVERRIDE_PREFIX,
+  admissionCheck, doorAdmission, wasOverridden, OVERRIDE_PREFIX, OPEN_VISIT_HOURS,
   readPending, addPending, dropPending, partitionPending, pendingNote, pendingKey,
   WEEKDAYS,
   type Visit, type Admission, type PendingDoorWrite,
@@ -390,7 +390,11 @@ export default function Door() {
   // The queue's re-read is the hook's `refresh`, so a check-in that finally
   // reached the server moves the stamp with it. It was a bare `load`, which
   // re-read the desk without dating it.
-  const queue = useDoorQueue(me?.tenantId ?? '', refresh);
+  // `zone` as well as the tenant: a held arrival is replayed through `checkIn`,
+  // which judges the member's membership against a calendar day, and that day
+  // has to be the gym's for the same reason every other "today" on this screen
+  // is. See `CheckIn.today` in src/lib/gymVisits.ts.
+  const queue = useDoorQueue(me?.tenantId ?? '', zone, refresh);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -439,29 +443,60 @@ export default function Door() {
   const today = gymDay(Date.now(), zone) ?? dayTick;
   const todays = (visits ?? []).filter((v) => dayOf(v.enteredAt, zone) === today);
 
-  // "Inside now" means today, the same thing the Overview tile means by "In the
-  // building". Over the 30-day window it meant "no exit recorded at any point
-  // in the last month" — and because the overnight sweep deliberately writes
-  // only a note and leaves exited_at null, every abandoned check-in stayed in
-  // that count forever. The tile crept upward all month and the two screens
-  // disagreed. Visits left open from earlier days are counted separately and
-  // said out loud: nobody is standing in the gym from Tuesday.
+  // "Inside now" is not the whole 30-day window. Over that window it meant "no
+  // exit recorded at any point in the last month" — and because the overnight
+  // sweep deliberately writes only a note and leaves exited_at null, every
+  // abandoned check-in stayed in the count forever. The tile crept upward all
+  // month. Visits left open long enough that nobody is standing on them are
+  // counted separately and said out loud: nobody is in the gym from Tuesday.
   // `currentlyInside` rather than a hand-rolled filter, so the Door and every
   // other reader of the door log agree on what "inside" means. It had no caller
   // anywhere in the repository until now — the definition existed, was tested,
   // and every screen re-implemented it.
-  const inside = currentlyInside(todays);
+  // ── who is in the building, and where "today" is the wrong window ────────
+  //
+  // This was `currentlyInside(todays)` — today's arrivals only — and it dropped
+  // the one group who most need to be on the list. A member who came in at
+  // 23:45 is still in the gym at 00:30: the gym's day has turned over, their
+  // visit is not one of `todays`, and they vanished from Inside now and off the
+  // printed roll call, described there as a row "nobody closed rather than
+  // people standing in the gym". They could not put themselves back on it
+  // either — `admissionCheck` and supabase/parts/490 both refuse a second scan
+  // for anyone with an open visit under twelve hours old, so the desk re-scans
+  // the card and is told they are already inside, while the sheet says they are
+  // not in the building. The Overview tile has always counted them: it reads
+  // the door log from `min(today, now − OPEN_VISIT_HOURS)` for exactly this
+  // reason, so the two screens disagreed about who was in the building and the
+  // Door — the one carried outside during an alarm — was the one under-counting.
+  //
+  // OPEN_VISIT_HOURS is the threshold, because it is already the product's
+  // answer to "is this open visit a person or a row nobody closed": the same
+  // constant refuses their re-entry, and the overnight sweep marks past it.
+  const freshOpen = (v: Visit): boolean =>
+    !v.exitedAt && Date.now() - Date.parse(v.enteredAt) <= OPEN_VISIT_HOURS * 3600_000;
+  const stillHere = (visits ?? []).filter(
+    (v) => dayOf(v.enteredAt, zone) === today || freshOpen(v),
+  );
+  const inside = currentlyInside(stillHere);
   // The second and third open rows for somebody who is already in the list
   // above. `currentlyInside` folds them so the headcount is people rather than
   // scans; they are counted here so a desk that is double-scanning finds out.
-  const dupes = duplicateOpenVisits(todays);
-  const openBefore = (visits ?? []).filter((v) => !v.exitedAt && dayOf(v.enteredAt, zone) !== today);
+  const dupes = duplicateOpenVisits(stillHere);
+  // Open, from an earlier day, and old enough that nobody is standing in the
+  // room on the strength of it. The freshness test rather than the date alone,
+  // so the same row cannot be in this list and in the headcount at once.
+  const openBefore = (visits ?? []).filter(
+    (v) => !v.exitedAt && dayOf(v.enteredAt, zone) !== today && !freshOpen(v),
+  );
   // Of those, the ones a sweep has already accounted for. Two different things
   // for the desk: "nobody has looked at these" and "these are known to be
   // people who left without scanning out".
   const sweptBefore = openBefore.filter(isAccountedFor);
 
-  const sum = visits ? summariseVisits(todays) : null;
+  // `zone` as well: "Busiest hour" is bucketed by the hour a visit landed on
+  // AT THE GYM. Without it the tile reads an hour off for every owner who is
+  // not standing in the building.
+  const sum = visits ? summariseVisits(todays, zone) : null;
   const pSum = passes ? summarisePasses(passes, today) : null;
 
   // err is only ever set by a finished load, so a state still null once it is
@@ -494,7 +529,7 @@ export default function Door() {
         <Kpi
           label="Inside now"
           text={visits ? String(inside.length) : null}
-          note={openBefore.length > 0 ? `${openBefore.length} left open on an earlier day` : undefined}
+          note={openBefore.length > 0 ? `${openBefore.length} left open and over ${OPEN_VISIT_HOURS}h old` : undefined}
         />
         <Kpi label="Visits today" text={sum ? String(sum.visits) : null}
              note={sum && sum.anonymous > 0 ? `${sum.anonymous} not identified` : undefined} />
@@ -533,7 +568,7 @@ export default function Door() {
       {/* Thirty days rather than today, because "when is my gym busy" is not a
           question about today. The window is the same one `load()` reads, so
           nothing here needs a second query. */}
-      <Occupancy visits={visits} unread={unread(visits)} days={30} />
+      <Occupancy visits={visits} unread={unread(visits)} days={30} zone={zone} />
       <Passes
         passes={passes} types={types} members={members} summary={pSum}
         passesUnread={unread(passes)} typesUnread={unread(types)}
@@ -584,7 +619,7 @@ interface DoorQueue {
  * stay. One queue, in arrival order, owned above both sections and rendered in
  * the one place a desk already looks for it.
  */
-function useDoorQueue(tenantId: string, onChange: () => void): DoorQueue {
+function useDoorQueue(tenantId: string, zone: string | null, onChange: () => void): DoorQueue {
   const [pending, setPending] = useState<PendingDoorWrite[]>([]);
   const [queueRead, setQueueRead] = useState(true);
   const [lapsed, setLapsed] = useState<PendingDoorWrite[]>([]);
@@ -662,6 +697,8 @@ function useDoorQueue(tenantId: string, onChange: () => void): DoorQueue {
             classId: item.classId,
             enteredAtIso: item.atIso,
             source: 'desk',
+            // The gym's day at the moment the queue drains, not this laptop's.
+            today: gymDay(Date.now(), zone),
           });
         }
         list = dropPending(list, item.id);
@@ -684,7 +721,7 @@ function useDoorQueue(tenantId: string, onChange: () => void): DoorQueue {
     store(list);
     setFlushing(false);
     onChange();
-  }, [flushing, pending, store, onChange]);
+  }, [flushing, pending, store, onChange, zone]);
 
   useEffect(() => {
     const back = () => { void flush(); };
@@ -848,6 +885,11 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
         source: 'desk',
         enteredAtIso: at,
         overrideReason,
+        // The same day the preview above judged them on. Without it `checkIn`
+        // falls back to this browser's calendar day, so the line under the
+        // picker and the write itself could reach opposite answers about a
+        // membership that ends today — with the member standing there.
+        today,
       });
       setMemberId(''); setReason(''); setRefused(null); setWhy('');
       setMsg(wrote(
@@ -1629,7 +1671,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
   };
 
   return (
-    <Section title="Inside now" sub="Anyone who came in today and has not been checked out. A visit left open overnight is marked with a note and never a guessed exit time — an invented exit would put a twenty-hour stay into the average.">
+    <Section title="Inside now" sub="Anyone who came in today and has not been checked out, plus anyone whose check-in is under twelve hours old — somebody who arrived at 23:45 is still in the building at 00:30, and the day turning over does not put them outside. A visit left open longer than that is marked with a note and never a guessed exit time; an invented exit would put a twenty-hour stay into the average.">
       {/* Mounted for as long as this section is on screen, so a later `msg` is a
           CHANGE to an existing region rather than a node inserted at the same
           instant as its text. This is the desk: whoever is on it is looking at
@@ -1657,8 +1699,9 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
       {openBefore > 0 ? (
         <p style={{ margin: '14px', fontSize: 12.5, color: 'var(--ink3)' }}>
           {openBefore === 1 ? '1 visit is' : `${openBefore} visits are`} still open from an earlier
-          day — check-ins nobody closed, not people standing in the gym, so they are said here and
-          counted nowhere. There is no Check out on them on purpose: closing one now would stamp
+          day and more than twelve hours old — check-ins nobody closed, not people standing in the
+          gym, so they are said here and counted nowhere. Anyone whose check-in is newer than that
+          is in the headcount above, whichever day it was. There is no Check out on them on purpose: closing one now would stamp
           this minute as the exit and put a twenty-hour stay into the average.
           {swept > 0 ? ` ${swept} of them ${swept === 1 ? 'has' : 'have'} already been accounted for — marked by a sweep, or carrying the reason somebody was let in.` : ''}
           {isOwner && openBefore > swept ? (
@@ -1737,12 +1780,25 @@ function Today({ visits, unread, zone }: { visits: Visit[]; unread: Unread; zone
  * over so a 30-day window's five Mondays and four Fridays are not compared as
  * though they were the same sample.
  */
-function Occupancy({ visits, unread, days }: {
+function Occupancy({ visits, unread, days, zone }: {
   visits: Visit[] | null; unread: Unread; days: number;
+  /**
+   * `tenants.timezone`. This section had no zone at all, and every bucket in it
+   * came off `getHours()` and `getDay()` — the READER's clock.
+   *
+   * That is the one thing this panel must not get wrong. The whole panel exists
+   * to answer a staffing question, `busiestSlots` is documented as "the unit a
+   * rota is actually written in", and an owner reading their Dubai gym from
+   * London was being shown the morning rush at 05:00 and, either side of
+   * midnight, on the wrong day of the week entirely — then rostering somebody
+   * against it, on a rota that IS drawn on the gym's clock. Two screens, one
+   * gym, four hours apart, with nothing saying so.
+   */
+  zone: string | null;
 }) {
-  const hours = useMemo(() => (visits ? visitsByHour(visits) : null), [visits]);
-  const week = useMemo(() => (visits ? visitsByWeekday(visits) : null), [visits]);
-  const slots = useMemo(() => (visits ? busiestSlots(visits, 5) : null), [visits]);
+  const hours = useMemo(() => (visits ? visitsByHour(visits, zone) : null), [visits, zone]);
+  const week = useMemo(() => (visits ? visitsByWeekday(visits, zone) : null), [visits, zone]);
+  const slots = useMemo(() => (visits ? busiestSlots(visits, 5, zone) : null), [visits, zone]);
   const dwell = useMemo(() => (visits ? averageDwellMinutes(visits) : null), [visits]);
 
   if (unread) {
@@ -1777,6 +1833,22 @@ function Occupancy({ visits, unread, days }: {
       title="When the gym is busy"
       sub={`Every arrival in the last ${days} days, by hour and by day. A quiet hour is drawn as a quiet hour rather than left out.`}
     >
+      {/* Whose clock these buckets are cut on. Said in both states and for the
+          same reason the rota says it: a histogram drawn on the wrong clock
+          renders exactly as neatly as one drawn on the right clock, and the
+          only reader who ever finds out is the coach rostered against it. */}
+      <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '80ch' }}>
+        {zone ? (
+          <>Hours and days below are <span className="mono">{zone}</span>, this gym&rsquo;s own clock.</>
+        ) : (
+          <>
+            Hours and days below are <strong style={{ color: 'var(--ink2)' }}>your own device&rsquo;s</strong>{' '}
+            — {whoseClockNote(null)}{' '}
+            <a href="/settings" style={{ color: 'var(--brand)' }}>Set it on Gym</a> and these become
+            the gym&rsquo;s, so a rota written against them lands on the right hour.
+          </>
+        )}
+      </p>
       <div style={{ padding: '14px 14px 4px' }}>
         <div className="micro" style={{ marginBottom: 7 }}>By hour of the day</div>
         <div style={{ display: 'grid', gap: 3, gridTemplateColumns: 'repeat(24, minmax(0, 1fr))' }}>
@@ -2015,7 +2087,9 @@ function Passes({ passes, types, members, summary, passesUnread, typesUnread, te
     try {
       if (p.holderId && !overrideWhy) {
         const admission = await doorAdmission(supabase, tenantId, {
-          memberId: p.holderId, passId: p.id,
+          // The gym's day — the same one `passBlocker` was just given, so the
+          // pass desk and the membership check cannot land on different days.
+          memberId: p.holderId, passId: p.id, today,
         });
         if (admission.verdict === 'refuse') {
           setRefusedTake({ pass: p, admission });

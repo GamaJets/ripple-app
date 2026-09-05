@@ -536,7 +536,10 @@ function DueForService({ rows, unread, today, tenantId, me, onChange }: {
   const pull = async (e: Equipment) => {
     setMsg(null);
     try {
-      await setStatus(supabase, e.id, 'out_of_service');
+      // The gym's own day on the `since` column, so it and `last_serviced_on`
+      // stay in one calendar and "out of action N days" counts from the day the
+      // staff member was standing in front of it.
+      await setStatus(supabase, e.id, 'out_of_service', undefined, null, today);
       onChange();
     } catch (x: any) {
       setMsg(x?.message ?? 'Could not take that out of service.');
@@ -835,7 +838,7 @@ function Register({ rows, unread, today, onChange }: {
   const move = async (e: Equipment, status: EquipmentStatus, reason?: string) => {
     setMsg(null);
     try {
-      await setStatus(supabase, e.id, status, undefined, reason ?? null);
+      await setStatus(supabase, e.id, status, undefined, reason ?? null, today);
       setPulling(null); setWhy('');
       onChange();
     } catch (x: any) {

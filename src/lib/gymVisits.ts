@@ -13,7 +13,8 @@
 import { assertWhole, capLimit, readAll } from './rowCap';
 import { assertWrote } from './wroteRows';
 import type { MembershipStatus } from './gymRecord';
-import { WEEK_DAYS, weekIndexOf, isoDay } from './weekStart';
+import { WEEK_DAYS, dayIndexInWeek, isoDay } from './weekStart';
+import { rotaDay, rotaHour, calendarWeekday } from './rotaClock';
 
 type Queryable = { from: (table: string) => any };
 
@@ -124,21 +125,49 @@ export function duplicateOpenVisits(visits: Visit[]): Visit[] {
   return visits.filter((v) => !v.exitedAt && !kept.has(v.id));
 }
 
-/** ISO date (YYYY-MM-DD) of a visit, in the viewer's timezone. */
-function dayOf(iso: string): string {
-  const d = new Date(iso);
-  // Local, not UTC: a gym's "Tuesday" is its own Tuesday. A 22:00 visit in
-  // Dubai belongs to that evening, not to the next UTC day.
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
+/**
+ * ISO date (YYYY-MM-DD) of a visit, on the GYM's clock when it has said what
+ * that is, and on the reader's device when it has not.
+ *
+ * ── What this was, and why it was wrong ───────────────────────────────────
+ *
+ * `d.getFullYear()/getMonth()/getDate()` with a comment claiming "a gym's
+ * Tuesday is its own Tuesday". Those getters answer the READER's Tuesday. Right
+ * at the front desk by accident, and wrong by a whole day for an owner reading
+ * their Dubai gym's footfall from London — which is precisely the reader these
+ * figures were built for, because the person at the desk can see the room.
+ *
+ * `rotaDay` is the one decision, shared with the rota so a busiest-slots strip
+ * and the shift somebody is rostered into cannot disagree about which day they
+ * are talking about. It falls back to the reader's day AND the screen says so —
+ * see `whoseClockNote` in src/lib/gymWhen.ts. Refusing to draw the histogram at
+ * all for every gym that has not filled in a setting takes a working screen
+ * away to make a point.
+ */
+function dayOf(iso: string, zone?: string | null): string | null {
+  return rotaDay(iso, zone ?? null);
+}
+
+/** The weekday index (in `WEEK_DAYS` order) an instant falls on, on the same
+ *  clock `dayOf` uses. Derived from the day rather than from a second call, so
+ *  the column and the date can never name different days. */
+function weekdayOf(iso: string, zone?: string | null): number | null {
+  const day = dayOf(iso, zone);
+  if (day == null) return null;
+  const js = calendarWeekday(day);
+  return js == null ? null : dayIndexInWeek(js);
 }
 
 /** Visit counts per calendar day, oldest first. Days with no visits are absent. */
-export function visitsPerDay(visits: Pick<Visit, 'enteredAt'>[]): { day: string; visits: number }[] {
+export function visitsPerDay(
+  visits: Pick<Visit, 'enteredAt'>[], zone?: string | null,
+): { day: string; visits: number }[] {
   const byDay = new Map<string, number>();
-  for (const v of visits) byDay.set(dayOf(v.enteredAt), (byDay.get(dayOf(v.enteredAt)) ?? 0) + 1);
+  for (const v of visits) {
+    const day = dayOf(v.enteredAt, zone);
+    if (day == null) continue;
+    byDay.set(day, (byDay.get(day) ?? 0) + 1);
+  }
   return [...byDay.entries()]
     .map(([day, n]) => ({ day, visits: n }))
     .sort((a, b) => a.day.localeCompare(b.day));
@@ -151,11 +180,16 @@ export function visitsPerDay(visits: Pick<Visit, 'enteredAt'>[]): { day: string;
  * a gap at 14:00 is information, and omitting it would let a chart draw a line
  * straight through the quiet hours as though they were busy.
  */
-export function visitsByHour(visits: Pick<Visit, 'enteredAt'>[]): { hour: number; visits: number }[] {
+export function visitsByHour(
+  visits: Pick<Visit, 'enteredAt'>[], zone?: string | null,
+): { hour: number; visits: number }[] {
   const hours = Array.from({ length: 24 }, (_, hour) => ({ hour, visits: 0 }));
   for (const v of visits) {
-    const h = new Date(v.enteredAt).getHours();
-    if (h >= 0 && h < 24) hours[h].visits += 1;
+    // The gym's hour, not the reader's. `gymHour`'s own doc names this
+    // histogram as the figure `getHours()` gets wrong by however far the reader
+    // is from the gym, and this was the caller getting it wrong.
+    const h = rotaHour(v.enteredAt, zone ?? null);
+    if (h != null && h >= 0 && h < 24) hours[h].visits += 1;
   }
   return hours;
 }
@@ -166,9 +200,11 @@ export function visitsByHour(visits: Pick<Visit, 'enteredAt'>[]): { hour: number
  * Ties go to the earlier hour: told two slots are equally busy, a gym should
  * look at the one it reaches first in the day.
  */
-export function peakHour(visits: Pick<Visit, 'enteredAt'>[]): { hour: number; visits: number } | null {
+export function peakHour(
+  visits: Pick<Visit, 'enteredAt'>[], zone?: string | null,
+): { hour: number; visits: number } | null {
   if (visits.length === 0) return null;
-  const byHour = visitsByHour(visits);
+  const byHour = visitsByHour(visits, zone);
   let best = byHour[0];
   for (const h of byHour) if (h.visits > best.visits) best = h;
   return best.visits === 0 ? null : best;
@@ -187,12 +223,14 @@ export const WEEKDAYS: readonly string[] = WEEK_DAYS;
  * Fridays needs to see the gap, and a chart that omits it draws a line straight
  * through.
  */
-export function visitsByWeekday(visits: Pick<Visit, 'enteredAt'>[]): { day: string; visits: number }[] {
+export function visitsByWeekday(
+  visits: Pick<Visit, 'enteredAt'>[], zone?: string | null,
+): { day: string; visits: number }[] {
   const out = WEEKDAYS.map((day) => ({ day, visits: 0 }));
   for (const v of visits) {
-    const d = new Date(v.enteredAt);
-    if (Number.isNaN(d.getTime())) continue;
-    out[weekIndexOf(d)].visits += 1;
+    const i = weekdayOf(v.enteredAt, zone);
+    if (i == null) continue;
+    out[i].visits += 1;
   }
   return out;
 }
@@ -227,18 +265,23 @@ export interface BusySlot {
 export function busiestSlots(
   visits: Pick<Visit, 'enteredAt'>[],
   limit = 5,
+  zone?: string | null,
 ): BusySlot[] {
   const counts = new Map<string, { weekday: number; hour: number; visits: number; days: Set<string> }>();
   for (const v of visits) {
-    const d = new Date(v.enteredAt);
-    if (Number.isNaN(d.getTime())) continue;
-    const weekday = weekIndexOf(d);
-    const hour = d.getHours();
+    // Weekday, hour and day all off the SAME clock — `rotaDay`'s, the one the
+    // rota itself is bucketed by. A slot named on the reader's clock and a
+    // shift written on the gym's is the disagreement that puts somebody on the
+    // floor an hour, or a day, from where the footfall actually is.
+    const weekday = weekdayOf(v.enteredAt, zone);
+    const hour = rotaHour(v.enteredAt, zone ?? null);
+    const day = dayOf(v.enteredAt, zone);
+    if (weekday == null || hour == null || day == null) continue;
     const key = `${weekday}:${hour}`;
     let cell = counts.get(key);
     if (!cell) { cell = { weekday, hour, visits: 0, days: new Set<string>() }; counts.set(key, cell); }
     cell.visits += 1;
-    cell.days.add(dayOf(v.enteredAt));
+    cell.days.add(day);
   }
   return [...counts.values()]
     .map((c) => ({ weekday: c.weekday, hour: c.hour, visits: c.visits, days: c.days.size }))
@@ -270,7 +313,7 @@ export interface VisitSummary {
 }
 
 /** The door-log picture for a period. */
-export function summariseVisits(visits: Visit[]): VisitSummary {
+export function summariseVisits(visits: Visit[], zone?: string | null): VisitSummary {
   const members = uniqueMembers(visits);
   const anonymous = visits.filter((v) => !v.memberId).length;
   const dwell = averageDwellMinutes(visits);
@@ -282,7 +325,7 @@ export function summariseVisits(visits: Visit[]): VisitSummary {
     visitsPerMember: members === 0 ? null : Math.round(((visits.length - anonymous) / members) * 10) / 10,
     averageDwell: dwell.minutes,
     dwellFrom: dwell.closed,
-    peak: peakHour(visits),
+    peak: peakHour(visits, zone),
     inside: currentlyInside(visits).length,
   };
 }
@@ -671,6 +714,15 @@ export interface CheckIn {
    * visit, so the row itself carries why it exists.
    */
   overrideReason?: string | null;
+  /**
+   * The GYM's calendar day, `YYYY-MM-DD` — `gymDay(Date.now(), tenants.timezone)`.
+   *
+   * What the admission rules compare a membership's `ends_on` against. Pass it
+   * wherever the zone has been read; without it the check falls back to the
+   * desk machine's own day, which is the same answer only while the machine is
+   * in the same country as the gym.
+   */
+  today?: string | null;
 }
 
 /**
@@ -726,10 +778,28 @@ async function doorFacts(
   };
 }
 
-/** The gym's own calendar day for an instant, which is what every admission
- *  rule and every pass expiry is compared against. Local, never UTC: this
- *  product sells in AED and the UTC date does not turn over until 04:00 there. */
-function localDayOf(iso?: string): string {
+/**
+ * The calendar day an admission is judged on, when the caller has not said.
+ *
+ * ── The claim this used to make, and could not keep ───────────────────────
+ *
+ * It was documented as "the gym's own calendar day … local, never UTC", and the
+ * body is the READER's local day. Local is the right answer to UTC and the
+ * wrong answer to "whose Tuesday". `memberships.ends_on` is a `date` column
+ * filled in on the gym's calendar, so comparing it against the desk machine's
+ * day gets the boundary wrong by one day whenever the two differ — a browser
+ * an hour or two ahead refuses a member whose membership runs through today,
+ * with somebody standing at the counter, and one behind admits a membership
+ * that ran out yesterday. The Door screen's own preview already compares
+ * against `gymDay(…, zone)`, so the two disagreed about the same member: the
+ * line under the picker said one thing and the write did the other.
+ *
+ * So the day is now the caller's to state — `today` on `doorAdmission` and on
+ * `CheckIn` — and a caller that knows the gym's zone passes the gym's day. This
+ * is only the fallback for one that does not, and it is the reader's day, said
+ * as that rather than dressed up as the gym's.
+ */
+function readerDayOf(iso?: string): string {
   const d = iso ? new Date(iso) : new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -752,7 +822,15 @@ function localDayOf(iso?: string): string {
 export async function doorAdmission(
   sb: Queryable,
   tenantId: string,
-  input: { memberId: string; passId?: string | null; enteredAtIso?: string },
+  input: {
+    memberId: string; passId?: string | null; enteredAtIso?: string;
+    /** The GYM's calendar day, `YYYY-MM-DD`, from `gymDay(…, tenants.timezone)`.
+     *  Every caller that has read the zone should pass it: it is what
+     *  `memberships.ends_on` is written on. Omitted, this falls back to the
+     *  reading machine's day, which is right at the desk and wrong by a day for
+     *  anybody else. */
+    today?: string | null;
+  },
 ): Promise<Admission> {
   const facts = await doorFacts(sb, tenantId, input.memberId);
   return admissionCheck({
@@ -760,7 +838,7 @@ export async function doorAdmission(
     passId: input.passId ?? null,
     memberships: facts.memberships,
     recent: facts.recent,
-    today: localDayOf(input.enteredAtIso),
+    today: input.today || readerDayOf(input.enteredAtIso),
   });
 }
 
@@ -803,6 +881,7 @@ export async function checkIn(sb: Queryable, tenantId: string, v: CheckIn = {}):
         memberId: v.memberId,
         passId: v.passId ?? null,
         enteredAtIso: v.enteredAtIso,
+        today: v.today ?? null,
       });
       if (admission.verdict === 'refuse') throw new AdmissionRefused(admission);
     }

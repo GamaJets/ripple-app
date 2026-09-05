@@ -463,6 +463,14 @@ export async function setStatus(
   status: EquipmentStatus,
   note?: string | null,
   reason?: string | null,
+  /**
+   * The GYM's calendar day, `YYYY-MM-DD` — what both console screens already
+   * compute as `gymDay(Date.now(), tenants.timezone)` and already hand to
+   * `recordService`. Passing it here is what keeps the two date columns on one
+   * row in ONE calendar; the fallback below is the reading device's day, which
+   * is the same answer only while the device is at the gym.
+   */
+  todayAtGym?: string | null,
 ): Promise<void> {
   const patch: Record<string, unknown> = { status };
   if (note !== undefined) patch.note = note;
@@ -483,7 +491,17 @@ export async function setStatus(
     // disagreed with the day the staff member remembers standing there. The
     // service date written a few lines down goes in as the local day too, and
     // two columns of one row in two different calendars is its own bug.
-    patch.out_of_service_since = isoDay(new Date());
+    //
+    // ── and that last sentence is why this now takes the gym's day ────────
+    //
+    // `recordService` stopped taking the reader's day: both console screens
+    // pass it `gymDay(Date.now(), tenants.timezone)`. This line did not move
+    // with it, so the two columns went back into two calendars — an owner
+    // taking a Dubai treadmill out of action from London stamped `since` on
+    // London's day and `last_serviced_on` on Dubai's. `daysSince(since, today)`
+    // on the console then compares a reader-day against a gym-day and reads
+    // "out of action −1 days" the evening it is reported.
+    patch.out_of_service_since = todayAtGym || isoDay(new Date());
   } else {
     // Back in service, or retired. Both clear the reason and the clock —
     // leaving them would make a working machine read as out of action on every

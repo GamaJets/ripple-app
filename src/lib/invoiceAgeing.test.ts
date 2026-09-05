@@ -209,8 +209,30 @@ ok(/4 times/.test(chaseHistoryLine(inv({ reminderCount: 4, remindedAt: '2026-08-
 // Derived, not pinned: the line renders the day in the reader's own language
 // now, so a literal here asserted the formatter and not this module. What is
 // still being claimed is that the date shown is the LAST reminder's.
-ok(chaseHistoryLine(inv({ reminderCount: 2, remindedAt: '2026-08-20T09:00:00Z' }))!.includes(fmtPointDay(2026, 7, 20)),
-  'and the last one is dated');
+//
+// ── and the ZONE is derived too, which it was not ────────────────────────
+//
+// This read `fmtPointDay(2026, 7, 20)` — the day that instant falls on in
+// GREENWICH. `chaseHistoryLine` deliberately reads the LOCAL parts, and says
+// why at length: slicing the UTC day told a coach who chased at 18:00 on 31
+// March in California "last on 1 Apr", a date in the future, on the one line
+// that exists to say when they last chased.
+//
+// So the assertion demanded the exact behaviour the code was written to stop.
+// It passed in five of the six zones `npm run test:zones` runs by luck of the
+// offsets — 09:00 UTC lands on the same calendar day in Kiritimati (+14),
+// Dubai (+4) and Los Angeles (-7) — and failed at Pacific/Midway (-11), where
+// that instant is 22:00 on the 19th.
+//
+// The expected day is now taken from the same instant the same way the code
+// takes it, so this asserts "the date shown is the last reminder's" in every
+// zone rather than "the date shown is Greenwich's".
+{
+  const at = new Date('2026-08-20T09:00:00Z');
+  ok(chaseHistoryLine(inv({ reminderCount: 2, remindedAt: '2026-08-20T09:00:00Z' }))!
+      .includes(fmtPointDay(at.getFullYear(), at.getMonth(), at.getDate())),
+    'and the last one is dated, on the reader\u2019s own day rather than Greenwich\u2019s');
+}
 
 /* ── 7. the shortcut arithmetic ─────────────────────────────────────────── */
 
