@@ -119,7 +119,16 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     // thing that makes a vendor unreachable is an empty env var in one build
     // profile, which is a deploy away and gives no warning — and the fallback
     // for a missing sentence must not be the owner's setup instructions.
-    clientNote: 'Oura is not available in this version of Repple, so there is nothing here to sign in to — nothing is wrong with your ring.',
+    //
+    // This used to say "Oura is not available in this version of Repple". That
+    // sentence sends the reader to the App Store, and no update can ever fix
+    // it: nothing is missing from the binary, the client id is simply empty in
+    // the profile this build was made from. Google Calendar shipped with that
+    // exact wording, coaches went hunting for an app update that did not exist,
+    // and the feature was withdrawn. The version is never the reason — say the
+    // integration is not set up, which is both true and not something the
+    // member can act on wrongly.
+    clientNote: 'Repple has not set Oura up, so there is nothing here to sign in to — nothing is wrong with your ring.',
   },
   whoop: {
     id: 'whoop',
@@ -154,8 +163,11 @@ export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
     clientId: env('EXPO_PUBLIC_WHOOP_CLIENT_ID'),
     usePKCE: false,
     note: 'Register at developer.whoop.com → set EXPO_PUBLIC_WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET.',
-    // As with Oura: configured today, so unreachable today. See the note there.
-    clientNote: 'WHOOP is not available in this version of Repple, so there is nothing here to sign in to — nothing is wrong with your strap.',
+    // As with Oura: configured today, so unreachable today. See the note there,
+    // including why this no longer says "not available in this version of
+    // Repple" — that blamed the build for a missing client id and sent people
+    // looking for an update that could not carry the fix.
+    clientNote: 'Repple has not set WHOOP up, so there is nothing here to sign in to — nothing is wrong with your strap.',
   },
   garmin: {
     id: 'garmin',
