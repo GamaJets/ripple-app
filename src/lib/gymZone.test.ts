@@ -313,6 +313,22 @@ const sbWith = (row: unknown, error: unknown = null) => ({
   eq(failed.zone, null, 'a failed read has no zone');
   ok(!!failed.error && /permission/.test(failed.error), 'and says so, separately from the value');
 
+  // ── this check catches the block BELOW the IIFE, and only by ordering ────
+  //
+  // Everything after `})();` is synchronous, and this epilogue sits after an
+  // `await`. So the tail runs while this function is suspended, its failures
+  // are in `errors` by the time control returns here, and they are caught.
+  // Mutation-checked: breaking an assertion in the tail block exits 1.
+  //
+  // It is correct by accident, not by design, and the accident is worth naming
+  // because the same shape has already bitten. sessionCredits.test.ts had its
+  // epilogue mid-file with no await to save it, and eight failing assertions
+  // reported "ok"; badges.test.ts and units.test.ts had nineteen more between
+  // them. This file survived on the await alone.
+  //
+  // Two ordinary changes break it silently: putting an `await` anywhere in the
+  // tail block, or removing the last `await` above this line. If you do either,
+  // move this epilogue below the tail — which is where it belongs anyway.
   if (errors.length) {
     console.error(`gymZone: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);
     for (const e of errors) console.error(`  ✗ ${e}`);

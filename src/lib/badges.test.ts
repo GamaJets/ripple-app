@@ -168,11 +168,6 @@ const zero = badgeFigures([]);
   eq(badgeAnnouncement('nope' as BadgeKey, 0), null, 'an unknown badge announces nothing rather than an empty banner');
 }
 
-if (errors.length) {
-  console.error(`badges.test.ts — ${errors.length} failures:`);
-  for (const e of errors) console.error('  · ' + e);
-  process.exit(1);
-}
 /* ── a plank is not four and a half thousand repetitions ──────────────────
  *
  * This file's own loop resolved a load and multiplied it by whatever was in the
@@ -211,6 +206,18 @@ if (errors.length) {
     weighed,
   );
   eq(both.totalVolumeKg, 500, 'the hold takes nothing from the squat and adds nothing to it');
+}
+
+
+// The exit-on-failure epilogue belongs LAST. It used to sit further up this
+// file, and everything appended below it ran with its failures collected into
+// `errors` and never read — the suite printed "ok" and exited 0 while real
+// assertions were failing. Found in sessionCredits.test.ts and swept for; this
+// file was one of three. Append new sections ABOVE this block.
+if (errors.length) {
+  console.error(`badges.test.ts — ${errors.length} failures:`);
+  for (const e of errors) console.error('  · ' + e);
+  process.exit(1);
 }
 
 console.log('badges.test.ts — ok');

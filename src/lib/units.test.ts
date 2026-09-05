@@ -450,12 +450,6 @@ ok(readNumber('-5') === -5, 'a minus sign is read, so the caller can refuse it i
 ok(readNumber('16.') === 16, 'a field mid-keystroke still reads, so the point does not vanish as it is typed');
 ok(readNumber('16,') === 16, 'including on a comma keyboard');
 
-if (errors.length) {
-  console.error(`units.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);
-  for (const e of errors.slice(0, 20)) console.error('  · ' + e);
-  if (errors.length > 20) console.error(`  … and ${errors.length - 20} more`);
-  process.exit(1);
-}
 /* ── a body weight has a bound, and it is named in the unit on screen ──────
  *
  * app/(client)/profile.tsx — the main place a member edits their own weight —
@@ -491,6 +485,19 @@ if (errors.length) {
   ok(readBodyWeight('20', 'kg').ok && readBodyWeight('400', 'kg').ok, 'and the bounds themselves are inside it');
   ok(!readBodyWeight('abc', 'kg').ok, 'text that is not a number is refused rather than coerced');
   ok(!readBodyWeight('-80', 'kg').ok, 'and so is a negative');
+}
+
+
+// The exit-on-failure epilogue belongs LAST. It used to sit further up this
+// file, and everything appended below it ran with its failures collected into
+// `errors` and never read — the suite printed "ok" and exited 0 while real
+// assertions were failing. Found in sessionCredits.test.ts and swept for; this
+// file was one of three. Append new sections ABOVE this block.
+if (errors.length) {
+  console.error(`units.test.ts — ${errors.length} failure${errors.length === 1 ? '' : 's'}:`);
+  for (const e of errors.slice(0, 20)) console.error('  · ' + e);
+  if (errors.length > 20) console.error(`  … and ${errors.length - 20} more`);
+  process.exit(1);
 }
 
 console.log('units.test.ts — ok');
