@@ -177,7 +177,11 @@ export default function OwnerDeletions() {
       setQueueShort(qPage.truncated);
       setPending(qPage.rows.map((r: any) => ({
         subjectId: String(r.subject_id),
-        name: r.full_name ?? null,
+        // `||`, not `??`: an empty string is what an unguarded Name field
+        // stores, and `??` passes it straight through to a blank row on the
+        // one screen whose job is identifying somebody before an
+        // irreversible delete. Part 2370 closes the SQL half.
+        name: r.full_name || null,
         role: r.role ?? null,
         requestedAt: r.deletion_requested_at ?? null,
         daysRemaining: typeof r.days_remaining === 'number' ? r.days_remaining : null,
@@ -204,7 +208,9 @@ export default function OwnerDeletions() {
       setLogShort(lRows.length >= LOG_LIMIT);
       setLog(lRows.map((r: any) => ({
         id: String(r.id),
-        label: r.subject_label ?? null,
+        // Same reason as above. This one is read off deletion_log, where a
+        // blank can no longer be repaired — the profile it came from is gone.
+        label: r.subject_label || null,
         requestedAt: r.requested_at ?? null,
         actionedAt: r.actioned_at ?? null,
         note: r.note ?? null,
@@ -252,7 +258,7 @@ export default function OwnerDeletions() {
    * under your thumb from opening the first.
    */
   const confirm = (p: Pending) => {
-    const who = p.name ?? 'This account';
+    const who = p.name || 'This account';
     Alert.alert(
       `Delete ${who}?`,
       `This permanently erases ${who} and everything of theirs — their profile, workouts, logs, scans, messages and bookings, across 39 tables.\n\n` +
@@ -404,7 +410,7 @@ export default function OwnerDeletions() {
                     disabled={working}
                     hitSlop={8}
                     accessibilityRole="button"
-                    accessibilityLabel={`Permanently delete the account of ${p.name ?? 'this member'}`}
+                    accessibilityLabel={`Permanently delete the account of ${p.name || 'this member'}`}
                     // The label and the role were here; the STATE was not. While
                     // a deletion is running every other Delete on the queue is
                     // inert, and the only sign of it was a border that changed

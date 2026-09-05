@@ -276,7 +276,24 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
         // work. src/ui/avatarUpload.ts is where a photo becomes a URL; nothing
         // else may reach this column.
         supabase.from('profiles')
-          .update({ full_name: v.name, avatar: isDeviceAvatar(v.photo) ? null : v.photo }, { count: 'exact' })
+          .update({
+          // Trimmed, and never stored blank: a coach who cleared this field was
+          // storing an empty string for real. Blank is not a name any screen can
+          // show, and action_account_deletion() freezes this column into
+          // deletion_log — where it can never be repaired, because the profile it
+          // came from is deleted on the next line. See supabase/parts/2370.
+          //
+          // NULL rather than the client app's answer, and the difference is
+          // deliberate. app/(client)/profile.tsx does `setName(nameVal.trim() ||
+          // cd.name)` — it keeps the OLD name, so clearing the box silently does
+          // nothing. That is fine there and wrong here: `full_name` is nullable,
+          // every reader of it already handles null (my_coach and
+          // my_coach_profile nullif this exact column), and a coach who clears
+          // their name has asked for something the schema can express. Reverting
+          // would tell them it saved when it had not.
+          full_name: v.name.trim() || null,
+          avatar: isDeviceAvatar(v.photo) ? null : v.photo,
+        }, { count: 'exact' })
           .eq('id', v.uid),
         supabase.from('trainers').update({
           bio: v.bio, tagline: v.tagline, offers: v.offers,
