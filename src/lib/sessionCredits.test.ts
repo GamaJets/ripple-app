@@ -1,10 +1,11 @@
 // Which entitlement pays for a session, and what each app says about it.
 // Compile with tsc, run with node.
 //
-// Six things are defended here. Every one of them is a sentence that would look
+// Eight things are defended here. Every one of them is a sentence that would look
 // entirely ordinary on a screen while being false about somebody's money.
 //
-// 1. AN EXHAUSTED COACH PACK STILL BEATS A LIVE GYM PASS. This is the whole
+// 1. AN EXHAUSTED COACH PACK STILL BEATS A LIVE GYM PASS.  (And so does an
+//    EXPIRED one — see 7.) This is the whole
 //    choice rule and it is the one that is tempting to get wrong: falling
 //    through onto the gym's pass when the coach's pack runs out looks generous,
 //    spends a second business's money, and hides the conversation the coach and
@@ -35,6 +36,16 @@
 // 6. A PASS THAT DOES NOT COVER PT NEVER PAYS FOR A ONE-TO-ONE. A ten-CLASS
 //    pack is not a ten-PT-session pack, and spending one on the other is the
 //    "wrong credit" failure pointed at the member instead of the coach.
+//
+// 7. AN EXPIRED COACH PACK STILL WINS THE ROUTE. Part 370 picks route 1 on
+//    `status = 'paid' and cp.sessions_total is not null` — no expiry clause,
+//    no room clause — and part 612 closes a window without falsifying either.
+//    So the app must not fall through onto the gym's pass when a pack runs out
+//    of TIME, for the same reason it must not when one runs out of SESSIONS.
+//
+// 8. A SESSION SOMEBODY MARKED IS NOT "NOT MARKED YET". A no-show and a
+//    cancellation are recorded facts with a person's name on them, and
+//    'unmarked' means the opposite: nobody has said what happened.
 //
 // No formatted date is asserted against a literal — `npm test` runs under six
 // timezones — and every instant here is an explicit ISO string.
@@ -146,7 +157,7 @@ eq(unnamed[0].label, '8-session PT pass',
 
 eq(coachPackLines(null), null, 'unread coach packs stay unread');
 eq(coachPackLines([{ id: 'z', label: '10-session pack', left: 4, sessions_total: 10 }]),
-  [{ id: 'z', kind: 'coach_pack', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: null }],
+  [{ id: 'z', kind: 'coach_pack', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: null, expired: false }],
   'a pack with no window reports no date, rather than one this code chose');
 
 /* THE LITERAL NULL THAT PART 612 MADE FALSE.
@@ -161,18 +172,26 @@ eq(coachPackLines([{ id: 'z', label: '10-session pack', left: 4, sessions_total:
    money away is soonest-to-expire first, and it was being fed a null. */
 
 eq(coachPackLines([{ id: 'w', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: '2026-09-30' }]),
-  [{ id: 'w', kind: 'coach_pack', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: '2026-09-30' }],
+  [{ id: 'w', kind: 'coach_pack', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: '2026-09-30', expired: false }],
   'a pack that DOES have a window carries its own last day through');
 
-// A pack whose window has already closed is not an entitlement and is not
-// offered: nothing in the database will let it be drawn — `run_pack_expiry()`
-// has reduced its `sessions_total` — so putting it in a picker offers somebody
-// something that cannot be spent.
+/* THE PACK THAT WAS DROPPED BEFORE THE ROUTE WAS CHOSEN.
+
+   This assertion used to read `['live']`, on the argument that a closed window
+   is not an entitlement and putting one in a picker offers something that
+   cannot be spent. It was answering a question about SPENDING with the list
+   that answers a question about CHOOSING, and part 370 decides those with two
+   different predicates. Its route-1 test — verified against the live function —
+   is `status = 'paid' and cp.sessions_total is not null`, with no expiry clause
+   and no room clause, and part 612 closes a window by moving `sessions_total`
+   down to `sessions_used` while leaving both of those true.
+
+   So the pack stays in the list and the caller who routes on it counts it. */
 eq(coachPackLines([
-  { id: 'gone', label: '10-session pack', left: 1, sessions_total: 10, expiresOn: '2026-06-30', expired: true },
+  { id: 'gone', label: '10-session pack', left: 0, sessions_total: 10, expiresOn: '2026-06-30', expired: true },
   { id: 'live', label: '5-session pack', left: 2, sessions_total: 5 },
-])!.map((e) => e.id), ['live'],
-  'a pack whose window has closed is dropped rather than offered with a date in the past');
+])!.map((e) => [e.id, e.expired]), [['gone', true], ['live', false]],
+  'a pack whose window has closed is still a pack this coach sold them, and it is still what part 370 draws against');
 
 /* ── 4 · one session's state ──────────────────────────────────────────────── */
 
@@ -245,6 +264,7 @@ const row = (state: LedgerState, kind: 'coach_pack' | 'gym_pass' | null = null) 
   ({ sessionId: 's', startsAt: PAST, state, kind, drawnAt: null, entitlementId: null });
 
 for (const s of ['drawn', 'drawn_at_booking', 'not_covered', 'shortfall', 'unmarked',
+  'missed', 'late_cancelled', 'cancelled',
   'expected', 'reserved', 'expected_none', 'unknown'] as LedgerState[]) {
   const c = clientLedgerLine(row(s));
   const k = coachLedgerLine(row(s));
@@ -377,5 +397,100 @@ eq(creditsHeroNote(gymOnly, null), creditsHeroNote(gymOnly),
   'a diary that would not read adds nothing, rather than claiming nothing is booked');
 
 
+/* ── 8 · the expired pack, and the money it must not move ────────────────── */
+//
+// A member holds a 10-pack from their coach whose validity ran out, and a live
+// gym PT pass with six credits on it. `coachPackLines` used to drop the pack
+// before the route was chosen, so the app answered 'gym_pass' and printed
+// "Sessions Remaining 6". The server answers route 1 — the pack — finds no row
+// with `sessions_used < sessions_total`, draws nothing and stamps
+// `pack_draw_shortfall_at`. The gym's pass was never touched, and the coach was
+// then told by `app/(trainer)/client.tsx` that they had delivered an hour
+// unpaid, off the same route this file computes.
+
+const closedPack = {
+  id: 'x1', label: '10-session pack', left: 0, sessions_total: 10,
+  expiresOn: '2026-06-30', expired: true,
+};
+
+// The route decision exactly as the coach's screen makes it: the length of the
+// coach-pack list. This is the line the defect ran through.
+eq(chooseRoute((coachPackLines([closedPack]) || []).length > 0, true), 'coach_pack',
+  'a pack whose window has closed is still a pack from this coach, which is the whole of part 370’s route-1 test');
+
+const expiredVsPass = bookableCredits([closedPack], [ptPass({ usesTotal: 6, usesSpent: 0 })], DAY);
+eq(expiredVsPass.route, 'coach_pack',
+  'so the route is the coach’s pack and never the gym’s pass — the app and the trigger name the same payer');
+eq(expiredVsPass.left, 0,
+  'and the figure is 0, not the pass’s 6: those six credits are not going to be spent on this hour');
+eq((expiredVsPass.lines || []).map((l) => l.id), ['x1'],
+  'the pass is not listed either, because listing it invites somebody to book against it');
+ok((creditsEmptyLine(expiredVsPass) || '').includes('ran out of time'),
+  'the member is told the pack ran out of TIME, which is a different thing from having used every session');
+ok(!(creditsEmptyLine(expiredVsPass) || '').includes('gym'),
+  'and is never pointed at a gym pass that will not pay for it');
+ok((creditsHeroNote(expiredVsPass) || '').includes('validity has run out'),
+  'the caption over the nought says why it is a nought');
+
+// What the ledger then says about the hour that was delivered against it.
+eq(st(session({ id: 'sf', outcome: 'completed', shortfallAt: PAST }), expiredVsPass.route), 'shortfall',
+  'the delivered hour is a shortfall, which is what the server actually stamped');
+eq(st(session({ id: 'nx', startsAt: FUTURE }), expiredVsPass.route), 'expected',
+  'and the next one is expected to draw off the pack');
+ok(clientLedgerLine(row('expected')).includes('pack'),
+  'so the sentence before it names the pack, rather than promising a gym credit that will not move');
+
+// A credit refunded ONTO a closed pack. `refund_pack_session` decrements
+// `sessions_used` on the newest pack with usage and never asks whether that
+// pack's window has closed, and neither draw site filters on the window — so
+// the credit really is spendable, and this figure says so.
+const refunded = bookableCredits(
+  [{ id: 'r1', label: '10-session pack', left: 1, sessions_total: 10, expiresOn: '2026-06-30', expired: true }],
+  [], DAY,
+);
+eq(refunded.left, 1, 'a credit returned onto a closed pack is one the database will still draw, so it is counted');
+eq(creditsEmptyLine(refunded), null, 'there IS a figure, so there is no sentence instead of one');
+ok((creditsHeroNote(refunded) || '').includes('validity has run out'),
+  'but the caption still says the window is closed, because that is the conversation to have about it');
+
+// A live pack beside a closed one is unaffected: the figure is what can be drawn.
+const oneOfEach = bookableCredits([closedPack, pack({ id: 'live', left: 3 })], [], DAY);
+eq(oneOfEach.left, 3, 'the closed pack adds nothing to a live one, and takes nothing off it');
+eq(creditsHeroNote(oneOfEach), 'Across 2 packs you bought from your coach',
+  'and the caption does not claim everything they hold has run out when one of them has not');
+
+/* ── 9 · a session somebody marked is not one nobody marked ──────────────── */
+//
+// `ledgerStateOf` returned 'unmarked' for every outcome that was not
+// 'completed', while `LedgerState`'s own definition of 'unmarked' is "nobody has
+// said what happened yet". So a session the coach recorded as a no-show told
+// the client "Your coach has not said what happened yet" and told the coach who
+// recorded it "Not marked yet".
+
+eq(st(session({ id: 'm1', outcome: 'no_show' }), 'coach_pack'), 'missed',
+  'a no-show is a recorded fact, and it says so');
+eq(st(session({ id: 'm2', outcome: 'cancelled' }), 'coach_pack'), 'cancelled',
+  'a cancellation with notice is its own state');
+eq(st(session({ id: 'm3', outcome: 'late_cancelled' }), 'gym_pass'), 'late_cancelled',
+  'and a late one is kept apart from it, exactly as sessions.outcome and isPayable keep them apart');
+eq(st(session({ id: 'm4' }), 'coach_pack'), 'unmarked',
+  'while a session with no outcome at all is still, and only, unmarked');
+eq(st(session({ id: 'm5', outcome: 'no_show', bookingDrewCreditAt: PAST }), 'coach_pack'), 'drawn_at_booking',
+  'a no-show that had already spent a credit at booking still spent one, and that comes first');
+eq(st(session({ id: 'm6', outcome: 'teleported' }), 'coach_pack'), 'unknown',
+  'an outcome the live CHECK does not allow is unknown, never “nobody has marked this” — that would be a claim about their coach');
+
+ok(!clientLedgerLine(row('missed')).toLowerCase().includes('has not said'),
+  'the client is never told nobody has said what happened about a session somebody marked');
+ok(!coachLedgerLine(row('cancelled')).toLowerCase().includes('not marked'),
+  'and the coach who marked it is never told they have not');
+ok(coachLedgerLine(row('missed')).includes('not attended'),
+  'the words are sessionHistory’s own, so a history row and a credit row describe the same session the same way');
+ok(coachLedgerLine(row('late_cancelled')).includes('notice period'),
+  'and a late cancellation is named as one, because gyms pay for those and not for the other');
+ok(clientLedgerLine(row('cancelled')).includes('Nothing came off'),
+  'each of them still answers the question this module exists for: what happened to the credit');
+
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('sessionCredits: ok (an empty coach pack still beats a gym pass, unread is never nought, a shortfall is not cash)');
+console.log('sessionCredits: ok (an empty OR EXPIRED coach pack still beats a gym pass, unread is never nought, a marked session is not an unmarked one)');

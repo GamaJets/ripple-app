@@ -30,6 +30,8 @@
 // must never be shown "0 left", and an empty ledger under a failed read must
 // never read as "you have never used a session".
 
+import { PAST_STATE_NOTE } from './sessionHistory';
+
 /** Which of the two entitlement systems a credit came off. Mirrors
  *  `sessions.pack_drawn_kind`. */
 export type CreditKind = 'coach_pack' | 'gym_pass';
@@ -62,9 +64,25 @@ export interface Entitlement {
    * thousands separator on purpose rather than by omission.
    */
   sessions_total: number;
-  /** ISO date this expires on, or null for one that does not. A coach pack has
-   *  no expiry in this schema; a gym pass may. */
+  /**
+   * ISO date this expires on, or null for one that does not.
+   *
+   * Both kinds can carry one. A gym pass always could; part 612 put an
+   * `expires_on` on a coach pack too, and the sentence that used to sit here —
+   * "a coach pack has no expiry in this schema" — has been false since.
+   */
   expiresOn: string | null;
+  /**
+   * The window on this entitlement has already closed.
+   *
+   * Optional because only one of the two kinds is ever handed to a screen in
+   * this state. `gymPtLines` drops a lapsed pass and is right to: the pass draw
+   * in part 370 filters on `p.expires_on is null or p.expires_on >= v_on`, so a
+   * lapsed pass genuinely cannot be spent on anything. A coach pack is the
+   * opposite case — see `coachPackLines` — and this flag is how a screen says
+   * why the figure beside it is nought.
+   */
+  expired?: boolean;
 }
 
 /** A session as the credit ledger reads it — the columns parts 193 and 370 put
@@ -249,12 +267,41 @@ export function gymPtLines(
  * to be lost. The one order that does not throw a client's money away is
  * soonest-to-expire first, and this fed it a null for every coach pack.
  *
- * A pack whose window has ALREADY closed is not an entitlement at all and is
- * dropped here rather than offered with a date in the past: nothing in the
- * database will let it be drawn — `run_pack_expiry()` has reduced its
- * `sessions_total` — so putting it in a picker is offering somebody something
- * that cannot be spent. `packBalance` counts what is left on those under
- * `onClosedPacks`, which is where that conversation belongs.
+ * ── an expired pack was dropped, and that disagreed with part 370 ────────
+ *
+ * This function used to end `.filter((l) => !l.expired)`, on the argument that
+ * a closed window is not an entitlement and putting one in a picker offers
+ * somebody something that cannot be spent. The argument is about SPENDING, and
+ * the answer this list is used for is CHOOSING — and the two are decided by
+ * different predicates in part 370.
+ *
+ * Route 1 is asked as "do they hold a pack from this coach at all", verified
+ * against the live function today:
+ *
+ *     status = 'paid' and cp.sessions_total is not null
+ *
+ * with no expiry clause and no room clause. Part 612 closes a window by moving
+ * `sessions_total` down to `sessions_used`; it leaves `status = 'paid'` and it
+ * leaves `sessions_total` non-null. So an expired pack still WINS route 1, the
+ * draw inside that route then finds no row with `sessions_used <
+ * sessions_total`, and the session is stamped `pack_draw_shortfall_at`.
+ *
+ * Filtering the pack out here made the app answer a different question from the
+ * database: a member holding an expired 10-pack from their coach and a live gym
+ * PT pass was routed to 'gym_pass' and shown the pass's six credits, while the
+ * server matched the pack, found no room, and drew nothing at all. The pass was
+ * never touched, and the coach was told they had delivered an hour unpaid — by
+ * `app/(trainer)/client.tsx`, off this same route.
+ *
+ * So the pack stays in the list, carrying `expired`, and the honest answer
+ * becomes "this pack is what pays, and it has nothing left" rather than "the
+ * gym pass pays". `left` is what the DATABASE will still draw off it, which is
+ * normally nought — and is not always: `refund_pack_session` gives a credit back
+ * to the newest pack with usage without asking whether that pack's window has
+ * closed, and neither draw site filters on the window, so that credit really is
+ * spendable and really is counted here. `packBalance` in packDraw.ts takes the
+ * other view and keeps those out of its own `left` under `onClosedPacks`; where
+ * the two disagree, this one is the one that matches what the trigger does.
  */
 export function coachPackLines(
   lines: readonly {
@@ -267,19 +314,21 @@ export function coachPackLines(
   }[] | null | undefined,
 ): Entitlement[] | null {
   if (lines == null) return null;
-  return lines
-    .filter((l) => !l.expired)
-    .map((l) => ({
-      id: l.id,
-      kind: 'coach_pack' as const,
-      label: l.label,
-      left: Math.max(0, l.left),
-      sessions_total: l.sessions_total,
-      // The pack's own last day, straight off the line. Null is still the
-      // answer for a pack with no window, and it still sorts last — but it is
-      // now the absence of a window rather than the absence of a field.
-      expiresOn: l.expiresOn ?? null,
-    }));
+  return lines.map((l) => ({
+    id: l.id,
+    kind: 'coach_pack' as const,
+    label: l.label,
+    left: Math.max(0, l.left),
+    sessions_total: l.sessions_total,
+    // The pack's own last day, straight off the line. Null is still the
+    // answer for a pack with no window, and it still sorts last — but it is
+    // now the absence of a window rather than the absence of a field.
+    expiresOn: l.expiresOn ?? null,
+    // Carried, not filtered on. Whoever renders this line owes the member a
+    // sentence about the closed window; whoever routes on it must count the
+    // pack, because part 370 does.
+    expired: !!l.expired,
+  }));
 }
 
 /* ── the ledger ────────────────────────────────────────────────────────────── */
@@ -302,6 +351,19 @@ export type LedgerState =
   | 'shortfall'
   /** Past, and nobody has said what happened yet. */
   | 'unmarked'
+  /**
+   * Past, marked, and not delivered. Three states and not one, because
+   * `sessions.outcome` distinguishes three and folding them together is how a
+   * screen came to tell somebody their cancelled session was "not marked yet".
+   *
+   * The names and the sentences are `PastState`'s in sessionHistory.ts rather
+   * than a second vocabulary invented here: a coach reading "cancelled inside
+   * the notice period" on a history row and on a credit row is reading about
+   * the same thing.
+   */
+  | 'missed'
+  | 'late_cancelled'
+  | 'cancelled'
   /** Upcoming, and a credit is expected to come off when it is marked. */
   | 'expected'
   /** Upcoming, and already paid for — the credit came off at booking. */
@@ -329,6 +391,25 @@ export interface Ledger {
   upcoming: LedgerRow[];
 }
 
+/**
+ * A recorded outcome that is not 'completed', in sessionHistory's words.
+ *
+ * The live CHECK on `sessions.outcome` allows exactly null, 'completed',
+ * 'no_show', 'cancelled' and 'late_cancelled', so the last branch is
+ * unreachable against this database. It answers 'unknown' rather than
+ * 'unmarked' anyway, because a value we do not recognise means we cannot say
+ * what happened — and "nobody has marked this" is a different claim, about
+ * somebody's coach, that this module would have no evidence for.
+ */
+const markedState = (outcome: string): LedgerState => {
+  switch (outcome) {
+    case 'no_show': return 'missed';
+    case 'late_cancelled': return 'late_cancelled';
+    case 'cancelled': return 'cancelled';
+    default: return 'unknown';
+  }
+};
+
 const isPast = (s: CreditSession, now: number): boolean => {
   const t = Date.parse(s.startsAt);
   return Number.isFinite(t) ? t <= now : true;
@@ -350,7 +431,13 @@ export function ledgerStateOf(s: CreditSession, route: CreditRoute, now: number 
     if (s.outcome !== 'completed') {
       // A no-show or a cancellation that had already spent a credit at booking
       // still spent one, and the client is entitled to see it.
-      return s.bookingDrewCreditAt && route === 'coach_pack' ? 'drawn_at_booking' : 'unmarked';
+      if (s.bookingDrewCreditAt && route === 'coach_pack') return 'drawn_at_booking';
+      // And one that did not is still MARKED. This branch used to return
+      // 'unmarked' — whose own definition four lines up is "nobody has said what
+      // happened yet" — so a session the coach had recorded as a no-show told
+      // the client "your coach has not said what happened yet" and told the
+      // coach who marked it "not marked yet".
+      return markedState(s.outcome);
     }
     if (s.shortfallAt) return 'shortfall';
     if (s.bookingDrewCreditAt && route === 'coach_pack') return 'drawn_at_booking';
@@ -440,6 +527,10 @@ export function clientLedgerLine(row: LedgerRow, entitlementLabel?: string | nul
       return 'Nothing was left to cover this session. Speak to your coach about what you owe for it.';
     case 'unmarked':
       return 'Your coach has not said what happened yet, so nothing has been drawn.';
+    case 'missed':
+    case 'late_cancelled':
+    case 'cancelled':
+      return `${PAST_STATE_NOTE[row.state]} Nothing came off a pack for it.`;
     case 'expected':
       return row.kind === 'gym_pass'
         ? 'One PT credit comes off your gym pass when your coach marks this complete.'
@@ -467,6 +558,10 @@ export function coachLedgerLine(row: LedgerRow): string {
       return 'Nothing left to cover this. You delivered it unpaid.';
     case 'unmarked':
       return 'Not marked yet, so nothing has been drawn.';
+    case 'missed':
+    case 'late_cancelled':
+    case 'cancelled':
+      return `${PAST_STATE_NOTE[row.state]} No credit was drawn.`;
     case 'expected':
       return row.kind === 'gym_pass' ? 'A gym PT credit comes off when you mark it.' : 'A credit comes off their pack when you mark it.';
     case 'reserved':
@@ -603,9 +698,17 @@ export function bookableCredits(
 export function creditsHeroNote(b: Bookable, expected?: number | null): string | null {
   if (b.left == null || b.lines == null || b.lines.length === 0) return null;
   const n = b.lines.length;
-  const holding = b.route === 'gym_pass'
+  const named = b.route === 'gym_pass'
     ? (n === 1 ? 'On the PT pass your gym sold you' : `Across ${n} PT passes your gym sold you`)
     : (n === 1 ? 'On the pack you bought from your coach' : `Across ${n} packs you bought from your coach`);
+  // Every line here is a pack whose window has closed. Said out loud, because
+  // `coachPackLines` now keeps those — they are still what part 370 draws
+  // against — and a caption that named the pack without naming the closed
+  // window would leave a nought underneath it with no explanation.
+  const closed = b.lines.every((l) => l.expired);
+  const holding = closed
+    ? `${named}, whose validity has run out`
+    : named;
   if (expected == null) return holding;
   return expected === 0
     ? `${holding} · nothing booked is due to draw one`
@@ -632,9 +735,18 @@ export function creditsEmptyLine(b: Bookable): string | null {
     return 'You are not on a session pack or a gym PT pass. You settle sessions with your coach or your gym directly, which is an ordinary way to pay and not something to fix.';
   }
   if (b.left === 0) {
-    return b.route === 'gym_pass'
-      ? 'You have no PT credits left on your gym pass. Your next session with your coach is not covered by one — ask your gym about another pass, or arrange it with your coach directly.'
-      : 'You have no sessions left on your pack. Your next session with your coach is not covered by one — buy another from them, or arrange it with them directly.';
+    if (b.route === 'gym_pass') {
+      return 'You have no PT credits left on your gym pass. Your next session with your coach is not covered by one — ask your gym about another pass, or arrange it with your coach directly.';
+    }
+    // Ran out of TIME, not out of sessions, and those are two different things
+    // to say to somebody who paid for credits they never used. Sessions with
+    // this coach still come off this pack — part 370 picks it whether or not
+    // its window has closed — so the sentence has to explain a nought that a
+    // gym pass beside it will not fill.
+    if (b.lines != null && b.lines.length > 0 && b.lines.every((l) => l.expired)) {
+      return 'Your pack ran out of time. Sessions with this coach still come off that pack, so the next one is not covered by anything — ask them about the credits you did not use, buy another pack, or arrange it with them directly.';
+    }
+    return 'You have no sessions left on your pack. Your next session with your coach is not covered by one — buy another from them, or arrange it with them directly.';
   }
   return null;
 }

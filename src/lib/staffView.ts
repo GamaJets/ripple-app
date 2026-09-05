@@ -499,6 +499,10 @@ export function buildStaff(rec: StaffRecord, opts: StaffOptions): StaffView {
           classes: classRows, activityOf,
           line: lineOf.get(t.trainerId) ?? null,
           settleableRows: settleableOf.get(t.trainerId) ?? null,
+          // The same fee those rows were ADMITTED on, carried through to the
+          // function that prices them. Without it `settlementAmount` falls back
+          // to its own `?? 0` for exactly the rows this fallback let in.
+          fallbackRateCents: fallback,
         }))
         .sort(compareStaff)
     : null;
@@ -534,6 +538,9 @@ interface AssessInput {
   activityOf: Map<string, ActivityEvent[]>;
   line: PayrollLine | null;
   settleableRows: PtSession[] | null;
+  /** The gym's standard session fee, for sessions with no rate of their own —
+   *  the same value `settleableSessions` was filtered with above. */
+  fallbackRateCents: number | null;
 }
 
 function assess(t: StaffTrainer, x: AssessInput): StaffMember {
@@ -579,7 +586,17 @@ function assess(t: StaffTrainer, x: AssessInput): StaffMember {
   const outstandingRows = x.sessions == null ? null : (x.settleableRows ?? []);
   const outstandingSessions = outstandingRows ? outstandingRows.length : null;
   const outstandingCents = outstandingRows && outstandingRows.length
-    ? settlementAmount(outstandingRows)
+    // Priced with the gym's fee, because that is what admitted these rows.
+    //
+    // This call was `settlementAmount(outstandingRows)`. `settleableSessions`
+    // 98 lines up was given the fallback and therefore admits a session whose
+    // `rate_cents` is null, and `settlementAmount`'s own `?? 0` — documented as
+    // "genuinely unreachable for anything settleableSessions returned" — was
+    // reachable for precisely those. A gym with a `session_fee` and no
+    // per-trainer rates showed a coach's twelve delivered, unsettled sessions
+    // as 0 payable beside their real earned figure, out of the same rows, and
+    // the gym-wide "Payable now" KPI summed those noughts.
+    ? settlementAmount(outstandingRows, x.fallbackRateCents)
     : null;
   // `settleBlocker` answers "is there anything to hand over, and is it safe" —
   // a different question from `settlementBlocker`, which asks whether a figure
