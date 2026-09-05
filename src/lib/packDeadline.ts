@@ -47,6 +47,19 @@
 // claiming anything about coverage. A guess would be worse than a silence:
 // "all of them are booked" is the one sentence here that could talk somebody
 // out of acting.
+//
+// ── The count is of bookings that have NOT been paid for yet ──────────────
+//
+// `bookedByThen` is subtracted from `left`, and `left` is
+// `sessions_total - sessions_used`. A one-off the member booked themselves has
+// ALREADY come off `sessions_used`: `book_session` stamps
+// `sessions.booking_drew_credit_at` and the app calls `redeem_pack_session`,
+// which increments the column on the spot. So a diary counted whole subtracts
+// the same credit twice — a ten-pack with eight self-booked hours reads
+// `left: 2`, `booked: 8`, `toBook: -6`, 'covered', and two paid-for sessions
+// nothing is booked against expire unrefunded while the screen says nothing is
+// going to be lost. `drawsBy` at the foot of this file is the count that
+// belongs here; `bookedBy` is only the day arithmetic under it.
 import { daysLeftOn, expiryDayLabel, packWindow } from './packExpiry';
 
 export interface DeadlineInput {
@@ -187,13 +200,30 @@ export function packDeadline(input: DeadlineInput): PackDeadline {
 }
 
 /**
+ * The instant the day AFTER a pack's last day begins, locally.
+ *
+ * `expiresOn` is a bare `YYYY-MM-DD`, so the comparison is made on the DAY, in
+ * the reader's own zone: a session at 7pm on the last day is inside the window,
+ * and `new Date('2026-09-12') > startsAt` would have put it outside for every
+ * member west of Greenwich — the UTC midnight trap src/lib/localDate.ts exists
+ * for. Half-open at the end, like every other window in this codebase.
+ *
+ * Null when the day will not read, which is how both counters below refuse to
+ * let "no window" become "nothing booked".
+ */
+function windowEnd(lastDay: string | null): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(lastDay ?? '').trim());
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3] + 1, 0, 0, 0, 0).getTime();
+}
+
+/**
  * How many upcoming bookings start on or before a pack's last day.
  *
- * `startsAt` is a timestamp and `lastDay` a bare `YYYY-MM-DD`, so the
- * comparison is made on the DAY, in the reader's own zone: a session at 7pm on
- * the last day is inside the window, and `new Date('2026-09-12') > startsAt`
- * would have put it outside for every member west of Greenwich — the UTC
- * midnight trap src/lib/localDate.ts exists for.
+ * The raw count, which is NOT the same question as "how many of the credits
+ * still on this pack are going to be spent" — see `drawsBy`, which is what the
+ * two client screens ask. This one is the day arithmetic underneath it, kept
+ * separate so the window rule has one home and one set of tests.
  *
  * Returns null when `lastDay` will not read, so a caller cannot accidentally
  * treat "no window" as "nothing booked".
@@ -202,11 +232,8 @@ export function bookedBy(
   upcoming: { startsAt: string }[],
   lastDay: string | null,
 ): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(lastDay ?? '').trim());
-  if (!m) return null;
-  // The instant the day after the last day begins, locally. Half-open at the
-  // end, like every other window in this codebase.
-  const end = new Date(+m[1], +m[2] - 1, +m[3] + 1, 0, 0, 0, 0).getTime();
+  const end = windowEnd(lastDay);
+  if (end == null) return null;
   let n = 0;
   for (const r of upcoming) {
     const t = Date.parse(r.startsAt);
@@ -216,6 +243,66 @@ export function bookedBy(
     // not, and that is the sentence this whole module exists to get right.
     if (!Number.isFinite(t)) continue;
     if (t < end) n += 1;
+  }
+  return n;
+}
+
+/** One upcoming booking, from the point of view of the pack that may pay for it. */
+export interface UpcomingDraw {
+  /** When it starts. A timestamp, judged against the last day in local time. */
+  startsAt: string;
+  /**
+   * Whether this booking is STILL going to take a credit off the pack.
+   *
+   * False for one that has already taken it. That is not a hypothetical: a
+   * one-off the member booked themselves draws at BOOKING — `book_session`
+   * stamps `sessions.booking_drew_credit_at` and the app calls
+   * `redeem_pack_session`, which does `sessions_used = sessions_used + 1` —
+   * so the credit is off the pack the moment the slot is taken, and
+   * `client_purchases.sessions_used` has already had it. Everything else
+   * (a standing appointment, a slot the coach booked) draws at delivery and is
+   * true here.
+   *
+   * Null when it cannot be told — an unread route, a booking whose credit row
+   * did not come back. Null poisons the whole count on purpose; see below.
+   */
+  willDraw: boolean | null;
+}
+
+/**
+ * How many of the credits still on a pack are already spoken for by the diary.
+ *
+ * This is the number `packDeadline` wants for `bookedByThen`, and `bookedBy` is
+ * not it. `left` is `sessions_total - sessions_used`, and `sessions_used` has
+ * ALREADY had the self-booked one-offs taken off it. Counting those bookings
+ * again here subtracts the same credit twice: a ten-pack with eight self-booked
+ * hours reads `left: 2`, `booked: 8`, `toBook: -6`, and the member is told
+ * "nothing here is going to be lost" about two credits that nothing is booked
+ * against and that will expire unrefunded. Only the bookings that have NOT yet
+ * drawn belong in this count.
+ *
+ * Null when the day will not read, and null when any booking INSIDE the window
+ * cannot be judged — a count that cannot be trusted must not silently become a
+ * number, because the number it would become is the one that produces the
+ * 'covered' sentence. A booking after the last day is skipped before its state
+ * is consulted: it could not cover anything either way, so an unknown one out
+ * there does not get to silence a window it was never in.
+ */
+export function drawsBy(
+  upcoming: readonly UpcomingDraw[],
+  lastDay: string | null,
+): number | null {
+  const end = windowEnd(lastDay);
+  if (end == null) return null;
+  let n = 0;
+  for (const r of upcoming) {
+    const t = Date.parse(r.startsAt);
+    // Same safe direction as `bookedBy`: a date that will not read claims
+    // nothing rather than claiming coverage.
+    if (!Number.isFinite(t)) continue;
+    if (t >= end) continue;
+    if (r.willDraw == null) return null;
+    if (r.willDraw) n += 1;
   }
   return n;
 }

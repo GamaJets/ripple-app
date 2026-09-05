@@ -39,7 +39,7 @@ import { bookableCredits, ledgerStateOf,
   clientLedgerLine, bookingCreditNote, type CreditSession } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
-import { packDeadline, bookedBy } from '../../src/lib/packDeadline';
+import { packDeadline, drawsBy } from '../../src/lib/packDeadline';
 // Whether a booking is still ahead of the member, and the hour of grace on the
 // answer. One copy of a comparison this file held three of, all three of them
 // against a clock that had stopped at mount — see the header of that file.
@@ -298,6 +298,14 @@ export default function Bookings() {
     const w = (payingEntitlements ?? []).filter((l) => l.expiresOn);
     return w.length === 1 ? w[0] : null;
   }, [payingEntitlements]);
+  // Declared BEFORE the deadline below, which reads it. A `useMemo` body runs
+  // where it is written, so the deadline reaching backwards for this would have
+  // been a temporal-dead-zone crash on first render rather than a stale value.
+  const creditById = useMemo(() => {
+    const m = new Map<string, CreditSession>();
+    for (const c of credits ?? []) m.set(c.id, c);
+    return m;
+  }, [credits]);
   const deadline = useMemo(() => {
     if (!soleWindow) return null;
     // Only the member's own PT bookings, and only when BOTH reads that make
@@ -313,17 +321,50 @@ export default function Bookings() {
     // then went on counting as one still booked before the pack expires, and
     // the line under this told the member their remaining credits were covered
     // when they were not. See src/lib/upcomingWindow.ts.
+    //
+    // ── and the bookings that have already been paid for are not counted ──
+    //
+    // The list alone is the wrong count, and it was costing the member money.
+    // `soleWindow.left` is `sessions_total - sessions_used`, and a one-off the
+    // member booked THEMSELVES has already come off `sessions_used`:
+    // `book_session` stamps `sessions.booking_drew_credit_at` and the app then
+    // calls `redeem_pack_session`, which does `sessions_used = sessions_used + 1`
+    // on the spot. Subtracting those bookings again took the same credit off
+    // twice — a ten-pack with eight self-booked hours read `left: 2`,
+    // `booked: 8`, `toBook: -6`, and the line under this said "nothing here is
+    // going to be lost" about two credits nothing was booked against, which
+    // then expired unrefunded.
+    //
+    // Which bookings those are is not on `sessions` — `TrainingSession` carries
+    // no credit columns — so it comes from the same place the caption under
+    // each row comes from, `mySessionCredits` via `creditById`, judged by
+    // `ledgerStateOf`. A booking with no credit row is not assumed to be
+    // unpaid: it is `willDraw: null`, and `drawsBy` turns any such row INSIDE
+    // the window into no count at all rather than into a number. This screen
+    // already refuses to guess about one of these on the row itself
+    // ("We could not read what pays for this session"); it must not go on to
+    // quietly guess about the same session in a sentence about the whole pack.
+    //
+    // The gym-pass route is untouched by any of this: a pass only ever draws at
+    // delivery, so `ledgerStateOf` never returns 'reserved' under it and every
+    // upcoming booking still counts, exactly as before.
     const booked = bookingsWhole
-      ? bookedBy(sessions.filter((x) => x.clientId === cd.id && x.status === 'booked'
-          && isUpcoming(x.startsAt, nowMs)), soleWindow.expiresOn)
+      ? drawsBy(
+          sessions
+            .filter((x) => x.clientId === cd.id && x.status === 'booked' && isUpcoming(x.startsAt, nowMs))
+            .map((x) => {
+              const c = creditById.get(x.id);
+              if (!c) return { startsAt: x.startsAt, willDraw: null };
+              const st = ledgerStateOf(c, creditRoute, nowMs);
+              // 'reserved' and 'drawn' are credits already off the pack;
+              // 'expected_none' is a member with no pack to draw on. Only
+              // 'expected' is still to come off this one.
+              return { startsAt: x.startsAt, willDraw: st === 'unknown' ? null : st === 'expected' };
+            }),
+          soleWindow.expiresOn)
       : null;
     return packDeadline({ left: soleWindow.left, expiresOn: soleWindow.expiresOn, today: todayISO, bookedByThen: booked });
-  }, [soleWindow, sessions, cd.id, bookingsWhole, todayISO, nowMs]);
-  const creditById = useMemo(() => {
-    const m = new Map<string, CreditSession>();
-    for (const c of credits ?? []) m.set(c.id, c);
-    return m;
-  }, [credits]);
+  }, [soleWindow, sessions, cd.id, bookingsWhole, todayISO, nowMs, creditById, creditRoute]);
   /**
    * The one sentence under a PT row saying what pays for it.
    *
@@ -348,6 +389,42 @@ export default function Bookings() {
       kind: c.packDrawnKind, drawnAt: c.packDrawnAt, entitlementId: null,
     });
   };
+
+  /**
+   * Of the two "saved on this phone" sentences, the one that describes the
+   * OLDER copy.
+   *
+   * The class list and the PT list are cached by two independent providers and
+   * go stale independently, and only one sentence fits above the rows. The
+   * comment at the call site has always said which one belongs there — "if both
+   * are, the older sentence is the one that matters" — and the code took the
+   * class note whenever it existed. So classes cached ten minutes ago over PT
+   * sessions cached three days ago printed "Saved on this phone 10 minutes ago"
+   * above a PT list three days old, and the PT rows are the ones carrying
+   * Cancel, Move and the line saying what pays for each session.
+   *
+   * The age is read back out of the sentence because the age is all this screen
+   * is given: `useClasses` and `useSessions` both publish `cachedNote` and keep
+   * `cachedAt` to themselves. `cachedAtLine` in src/lib/readCache.ts is the one
+   * writer of both strings and its shape is "<n> minutes|hours|days ago", with
+   * "a moment ago" under two minutes; anything that does not match is treated as
+   * the youngest possible copy, so an unparsed sentence can never displace one
+   * whose age we actually read.
+   */
+  const staleNote = useMemo(() => {
+    const ageMins = (note: string): number => {
+      const m = /(\d+)\s+(minute|hour|day)s?\s+ago/.exec(note);
+      if (!m) return 0; // "a moment ago", or wording this does not recognise
+      const n = Number(m[1]);
+      if (!Number.isFinite(n)) return 0;
+      return m[2] === 'minute' ? n : m[2] === 'hour' ? n * 60 : n * 1440;
+    };
+    if (!classCachedNote) return sessionCachedNote ?? null;
+    if (!sessionCachedNote) return classCachedNote;
+    // Ties go to the PT sentence: two copies of the same age are equally stale,
+    // and the PT rows are the ones carrying the money.
+    return ageMins(classCachedNote) > ageMins(sessionCachedNote) ? classCachedNote : sessionCachedNote;
+  }, [classCachedNote, sessionCachedNote]);
 
   const items = useMemo(() => {
     const out: Item[] = [];
@@ -688,10 +765,11 @@ export default function Bookings() {
               a member who reads a cached booking as a confirmed one turns up to
               a session that was moved. The class list and the PT list can be in
               that state independently, so whichever is stale says so — and if
-              both are, the older sentence is the one that matters. */}
-          {classCachedNote || sessionCachedNote
-            ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{classCachedNote ?? sessionCachedNote}</Flag>
-            : null}
+              both are, the older sentence is the one that matters, which is
+              what `staleNote` above picks. It used to be `classCachedNote ??
+              sessionCachedNote`, which is "the class one whenever there is
+              one". */}
+          {staleNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{staleNote}</Flag> : null}
           {items.map((it, i) => (
             <View key={it.id}>
               {i > 0 ? <Rule /> : null}

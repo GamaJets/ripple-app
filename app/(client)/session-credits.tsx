@@ -47,7 +47,7 @@ import { bookableCredits, creditsHeroNote, routeReason,
   type CreditRoute, type CreditSession, type Ledger, type LedgerRow } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
-import { packDeadline, bookedBy } from '../../src/lib/packDeadline';
+import { packDeadline, drawsBy } from '../../src/lib/packDeadline';
 import { useToday, useNow } from '../../src/ui/today';
 import { Fetched } from '../../src/ui/fetched';
 import { useReadStamp } from '../../src/ui/readStamp';
@@ -178,7 +178,40 @@ export default function SessionCredits() {
     // The diary must have been READ to be counted. `ledger` is null for a read
     // that did not land, and counting zero bookings out of that would report
     // the worst case as a fact.
-    const booked = ledger ? bookedBy(ledger.upcoming, soleWindow.expiresOn) : null;
+    //
+    // ── and only the bookings that have not been paid for yet ─────────────
+    //
+    // This handed `bookedBy` the WHOLE upcoming list, and every 'reserved' row
+    // in it had already been taken off the balance it was being subtracted
+    // from. A one-off the member books themselves draws at BOOKING —
+    // `book_session` stamps `booking_drew_credit_at`, `redeemSession` calls
+    // `redeem_pack_session`, which does `sessions_used = sessions_used + 1` —
+    // and `left` here is `sessions_total - sessions_used`. So a ten-pack with
+    // eight self-booked hours read `left: 2`, `booked: 8`, `toBook: -6`, and
+    // told the member "nothing here is going to be lost" about two credits
+    // nothing was booked against. The milder case was always short by exactly
+    // the reserved count.
+    //
+    // `expectedDraws` above is the right RULE and the wrong CALL: it is the
+    // whole diary with no regard for the pack's last day, which is the one
+    // thing this arithmetic exists to bound. Its rule is what `drawsBy`
+    // enforces instead — only a row that will still draw is counted, and a row
+    // whose state cannot be read refuses to become a number rather than
+    // silently becoming zero, because zero is what produces the 'covered'
+    // sentence. It is narrower than `expectedDraws` in one way on purpose: an
+    // 'unknown' row starting AFTER the last day could not have covered anything
+    // either way, so it does not get to silence a window it was never in.
+    const booked = ledger
+      ? drawsBy(
+          ledger.upcoming.map((r) => ({
+            startsAt: r.startsAt,
+            // 'reserved' and 'drawn' have already been paid for out of
+            // `sessions_used`; 'expected_none' is a member with no pack to
+            // draw on. Only 'expected' is still to come off this pack.
+            willDraw: r.state === 'unknown' ? null : r.state === 'expected',
+          })),
+          soleWindow.expiresOn)
+      : null;
     return packDeadline({
       left: soleWindow.left,
       expiresOn: soleWindow.expiresOn,

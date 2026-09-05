@@ -8,7 +8,7 @@
 // evaporates, and packExpiry's own header calls it "a conversation, not a
 // zero": the coach's half of that conversation exists (`strandedNote`), and the
 // member's half told them the date and left them to do the arithmetic.
-import { packDeadline, bookedBy } from './packDeadline';
+import { packDeadline, bookedBy, drawsBy } from './packDeadline';
 import { EXPIRING_SOON_DAYS } from './packExpiry';
 
 const errors: string[] = [];
@@ -153,6 +153,84 @@ eq(bookedBy([{ startsAt: 'nonsense' }, { startsAt: lastDayEvening }], '2026-09-1
   eq(d.kind, 'toBook', 'so the fourth session still has to be booked');
   eq(d.toBook, 1, 'and it is one, not none');
 }
+
+/* ── drawsBy: a credit already spent is not a credit still to spend ────── */
+
+// The bug this exists for. `left` is `sessions_total - sessions_used`, and
+// `sessions_used` has ALREADY had the self-booked one-offs taken off it:
+// `book_session` stamps `booking_drew_credit_at` and `redeem_pack_session` does
+// `sessions_used = sessions_used + 1` the moment the member books. Handing the
+// whole diary to `bookedBy` subtracted the same credit a second time.
+{
+  const at = (day: number) => new Date(2026, 8, day, 7, 0, 0).toISOString();
+  // A ten-session pack expiring 12 Sep. The member booked eight hours
+  // themselves, so eight credits are already off it and two are left.
+  const diary = [3, 4, 5, 6, 8, 9, 10, 11].map((d) => ({ startsAt: at(d), willDraw: false }));
+  eq(bookedBy(diary, '2026-09-12'), 8, 'the raw count sees eight bookings, which it should');
+  eq(drawsBy(diary, '2026-09-12'), 0,
+    'but none of them is going to take a credit off the pack — they already have');
+  const wrong = packDeadline({ left: 2, expiresOn: '2026-09-12', today: TODAY, bookedByThen: bookedBy(diary, '2026-09-12') });
+  eq(wrong.kind, 'covered', 'the raw count is what told the member nothing would be lost');
+  eq(wrong.toBook, 0, 'off a toBook of -6, clamped');
+  const right = packDeadline({ left: 2, expiresOn: '2026-09-12', today: TODAY, bookedByThen: drawsBy(diary, '2026-09-12') });
+  eq(right.kind, 'toBook', 'and two paid-for sessions with nothing booked against them is a nudge');
+  eq(right.toBook, 2, 'both of them, not none');
+  ok(right.urgent, 'said with a mark, because they are not refunded');
+}
+
+// The milder case, which is the ordinary one: the count is short by exactly the
+// number of reserved bookings, so the member is under-warned rather than
+// silenced.
+{
+  const at = (day: number) => new Date(2026, 8, day, 7, 0, 0).toISOString();
+  const diary = [
+    { startsAt: at(4), willDraw: false }, // booked by the member, already drawn
+    { startsAt: at(6), willDraw: true },  // the coach put this one in; draws at delivery
+  ];
+  eq(drawsBy(diary, '2026-09-12'), 1, 'only the one that has not been paid for yet counts');
+  const d = packDeadline({ left: 3, expiresOn: '2026-09-12', today: TODAY, bookedByThen: drawsBy(diary, '2026-09-12') });
+  eq(d.toBook, 2, 'so two are still to book, where the whole-diary count said one');
+}
+
+// The day still bounds it: a booking after the last day cannot pay for a credit
+// that expires on it, whether or not it has drawn.
+{
+  eq(drawsBy([
+    { startsAt: new Date(2026, 8, 11, 19, 0, 0).toISOString(), willDraw: true },
+    { startsAt: new Date(2026, 8, 20, 7, 0, 0).toISOString(), willDraw: true },
+  ], '2026-09-12'), 1, 'only the booking inside the window counts towards the window');
+  eq(drawsBy([{ startsAt: new Date(2026, 8, 12, 19, 0, 0).toISOString(), willDraw: true }], '2026-09-12'), 1,
+    'the evening of the last day is inside it, in the reader\'s own zone');
+}
+
+// A gym-pass member is untouched by any of this: a pass only draws at delivery,
+// so nothing is ever reserved and every upcoming booking still counts.
+eq(drawsBy([
+  { startsAt: new Date(2026, 8, 5, 7, 0, 0).toISOString(), willDraw: true },
+  { startsAt: new Date(2026, 8, 9, 7, 0, 0).toISOString(), willDraw: true },
+], '2026-09-12'), 2, 'where nothing draws at booking, every booking is still a draw to come');
+
+// The unknowns. A state that could not be read must not become a zero, because
+// zero is precisely the value that produces "nothing here is going to be lost".
+eq(drawsBy([{ startsAt: new Date(2026, 8, 5, 7, 0, 0).toISOString(), willDraw: null }], '2026-09-12'), null,
+  'a booking whose credit could not be read leaves no honest count');
+eq(packDeadline({ left: 2, expiresOn: '2026-09-12', today: TODAY,
+  bookedByThen: drawsBy([{ startsAt: new Date(2026, 8, 5, 7, 0, 0).toISOString(), willDraw: null }], '2026-09-12') }).kind,
+  'unknown', 'and the screen says so rather than promising coverage');
+// ...but only where the doubt could have mattered. A row after the last day was
+// never going to cover anything, so it does not get to silence the window.
+eq(drawsBy([
+  { startsAt: new Date(2026, 8, 5, 7, 0, 0).toISOString(), willDraw: true },
+  { startsAt: new Date(2026, 8, 25, 7, 0, 0).toISOString(), willDraw: null },
+], '2026-09-12'), 1, 'an unreadable booking outside the window is not doubt about the window');
+// A date that will not read claims nothing, the same safe direction bookedBy takes.
+eq(drawsBy([
+  { startsAt: 'nonsense', willDraw: true },
+  { startsAt: new Date(2026, 8, 5, 7, 0, 0).toISOString(), willDraw: true },
+], '2026-09-12'), 1, 'a booking whose date will not read is not counted as covering anything');
+eq(drawsBy([{ startsAt: new Date(2026, 8, 5, 7, 0, 0).toISOString(), willDraw: true }], null), null,
+  'no window means no count here either');
+eq(drawsBy([], '2026-09-12'), 0, 'an empty diary is zero draws, which is a real answer');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('packDeadline: ok — a pack that is about to lapse says so, and says whether the diary covers it');
