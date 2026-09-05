@@ -344,8 +344,23 @@ const HK_TO_EXERCISE: Record<string, string> = {
   'Functional Strength Training': 'Circuit', 'Traditional Strength Training': 'Strength',
   Cooldown: 'Stretching', Flexibility: 'Stretching', 'Mixed Cardio': 'Cardio', Dance: 'Dance',
 };
+/**
+ * Looked up with the spaces and the case taken out of the question.
+ *
+ * Half the keys above are spaced ('Traditional Strength Training') and half are
+ * not ('StairClimbing'), because two libraries spelt the same activity two ways
+ * and both spellings were added as they turned up. HealthKit's own name for it
+ * is one word — `WorkoutActivityType.traditionalStrengthTraining` — which is
+ * what src/lib/wearables/appleHealthShim.ts now publishes, and what
+ * HK_WRITE_ACTIVITIES in appleHealthWrite.ts has always used, so a lookup that
+ * cares about the spaces matches on 'StairClimbing' and misses on the five
+ * spaced keys beside it. Normalising both sides means neither spelling can be
+ * the wrong one, and it costs one Object.entries at module load.
+ */
+const HK_TO_EXERCISE_KEY: Record<string, string> = Object.entries(HK_TO_EXERCISE)
+  .reduce<Record<string, string>>((a, [k, v]) => { a[k.replace(/\s+/g, '').toLowerCase()] = v; return a; }, {});
 function mapActivity(name: string): string {
-  return HK_TO_EXERCISE[name] || name || 'Workout';
+  return HK_TO_EXERCISE_KEY[String(name ?? '').replace(/\s+/g, '').toLowerCase()] || name || 'Workout';
 }
 
 // Named rather than inlined on the provider so the sleep reader can give the

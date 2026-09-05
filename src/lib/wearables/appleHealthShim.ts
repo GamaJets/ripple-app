@@ -57,6 +57,8 @@ import {
   queryCategorySamples,
   queryWorkoutSamples,
   saveWorkoutSample,
+  CategoryValueSleepAnalysis,
+  WorkoutActivityType,
 } from '@kingstinct/react-native-healthkit';
 
 /** ISO strings out, whatever the library hands back. */
@@ -65,6 +67,41 @@ const iso = (d: any): string | null => {
   if (typeof d === 'string') return d;
   if (typeof d === 'number' && isFinite(d)) return new Date(d).toISOString();
   return null;
+};
+
+/**
+ * Who wrote the sample, in the two fields the callers read.
+ *
+ * The third silent translation, and the one with no visible symptom at all.
+ * BaseObject carries `uuid` and `sourceRevision.source` (`{ name,
+ * bundleIdentifier }`); react-native-health flattened those onto every row as
+ * `id`, `sourceId` and `sourceName`, and the first version of this file dropped
+ * all three. Nothing threw, because every consumer of them is written to
+ * tolerate their absence — and each one then does something quietly wrong:
+ *
+ *   · `sleepReadings()` in appleHealth.ts groups by `sourceId` and falls back to
+ *     the literal string 'unknown'. With every row unattributed, an Oura night
+ *     and an Apple Watch night land in ONE bucket and are merged into a single
+ *     longer stretch — the exact outcome the comment above `fetchSleep` says
+ *     must never happen, and the whole of what TF-01 asked for.
+ *   · `parseHealthSamples()` in glucose.ts collapses duplicates by `id`. With
+ *     no id there is nothing to collapse by, so every re-read of Health inserts
+ *     the same CGM samples again — that function's own comment puts a week of
+ *     wearing one at 2,000 duplicate rows.
+ *
+ * `sourceRevision.source` is a nitro hybrid object rather than a plain record,
+ * so it is read defensively: a throwing getter here would take out a whole read
+ * that is otherwise fine.
+ */
+const sourceOf = (r: any): { sourceId: string | null; sourceName: string | null } => {
+  try {
+    const s = r?.sourceRevision?.source;
+    const id = typeof s?.bundleIdentifier === 'string' ? s.bundleIdentifier : null;
+    const name = typeof s?.name === 'string' ? s.name : null;
+    return { sourceId: id, sourceName: name };
+  } catch {
+    return { sourceId: null, sourceName: null };
+  }
 };
 
 /**
@@ -153,6 +190,11 @@ async function quantity(id: string, options: any) {
     value: r?.quantity,
     startDate: iso(r?.startDate),
     endDate: iso(r?.endDate),
+    // The store's own uuid, under the name react-native-health gave it.
+    // `parseHealthSamples` in src/lib/glucose.ts deduplicates by this and by
+    // nothing else; see `sourceOf` above.
+    id: typeof r?.uuid === 'string' ? r.uuid : null,
+    ...sourceOf(r),
   }));
 }
 
@@ -161,6 +203,80 @@ async function quantity(id: string, options: any) {
 function cb<T>(p: Promise<T>, done: (err: any, res: T | null) => void): void {
   p.then((res) => done(null, res)).catch((e) => done(e ?? new Error('Apple Health did not answer'), null));
 }
+
+/**
+ * A sleep sample's `value`, as a WORD rather than as a number.
+ *
+ * The fourth translation, and it is the same defect as `quantity` vs `value`
+ * one layer down: a real difference in the two libraries' shapes that produces
+ * an empty screen instead of an error.
+ *
+ * `HKCategorySample.value` is an integer, and the new library forwards it as
+ * one — `serializeCategorySample` in the pod's Serializers.swift writes
+ * `value: Double(sample.value)`, and the declared type is the numeric enum
+ * `CategoryValueSleepAnalysis` (inBed 0, asleepUnspecified 1, awake 2,
+ * asleepCore 3, asleepDeep 4, asleepREM 5). RCTAppleHealthKit turned the same
+ * integer into one of the strings INBED / ASLEEP / CORE / DEEP / REM / AWAKE /
+ * UNKNOWN before handing it over, and `sleepReadings()` in appleHealth.ts is
+ * written against those strings: it does `String(row.value).toUpperCase()` and
+ * tests membership of ASLEEP_VALUES and IN_BED_VALUES.
+ *
+ * Unmapped, every row arrives as "0".."5", matches neither set, and is skipped
+ * by the `continue` two lines later. So the read SUCCEEDS, returns hundreds of
+ * real samples, and produces zero readings — which reaches the Recovery screen
+ * as a measured night of no sleep at all, from a watch that recorded one. That
+ * is precisely the confusion `readSleepRows` was built to prevent (an empty
+ * night and an unreadable night are different sentences) defeated one layer
+ * below it, where it cannot tell.
+ *
+ * Anything outside the enum is UNKNOWN rather than guessed. appleHealth.ts
+ * counts neither UNKNOWN nor AWAKE as sleep, so an unrecognised value can only
+ * ever be left out — never added to a night.
+ */
+const SLEEP_VALUE: Record<number, string> = {
+  [CategoryValueSleepAnalysis.inBed]: 'INBED',
+  [CategoryValueSleepAnalysis.asleepUnspecified]: 'ASLEEP',
+  [CategoryValueSleepAnalysis.awake]: 'AWAKE',
+  [CategoryValueSleepAnalysis.asleepCore]: 'CORE',
+  [CategoryValueSleepAnalysis.asleepDeep]: 'DEEP',
+  [CategoryValueSleepAnalysis.asleepREM]: 'REM',
+};
+const sleepWord = (v: unknown): string => {
+  const n = Number(v);
+  return (Number.isFinite(n) && SLEEP_VALUE[n]) || 'UNKNOWN';
+};
+
+/**
+ * A workout's activity, as a NAME rather than as a number.
+ *
+ * Same shape of mistake again. `WorkoutSample.workoutActivityType` is the
+ * numeric `WorkoutActivityType` enum; react-native-health's `getSamples`
+ * published `activityName` as a string ('Running', 'TraditionalStrengthTraining'
+ * …). `mapActivity()` in appleHealth.ts looks the name up in HK_TO_EXERCISE and
+ * falls back to the raw value, so an unmapped number does not throw — it puts
+ * the string "45" in the activity column of the import list and writes
+ * `apple-<date>-45` as the row's stable id.
+ *
+ * The enum's own reverse lookup is the source, upper-cased on the first letter
+ * to match the vocabulary HK_WRITE_ACTIVITIES and EXERCISE_TO_HK in
+ * appleHealthWrite.ts already use — so a session imported from the watch and
+ * written back keeps one name, which is what that file's comment promises.
+ */
+const activityName = (v: unknown): string => {
+  const n = Number(v);
+  const raw = Number.isFinite(n) ? (WorkoutActivityType as any)[n] : undefined;
+  return typeof raw === 'string' && raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Workout';
+};
+/** The inverse, for the write path. Built from the same enum, so the two
+ *  directions cannot drift apart. */
+const activityType = (name: unknown): number | null => {
+  const want = String(name ?? '').toLowerCase();
+  if (!want) return null;
+  for (const [k, v] of Object.entries(WorkoutActivityType as any)) {
+    if (typeof v === 'number' && k.toLowerCase() === want) return v;
+  }
+  return null;
+};
 
 /**
  * The object `hk()` returns.
@@ -208,9 +324,14 @@ export const AppleHealthCompat = {
     cb(
       queryCategorySamples(READ_ID.SleepAnalysis as any, toQuery(o) as any).then((rows) =>
         (rows ?? []).map((r: any) => ({
-          value: r?.value,
+          // A word, not the raw integer — see SLEEP_VALUE.
+          value: sleepWord(r?.value),
           startDate: iso(r?.startDate),
           endDate: iso(r?.endDate),
+          id: typeof r?.uuid === 'string' ? r.uuid : null,
+          // Without these every writer collapses into one bucket called
+          // 'unknown' and two devices' nights are merged. See `sourceOf`.
+          ...sourceOf(r),
         })),
       ),
       d,
@@ -225,30 +346,75 @@ export const AppleHealthCompat = {
         (rows ?? []).map((w: any) => ({
           start: iso(w?.startDate ?? w?.start),
           end: iso(w?.endDate ?? w?.end),
-          activityName: w?.workoutActivityType ?? w?.activityName,
+          // A name, not the enum's number — see `activityName`. `activityId`
+          // keeps the number, which is what its name says it is and what the
+          // old bridge put there.
+          activityName: activityName(w?.workoutActivityType),
           activityId: w?.workoutActivityType ?? w?.activityId,
           calories: w?.totalEnergyBurned?.quantity ?? w?.calories,
           distance: w?.totalDistance?.quantity ?? w?.distance,
+          ...sourceOf(w),
         })),
       ),
       d,
     );
   },
 
+  /**
+   * ── the totals were being sent under names nothing reads ──────────────────
+   *
+   * `WorkoutTotals` is `{ distance?: number; energyBurned?: number }` — two
+   * keys, and neither is what was here. This sent `totalEnergyBurned` and
+   * `totalDistance`, which are the field names on the workout that COMES BACK,
+   * not on the object that goes in. Unknown properties on a nitro struct are
+   * dropped, exactly as they are on a query filter, so every session Repple
+   * wrote into Apple Health arrived with no energy and no distance on it —
+   * silently, and only visible by opening Health and looking at a workout that
+   * says nothing but its duration.
+   *
+   * The units are stated by the pod rather than chosen here: WorkoutsModule.swift
+   * builds `HKQuantity(unit: .kilocalorie(), ...)` and `HKQuantity(unit: .meter(),
+   * ...)` from these two numbers. appleHealthWrite.ts passes SMALL calories
+   * (`p.kcal * 1000`, with `energyBurnedUnit: 'calorie'`) because that is what
+   * react-native-health's unit table required, so the conversion belongs here,
+   * with the rest of the translation. Passing that figure through untouched
+   * would file a 400 kcal session as 400,000.
+   *
+   * And the activity is the numeric enum, not the name. `p.activity` is a
+   * string ('Running'); `initializeWorkoutActivityType` takes the raw value, and
+   * a string has none. An activity this build cannot name is REFUSED rather than
+   * defaulted — appleHealthWrite.ts records that the old bridge filed an
+   * unrecognised activity as American Football, and inventing a sport in
+   * somebody's health record is not a thing to do quietly.
+   */
   saveWorkout(options: any, d: any) {
     const start = options?.startDate ? new Date(options.startDate) : new Date();
     const end = options?.endDate ? new Date(options.endDate) : start;
+    const type = activityType(options?.type);
+    if (type == null) {
+      return d(new Error(`Apple Health has no workout type called “${String(options?.type ?? '')}”.`), null);
+    }
+    // Small calories in (the unit appleHealthWrite states), kilocalories out.
+    const kcal = typeof options?.energyBurned === 'number' && isFinite(options.energyBurned)
+      ? (String(options?.energyBurnedUnit ?? 'calorie') === 'calorie' ? options.energyBurned / 1000 : options.energyBurned)
+      : null;
+    const metres = typeof options?.distance === 'number' && isFinite(options.distance) ? options.distance : null;
     cb(
       saveWorkoutSample(
-        options?.type as any,
+        type as any,
         [] as any,
         start,
         end,
         {
-          ...(typeof options?.energyBurned === 'number' ? { totalEnergyBurned: options.energyBurned } : null),
-          ...(typeof options?.distance === 'number' ? { totalDistance: options.distance } : null),
+          ...(kcal != null && kcal > 0 ? { energyBurned: kcal } : null),
+          ...(metres != null && metres > 0 ? { distance: metres } : null),
         } as any,
-      ) as any,
+      )
+        // The uuid, which is what react-native-health resolved and what
+        // `saveOne` in appleHealthWrite.ts stores in the ledger — it takes a
+        // string or nothing, and the proxy object was reaching it as nothing,
+        // so every written session was recorded with no HealthKit id against it.
+        .then((w: any) => (typeof w?.uuid === 'string' ? w.uuid : null)) as any,
       d,
     );
   },

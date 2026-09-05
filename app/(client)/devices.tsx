@@ -954,6 +954,29 @@ export default function Devices() {
     const busy = !!w.busy[p.meta.id];
     const reason = p.unavailableReason();
     const blocked = !p.isAvailable() && !on;
+    // ── connected, and not readable on this phone ────────────────────────────
+    //
+    // The third state, and it had no words anywhere. `blocked` is deliberately
+    // `&& !on`, so the reason a provider cannot be read was printed only for
+    // devices that are NOT connected — and `sync()` in src/ui/wearables.tsx
+    // opens with `if (!p || !p.isAvailable()) return;`, before it sets a status,
+    // a timestamp or a metric. So a device that is connected on the account but
+    // unavailable in this binary sat here saying Connected, with a live green
+    // dot, a Sync Now button that returned instantly and did nothing, no
+    // "Synced" timestamp, no figures, and not one sentence explaining any of it.
+    // Every sixty-second refresh skipped it in the same silence.
+    //
+    // Both of the devices this screen is about can land here. Apple Health is
+    // unavailable in any build without HealthKit compiled in (Expo Go, or a
+    // binary older than the shim), and a cloud vendor is unavailable in a build
+    // whose client id is missing — while the token it was connected with is
+    // still perfectly good on the server, so nothing upstream calls it
+    // disconnected and nothing should.
+    //
+    // The figures are still whatever was last read, which is right and is what
+    // the roll-up in src/ui/wearables.tsx says about a failed read too. What
+    // changes is that the row now says they have stopped moving and why.
+    const unreadable = on && !p.isAvailable();
     return (
      <View key={p.meta.id} style={{
       paddingVertical: sp.md,
@@ -1000,6 +1023,20 @@ export default function Devices() {
 
       {blocked && reason ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{reason}</Text> : null}
 
+      {/* Connected, and this build cannot read it — see `unreadable`. A warn
+          flag rather than a caption, because the figures underneath are stale
+          and nothing else on the row says so. The first sentence is the one
+          fact the member cannot get anywhere else: their connection is fine.
+          `reason` carries the rest where the provider has one; where it has
+          none, saying "for a reason Repple has not named" is still better than
+          the silence this replaces, and does not invent a cause. */}
+      {unreadable ? (
+       <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+        {`${p.meta.name} is connected, but this version of Repple cannot read it on this phone, so the figures below have stopped updating. `}
+        {reason ?? 'Repple has not named the reason, which is a fault on our side rather than anything to do with your device.'}
+       </Flag>
+      ) : null}
+
       {/* The state in words, wherever it is not simply working.
           'live' says nothing here — the figures below it are the evidence, and
           a line saying "connected" over a row of live numbers is noise. Every
@@ -1025,7 +1062,23 @@ export default function Devices() {
        <View style={{ marginTop: sp.md }}>
         {(() => {
          const m = w.metrics[p.meta.id];
-         if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>Connected. Tap Sync — no data for today yet.</Text>;
+         // "Tap Sync" is an instruction, and it must not be given to somebody
+         // for whom Sync cannot work: `sync()` returns at its first line for an
+         // unavailable provider. The flag above this block has already said
+         // why, so this only has to stop contradicting it.
+         if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>{unreadable ? 'Nothing has been read from this device on this phone.' : 'Connected. Tap Sync — no data for today yet.'}</Text>;
+         // A read that answered with every field empty rendered as an EMPTY ROW
+         // — no figures, no message, and a "Synced just now" beside it. That is
+         // the same silence the flag above exists to break, arriving by the
+         // other route: a vendor that answered and holds nothing for today yet
+         // (WHOOP publishes no cycle score until it has scored one), or a
+         // metric endpoint refusing on a token that is otherwise fine. Saying so
+         // is not a claim about which — only that we asked and got no numbers.
+         if (m.activeKcal == null && m.totalKcal == null && m.heartRateAvg == null
+          && m.heartRateResting == null && m.steps == null && m.workoutMins == null
+          && m.recoveryPct == null && m.strain == null && m.hrv == null) {
+          return <Text style={{ ...ty.caption, color: t.ink3 }}>Read, and {p.meta.name} has no figures for today yet.</Text>;
+         }
          return (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.lg }}>
            {m.activeKcal != null ? <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{num(m.activeKcal)} active kcal</Text>
@@ -1056,10 +1109,16 @@ export default function Devices() {
           </View>
          );
         })()}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
-         <Ghost label="Sync Now" onPress={() => { tapLight(); w.sync(p.meta.id); }} />
-         {w.lastSync[p.meta.id] ? <Text style={{ ...ty.caption, color: t.ink3 }}>Synced {ago(w.lastSync[p.meta.id])}</Text> : null}
-        </View>
+        {/* No Sync button where syncing is a no-op. It returned instantly,
+            changed nothing, wrote no timestamp and reported nothing, which
+            teaches somebody to keep pressing it — the same loop
+            src/lib/wearableLink.ts was written to end for reconnecting. */}
+        {unreadable ? null : (
+         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
+          <Ghost label="Sync Now" onPress={() => { tapLight(); w.sync(p.meta.id); }} />
+          {w.lastSync[p.meta.id] ? <Text style={{ ...ty.caption, color: t.ink3 }}>Synced {ago(w.lastSync[p.meta.id])}</Text> : null}
+         </View>
+        )}
        </View>
       ) : null}
      </View>
