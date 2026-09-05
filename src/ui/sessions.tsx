@@ -1644,16 +1644,54 @@ export function useLateCancelCharges(): {
   };
 }
 
+/**
+ * What became of one promotion — three answers, where there used to be one.
+ *
+ *  'promoted' — the server handed the slot to `clientId`. It has an owner.
+ *  'nobody'   — the server ran and handed it to nobody. This is the only answer
+ *               that licenses broadcasting the hour to the rest of the book.
+ *  'failed'   — the call was refused or did not come back. NOTHING is known
+ *               about the queue, and least of all that it is empty.
+ *
+ * The distinction is the one `classifyWrite` draws in src/lib/offlineQueue.ts
+ * and `readState` draws in src/lib/staleRead.ts — a call that did not happen is
+ * not an empty result — and it is worth more here than in either of those. The
+ * caller's next act on a wrongly-empty answer is to tell the whole roster the
+ * hour is first-come-first-served, which is precisely the race this waitlist
+ * exists to replace, run against a person who may already own the slot.
+ *
+ * 'nobody' is deliberately "the server promoted nobody" rather than "the queue
+ * is empty": `_promote_session_waitlist` also returns null when the row is no
+ * longer available or has already started, and every one of those means the
+ * same thing to the caller — no client is holding this hour.
+ */
+export type PromoteResult =
+  | { outcome: 'promoted'; clientId: string }
+  | { outcome: 'nobody'; clientId: null }
+  | { outcome: 'failed'; clientId: null };
+
+const PROMOTE_NOBODY: PromoteResult = { outcome: 'nobody', clientId: null };
+const PROMOTE_FAILED: PromoteResult = { outcome: 'failed', clientId: null };
+
 /** Hand a freed slot to the head of its waitlist, as the COACH. The client's
  *  own cancellation does this inside the same transaction that frees the slot;
  *  a coach frees their slot with a direct RLS-owned update, so for them it is
- *  this explicit second step. Resolves to the client it went to, or null when
- *  nobody was waiting. */
-export async function promoteWaitlist(sessionId: string): Promise<string | null> {
-  if (!USE_SUPABASE) return null;
+ *  this explicit second step.
+ *
+ *  With no backend there is no queue to read and no read to fail — the local
+ *  store is the source of truth and it holds no waitlist at all, which is the
+ *  same reason `useSessionWaitlistCounts` reports 'ready' rather than 'error'
+ *  in that mode. So that case is a real 'nobody', not a 'failed'. */
+export async function promoteWaitlist(sessionId: string): Promise<PromoteResult> {
+  if (!USE_SUPABASE) return PROMOTE_NOBODY;
   try {
     const { data, error } = await supabase.rpc('promote_session_waitlist', { p_session: sessionId });
-    if (error) return null;
-    return typeof data === 'string' ? data : null;
-  } catch { return null; }
+    if (error) return PROMOTE_FAILED;
+    if (typeof data === 'string') return { outcome: 'promoted', clientId: data };
+    // `null` is the function's own answer for "nobody got it" and is the only
+    // non-string this may read as empty. Anything else is a reply we do not
+    // understand, and an answer we cannot read is not an answer that the queue
+    // was empty — the broadcast is not licensed by it.
+    return data == null ? PROMOTE_NOBODY : PROMOTE_FAILED;
+  } catch { return PROMOTE_FAILED; }
 }

@@ -412,7 +412,16 @@ export default function TrainerSchedule() {
    * and the one thing this must not do is report a clear hour it never checked.
    */
   const { classes: gymClasses, status: classStatus, refresh: refreshClasses } = useClasses();
-  const classesKnown = classStatus !== 'error';
+  // `isWhole`, not `!== 'error'`. Under 'loading' the timetable has not been
+  // read AT ALL and under 'partial' what came back is a fraction of it, and
+  // both of those used to arrive here as `true` — i.e. as a check that ran and
+  // found nothing in the way. `classCheckCaveat(true, 0)` and
+  // `syncClassesNote(true)` both return null, so a coach tapping Generate Open
+  // Slots while the timetable was still in flight was told "12 open slots
+  // added" with no caveat at all, some of them on top of classes they teach.
+  // `moveTimesCaveat` on this same screen has taken the raw statuses and
+  // handled 'partial' by name since src/lib/moveTimes.ts was written.
+  const classesKnown = isWhole(classStatus);
   // Who is waiting on which of these hours. A booked slot with somebody behind
   // it is not the same object as one with nobody behind it: cancelling the
   // first hands it straight over, and the coach should be able to see that
@@ -1712,6 +1721,19 @@ export default function TrainerSchedule() {
    *
    * The same sentence the generate-slots path already refuses to say, on the
    * other side of the wire.
+   *
+   * `isWhole(classStatus)` is the SAME guard for the same reason, and it was
+   * missing. Classes are half of what this push plans: `teachingForSync()`
+   * hands `plannedSyncEvents` `{ classes: gymClasses, uid }` unconditionally,
+   * class events are minted as their own `repple`+hex ids by `syncClassEventId`
+   * and are therefore inside the reconcile sweep like everything else. So a
+   * push taken while `useClasses` was still loading — which is the ordinary
+   * state for the first seconds of this screen, the classes read taking three
+   * round trips where the sessions read takes one — sent `{ classes: [] }` and
+   * DELETED every class Repple had ever written into the coach's Google
+   * calendar. src/lib/calendarSync.ts says it outright at `plannedSyncEvents`:
+   * a caller whose read did not complete must pass nothing here. There is no
+   * "pass nothing" that also reconciles, so the push waits.
    */
   const doPush = async (announce: boolean) => {
     if (!isWhole(sessionsStatus)) {
@@ -1719,6 +1741,16 @@ export default function TrainerSchedule() {
         Alert.alert(
           'Can’t send yet',
           'Your Repple calendar could not be read in full, so Repple does not know what you have booked — and sending now would remove sessions from Google that are still here.\n\nNothing has been changed. Pull down to refresh and try again.',
+          [{ text: 'OK' }],
+        );
+      }
+      return;
+    }
+    if (!isWhole(classStatus)) {
+      if (announce) {
+        Alert.alert(
+          'Can’t send yet',
+          'Your class timetable could not be read in full, so Repple does not know which classes you teach — and sending now would remove the classes it has already written from your Google calendar, leaving those hours looking free to anybody reading it.\n\nNothing has been changed. Pull down to refresh and try again.',
           [{ text: 'OK' }],
         );
       }
@@ -1736,6 +1768,11 @@ export default function TrainerSchedule() {
       // what was just sent, and the coach has no way to tell from a count of
       // events. Said here rather than swallowed: somebody reading their
       // calendar will see those hours as free.
+      //
+      // Kept below the guard above rather than instead of it. The guard is what
+      // stops the push, and this is the sentence for a push that went out short
+      // — the two are not alternatives, and the day the window between them
+      // reopens is the day the sentence has to be there already.
       const caveat = syncClassesNote(classesKnown);
       Alert.alert('Sent to Google', [pushSummaryLine(out.result), caveat].filter(Boolean).join('\n\n'));
     }
@@ -1763,13 +1800,24 @@ export default function TrainerSchedule() {
   useEffect(() => {
     if (!syncLink.connected || !syncLink.writeEnabled || !syncLink.hasWriteCalendar) return;
     if (!isWhole(sessionsStatus)) return;
+    // And the timetable, on the same terms. This effect is where the deletion
+    // actually happened: `lastPushMs` starts at 0 at module scope, so the first
+    // push after every launch is due, and the sessions read lands well before
+    // the classes read does. A coach opening Schedule fired a silent push —
+    // `announce` is false — the moment the sessions went 'ready', with
+    // `gymClasses` still `[]`, and their teaching hours were reconciled out of
+    // Google without a word. They then read their own calendar, saw those
+    // hours as free, and took a booking on top of a class they were running.
+    // Skipping is free: `pushIsDue` is not consulted yet, so nothing is spent
+    // and the effect runs again on the very next status change.
+    if (!isWhole(classStatus)) return;
     if (!pushIsDue()) return;
     void doPush(false);
     // `sessions` rather than a length: a session moved to another hour changes
     // nothing about how many there are, and the whole point of writing is that
     // the time in Google is the time in Repple.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, sessionsStatus, syncLink.connected, syncLink.writeEnabled, syncLink.hasWriteCalendar]);
+  }, [sessions, sessionsStatus, gymClasses, classStatus, syncLink.connected, syncLink.writeEnabled, syncLink.hasWriteCalendar]);
 
   const toggleBusyPick = (key: string) =>
     setBusyPicked((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
@@ -1935,6 +1983,15 @@ export default function TrainerSchedule() {
     promoted: string | null;
     promotedTold: boolean | null;
     /**
+     * The promotion call did not come back, so whether anybody was queued for
+     * this hour is UNKNOWN. Distinct from `promoted: null`, which used to mean
+     * both this and "the server checked and nobody was waiting" — and the
+     * second of those is what decides whether the hour may be broadcast to the
+     * rest of the book. Under this the re-offer is not made and `offer` is
+     * null, for a third reason the alert has to be able to say.
+     */
+    queueUnknown: boolean;
+    /**
      * The re-offer, as the SERVER answered it — never as a count of the list
      * we handed over. Null when no re-offer was made at all, which is either
      * because somebody was promoted off the waitlist or because the roster is
@@ -1976,14 +2033,22 @@ export default function TrainerSchedule() {
     // book it gets it" about a session that was still booked — so the quickest
     // client to respond was the one turned away.
     const freed = await releaseSession(s.id);
-    if (!freed) return { freed: false, toldClient: false, promoted: null, promotedTold: null, offer: null, rosterWhole };
+    if (!freed) return { freed: false, toldClient: false, promoted: null, promotedTold: null, queueUnknown: false, offer: null, rosterWhole };
 
     // The queue, before anybody is broadcast at. A client's own cancellation
     // hands the slot over inside the transaction that frees it; a coach frees
     // theirs with a direct update, so for this path the promotion is an
     // explicit second call — and it has to come BEFORE the re-offer, or the
     // roster is invited to race for an hour that already has an owner.
-    const promoted = await promoteWaitlist(s.id);
+    //
+    // Three answers rather than a client id or null: a promotion that FAILED
+    // used to be indistinguishable from a proven-empty queue, and this branch
+    // then broadcast the freed hour to the entire roster as "first to book it
+    // gets it" — the exact race the waitlist exists to replace, run over a
+    // queue that may have had somebody at the head of it. Unknown is not empty.
+    const promotion = await promoteWaitlist(s.id);
+    const promoted = promotion.clientId;
+    const queueUnknown = promotion.outcome === 'failed';
     await reloadWaits();
 
     const toldClient = s.clientId
@@ -1996,7 +2061,11 @@ export default function TrainerSchedule() {
     let offer: CancelOutcome['offer'] = null;
     if (promoted) {
       promotedTold = (await sendPushChecked([promoted], 'The slot you were waiting for is yours', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} freed up and you were next on the list — it is booked for you.`, { route: '/(client)/calendar' })).ok;
-    } else if (rosterWhole) {
+      // `!queueUnknown`: the broadcast is licensed by a PROVEN empty queue and
+      // by nothing else. Where the promotion did not come back, the hour stays
+      // open on the calendar and is offered to nobody — said in the alert
+      // instead, with Offer It Round as the coach's deliberate next step.
+    } else if (!queueUnknown && rosterWhole) {
       const openTo = roster.filter((c) => c.id !== s.clientId).map((c) => c.id);
       if (openTo.length) {
         // What the SERVER did with it, not the size of the list handed over.
@@ -2018,7 +2087,7 @@ export default function TrainerSchedule() {
       }
     }
 
-    return { freed: true, toldClient: toldClient.ok, promoted, promotedTold, offer, rosterWhole };
+    return { freed: true, toldClient: toldClient.ok, promoted, promotedTold, queueUnknown, offer, rosterWhole };
   }
 
   async function doCancel(s: TrainingSession) {
@@ -2031,7 +2100,7 @@ export default function TrainerSchedule() {
       );
       return;
     }
-    const { toldClient, promoted, promotedTold, offer, rosterWhole } = r;
+    const { toldClient, promoted, promotedTold, queueUnknown, offer, rosterWhole } = r;
     const when = `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]}`;
     Alert.alert(
       'Session cancelled',
@@ -2042,7 +2111,13 @@ export default function TrainerSchedule() {
       (promoted
         ? `The hour went straight to the next client on its waitlist${promotedTold === false ? ', though we couldn’t notify them — tell them yourself.' : ' and they have been told. Nobody had to race for it.'}`
         : `The slot is open again on your calendar. ` +
-          (!rosterWhole
+          // Before the roster question, because it is a different unknown and
+          // a worse one: not "who could we ask" but "does this hour already
+          // belong to somebody". Offering it round on top of that is how the
+          // person at the head of the queue loses their own slot.
+          (queueUnknown
+            ? 'Its waiting list could not be checked just now, so it has NOT been offered round — somebody may already be next in line for it. Pull down to refresh, and use Offer It Round once you can see the list.'
+            : !rosterWhole
             ? 'Your clients could not all be read just now, so it has NOT been offered round — that is a connection problem and not an empty book. Use Offer It Round once the list has loaded.'
             : offer === null
             ? 'You have no other clients to offer it to.'
@@ -3973,7 +4048,27 @@ export default function TrainerSchedule() {
                       being written. Choose read and write again to try.
                     </Flag>
                   ) : null}
-                  {state === 'two-way' ? (
+                  {/* Sending is PAUSED, and until this said so the paragraph
+                      below went on promising it happened on its own. `doPush`
+                      refuses while the class timetable is not whole — a plan
+                      that names no classes deletes the classes already in
+                      Google — so a coach whose timetable will not load has to
+                      be told why nothing is going across, or the screen looks
+                      broken and the next thing they do is disconnect.
+
+                      It REPLACES the count rather than sitting above it: the
+                      count comes off `plannedEvents`, which plans the classes
+                      too, so under an unread timetable it is short by an
+                      unknown number of them. A short number stated as a total
+                      is the thing this screen keeps being fixed for. */}
+                  {state === 'two-way' && !classesKnown ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                      Your class timetable has not come back in full just now, so nothing is being sent to Google for
+                      the moment. This is a pause, not a change: what is already in your Google calendar is untouched,
+                      and sending resumes on its own once the timetable has loaded.
+                    </Flag>
+                  ) : null}
+                  {state === 'two-way' && classesKnown ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
                       {planned == null
                         ? `Your booked sessions go across on their own while this screen is open. Your Repple calendar could not be read in full just now, so this cannot say how many are waiting to go — that is a connection problem and not an empty diary. Open slots and blocked time are never written.`
@@ -3998,9 +4093,15 @@ export default function TrainerSchedule() {
             /* Left LIVE when the sessions read is not whole, rather than
                disabled on a count of nothing. A grey button is the one answer
                that explains itself least; `doPush` refuses the tap and says
-               why in a sentence a coach can act on. */
-            <Cta wide disabled={pushBusy || (isWhole(sessionsStatus) && pushLabel(plannedEvents().length) === null)}
-              label={pushBusy ? 'Sending…' : (isWhole(sessionsStatus) ? (pushLabel(plannedEvents().length) ?? 'Send Sessions') : 'Send Sessions')}
+               why in a sentence a coach can act on.
+
+               `classesKnown` on the same terms, and for the count as well as
+               the greying: `plannedEvents` plans the classes too, so under an
+               unread timetable its length is short by an unknown number of
+               them — a button reading "Send 3 Sessions" would be putting that
+               short number on the one control a coach reads as a total. */
+            <Cta wide disabled={pushBusy || (isWhole(sessionsStatus) && classesKnown && pushLabel(plannedEvents().length) === null)}
+              label={pushBusy ? 'Sending…' : (isWhole(sessionsStatus) && classesKnown ? (pushLabel(plannedEvents().length) ?? 'Send Sessions') : 'Send Sessions')}
               onPress={() => { void doPush(true); }} />
           ) : null}
           {syncLink.connected ? (<>
