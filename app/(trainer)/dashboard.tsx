@@ -1320,17 +1320,25 @@ export default function TrainerClients() {
   // regardless — so a client added by hand (a coach_clients row with no user
   // account behind it) got "Nudge sent" while the insert failed on the foreign
   // key and no push had anywhere to go.
-  const deliverMessage = async (client: RosterClient, body: string, pushTitle: string): Promise<{ ok: boolean; error?: string }> => {
+  //
+  // The push that used to follow this insert has gone. The row's own AFTER
+  // INSERT trigger already posts to supabase/functions/notify-message, which
+  // writes the inbox row and sends a push to the same person, with the same
+  // body, to the same route — so a nudge buzzed the client's phone twice, in
+  // two wordings, seconds apart. src/lib/notifyInbox.ts had already stopped the
+  // duplicate ROW for exactly this send ("part 26's trigger records that"); the
+  // duplicate PUSH went on happening, which is the shape supabase/parts/2392
+  // describes. See the long note in src/ui/messaging.ts's `send`.
+  const deliverMessage = async (client: RosterClient, body: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const { error } = await supabase.from('messages').insert({ client_id: client.id, sender: 'coach', body });
       if (error) return { ok: false, error: error.message };
     } catch (e: any) { return { ok: false, error: e?.message || 'Could not reach the server.' }; }
-    try { supabase.functions.invoke('send-push', { body: { user_ids: [client.id], title: pushTitle, body, data: { route: '/(client)/messages' } } }).then(() => {}, () => {}); } catch { /* the message is saved; the push is a bonus */ }
     return { ok: true };
   };
   const sendNudge = async (client: RosterClient) => {
     const body = 'Hey ' + client.name.split(' ')[0] + ' — checking in! How is your week going? Let me know if you need anything.';
-    const r = await deliverMessage(client, body, 'A nudge from your coach');
+    const r = await deliverMessage(client, body);
     Alert.alert(r.ok ? 'Nudge sent' : 'Not sent',
       r.ok ? 'Saved to your thread with ' + client.name.split(' ')[0] + '. They will see it next time they open Repple.'
            : 'Could not send to ' + client.name.split(' ')[0] + ': ' + (r.error || 'unknown error') + '. Clients you added by hand cannot receive messages until they join.');
@@ -1410,7 +1418,7 @@ export default function TrainerClients() {
   const sendDraft = async () => {
     const client = draftClient; const body = draftText.trim();
     if (!client || !body) return;
-    const r = await deliverMessage(client, body, 'A note from your coach');
+    const r = await deliverMessage(client, body);
     if (!r.ok) { Alert.alert('Not sent', 'Could not send to ' + client.name.split(' ')[0] + ': ' + (r.error || 'unknown error') + '. Your draft is still here.'); return; }
     setDraftClient(null); setDraftText('');
     Alert.alert('Sent', 'Saved to your thread with ' + client.name.split(' ')[0] + '.');

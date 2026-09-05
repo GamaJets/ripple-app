@@ -46,7 +46,6 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
-import { sendPush } from './pushNotifications';
 import { ensureMediaPermission } from './permissions';
 import { useAuthRevision } from './authRevision';
 import { reportError } from '../lib/reportError';
@@ -57,7 +56,6 @@ import { cacheKey, cachedAtLine, packCache, readCache, withinHorizon } from '../
 import { classifyWrite } from '../lib/offlineQueue';
 import { useOutbox } from './outbox';
 import { resolvePeerName, type PeerName } from '../lib/threadPeer';
-import { messagePreview } from '../lib/messagePreview';
 import { resolvePeerAvatar } from '../lib/peerAvatar';
 import {
   blockStateOf, looksLikeThreadRefusal, REPORT_FAILED_NOTE, SEND_REFUSED_NOTE,
@@ -841,33 +839,44 @@ export function useThread(clientId: string | null, role: ChatRole) {
       setMessages((p) => p.map((m) => (m.id === localId
         ? { ...rowToMsg(data), local: att ? { uri: att.uri, kind: att.kind } : null }
         : m)));
-      // What the push says when the message is a photograph and nothing else.
-      // It does not quote a caption that was never written, and it does not say
-      // "sent you a message" either — the notification is most of what the
-      // other person sees before they open it.
+      // ── THE PUSH IS THE SERVER'S, AND ONLY THE SERVER'S ──────────────────
       //
-      // The wording moved to src/lib/messagePreview.ts because there are three
-      // places that need it, not one: this push, and BOTH halves of
-      // supabase/functions/notify-message — which had no words for a body-less
-      // message at all and skipped the whole call, inbox row included. Three
-      // authors of the same sentence is how the banner and the bell come to
-      // disagree about what arrived.
-      const preview = messagePreview(b, stored?.kind ?? null);
-      // notify the other side (coach -> client push; client side needs the coach id, skipped)
-      if (role === 'coach' && tid.current) sendPush([tid.current], 'New message from your coach', preview, { route: '/(client)/messages' });
-      // The coach's route carries the thread key. It used to be the bare
-      // '/(trainer)/chat', and the tap handler pushes that string straight at
-      // the router — so a coach who opened the notification landed on a chat
-      // with no clientId: an empty thread headed "Client", and a reply that went
-      // nowhere because `send` has no thread to insert into. The client's route
-      // needs no key; their thread is their own id, resolved from auth.
-      // 'chat' — the coach can mute this category on its own without losing
-      // bookings or a failed subscription payment with it. The filter is
-      // applied in the send-push edge function, not here; see the note on
-      // `PushChannel` in src/ui/pushNotifications.ts. The push to the CLIENT
-      // above carries no channel, because the channels are the coach's and a
-      // member's own controls are src/lib/notifyPrefs.ts.
-      else if (role === 'client' && coachId.current && tid.current) sendPush([coachId.current], 'New message from your client', preview, { route: '/(trainer)/chat?clientId=' + encodeURIComponent(tid.current) }, 'chat');
+      // There used to be a `sendPush` here, and the row's own trigger pushes
+      // too, so every message in this product arrived on the recipient's phone
+      // TWICE — two banners, seconds apart, in two different wordings. Both
+      // halves of the duplicate were written down and neither was removed:
+      // supabase/functions/notify-message says "it was masked because
+      // src/ui/messaging.ts fires a second, correctly-routed push for the same
+      // message", and `PUSHED_BY_ITS_WRITER` in src/lib/notifyDispatch.ts warns
+      // that a third pusher "would make every message in the product arrive
+      // twice" — of a message that was already arriving twice.
+      //
+      // It is the same defect supabase/parts/2392 fixed for a coaching request
+      // and a called-off class, and 2392's own words for why it matters are
+      // src/lib/notifyCopy.ts's: double-pushing "is the thing that gets
+      // notifications turned off", and turning them off is what took the money
+      // channel down with the chat channel.
+      //
+      // THE SERVER'S COPY IS THE ONE THAT SURVIVES, for four reasons, none of
+      // them a preference:
+      //
+      //   · it fires on the ROW, so it also covers the outbox flush below, the
+      //     coach's fan-out in `sendCoachMessages`, the nudge on the trainer
+      //     dashboard and anything else that ever writes a `messages` row. A
+      //     handset push covers only the call site that remembered it.
+      //   · it writes the inbox row (`icon: 'message'`), and
+      //     src/lib/notifyInbox.ts already refuses to record the handset's copy
+      //     — so this side has been pushing a banner with no record behind it.
+      //   · it titles the client's banner with the COACH'S OWN NAME rather than
+      //     'New message from your coach', which is what the bell shows.
+      //   · it applies the 'chat' channel mute and quiet hours to BOTH sides.
+      //     The push removed from here passed no channel on the coach → client
+      //     leg at all, so a member who had muted chat was buzzed anyway.
+      //
+      // `messagePreview` stays in src/lib/messagePreview.ts and is still
+      // asserted by messagePreview.test.ts; notify-message repeats those words
+      // under Deno because it cannot import them, which is the duplication that
+      // file's own header describes.
       return { ok: true };
     } catch (e) {
       reportError('messaging.send', e);
@@ -1073,29 +1082,17 @@ export function MessageOutboxHandler(): null {
           if (out === 'refused') reportError('messaging.outbox', error);
           return out;
         }
-        // Best effort, and deliberately after the row. A failed push costs a
-        // notification; a failed row costs the message, and the row is already
-        // safe by the time this runs.
-        try {
-          if (q.sender === 'coach') {
-            sendPush([q.clientId], 'New message from your coach', q.body, { route: '/(client)/messages' });
-          } else {
-            // no-error-ok: addressing for a notification; without it the message is still delivered and visible in the thread
-            const { data: cr } = await supabase.from('clients').select('trainer_id').eq('id', q.clientId).single();
-            const coach = (cr as any)?.trainer_id ?? null;
-            if (coach) {
-              // 'chat', exactly as the live send above passes it. Without it
-              // this push went through send-push with no channel and so through
-              // the per-channel filter untouched: a coach who had muted chat
-              // was buzzed anyway, by any message that happened to have been
-              // typed in a basement. A mute that holds only when the sender had
-              // signal is not a mute, and the coach has no way to tell the two
-              // sends apart — they are the same client saying the same thing.
-              sendPush([coach], 'New message from your client', q.body,
-                { route: '/(trainer)/chat?clientId=' + encodeURIComponent(q.clientId) }, 'chat');
-            }
-          }
-        } catch { /* the message is delivered either way */ }
+        // No push from here either, and this call site is the clearest case of
+        // the four. The row has just landed, so the AFTER INSERT trigger on
+        // `messages` has already posted it to notify-message — which resolves
+        // the recipient itself and therefore needs neither the `clients` read
+        // that used to happen here for addressing, nor this device to have
+        // remembered which side sent it. See the long note in `send` above for
+        // why the server's copy is the one that survives.
+        //
+        // What is deliberately NOT lost: a message typed in a basement still
+        // reaches the other person's phone the moment it goes up, because the
+        // push follows the row rather than the send.
         return 'stored';
       } catch {
         // Still no answer. It stays in the outbox, stays counted, and is tried
@@ -1197,11 +1194,12 @@ export async function sendCoachMessages(
     }
   }));
 
-  const landed = results.filter((r) => r.ok).map((r) => r.clientId);
-  // Addressed only to the rows that exist. A failing push costs a notification,
-  // not the message, so it stays best-effort — but it can never announce one
-  // that was not written.
-  if (landed.length) sendPush(landed, 'New message from your coach', b, { route: '/(client)/messages' });
+  // No push from here. Each of these is an ordinary `messages` row and the
+  // trigger on that table pushes each one, addressed to the client whose row it
+  // is — which is the property this call site cared about ("it can never
+  // announce one that was not written") arrived at by construction rather than
+  // by filtering a list afterwards. A fan-out of twelve used to buzz twelve
+  // phones twice. See the note in `send`.
   return results;
 }
 

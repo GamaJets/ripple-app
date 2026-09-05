@@ -428,18 +428,27 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   { where: 'app/(trainer)/calendar.tsx', title: 'Session booked', body: 'Your session on Tue at 6:30 PM is confirmed.', route: '/(client)/calendar' },
   { where: 'app/(trainer)/calendar.tsx', title: 'Session cancelled', body: 'Your 6:30 PM session on Tue was cancelled.', route: '/(client)/calendar' },
   { where: 'app/(trainer)/calendar.tsx', title: 'A slot just opened', body: '6:30 PM on Tue is available — first to book it gets it.', route: '/(client)/calendar' },
-  // The broadcast. `app/(trainer)/broadcast.tsx` composes it; the send is
-  // src/ui/messaging.ts's `deliverMessage` fan-out, which writes a `messages`
-  // row per client and pushes with the ordinary chat title — so the string this
-  // entry named ('Message from your coach') is sent by nothing any more. The
-  // ROUTE is what classifies it and the route has not changed, so the answer
-  // was right for the wrong words; the words are corrected here so that reading
-  // this catalogue does not send somebody looking for a literal that is gone.
-  { where: 'app/(trainer)/broadcast.tsx → src/ui/messaging.ts', title: 'New message from your coach', body: 'Session times move next week.', route: '/(client)/messages' },
+  // ── THE FOUR CHAT PUSHES THAT USED TO BE HERE ──────────────────────────
+  //
+  // Gone, and not reworded: nothing in this repository pushes a chat message
+  // from a handset any more. src/ui/messaging.ts (the live send, the outbox
+  // flush and the coach's fan-out behind app/(trainer)/broadcast.tsx) and the
+  // nudge on app/(trainer)/dashboard.tsx all wrote a `messages` row and THEN
+  // pushed, while part 26's trigger was already pushing the same row through
+  // supabase/functions/notify-message — so every message in the product arrived
+  // on the recipient's phone twice, in two wordings, seconds apart.
+  //
+  // Rule 1 at the top of this file is the reason the duplicate was invisible:
+  // somebody noticed the duplicate ROW and stopped it here, and the duplicate
+  // PUSH went on happening. That is supabase/parts/2392's sentence about a
+  // coaching request, arriving a second time.
+  //
+  // Rule 1 STAYS. It is not made redundant by the removal — it is what keeps
+  // any future chat push from writing a second row over the trigger's — and
+  // `PUSHED_BY_ITS_WRITER` in src/lib/notifyDispatch.ts stays with it, because
+  // notify-message is still the writer that pushes its own rows.
   { where: 'app/(owner)/promotions.tsx', title: 'A new offer', body: '20% off with code SPRING', route: '/(client)/explore' },
   { where: 'app/(client)/calendar.tsx', title: 'New booking', body: 'A client booked Tue 6:30 PM.', route: '/(trainer)/calendar' },
-  { where: 'src/ui/messaging.ts', title: 'New message from your coach', body: 'See you Tuesday.', route: '/(client)/messages' },
-  { where: 'src/ui/messaging.ts', title: 'New message from your client', body: 'Can we move to 7?', route: '/(trainer)/chat?clientId=abc' },
   { where: 'src/ui/injuryAsk.ts', title: 'Your coach asked about an injury', body: 'They’ve asked you to add your left knee to your injuries.', route: '/(client)/injuries' },
   { where: 'src/ui/injuryAcks.tsx', title: 'Your coach has read your injuries', body: 'They have seen what you disclosed.', route: '/(client)/injuries' },
   { where: 'src/ui/sessions.tsx', title: 'A PT slot just opened', body: 'Tue 6:30 PM with your coach just opened up.', route: '/(client)/calendar' },
@@ -490,13 +499,10 @@ export const KNOWN_PUSHES: ReadonlyArray<{
   // already had in their diary, which is why it is the one they most need a
   // durable row for when the banner is missed.
   { where: 'app/(trainer)/calendar.tsx', title: 'Your session has moved', body: 'Tue 6:30 PM moved to Wed 7:30 AM. Nothing is charged and your session is still paid for.', route: '/(client)/calendar' },
-  // The coach's check-in nudge. It does NOT go through sendPush() — it invokes
-  // the send-push function directly — so recordInbox() never sees it, and it is
-  // listed here so that reading this catalogue does not leave somebody
-  // believing it is one of the pushes this file decides about. It needs no row
-  // either way: it writes a `messages` row first, and part 26's trigger records
-  // that, which is the same reason the chat rule drops it.
-  { where: 'app/(trainer)/dashboard.tsx', title: 'A nudge from your coach', body: 'Hey Sam — checking in! How is your week going?', route: '/(client)/messages' },
+  // The coach's check-in nudge used to be listed here. It invoked the send-push
+  // function directly, so recordInbox() never saw it — and it wrote a `messages`
+  // row first, so part 26's trigger both recorded AND pushed the same thing. It
+  // was one of the four duplicates described above and it has gone with them.
   // The two notices. Both are RECORDED whether or not the author asked for a
   // push — see src/ui/announcements.tsx — so these two rows are the only ones
   // in this catalogue that describe a send which may happen with no push at

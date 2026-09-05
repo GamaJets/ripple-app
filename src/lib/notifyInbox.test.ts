@@ -77,13 +77,20 @@ ok(KNOWN_PUSHES.length >= 20, 'the catalogue still lists every push in the repo'
 ok(byTitle('Session cancelled').length === 2, 'both cancellation pushes are listed — the coach one and the client one');
 ok(byTitle('The slot you were waiting for is yours').length === 2,
   'both waitlist promotions are listed — the coach cancelling and the client cancelling send the same news');
-// Ten of the twenty-five: four that route to a chat thread (two from
-// messaging.ts, one from the coach's broadcast, one from the coach's nudge, all
-// four already written by part 26), two slot races, one read receipt, and three
-// whose row a database trigger writes inside the same transaction (a coaching
-// request by part 158, a called-off class by part 493, singular and plural).
-// Stated as a total so that a rule which starts dropping something it did not
-// drop before fails here rather than quietly emptying somebody's inbox.
+// Six of the twenty-five: two slot races, one read receipt, and three whose row
+// a database trigger writes inside the same transaction (a coaching request by
+// part 158, a called-off class by part 493, singular and plural). Stated as a
+// total so that a rule which starts dropping something it did not drop before
+// fails here rather than quietly emptying somebody's inbox.
+//
+// It was TEN, and the four that went were the chat pushes: two from
+// messaging.ts, one from the coach's broadcast and one from the coach's nudge.
+// They are not classified differently — they are not SENT any more. Each wrote
+// a `messages` row and then pushed it, while part 26's trigger was already
+// pushing the same row, so every message arrived on the phone twice. The row
+// rule that dropped them here is what made the duplicate invisible; it stays,
+// and the loop below still asserts it against the two `SERVER_WRITTEN` chat
+// rows and the hand-written cases underneath.
 //
 // The three added when the notice fan-out and the invoice notification were
 // built are all on the recorded side, which is the whole point of them: they
@@ -97,8 +104,8 @@ ok(byTitle('The slot you were waiting for is yours').length === 2,
 // request', its two answers, and a session that MOVED — are all recorded, by
 // the default and correctly: nothing else tells either party any of them
 // happened, and a moved appointment is the one a missed banner costs most.
-eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 10,
-  'ten of the twenty-nine pushes are deliberately not recorded');
+eq(KNOWN_PUSHES.filter((p) => !inboxDecision(p.title, p.body, p.route).record).length, 6,
+  'six of the twenty-five pushes are deliberately not recorded');
 eq(KNOWN_PUSHES.filter((p) => inboxDecision(p.title, p.body, p.route).record).length, 19,
   'the other nineteen are');
 
