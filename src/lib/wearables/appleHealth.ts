@@ -26,22 +26,34 @@ const meta: ProviderMeta = {
 };
 
 // ── Lazy native module load ────────────────────────────────────────────────
+//
+// Served by src/lib/wearables/appleHealthShim.ts, not by react-native-health.
+// That package is a legacy-architecture module and does not register under RN
+// 0.86, so `NativeModules.AppleHealthKit` is undefined and every method below
+// it was missing while `Constants` — which it bolts on in JavaScript — was
+// present. The shim has the whole account of it; nothing else in this file
+// changed, because the shim answers in the shapes this file already parses.
 let HK: any = null;
 let tried = false;
 function hk(): any {
   if (tried) return HK;
   tried = true;
   try {
-    const mod = require('react-native-health');
-    HK = mod?.default ?? mod;
+    HK = require('./appleHealthShim').AppleHealthCompat ?? null;
   } catch {
-    HK = null; // package not installed yet
+    HK = null; // the library is not in this build
   }
   return HK;
 }
-/** True only in a real build where the native HealthKit module is compiled in. */
+/** True only where HealthKit actually exists and can be talked to.
+ *
+ *  `NativeModules.AppleHealthKit` used to be the test and can no longer answer:
+ *  that key is undefined on every build now, present framework or not, so it
+ *  reported "no HealthKit" on an iPhone that has it. `isHealthDataAvailable()`
+ *  is Apple's own answer to the same question. */
 function nativePresent(): boolean {
-  return Platform.OS === 'ios' && !!NativeModules.AppleHealthKit && !!hk();
+  if (Platform.OS !== 'ios') return false;
+  try { return !!require('./appleHealthShim').healthKitPresent() && !!hk(); } catch { return false; }
 }
 
 function isoStartOfToday(): string {

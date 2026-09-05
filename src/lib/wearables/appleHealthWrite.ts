@@ -499,7 +499,10 @@ function lazy(mod: NativeMod): any {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     else if (mod === 'react-native') m = require('react-native');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    else if (mod === 'health') m = require('react-native-health');
+    // The shim, not react-native-health: that package is legacy-architecture
+    // and does not register under RN 0.86, so `saveWorkout` was never on it.
+    // See src/lib/wearables/appleHealthShim.ts.
+    else if (mod === 'health') m = require('./appleHealthShim').AppleHealthCompat;
     return m?.default ?? m;
   } catch {
     return null;
@@ -552,9 +555,17 @@ export function ledgerAvailable(): boolean {
 function nativeHk(): any {
   const rn = lazy('react-native');
   if (!rn || rn.Platform?.OS !== 'ios') return null;
-  if (!rn.NativeModules?.AppleHealthKit) return null;
+  if (!healthKitHere()) return null;
   const k = lazy('health');
   return k && typeof k.saveWorkout === 'function' ? k : null;
+}
+
+/** Apple's own answer to "does this device have HealthKit".
+ *
+ *  `NativeModules.AppleHealthKit` was the test and is undefined on every build
+ *  now — see the shim — so it said "no HealthKit" on an iPhone that has it. */
+function healthKitHere(): boolean {
+  try { return !!require('./appleHealthShim').healthKitPresent(); } catch { return false; }
 }
 
 /** Why writing is impossible in this binary, or null if it is possible. */
@@ -562,7 +573,7 @@ export function writeUnavailableReason(): string | null {
   const rn = lazy('react-native');
   if (!rn) return 'Apple Health is only available in the Repple app.';
   if (rn.Platform?.OS !== 'ios') return 'Writing to Apple Health is iPhone-only — Health does not exist on this platform.';
-  if (!rn.NativeModules?.AppleHealthKit) {
+  if (!healthKitHere()) {
     return 'Needs the Repple app build. HealthKit is native code and is not present in Expo Go or the iOS Simulator without it.';
   }
   if (!nativeHk()) return 'The Apple Health module in this build cannot save workouts. A newer build is needed.';
