@@ -99,6 +99,62 @@ const VIS: { key: Visibility; label: string; chip: string; note: string }[] = [
 ];
 const visOf = (v: Visibility) => VIS.find((c) => c.key === v) ?? VIS[1];
 
+/**
+ * Why a pasted link is not a link, or null when it is one.
+ *
+ * ── the write this closes ─────────────────────────────────────────────────
+ *
+ * "Add by link" validated the NAME and nothing else. With the URL box left
+ * empty, `saveLink` called `addVideo({ name, group, url: '' })`, and
+ * src/ui/exerciseVideos.ts writes `url: v.url || null, video_path: v.path ||
+ * null` — so the insert succeeded with BOTH columns null, returned 'remote',
+ * and the coach was told the clip was in the exercise library and that
+ * "Everyone you coach sees it in their program, on any device." There was
+ * nothing to see. The one field that makes the row a video was the one field
+ * nothing checked.
+ *
+ * ── what it insists on, and what it deliberately does not ─────────────────
+ *
+ * An ABSOLUTE http(s) URL with a host. Not a guess at what the coach meant:
+ * "youtube.com/watch?v=..." is not silently promoted to https:// — a link this
+ * app repairs on the coach's behalf is a link the coach never checked, and it
+ * is stored and served to every client they have. They are asked for the whole
+ * thing instead, which is what the copy/paste they just did would have given
+ * them.
+ *
+ * http and https and nothing else, because the row's `url` is handed to a
+ * player. A `javascript:` or `data:` scheme in a column that reaches a WebView
+ * is the shape src/lib/redirectTarget.ts refuses for the same reason, and
+ * neither is a video anybody can watch.
+ *
+ * It does NOT try to say whether the video exists, is public, or is on a host
+ * this app can play. That needs the network, and a check this screen cannot
+ * actually perform must not be implied by a sentence saying it did.
+ */
+function linkProblem(raw: string): string | null {
+  const url = raw.trim();
+  if (!url) return 'Paste the link to the video. Without one there is nothing for your clients to watch.';
+  // Whitespace inside a URL is a truncated paste or two links stuck together;
+  // a backslash is a Windows path. Neither is a link, and both parse.
+  if (/[\s\\]/.test(url)) return 'That link has a space or a backslash in it, so it is not a web address. Paste the whole link again.';
+  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(url);
+  if (!scheme) {
+    return 'That is not a full link. Paste the whole address, starting with https:// — Repple will not guess the missing half and store a link nobody has opened.';
+  }
+  const s = scheme[1].toLowerCase();
+  if (s !== 'http' && s !== 'https') {
+    return `“${s}” links cannot be played in the app. Paste an http:// or https:// address to the video.`;
+  }
+  // Something has to follow the scheme, and it has to be a host rather than a
+  // slash: "https://" and "https:///watch" both pass the test above.
+  const rest = url.slice(scheme[0].length);
+  const host = rest.split(/[/?#]/)[0];
+  if (!host || !host.includes('.')) {
+    return 'That link has no website in it. Paste the whole address, the way it appears in your browser.';
+  }
+  return null;
+}
+
 /** The picker itself — a row of chips, used on a library row and on the sheet
  *  that names a newly recorded clip so both offer the same four words. */
 function VisibilityChoice({ value, onChange, subject, disabled }: {
@@ -524,8 +580,23 @@ export default function TrainerVideos() {
     if (lBusy) return;
     const name = lName.trim();
     if (!name) { Alert.alert('Name needed', 'Give the exercise a name.'); return; }
+    // The link is checked the same way and in the same breath as the name, and
+    // the write is REFUSED rather than made and then described. Without this
+    // an empty box wrote a row with `url` null and `video_path` null — a clip
+    // that is neither hosted nor linked — and the alert below told the coach
+    // everyone they coach could see it in their program.
+    //
+    // Nothing is migrated for the rows already written that way, and nothing
+    // needs to be: `rowToItem` in src/ui/exerciseVideos.ts already sets
+    // `uploaded: !!(r.video_path || r.url)`, so such a row draws as
+    // "not recorded yet · To do" with a plus rather than a play button, is
+    // excluded from the "N of M recorded" figure, and tapping it offers to
+    // record or upload a clip for that exercise. The screen shows them as the
+    // empty placeholders they are, which is the truth about them.
+    const why = linkProblem(lUrl);
+    if (why) { Alert.alert('Link needed', why); return; }
     setLBusy(true);
-    const where = await addVideo({ name, group: lGroup, url: lUrl });
+    const where = await addVideo({ name, group: lGroup, url: lUrl.trim() });
     setLBusy(false);
     if (where === 'none') {
       Alert.alert('Not added', `“${name}” was not added to your library. Nothing was saved — check the name and try again.`);

@@ -253,9 +253,83 @@ export default function TrainerAnalytics() {
   /** What the unmarked ones would come to if every one had been delivered.
    *  Priced apart and never added — see the note on `unmarkedValue`. */
   const unmarkedWorth = unmarkedValue(month, sessionFee);
-  // Null, not 0, with no clients: an average over nobody is undefined, and
-  // "$0 / client" reads as a fact about a coaching business that has none.
-  const valuePerClient = revenue != null && clients ? Math.round(revenue / clients) : null;
+  /**
+   * How many DISTINCT people this month's revenue actually came from.
+   *
+   * ── the two populations this replaces dividing across ─────────────────
+   *
+   * `revenue / clients` divided a numerator over one set of people by a
+   * denominator over another. `revenue` is `deliveredValue(month, sessionFee)`
+   * over `useSessions()`, which is every row RLS lets this coach read —
+   * `sessions_trainer` is `trainer_id = auth.uid()` on the session's own
+   * column. `clients` is `roster.length`, and `useRoster` reads `clients` where
+   * `trainer_id = uid` plus `coach_clients` where `trainer_id = uid`. Two
+   * different questions, and they disagree in both directions:
+   *
+   *   · A CLIENT WHO LEFT keeps their sessions and loses their roster row.
+   *     `end_coaching()` (supabase/parts/68) nulls `clients.trainer_id` — the
+   *     column the roster reads — and that file's own "what a coach keeps"
+   *     section names the other half in as many words: "`sessions` —
+   *     `sessions_trainer` is `trainer_id = auth.uid()` on the session's OWN
+   *     column. Every session they ever delivered stays readable." So ten
+   *     clients at AED 200 with one leaving after eight sessions read AED
+   *     960/mo per client against a true AED 800. Reassignment inside a gym is
+   *     an UPDATE of the same column and does the same thing.
+   *
+   *   · A HAND-ADDED CLIENT is in the denominator and can never reach the
+   *     numerator. `sessions.client_id` is `references clients(id)`
+   *     (supabase/setup.sql), and a `coach_clients` id is not in `clients` —
+   *     app/(trainer)/videos.tsx spells the consequence out for grants:
+   *     "a coach_clients id is a perfectly good uuid that is in no profile".
+   *     A coach with ten linked clients and six cash clients had their per-
+   *     client figure cut by well over a third, on a book where nothing was
+   *     wrong. The screen already knows about this population — see
+   *     `handAdded` and `driftSubjects` above, which exclude them from the
+   *     drift verdict for the same reason.
+   *
+   * The reviewer's third suggestion — a GYM MEMBER who was never this coach's
+   * client landing in the numerator — did NOT hold up and is not what this
+   * fixes. `book_session()` in supabase/parts/09-sessions-access.sql updates
+   * only `where … exists (select 1 from clients c where c.id = auth.uid() and
+   * c.trainer_id = sessions.trainer_id)`, which is the same predicate the
+   * roster reads, so nobody can take a slot from a coach they are not linked
+   * to at the moment they book. Every stray in the numerator is somebody who
+   * WAS linked and no longer is — the first bullet, not a third case.
+   *
+   * So the denominator is now the people the numerator is actually made of:
+   * distinct clients with at least one session marked delivered inside the
+   * window. Numerator and denominator over one population, and it needs no
+   * roster read at all — which is why it survives a roster that came back
+   * short, where the old figure quietly did not.
+   *
+   * `sessionMonthFor` per id rather than a second copy of the outcome rules:
+   * what counts as delivered — `outcome === 'completed'`, bounded by
+   * `startsAt`, never "booked and in the past" — is decided in exactly one
+   * place, src/lib/coachRevenue.ts, and re-deriving it here is how this screen
+   * and the hero above it would come to disagree about the same month.
+   */
+  const payingClients = useMemo(() => {
+    if (!isWhole(sessionsStatus)) return null;
+    const ids = new Set<string>();
+    for (const s of sessions) if (s.clientId) ids.add(s.clientId);
+    let n = 0;
+    for (const id of ids) {
+      const m = sessionMonthFor(sessions, new Set([id]), sessionsStatus, monthFrom, monthTo);
+      if ((m.delivered ?? 0) > 0) n += 1;
+    }
+    return n;
+  }, [sessions, sessionsStatus, monthFrom, monthTo]);
+  // Null, not 0, with nobody in the denominator: an average over nobody is
+  // undefined, and "0 / client" reads as a fact about a coaching business that
+  // has none.
+  //
+  // No `Math.round` any more either. It rounded to a whole unit and then handed
+  // the result to `wholeMoney`, which prints the currency's own decimals — so a
+  // three-decimal currency was shown ".000" and a two-decimal one ".00", false
+  // precision announced on a figure that had just been rounded away.
+  // `currencyDecimals()` is the only thing that gets to decide how many places
+  // this money has, and it is inside `wholeMoney`.
+  const valuePerClient = revenue != null && payingClients ? revenue / payingClients : null;
   // Average over clients who have actually checked in. Averaging a null-as-100
   // default meant a roster of strangers reported 100% adherence.
   const _adhKnown = roster.map((c) => c.adherence).filter((a): a is number => a != null);
@@ -830,6 +904,17 @@ export default function TrainerAnalytics() {
             { label: 'Avg Adherence', value: fig(avgAdh), unit: avgAdh == null ? undefined : '%' },
             { label: 'Value / Client', value: fig(priced(valuePerClient)), unit: priced(valuePerClient) == null ? undefined : '/mo' },
           ]} />
+          {/* The third figure is not the first two divided into each other, and
+              a row of three numbers reads as though it were. Said out loud
+              rather than left to be inferred — see `payingClients` above for
+              what dividing across the two populations cost. */}
+          {valuePerClient != null && priced(valuePerClient) != null ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {payingClients === 1
+                ? 'Value per client is over the one client who trained with you this month, not over the roster beside it.'
+                : `Value per client is over the ${payingClients} clients who trained with you this month, not over the ${clients == null ? 'roster' : `roster of ${clients}`} beside it. Somebody who has left keeps the sessions they took, and a client you added by hand has no bookings to count — so the two are different sets of people and dividing one by the other is not this figure.`}
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />
@@ -1026,9 +1111,27 @@ export default function TrainerAnalytics() {
               one, because "No currency set" over a query that failed is the
               same wrong sentence the four longer ones on this screen used to
               carry. See src/lib/currencyGap.ts. */}
+          {/* ── "Tracking started" over a month that simply did not move ──
+              `historyDelta` returns 0 for TWO different things and says so in
+              its own header: "0 when either end is missing — and 0 here means
+              'no comparison'". A coach who billed the same in August as in
+              July has both ends present and a real delta of zero, and this
+              line told them tracking had only just begun — under a chart
+              already drawing six months of their history.
+
+              The two are separable without touching that function: `series` is
+              on the hook, and `series[length - 2]` is the previous month's
+              column — null when there is nothing to compare against, a number
+              when there is. That is the same slot `historyDelta` reads, so the
+              branch here cannot drift from the arithmetic it is describing.
+
+              The flat case prints no amount, which is not a dodge: zero is the
+              one figure whose currency does not change what it means, so there
+              is nothing to withhold and nothing to guess. */}
           <SectionHead title="Revenue Trend"
             note={revenue == null ? 'This month not recorded'
-              : revHist.delta === 0 ? 'Tracking started'
+              : revHist.series[revHist.series.length - 2] == null ? 'Tracking started'
+              : revHist.delta === 0 ? 'Level with last mo'
               : priced(Math.abs(revHist.delta)) == null
                 ? (curGap === 'gym-unset' || curGap === 'own-unset' ? 'No currency set'
                   : curGap === 'reading' ? 'Reading your currency'

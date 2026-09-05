@@ -498,10 +498,33 @@ export default function CoachProfile() {
               else if (n === 0) p.setSessionFee(null);
             }}
             placeholder="75" keyboardType="decimal-pad" />
+          {/* ── which of these two sentences was wrong about the rule ─────
+              This note sat four inches above a Late-Cancellation Fee field
+              whose LABEL carries the gym's ISO code, and claimed the app prints
+              no symbol at all. Both cannot be right, and the one that was wrong
+              is this one.
+
+              The rule — scripts/check-currency.mjs states it — is not "print
+              nothing". It is: a figure whose currency is UNKNOWN is withheld or
+              printed bare and said to be bare, and a code the app WAS given is
+              printed, because naming a currency somebody chose is a
+              translation and not a guess. The late-cancel field does exactly
+              that and is right.
+
+              And the first half was stale as well as the second.
+              app/(client)/trainers.tsx used to print a '$' in front of this
+              rate, and its own comment names this sentence as the thing it was
+              describing — "this is the screen that sentence was describing, and
+              it was the half still printing one". That is fixed: since part 242
+              the directory reads the listed coach's gym currency and renders
+              the rate through `wholeMoney`, so a client sees "AED 300" where
+              the app knows the money and the bare figure only where it does
+              not. Telling the coach their rate is shown "as a number" is now a
+              description of the fallback, offered as the whole behaviour. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             {p.sessionFee == null
               ? 'Leave this empty and nothing quotes a rate for you — your figures show a dash rather than a zero.'
-              : 'Shown to clients as a number, in whatever currency you charge in. Repple does not print a symbol it has not been told.'}
+              : 'Clients see this in the currency you charge in wherever Repple has been told what that is, and as a bare figure where it has not — never with a symbol nobody chose. If yours is showing bare, the currency is set once, for the gym or in Settings, and every amount in the app picks it up.'}
           </Text>
         </Section>
 

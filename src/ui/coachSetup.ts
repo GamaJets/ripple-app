@@ -85,6 +85,51 @@ async function anyRow(label: string, q: any): Promise<boolean | null> {
   }
 }
 
+/**
+ * Whether `trainers.session_fee` holds a rate somebody actually set.
+ *
+ * `> 0`, and NOT `!= null`, and the difference is not pedantry — it is the one
+ * row on the Getting Started list that could tick itself off nothing.
+ *
+ * ── is 0 ever a rate a coach chose? ───────────────────────────────────────
+ *
+ * No. It is not expressible as one anywhere in this product, and it is a
+ * legacy value in three of the eight production rows:
+ *
+ *   · `trainers.session_fee` was `not null default 0` before the column was
+ *     made nullable, so every row written before that carries a 0 nobody
+ *     typed. src/ui/coachProfile.tsx says so and maps a stored 0 back to null
+ *     on read — "Read as a rate, that zero came out the other end of Analytics
+ *     as 'AED 0.00 at your AED 0.00 session rate'".
+ *   · app/(trainer)/profile.tsx cannot store one: a typed 0 in the Session
+ *     Rate box calls `setSessionFee(null)`. So a coach who wants to charge
+ *     nothing has no way to say it here, and no coach on the live database can
+ *     have said it since.
+ *   · src/ui/sessions.tsx applies the same rule to the late-cancellation fee —
+ *     `!(fee > 0)` blocks the policy — under the sentence "a fee of nothing is
+ *     a policy that does not apply".
+ *
+ * A free intro session is a real thing a coach offers, and it is a PACKAGE
+ * priced at nothing or an hour they simply do not charge for — not their
+ * standing per-session rate, which is what this column is. Nothing downstream
+ * can read a 0 as a price either: every consumer of `sessionFee` already
+ * branches on null and says "Set a session rate in your profile".
+ *
+ * So `!= null` ticked "Set Your Session Rate" for three of eight live coaches
+ * who have not set one, and drove the list to "9 of 9 done · That is
+ * everything" — while app/(trainer)/profile.tsx, reading the same column
+ * through `fee > 0`, said "— no rate set" two taps away.
+ *
+ * PostgREST hands `numeric` back as a string often enough to matter, so the
+ * value is coerced rather than compared raw. A null, an undefined, an empty
+ * string or anything unparseable is not a rate.
+ */
+function hasRate(v: unknown): boolean {
+  if (v == null) return false;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) && n > 0;
+}
+
 export function useCoachSetup(): CoachSetupRead {
   const authRev = useAuthRevision();
   const [facts, setFacts] = useState<CoachSetupFacts>(UNKNOWN_SETUP);
@@ -116,9 +161,9 @@ export function useCoachSetup(): CoachSetupRead {
       fetchMyCurrency(),
       // 2 · the rate, AND how they coach. Two facts, one row, one read: both
       //     live on `trainers` and asking twice would let the same row answer
-      //     one question and fail the other. `session_fee` is nullable and 0 is
-      //     a rate a coach may really charge, so `!= null` is the test and
-      //     never truthiness. `delivery_mode` (part 410) is nullable too, and
+      //     one question and fail the other. `session_fee` is nullable, and a
+      //     stored 0 is NOT a rate — see `hasRate` below for why `!= null` was
+      //     the wrong test. `delivery_mode` (part 410) is nullable too, and
       //     ITS null is the coach not having answered — which is a real
       //     answer, and is why a refused read on this row has to blank both
       //     facts rather than report an unanswered question.
@@ -174,7 +219,11 @@ export function useCoachSetup(): CoachSetupRead {
       // becomes a nag to answer a question they already answered.
       mode: rateRow == null || rateRow.error ? null : (rateRow.data?.delivery_mode ?? null) != null,
       currency: currencyStepDone(cur),
-      rate: rateRow == null || rateRow.error ? null : (rateRow.data?.session_fee ?? null) != null,
+      // A refused read is still null. Past that, `hasRate` and not `!= null`:
+      // the stored 0 three live rows carry is the column's old default, not a
+      // price, and it must not tick a checklist item the Profile screen — which
+      // reads the same column through `fee > 0` — reports as unset.
+      rate: rateRow == null || rateRow.error ? null : hasRate(rateRow.data?.session_fee),
       client,
       availability: val<boolean | null>(4),
       package: val<boolean | null>(5),

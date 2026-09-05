@@ -650,15 +650,32 @@ export default function MyNutrition() {
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                 Built from your own weight and body fat with Katch–McArdle, the same way the client app
                 builds one. Burn from a watch is shown beside the day, never added to the allowance.
-                {/* Said, not hidden. `macrosFor` shifts calories by GOAL_ADJ and
-                    the fat split by diet, and a coach account carries neither —
-                    a goal and a diet live on a member record. What it uses are
-                    the app's starting values, so the figure is a maintenance-led
-                    muscle-gain target rather than one built on answers this
-                    coach gave. A number whose assumptions are unstated is a
-                    number nobody can check. */}
-                {' '}It assumes a muscle-gain goal and no dietary restriction — a coach account holds
-                neither, so those are the app&rsquo;s starting values rather than answers you gave.
+                {/* The paragraph that stood here said the target "assumes a
+                    muscle-gain goal and no dietary restriction — a coach
+                    account holds neither". That was true of the screen it was
+                    written for and has not been true since part 1020. It
+                    described `useClientData`'s constructed defaults — 'muscle',
+                    'meat', 1.5 — which were what `macrosFor` was fed back when
+                    the three inputs were read from `clients`, a table a coach
+                    has no row in.
+
+                    A coach now answers all three on `coach_prefs`, and this
+                    block cannot render unless they have: `target` is null
+                    unless `gate.ok`, and `macroGate` only says ok once goal,
+                    diet AND activity are all non-null. The Macros section
+                    above prints those three answers back by name through
+                    `builtFromLine` — "Built from your own answers: losing fat,
+                    vegan, moderately active." So the old sentence told a vegan
+                    coach who is cutting that their target assumed the opposite
+                    of both, four inches under the line naming them.
+
+                    What is worth saying instead is what the number does NOT
+                    carry, which is the one assumption still standing: no coach
+                    adjustment is layered on, because `coach_nutrition` is a
+                    coach's note to a client and nobody is coaching the coach. */}
+                {' '}Your goal, how you eat and how active your week is are your own answers, named above
+                the macros — change any of them and this moves. Nothing is layered on top of them: a
+                coach&rsquo;s nutrition adjustment is a note to a client, and there is nobody coaching you.
               </Text>
             ) : null}
           </Section>
