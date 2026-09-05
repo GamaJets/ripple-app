@@ -87,7 +87,7 @@ export default function Home() {
   const c = useClientData();
   const { log, status: logStatus, reload: reloadLog } = useWorkoutLog();
   const assigned = useAssignedPrograms();
-  const { getProgram, status: programStatus } = assigned;
+  const { getProgram, status: programStatus, cachedNote } = assigned;
   const coachProgram = getProgram(c.id);
   // Under 'error' an empty log means the history could not be read, not that
   // there is none — so the streak, the week's session count and the PR count
@@ -724,7 +724,20 @@ export default function Home() {
 
         <Rule />
 
-        {/* Said before the card, because the card is what the reader acts on. */}
+        {/* ── whose copy today's focus was drawn from ──────────────────────
+            Said before the card, for the same reason the notice below it is:
+            the card is what the reader acts on. `getProgram` serves this
+            device's copy when no read has landed, and keeps serving it for
+            THIRTY DAYS (src/lib/programCache.ts) — so "Today · Push" and the
+            session on the card can be last month's block with nothing here to
+            doubt it, and the notice below is suppressed exactly then, because
+            the cache is what made `coachProgram` non-null.
+
+            Non-null only while the copy is what is being served —
+            `mayServeCached` decides that — so no gate of its own, and it goes
+            the moment a live read lands. Same sentence, same position, as
+            app/(client)/week.tsx :194. */}
+        {cachedNote ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{cachedNote}</Flag> : null}
         {programUnknown ? (
           <Notice tone={t.warn} kicker="Today" title="We couldn’t check for a coach plan"
             note={`Today's focus below comes from ${BRAND.label}'s automatic program. If your coach has assigned you one it takes over as soon as we can read it.`} />

@@ -33,6 +33,7 @@ import { unsentNote } from '../../src/lib/offlineQueue';
 import { hydrationNote } from '../../src/lib/hydrationHero';
 import { donePercent } from '../../src/lib/checklist';
 import { useClientData } from '../../src/ui/clientData';
+import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { isWhole } from '../../src/ui/loadStatus';
 import { readNumber } from '../../src/lib/units';
 import { hitSlopFor } from '../../src/lib/a11y';
@@ -52,6 +53,13 @@ export default function Habits() {
   const t = useTheme();
   const router = useRouter();
   const h = useHabits();
+  // The checklist's training row names today's session, and that name comes
+  // off the assigned block — which `getProgram` will serve from this device
+  // for thirty days when the server cannot be reached. src/ui/habits.tsx
+  // cannot render this itself: its only return is a Provider wrapping the
+  // tree, so a Flag there would draw above the whole app or nowhere. The
+  // sentence has to sit beside the row it qualifies, which is here.
+  const { cachedNote } = useAssignedPrograms();
   // null when there is nothing on the list. Not 0 — nought per cent is a claim
   // that the client did none of the things asked of them today.
   const pct = donePercent(h.doneCount, h.habits.length);
@@ -214,6 +222,13 @@ export default function Habits() {
         {/* ── checklist ──────────────────────────────────────────────────── */}
         <Section>
           <SectionHead title="Checklist" note={doneKnown && h.habits.length ? `${h.doneCount} done` : undefined} />
+
+          {/* Which copy of the plan named today's session, and how old it is.
+              Non-null only while the cache is what is being served —
+              `mayServeCached` in src/ui/assignedPrograms.tsx sees to that — so
+              this needs no gate of its own. Same sentence and same treatment as
+              app/(client)/week.tsx and app/(client)/workouts.tsx. */}
+          {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{cachedNote}</Flag> : null}
 
           {/* The list is built from this person's own plan and targets, which is
               the question TF-31 asked outright. Saying so costs one line and

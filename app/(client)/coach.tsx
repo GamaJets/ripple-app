@@ -375,6 +375,27 @@ export default function Coach() {
             </Text>
           </View>
         </View>
+
+        {/* ── which copy of the plan the coach above is speaking from ──────
+            Directly under the subtitle, because the subtitle is the claim it
+            qualifies: "Knows your plan & numbers", and the greeting under it
+            says "I know your plan". `program` on this screen is
+            `coachProgram ?? buildProgram(…)`, `coachProgram` is `getProgram`,
+            and `getProgram` serves this device's copy for up to THIRTY DAYS
+            when no read has landed (src/lib/programCache.ts). So the model is
+            handed `programTitle` and `programFocus` off a block the coach may
+            have replaced, answers every question in the second person against
+            it, and "What Gets Sent" lists it as fact.
+
+            Placed HERE rather than over the thread on purpose: this screen has
+            a second thing saved on this phone — the stored conversation — and
+            the sentence would read as being about that if it sat above the
+            messages. Beside the plan claim it can only be about the plan.
+            Non-null for exactly as long as the copy is what is being served;
+            `mayServeCached` decides that, so it needs no gate of its own. */}
+        {assigned.cachedNote ? (
+          <Flag tone={t.warn} style={{ marginHorizontal: G, marginBottom: sp.md }}>{assigned.cachedNote}</Flag>
+        ) : null}
         <Rule />
 
         {/* ── the conversation ───────────────────────────────────────────── */}

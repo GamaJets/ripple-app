@@ -290,7 +290,7 @@ export default function Train() {
   const router = useRouter();
   const cd = useClientData();
   const assigned = useAssignedPrograms();
-  const { getProgram, status: programStatus } = assigned;
+  const { getProgram, status: programStatus, cachedNote } = assigned;
   const _cp = getProgram(cd.id);
   const coachProgram = cd.coachingMode === 'solo' ? null : _cp;
   const w = useWearables();
@@ -344,6 +344,17 @@ export default function Train() {
   //
   // 'solo' is excluded because there is no coach to have written one: the null
   // is deliberate there and saying otherwise would be the opposite lie.
+  //
+  // AND IT STAYS GATED ON `coachProgram == null`, deliberately. Serving the
+  // device's copy makes `coachProgram` non-null and so takes this notice away —
+  // which reads like the defect, but un-gating it would print a sentence that
+  // is false: it says today's session "is Repple's automatic program, not one
+  // your coach wrote", and a cached block IS one their coach wrote. Telling a
+  // member training a real block that they are on the generic one would push
+  // them to disregard the right session. What the cached case needs is not this
+  // notice but its own, and `cachedNote` above is it — same read, honest about
+  // which of the two situations the member is actually in. app/(client)/week.tsx
+  // faces the identical gate and resolved it the same way.
   const programUnknown = coachProgram == null && cd.coachingMode !== 'solo' && programStatus !== 'ready';
   const program = coachProgram ?? buildProgram(cd.goal, cd.bodyFatPct);
   /**
@@ -1431,6 +1442,27 @@ export default function Train() {
           <Text style={{ ...ty.micro, color: t.ink3 }} numberOfLines={1}>{coachProgram ? 'Coach plan' : program.title}</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Train</Text>
         </View>
+
+        {/* ── whose copy of the coach's plan is being trained ──────────────
+            The kicker directly above says "Coach plan" the moment `getProgram`
+            returns something, and `getProgram` returns this device's copy when
+            no read has landed — for up to THIRTY DAYS (PROGRAM_HORIZON_MS in
+            src/lib/programCache.ts). This is the screen the session is
+            actually trained from, so a block the coach replaced a fortnight
+            ago renders here identically to one confirmed a second ago, under
+            the same two words, with the "couldn't check" notice below
+            suppressed BY the cache — because the cache is what made
+            `coachProgram` non-null. The one signal that anything is stale was
+            removed by the thing that made it stale.
+
+            `cachedNote` is non-null for precisely as long as the copy is what
+            is being served — `mayServeCached` decides that — so it needs no
+            gate of its own and disappears the moment a live read lands.
+            app/(client)/week.tsx :194 and app/(trainer)/client-week.tsx :437
+            render the same sentence in the same position over the same
+            programme. The plan is NOT withheld: the cache exists so the member
+            can train in a basement. This labels it. */}
+        {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{cachedNote}</Flag> : null}
 
         {/* The sentence that stops a generated session passing for the coach's.
             Everything below this line — the day strip, the plan rows, Start

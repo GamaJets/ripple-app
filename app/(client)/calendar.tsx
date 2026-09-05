@@ -529,6 +529,11 @@ export default function Calendar() {
   }, [refresh, reloadWait, reloadFees, reloadLog, reloadPolicy, reloadStanding, assigned]));
   const solo = cd.coachingMode === 'solo';
   const coachProgram = assigned.getProgram(cd.id);
+  // The sentence for the third case `planUnknown` cannot express: not "we could
+  // not read it" and not "here it is", but "here is the copy this phone kept,
+  // and here is how old it is". Rendered beside the clashes it was computed
+  // against, further down.
+  const { cachedNote } = assigned;
   const planUnknown = !solo && assigned.status === 'error' && coachProgram == null;
   const program = planUnknown ? null : ((solo ? null : coachProgram) ?? buildProgram(cd.goal, cd.bodyFatPct));
   const blk = useClientWeek(program, cd.id);
@@ -1177,6 +1182,24 @@ export default function Calendar() {
               them — so the program is not rewritten and the mark is not
               overruled. Nothing is claimed while the program is unread; see
               selScheduled. */}
+          {/* ── whose copy of the programme that disagreement was drawn
+              against ──────────────────────────────────────────────────────
+              `getProgram` consults this device's copy when no read has landed,
+              and `planUnknown` cannot see that: the cache makes `coachProgram`
+              non-null, so `program` is built and every "your program has Push
+              on this day" above is computed against whatever was on the phone
+              — for up to THIRTY DAYS (src/lib/programCache.ts). A member told
+              their programme clashes with the rest day they just marked, on the
+              strength of a block their coach replaced a fortnight ago, either
+              changes a plan they did not need to or stops believing the notice.
+
+              `cachedNote` carries the age and is non-null for precisely as long
+              as the copy is what is being served — `mayServeCached` decides
+              that — so it needs no gate of its own.
+              app/(trainer)/client-week.tsx :437 puts the same sentence beside
+              the same clashes on the coach's side of this screen. */}
+          {cachedNote ? <Flag tone={t.warn} style={{ marginTop: sp.md }}>{cachedNote}</Flag> : null}
+
           {selConflict ? (
             <Notice tone={t.warn} kicker="Your plan and your program" title={selConflict.focus ? `Your program has ${selConflict.focus} on this day` : 'Your program has no session on this day'}
               note={selConflict.note} />

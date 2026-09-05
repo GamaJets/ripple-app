@@ -548,6 +548,40 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // Same reasoning as the home screen: a coached client whose assignment could
   // not be read would otherwise be handed the generic auto program, and the
   // checklist would name a session their coach never wrote.
+  //
+  // ── THE THIRD CASE, AND WHY IT IS NOT LABELLED HERE ──────────────────────
+  //
+  // `planUnknown` has two answers and the read has three. `assigned.getProgram`
+  // serves THIS DEVICE'S COPY when no read has landed, and goes on serving it
+  // for thirty days (PROGRAM_HORIZON_MS, src/lib/programCache.ts). That copy
+  // makes `coachProgram` non-null, so `planUnknown` is false, `status` below
+  // rolls up as though the plan were confirmed, and `trainingFocus` names a
+  // session off a block the coach may have replaced a fortnight ago. Nothing in
+  // this provider's value says so. `assigned.cachedNote` is the sentence for
+  // exactly that state, non-null for precisely as long as the copy is what is
+  // being served (`mayServeCached` decides), and it is deliberately NOT added
+  // to `HabitsValue`:
+  //
+  //   1. THIS FILE HAS NO SURFACE. It renders one thing — `<Ctx.Provider>` —
+  //      and it wraps the tree. A <Flag> here would appear above every screen
+  //      in the app, or nowhere, and the label has to sit beside the checklist
+  //      row it is about. The two screens that already carry this sentence
+  //      (app/(client)/week.tsx :194, app/(trainer)/client-week.tsx :437) both
+  //      put it next to the rows it qualifies, which is a judgement only the
+  //      screen can make.
+  //
+  //   2. THE CALL SITES ALREADY HAVE IT. `useAssignedPrograms` is a context
+  //      hook, so any screen under the provider reads `cachedNote` directly.
+  //      Re-publishing it through `HabitsValue` would be a second path to one
+  //      string, kept in sync by hand, buying nothing.
+  //
+  // It does not belong in `status` either: 'error' means "we could not find
+  // out", and a copy read off this phone is not that — it is an answer, an old
+  // one, and the whole point of the note is to say which.
+  //
+  // So it belongs at the call site that draws the checklist —
+  // app/(client)/habits.tsx, which renders `habits` and `gaps` — as
+  // `useAssignedPrograms().cachedNote` beside the training row.
   const planUnknown = !solo && assigned.status === 'error' && coachProgram == null;
   const program = planUnknown ? null : ((solo ? null : coachProgram) ?? buildProgram(c.goal, c.bodyFatPct));
   // The week of the block they are on, not week one for ever. The checklist
