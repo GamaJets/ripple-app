@@ -119,6 +119,31 @@
 //  4. studio-web. The console is Next.js in a browser and has no soft keyboard
 //     problem of this shape.
 //
+// ── and why both rules are about iOS ──────────────────────────────────────
+//
+// `automaticallyAdjustKeyboardInsets` is an iOS prop; on Android it is ignored.
+// That does not leave Android unchecked, it leaves it already handled, and by
+// the platform rather than by us — checked rather than assumed, because "the
+// other platform is probably fine" is how half a sweep gets called a whole one:
+//
+//   · The main activity. Expo defaults `android:windowSoftInputMode` to
+//     `adjustResize` when app.json sets no `softwareKeyboardLayoutMode`, which
+//     this one does not — see WindowSoftInputMode.js in @expo/config-plugins,
+//     which returns 'adjustResize' for the unset case. The window shrinks, so a
+//     page scroller shrinks with it and the focused field stays reachable.
+//
+//   · Modals, which are the whole subject of rule 2 and are a separate window
+//     on Android, so the activity's mode would not have reached them. React
+//     Native sets it on each Dialog itself:
+//     ReactModalHostView.kt line 332, `window.setSoftInputMode(
+//     WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)`. A bottom-anchored
+//     sheet in a window that resizes rises with the keyboard on its own.
+//
+// So a `KeyboardAvoidingView` here is written `behavior={Platform.OS === 'ios'
+// ? 'padding' : undefined}` throughout, and the `undefined` on Android is
+// correct rather than an omission — adding `padding` there would lift the sheet
+// a second time, on top of a window that has already resized.
+//
 // ── the escape hatch, and why it takes a sentence ─────────────────────────
 //
 // A field that genuinely cannot be covered — one pinned at the top of a short
