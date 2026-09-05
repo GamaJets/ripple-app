@@ -39,6 +39,49 @@
 // `RECEIPT_MAY_DOUBLE_COUNT` in src/lib/coachReceipts.ts is the sentence for
 // that and this module does not repeat it — it points at it.
 //
+// ── MONEY THAT CAME BACK ──────────────────────────────────────────────────
+//
+// This is the ONE figure in this app that is net of refunds, and the exception
+// is deliberate rather than an oversight in the other direction.
+//
+// `paidOnly` below reads like the guard for it and is not. Verified against the
+// live schema on 5 Sep 2026: `client_purchases.status` is `text not null
+// default 'paid'`, the only writer in the repo is the checkout branch of
+// supabase/functions/stripe-webhook, which hardcodes `'paid'`, and NOTHING
+// anywhere writes `'refunded'`. A refund is mirrored into `refunded_cents` /
+// `refunded_at` (part 192) by supabase/functions/connect-refund and by the
+// `charge.refunded` branch of the webhook, and the row's status is left alone
+// on purpose — a refunded sale is still a sale that happened. So the allowlist
+// never excluded anything, and the docstring promising it did was describing a
+// status this database has never held.
+//
+// The cost of that was Ana buying a ten-pack for AED 2,400, being refunded in
+// full, and still reading as the coach's most valuable client on the one screen
+// that tells them to make a retention decision from this figure.
+//
+// So the sale is netted, not dropped: `keptCents` takes `refunded_cents` off
+// `amount_cents` and floors at nought. A PARTIAL refund reduces the figure by
+// what went back and leaves the rest standing, which is the whole reason a
+// running total is the right shape for it; a FULL refund leaves a payment
+// worth nothing rather than a payment that never happened. The row still
+// counts in `payments`, still dates `firstAt`/`lastAt`, and what went back is
+// reported beside the figure by `refundedLine` — because a coach reading
+// "3 payments" over a smaller number than they expected is owed the reason,
+// and because the money did move, twice.
+//
+// ── AND THE TAKINGS FIGURES ARE STILL GROSS ───────────────────────────────
+//
+// Nothing here changes them and nothing here may. `app/(trainer)/payments.tsx`
+// carries the policy at length: every takings line in this app is what a client
+// was CHARGED, a refund is shown BESIDE the sale rather than silently inside
+// it, and `Purchase.refunded_cents` in src/lib/connect.ts says in as many words
+// that `sumTaken` is not given the net figure. That policy is about "what came
+// through my business this month". This module asks a different question —
+// "what has this person paid me and not had back" — and it is the question a
+// coach answers a retention decision with. `VALUE_IS_NET_OF_REFUNDS` says so on
+// the screen, because two figures on one page that are arrived at differently
+// have to say which is which.
+//
 // ── And the rules it inherits ─────────────────────────────────────────────
 //
 //   · currencies never merge. A client who paid in AED and once in GBP has two
@@ -54,7 +97,7 @@
 // Pure — the reads live in connect.ts, subscriptions.ts and ui/coachReceipts.ts.
 import type { LoadStatus } from '../ui/loadStatus';
 import { worstStatus } from '../ui/loadStatus';
-import { sumTaken, combineTaken, type Taken, type TakenRow } from './coachMoney';
+import { sumTaken, combineTaken, minorMoney, type Taken, type TakenRow } from './coachMoney';
 import { ledger, type Ledger, type Strand } from './coachLedger';
 import { num } from './format';
 
@@ -66,8 +109,21 @@ export interface ValuePurchase {
   amount_cents: number | null;
   currency: string | null;
   created_at: string;
-  /** Stripe's word. Only 'paid' is money; see `paidOnly`. */
+  /** Stripe's word. Only 'paid' is money; see `paidOnly`. It is NOT how a
+   *  refund is recorded — nothing writes 'refunded' here; see `keptCents`. */
   status: string | null;
+  /**
+   * Minor units already given back on this sale, as a RUNNING TOTAL across
+   * every refund on it (part 192).
+   *
+   * Zero, never null, on a sale nobody has refunded — the column is `not null
+   * default 0` and only supabase/functions/connect-refund and the webhook's
+   * `charge.refunded` branch write it, from Stripe's own answer. Optional and
+   * string-tolerant here for the same two reasons `refundableRow` in
+   * src/lib/refunds.ts is: it is a `bigint`, which PostgREST can hand back as a
+   * string, and a caller reading a narrower column set has none.
+   */
+  refunded_cents?: number | string | null;
 }
 
 /** One paid renewal invoice, as `fetchMySubscriptionPayments` hands it back. */
@@ -79,6 +135,12 @@ export interface ValueRenewal {
    *  payment is real and belongs to no month anybody can name. */
   paid_at: string | null;
   created_at: string;
+  /** The same running total, on the same terms, for a renewal
+   *  (`client_subscription_payments.refunded_cents`, part 192). A coach
+   *  refunding "last month" is refunding one of these, and a figure that netted
+   *  one-off sales while leaving renewals gross would be the same defect
+   *  half-fixed. */
+  refunded_cents?: number | string | null;
 }
 
 /** One recorded cash/transfer payment, as `fetchMyReceipts` hands it back. */
@@ -94,17 +156,73 @@ export interface ValueReceipt {
  * Only the sales that are money.
  *
  * `client_purchases.status` carries Stripe's own word, and a row that is
- * 'pending', 'failed' or 'refunded' is not a payment. The old instinct here is
- * `status !== 'refunded'`, which is a denylist and is wrong the first time
- * Stripe adds a status — the new one would count as income by default. Only
- * 'paid' counts.
+ * 'pending' or 'failed' is not a payment. The old instinct here is `status !==
+ * 'refunded'`, which is a denylist and is wrong the first time Stripe adds a
+ * status — the new one would count as income by default. Only 'paid' counts.
  *
  * A null status is NOT counted. Every row the webhook writes carries one, so a
  * null is a row from somewhere else or a row that never completed, and a
  * payment nobody can confirm should not appear in what somebody is worth.
+ *
+ * ── WHAT THIS DOES NOT DO, AND USED TO CLAIM IT DID ───────────────────────
+ *
+ * It does not exclude a refunded sale, and it never could. This docstring said
+ * "a row that is 'pending', 'failed' or 'refunded' is not a payment", and
+ * 'refunded' is a status this database has never held: verified live, the
+ * column is `text not null default 'paid'`, the only writer in the repo
+ * hardcodes `'paid'`, and a refund is mirrored into `refunded_cents` /
+ * `refunded_at` instead — deliberately, so a refunded sale is still a sale that
+ * can be listed. So every AED of a fully refunded ten-pack went on counting as
+ * money the client had paid.
+ *
+ * The refund arithmetic is `keptCents`, below, and it is applied to the AMOUNT
+ * rather than to the row. This stays an allowlist over the status because that
+ * is still the right guard for a pending or failed checkout, and because a
+ * status Stripe adds tomorrow must not become income by default.
  */
 export const paidOnly = <T extends { status: string | null }>(rows: readonly T[]): T[] =>
   rows.filter((r) => (r.status || '').trim().toLowerCase() === 'paid');
+
+/**
+ * `refunded_cents` as a number of minor units — 0 for anything that is not one.
+ *
+ * A `bigint` reaches a phone as a string often enough that src/lib/refunds.ts
+ * carries the same coercion and says why. A negative or unparseable value is
+ * read as no refund rather than as a credit: nothing may ever ADD to what
+ * somebody paid by way of this column.
+ */
+const refundedMinor = (v: number | string | null | undefined): number => {
+  const n = typeof v === 'string' ? Number(v.trim()) : v;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
+};
+
+/**
+ * What is left of one charge after what has gone back on it — minor units.
+ *
+ * Null in, null out: an amount Stripe never stated is still an amount nobody
+ * can put a figure on, and a refund against it does not make it nought. It
+ * stays `unpriced` in the total, exactly as before.
+ *
+ * Floored at nought, and that floor is not decoration. `sumTaken` has no notion
+ * of a negative pot and no screen in this app renders one, so a row that
+ * somehow claimed more back than was charged would otherwise print a coach a
+ * client who has paid them minus four hundred pounds. The database's
+ * `client_purchases_refund_within_charge` constraint should make it
+ * unreachable; "should be unreachable" is how the last such figure got out.
+ *
+ * NOTHING HERE DIVIDES BY A HUNDRED. Both sides are minor units in the same
+ * currency — one subtraction of two integers — so the number of decimal places
+ * that currency has never enters into it. `currencyDecimals()` returns null
+ * rather than 2 for a currency nobody stated, and the only place that matters
+ * is formatting, which is `minorMoney`'s job and not this one's.
+ */
+export function keptCents(
+  amountCents: number | null | undefined,
+  refundedCents: number | string | null | undefined,
+): number | null {
+  if (amountCents == null || !Number.isFinite(amountCents)) return null;
+  return Math.max(0, Math.trunc(amountCents) - refundedMinor(refundedCents));
+}
 
 /* ── one client ───────────────────────────────────────────────────────────── */
 
@@ -117,6 +235,21 @@ export interface ClientValue {
   /** What the coach recorded as cash, transfer or a terminal elsewhere. */
   recorded: Taken;
   /**
+   * What has gone back out of `sales` and `renewals`, per currency.
+   *
+   * Already subtracted from all three figures above and from `ledger` — this is
+   * the size of the subtraction, kept so the screen can say it happened rather
+   * than quietly showing a smaller number. Empty pots on a client nobody has
+   * refunded, which is nearly everybody.
+   *
+   * A recorded cash payment can never appear here: `coach_receipts` has no
+   * refund column, a coach handing cash back records it as a cost or not at
+   * all, and inventing a refund for it would be this app asserting something
+   * nobody told it. `VALUE_NEEDS_YOUR_RECORDS` already says the cash half is
+   * only as good as what was written down.
+   */
+  refunded: Taken;
+  /**
    * All three together — or withheld, with the reason.
    *
    * `total` is null unless EVERY contributing read was whole, including the
@@ -125,7 +258,13 @@ export interface ClientValue {
   ledger: Ledger;
   /** How many payments are behind the figure, across all three sources. Counted
    *  even where the total is withheld: "we could not total 14 payments" is a
-   *  more useful sentence than "we could not total your payments". */
+   *  more useful sentence than "we could not total your payments".
+   *
+   *  A refunded sale is still counted. The money moved — twice — and the date
+   *  it moved on is what makes this a LIFETIME rather than a period; dropping
+   *  the row would silently move `firstAt` and shorten a relationship that
+   *  really did start then. `refundedLine` is what keeps the count and a
+   *  smaller figure from reading as a contradiction. */
   payments: number;
   /** The earliest payment on record, ISO, or null. What makes it a LIFETIME
    *  rather than a period. */
@@ -162,13 +301,37 @@ export function clientValue(
   const myRenewals = renewals.filter((r) => r.client_id === clientId);
   const myReceipts = receipts.filter((r) => r.clientId === clientId);
 
-  const saleRows = mySales.map((p) => row(p.amount_cents, p.currency, p.created_at));
+  // NET OF WHAT WENT BACK. `keptCents` is the whole of the refund handling and
+  // it is applied here rather than by dropping rows: the sale still happened,
+  // still counts as a payment and still dates the relationship. See MONEY THAT
+  // CAME BACK at the top — and note that this is the ONE figure in this app
+  // that is not gross, which `VALUE_IS_NET_OF_REFUNDS` states on the screen.
+  const saleRows = mySales.map((p) => row(keptCents(p.amount_cents, p.refunded_cents), p.currency, p.created_at));
   // `paid_at` is Stripe's word on when the money moved; `created_at` is when
   // the webhook wrote the row. The fallback is deliberate and is the lesser
   // wrong: without it a renewal Stripe stated no date for would have no date at
   // all, and this figure's `firstAt`/`lastAt` would silently skip it.
-  const renewalRows = myRenewals.map((r) => row(r.amount_cents, r.currency, r.paid_at || r.created_at));
+  const renewalRows = myRenewals.map((r) => row(keptCents(r.amount_cents, r.refunded_cents), r.currency, r.paid_at || r.created_at));
   const receiptRows = myReceipts.map((r) => row(r.amountCents, r.currency, r.receivedOn));
+
+  // The size of the subtraction, dated by the CHARGE rather than by
+  // `refunded_at`. Nothing here is a period figure — this module is all-time —
+  // and the charge's date is the one both sides of the pair already agree on;
+  // `refunded_at` is only the LAST refund on a sale that may have had several,
+  // which is a date this app is careful never to present as the only one.
+  //
+  // Rows with nothing back are filtered out before summing, so a client nobody
+  // has refunded gets empty pots rather than a pot of noughts — `refundedLine`
+  // is null on empty pots and a "refunded AED 0.00" line under every client is
+  // the furniture `unattributedLine` refuses for the same reason.
+  const refunded = sumTaken([
+    ...mySales
+      .filter((p) => refundedMinor(p.refunded_cents) > 0)
+      .map((p) => row(refundedMinor(p.refunded_cents), p.currency, p.created_at)),
+    ...myRenewals
+      .filter((r) => refundedMinor(r.refunded_cents) > 0)
+      .map((r) => row(refundedMinor(r.refunded_cents), r.currency, r.paid_at || r.created_at)),
+  ]);
 
   const sales = sumTaken(saleRows);
   const renewalsTaken = sumTaken(renewalRows);
@@ -192,6 +355,7 @@ export function clientValue(
     sales,
     renewals: renewalsTaken,
     recorded,
+    refunded,
     ledger: ledger(strands),
     payments: saleRows.length + renewalRows.length + receiptRows.length,
     firstAt: times.length ? new Date(Math.min(...times)).toISOString() : null,
@@ -274,12 +438,40 @@ export function unattributedReceipts(receipts: readonly ValueReceipt[]): { count
   };
 }
 
-/** The sentence for them. Null when there are none — a "0 unattributed" line
- *  under every screen is furniture, and the line that matters would be lost in
- *  it. */
-export function unattributedLine(count: number): string | null {
+/**
+ * The sentence for them.
+ *
+ * Null when there are none — a "0 unattributed" line under every screen is
+ * furniture, and the line that matters would be lost in it.
+ *
+ * ── THE STATUS IS NOT OPTIONAL ────────────────────────────────────────────
+ *
+ * This took a bare count and stated it as a fact. Under a receipts read that
+ * came back TRUNCATED, every per-client amount above it correctly dashed —
+ * `ledger()` withholds a total the moment a strand is not whole — and then this
+ * line said flatly "330 recorded payments are not attached to anybody's
+ * account". A number counted over a prefix of the data, printed as the whole of
+ * it, on the one line on the screen that was still confidently stating a
+ * figure. Whatever the true number is, it is not smaller than 330, so the count
+ * is worth keeping; what it is not is a total.
+ *
+ * So a whole read states it and anything else states it as a floor, in the same
+ * words `paymentsFloorLine` uses in this file for the same shape of fact. The
+ * distinction between "we counted them" and "we counted the ones we could see"
+ * is exactly the one app/(owner)/financials.tsx keeps four silences apart for.
+ */
+export function unattributedLine(count: number, status: LoadStatus): string | null {
   if (count <= 0) return null;
-  return `${num(count)} recorded ${count === 1 ? 'payment is' : 'payments are'} not attached to anybody's account — cash from somebody you bill by hand has a name you typed and no Repple client behind it. ${count === 1 ? 'It is' : 'They are'} real income and ${count === 1 ? 'it is' : 'they are'} not in any of the per-client figures here.`;
+  const one = count === 1;
+  const what = `recorded ${one ? 'payment is' : 'payments are'} not attached to anybody's account`;
+  const why = 'cash from somebody you bill by hand has a name you typed and no Repple client behind it.';
+  const outside = `${one ? 'It is' : 'They are'} real income and ${one ? 'it is' : 'they are'} not in any of the per-client figures here.`;
+  if (status === 'ready') return `${num(count)} ${what} — ${why} ${outside}`;
+  // Truncated, failed or still in flight, the sentence is the same shape: the
+  // count is a floor. Which of the three it was is already said, once, by the
+  // reason under every per-client figure on the screen — repeating it here
+  // would be the third statement of one fact.
+  return `At least ${num(count)} ${what} — ${why} The record of your cash and transfers did not come back whole, so that is a floor and not a count. ${outside}`;
 }
 
 /* ── what the figure is, said on the screen ───────────────────────────────── */
@@ -310,6 +502,36 @@ export const VALUE_NEEDS_YOUR_RECORDS =
  * Points at the receipts screen's own sentence rather than restating it, so
  * there is one wording of this warning in the app.
  */
+export const VALUE_IS_NET_OF_REFUNDS =
+  'A refund is taken off the figure for the person it went back to. It is the one place in this app where that happens: every takings line is gross — what a client was charged — because that is what takings have always meant here, and what somebody has paid you and not had back is a different question. This section asks that one.';
+
+/**
+ * What has gone back, beside the figure it has already come off.
+ *
+ * Said rather than left implicit, because a netted figure with nothing on it to
+ * say so is the same defect as a gross one: a coach reading "3 payments" over a
+ * number smaller than the three payments they remember has no way to tell a
+ * refund from a bug, and the sentence they would reach for is "this app has
+ * lost money of mine".
+ *
+ * Null on the overwhelming majority of clients — nobody has refunded them
+ * anything — and null too where the only refund is against a sale whose
+ * currency was never recorded. That refund has come off an amount that is in no
+ * pot either way, and the screen already reports those as a hole in the figure;
+ * naming an amount in a unit nobody stated is the one thing this app will not
+ * do anywhere.
+ */
+export function refundedLine(v: ClientValue): string | null {
+  const parts = v.refunded.pots
+    .map((p) => minorMoney(p.minorUnits, p.currency))
+    .filter((s): s is string => !!s);
+  if (!parts.length) return null;
+  const amounts = parts.join(' and ');
+  return parts.length === 1
+    ? `${amounts} has been given back and is already off the figure above.`
+    : `${amounts} have been given back and are already off the figure above.`;
+}
+
 export const VALUE_MAY_DOUBLE_COUNT =
   'A payment recorded by hand that Stripe also took is counted twice here. The two rows share nothing this app can read, so nothing can spot it — record only what did not go through Repple.';
 
@@ -358,6 +580,32 @@ export function valueEmptyLine(v: ClientValue): string {
   }
   return v.ledger.reason
     ?? 'Nothing is stated, and that is not a statement that they have paid you nothing.';
+}
+
+/**
+ * The same thing for the WHOLE BOOK, where there is no person to point at.
+ *
+ * `app/(trainer)/money.tsx` had no such sentence and reached for the per-client
+ * one, through `valueEmptyLine(clientValue('', [], [], [], reads))` — so the
+ * first thing a coach with no clients yet read on the section headed "What Each
+ * Client Has Paid" was "Nothing has been recorded as paid to you by this
+ * person", with no person anywhere on the screen. Every money table in this
+ * database is empty today, verified live, which makes that empty state the one
+ * nearly every coach sees first.
+ *
+ * The WITHHELD branches are deliberately not rewritten: "the read failed" and
+ * "there is more than could be read in one request" say the same thing about a
+ * book as about a person, and `ledger()` already words them. Only the confident
+ * one — the sentence that asserts nothing was paid — has to know it is talking
+ * about a book, and it is the parallel of the per-client one rather than a new
+ * wording of it.
+ */
+export function valueBookEmptyLine(status: { purchases: LoadStatus; renewals: LoadStatus; receipts: LoadStatus }): string {
+  const v = clientValue('', [], [], [], status);
+  if (v.ledger.status === 'ready' && v.payments === 0) {
+    return 'Nothing has been recorded as paid to you by anybody yet. If a client pays you in cash or by transfer, record it and it will show here.';
+  }
+  return valueEmptyLine(v);
 }
 
 /** How long they have been paying, in the coach's words. Null when there is no

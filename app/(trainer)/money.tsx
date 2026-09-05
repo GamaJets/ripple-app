@@ -140,7 +140,8 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { costsTaken, costsEmptyLine, COSTS_ARE_NEVER_NETTED, type CoachCost } from '../../src/lib/coachCosts';
 import {
   clientValue, rankByValue, currenciesIn, unattributedReceipts, unattributedLine,
-  valueSpanLine, valueEmptyLine, VALUE_IS_PAST, VALUE_NEEDS_YOUR_RECORDS,
+  valueSpanLine, valueEmptyLine, valueBookEmptyLine, refundedLine,
+  VALUE_IS_PAST, VALUE_NEEDS_YOUR_RECORDS, VALUE_IS_NET_OF_REFUNDS,
   type RankedClient,
 } from '../../src/lib/clientValue';
 import type { LoadStatus } from '../../src/ui/loadStatus';
@@ -328,9 +329,15 @@ export default function CoachMoney() {
   }, [sales.rows, renewals.rows, receipts.rows, valueReads]);
 
   const valueCurrencies = useMemo(() => currenciesIn(ranked), [ranked]);
+  // The COUNT and the READ it was counted over, together. Under a truncated
+  // receipts read the count is a floor over a prefix of the rows, and this line
+  // used to state it as a total — on a screen where every per-client amount
+  // beside it had correctly gone to a dash. `unattributedLine` owns which
+  // sentence that is; this only has to stop dropping the half of the fact that
+  // decides it.
   const orphanLine = useMemo(
-    () => unattributedLine(unattributedReceipts(receipts.rows).count),
-    [receipts.rows],
+    () => unattributedLine(unattributedReceipts(receipts.rows).count, receipts.status),
+    [receipts.rows, receipts.status],
   );
 
   // Three strands rather than three figures, because they are one question:
@@ -789,14 +796,29 @@ export default function CoachMoney() {
             for most coaches and wrong in the direction that makes them
             undervalue the person in front of them, so a receipts read that did
             not come back whole withholds the total exactly as a failed sales
-            read does. src/lib/clientValue.ts carries the argument. */}
+            read does. src/lib/clientValue.ts carries the argument.
+
+            And it is the ONE figure on this screen that is net of refunds.
+            Everything under Coming In above is gross — what a client was
+            charged — and app/(trainer)/payments.tsx carries that policy at
+            length. A fully refunded ten-pack used to read here as AED 2,400
+            somebody had paid, and rank them above the clients who kept nothing
+            back, on the very line that tells a coach how hard to fight to keep
+            them. `VALUE_IS_NET_OF_REFUNDS` says which of the two figures is
+            which, on the screen rather than only here. */}
         <Section>
           <SectionHead title="What Each Client Has Paid" note="All time" />
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{VALUE_IS_PAST}</Text>
 
+          {/* The BOOK's empty state, not a person's. This was
+              `valueEmptyLine(clientValue('', …))`, which reaches the per-client
+              branch — so a coach who has never been paid by anybody read
+              "Nothing has been recorded as paid to you by this person" with no
+              person on the screen. `valueBookEmptyLine` keeps every withheld
+              sentence identical and rewords only the confident one. */}
           {ranked.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
-              {valueEmptyLine(clientValue('', [], [], [], valueReads))}
+              {valueBookEmptyLine(valueReads)}
             </Text>
           ) : (<>
             {/* Ranked within ONE currency. Sorting a mixed book by "amount"
@@ -828,6 +850,15 @@ export default function CoachMoney() {
                   {/* An amount with no currency on it is a hole in the figure
                       and the size of the hole is what is worth reporting. It is
                       never summed into a unit nobody stated. */}
+                  {/* What has gone back, beside the figure it has already come
+                      off. A netted number with nothing on it to say so reads
+                      as a bug to the coach who remembers the sale — and this
+                      is the one figure on the screen that is net, which is why
+                      `VALUE_IS_NET_OF_REFUNDS` is under the list as well.
+                      Null for nearly everybody. */}
+                  {refundedLine(r.value) ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{refundedLine(r.value)}</Text>
+                  ) : null}
                   {total && (total.unlabelled > 0 || total.unpriced > 0) ? (
                     <Flag style={{ marginTop: sp.sm }}>
                       {total.unlabelled > 0 ? `${total.unlabelled} ${plural(total.unlabelled, 'payment has', 'payments have')} no currency recorded and ${plural(total.unlabelled, 'is', 'are')} in no figure above. ` : ''}
@@ -852,6 +883,13 @@ export default function CoachMoney() {
           {orphanLine ? <Flag style={{ marginTop: sp.md }}>{orphanLine}</Flag> : null}
 
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{VALUE_NEEDS_YOUR_RECORDS}</Text>
+          {/* Two figures on one page arrived at differently have to say which
+              is which. Everything above under Coming In is GROSS — what a
+              client was charged, which is what a takings line has always meant
+              in this app — and this section alone takes refunds off, because
+              "what has this person paid me and not had back" is the question a
+              coach makes a retention decision on. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_IS_NET_OF_REFUNDS}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
         </Section>
 
