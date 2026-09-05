@@ -53,6 +53,42 @@
 // summary says how many tables were only spot-checked, rather than claiming a
 // coverage it does not have.
 //
+// ── What a row is allowed to look like ────────────────────────────────────
+//
+// Almost nothing writes an object literal straight into .insert(). Thirty
+// writes — thirty tables' worth of column names, four of them on the money
+// path — were being reported as unreadable, which is honest and is not
+// checking. Each of these is now followed to the literal underneath, and every
+// one of them can only be followed with certainty:
+//
+//   const row = { … }              the declaration the CALL sees, resolved by
+//                                  scope, innermost block outward
+//   crashRow(c, uid)               a named builder, through its `return`, past
+//                                  an object return TYPE that is not the body
+//   const rows = []; rows.push(…)  the pushes are the rows, unless something
+//                                  else fills the array too
+//   xs.map(asRow)                  a handler named rather than written out
+//   a ? { … } : { … }              both arms, because both are written
+//   built.row                      the row a builder hands back beside its
+//                                  refusal
+//   .from(TABLE_CONST)             a table named by a string constant declared
+//                                  once in the same file
+//   return null                    a builder refusing to build: no columns and
+//                                  no gap either, because nothing is written
+//
+// What is NOT followed is anything whose value only exists at runtime: a table
+// that is a parameter (src/lib/gymPay.ts, owner-metrics, connect-refund), one
+// chosen by a ternary over two tables, a property read off an event or a
+// queued payload (`sale.table`, `unitHome.current`, the outbox in
+// src/ui/measurements.tsx). Those are still listed, every run. A check that
+// pretends to know which table a write went to is worse than one that says it
+// cannot tell.
+//
+// The safety net under all of it is in scanFile: a write that comes back
+// having named NO column and admitted NO gap is reported anyway. Every shape
+// above says so when it gives up; that invariant is what catches the next
+// shape somebody adds and forgets to.
+//
 //     node scripts/check-schema.mjs             the whole check
 //     node scripts/check-schema.mjs --offline   app vs repo only, no credentials
 //     node scripts/check-schema.mjs --list      what it covers, table by table
@@ -681,13 +717,18 @@ function readRow(arg, table, method, add, file, depth, origin, at, pick) {
     const literal = text.slice(0, readBalanced(text, 0));
     if (pick) {
       // The value of one named property of this literal, and nothing else.
-      const body = literal.slice(1, -1);
-      for (const item of splitTopLevel(body)) {
+      // What is written here wins over anything spread in, exactly as it does
+      // at runtime, and a property arriving from two spreads is not read at
+      // all rather than read from whichever came first.
+      const items = splitTopLevel(literal.slice(1, -1));
+      for (const item of items) {
         const m = new RegExp(`^(?:'${pick}'|"${pick}"|${pick})\\s*:`).exec(item);
         if (m) return again(item.slice(m[0].length), file, at, null);
-        if (item.startsWith('...') || item.trim() === pick) return again(item.replace(/^\.\.\./, ''), file, at, item.trim() === pick ? null : pick);
+        if (item.trim() === pick) return again(pick, file, at, null);
       }
-      return giveUp(`nothing here is ${pick}`);
+      const spreads = items.filter((i) => i.startsWith('...'));
+      if (spreads.length === 1) return again(spreads[0].slice(3), file, at, pick);
+      return giveUp(`nothing here is the ${pick} it is asked for`);
     }
     const { keys, spreads, gaps } = objectKeys(literal);
     for (const k of keys) add(table, k);
