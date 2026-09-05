@@ -101,6 +101,30 @@ ok(/\bapp\b/.test(draftMessage('Sam', dQuiet)),
 ok(!/you have not|you haven't|didn't train|did not train/i.test(draftMessage('Sam', dQuiet)),
   'and never states that they did not train, which is the thing the record does not know');
 
+// ── the span in the draft may not outrun the span that was read ───────────
+//
+// `dNothing` joined 200 days ago and has nothing in the 56 days this verdict
+// was read over. The draft used to open "I've not had anything come through in
+// the app from you since you joined 200 days ago" — a message SENT TO THE
+// CLIENT, in the coach's name, about 144 days nobody looked at and that the
+// client may have spent training. The window is the only span the record can
+// stand behind.
+{
+  const draft = draftMessage('Sam', dNothing);
+  ok(!/200 days/.test(draft),
+    'a draft never claims silence back to the day they joined when the record was only read 56 days');
+  ok(draft.includes(`last ${DEFAULT_WINDOWS.historyDays} days`),
+    'it states the window that was actually read instead');
+  // The wording this branch was written for survives for the client it was
+  // written about: one whose whole record is inside the window.
+  const fresh = draftMessage('Sam', D([], agoIso(12)));
+  ok(/since you joined 12 days ago/.test(fresh),
+    'a client who joined inside the window is still addressed from the day they joined');
+  const today = draftMessage('Sam', D([], agoIso(0)));
+  ok(!/last \d+ days|since you joined/.test(today),
+    'and somebody added this morning is given no span at all rather than a fortnight they were not here for');
+}
+
 // The caveat is the ONE place the three explanations are named, and it must
 // name all three — a caveat that mentions injury and not money is a caveat that
 // has been edited down, which is how it ends up saying nothing.

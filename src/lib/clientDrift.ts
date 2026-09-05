@@ -122,6 +122,23 @@ export interface Drift {
   quietDays: number | null;
   /** Days of record this client has, from `since` or their first event. */
   observedDays: number | null;
+  /**
+   * How far back the events behind this verdict were actually read, in days —
+   * `windows.historyDays`, carried on the verdict rather than left with the
+   * caller.
+   *
+   * NO STATEMENT OF SILENCE MAY EXCEED IT. `observedDays` is measured from the
+   * day the client joined the book and has no ceiling; the events are read
+   * `historyDays` back and no further (`readClientActivity` bounds every one of
+   * its four reads on that window). For anybody who joined before that window
+   * opened the two are different numbers, and the sentences below were printing
+   * the first: a client of two years who stopped training in June read
+   * "Nothing recorded in 730 days on your book", and the coach's draft to them
+   * said "I've not had anything come through in the app from you since you
+   * joined 730 days ago". Both are claims about hundreds of days nobody looked
+   * at, and the second one is sent to the person who trained through them.
+   */
+  readSpanDays: number;
   /** How long they have been silent, for ordering the unknown band. Null when
    *  even that is unknowable. */
   silentDays: number | null;
@@ -301,6 +318,7 @@ export function assessDrift(
     score: null,
     quietDays,
     observedDays,
+    readSpanDays: windows.historyDays,
     silentDays,
     recentActiveDays,
     baselineActiveDays,
@@ -337,7 +355,21 @@ function unknownReason(
   eventCount: number,
 ): string {
   if (eventCount === 0) {
-    if (d.observedDays != null) {
+    // ── how far back the silence may be claimed to run ─────────────────
+    //
+    // `observedDays` counts from the day they joined the coach's book. The
+    // events are read `historyDays` back and no further, so for a client who
+    // joined before that window opened the two are different numbers and only
+    // the smaller one is evidence. This branch was printing the larger:
+    // "Nothing recorded in 730 days on your book — no check-ins, no logged
+    // workouts, no visits" about somebody who trained for two years and
+    // stopped in June, on the Clients list, on their client screen, in the
+    // nudge card, and stored verbatim into `client_nudges.observed`.
+    //
+    // The `observedDays` wording is kept for the client it was written for —
+    // the new one, whose whole record IS inside the window — and everybody
+    // older falls back to the window, which is what was actually looked at.
+    if (d.observedDays != null && d.observedDays <= windows.historyDays) {
       // ── the day they joined ──────────────────────────────────────────
       // `observedDays` floors, so somebody added this morning is 0, and the
       // sentence read "Nothing recorded in 0 days on your book" — on the

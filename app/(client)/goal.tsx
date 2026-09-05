@@ -28,6 +28,7 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
 import { weightIn, weightToKg, weightDeltaIn, kgToLb, readNumber, type WeightUnit } from '../../src/lib/units';
 import { deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
@@ -46,7 +47,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   progressOf, projectionOf, goalLabel, isMeasured, isOverdue, sortGoals,
   GOAL_METRIC, MEASURED_KINDS, MIN_TREND_DAYS,
-  type GoalKind, type GoalTarget, type MeasuredKind, type Point,
+  type GoalKind, type GoalProgress, type GoalTarget, type MeasuredKind, type Point,
 } from '../../src/lib/goalTargets';
 import { BACK_ICON } from '../../src/ui/direction';
 
@@ -173,7 +174,38 @@ export default function Goal() {
   // `c.status` is the worst of the profile and scans reads, which is the right
   // one to ask: the manual weight lives on the profile and the scans on their
   // own table, and either failing leaves a hole where a reading should be.
-  const readingsWhole = c.status === 'ready';
+  const readingsWhole = isWhole(c.status);
+  /**
+   * How far along one measured goal is, or null when the record cannot say.
+   *
+   * Gated on the READINGS read, not only on whether `progressOf` could produce
+   * a number, and that gate is the fix rather than a precaution.
+   *
+   * `progressOf` measures from a baseline — the reading taken at or before the
+   * goal was set — and the scans read is newest-first with a cap
+   * (src/ui/clientData.tsx orders `taken_at` descending before `capped()`), so
+   * under 'partial' the OLDEST readings are the ones missing. That is exactly
+   * the end the baseline comes from: `startPoint` finds nothing at or before
+   * the goal and falls back to the earliest reading that survived, which is one
+   * taken AFTER the target was set. The percentage that comes out is not a
+   * rougher figure, it is a different one, and it is printed as "68% of the way"
+   * with an arc drawn round it.
+   *
+   * The screen already knew this — `noReadingLine` has carried the sentence for
+   * 'partial' since it was written ("how far along this is cannot be worked out
+   * from what came back") — and could never reach it, because the sentence was
+   * only ever offered where `progressOf` returned null, and a truncated read is
+   * by definition one with more than a thousand readings in it. The condition
+   * was on the wrong thing.
+   *
+   * app/(trainer)/client-goals.tsx already refuses on exactly this status, in
+   * as many words: "a percentage worked out from an unknown fraction of them
+   * would be a wrong number rather than a rough one". A member and their coach
+   * looking at the same goal must not read two different numbers off it — the
+   * whole reason the shaping rules live in src/lib/clientGoals.ts.
+   */
+  const progressFor = (x: GoalTarget): GoalProgress | null =>
+    readingsWhole && isMeasured(x) ? progressOf(x, seriesFor(x.kind as MeasuredKind)) : null;
   /** Why a measured goal has no progress, in the reader's terms. */
   const noReadingLine = (k: MeasuredKind) =>
     readingsWhole
@@ -188,13 +220,13 @@ export default function Goal() {
   const open = goals.filter((x) => !x.achievedAtISO);
   // The one to put at the top: the nearest-due open goal that actually has
   // readings behind it. A goal we cannot measure makes a poor hero.
-  const lead = open.find((x) => isMeasured(x) && progressOf(x, seriesFor(x.kind as MeasuredKind)) !== null);
+  const lead = open.find((x) => progressFor(x) !== null);
   // Whether there was anything for the hero to have been about. Without this,
   // a member whose only goals are unmeasurable ("squat without my knee
   // complaining") would be shown a banner about readings that could not be read
   // for a goal no reading was ever going to measure.
   const measuredOpen = open.some((x) => isMeasured(x));
-  const leadProgress = lead ? progressOf(lead, seriesFor(lead.kind as MeasuredKind)) : null;
+  const leadProgress = lead ? progressFor(lead) : null;
 
   const save = async () => {
     if (saving) return;
@@ -362,8 +394,7 @@ export default function Goal() {
                 </Text>
               ) : goals.map((x) => {
                 const measured = isMeasured(x);
-                const series = measured ? seriesFor(x.kind as MeasuredKind) : [];
-                const prog = measured ? progressOf(x, series) : null;
+                const prog = progressFor(x);
                 const unit = measured ? goalUnit(x.kind as MeasuredKind, wu) : '';
                 const overdue = isOverdue(x, Date.now());
                 // On this phone and not yet on the record. Said on the row,

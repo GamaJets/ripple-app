@@ -20,7 +20,10 @@
 //     So the wrapper refuses, per src/lib/rowCap.ts.
 //
 // Compile with tsc, run with node.
-import { fetchClientActivity, readClientActivity, isQueryableId } from './clientDrift';
+import {
+  fetchClientActivity, readClientActivity, isQueryableId,
+  assessDrift, DEFAULT_WINDOWS,
+} from './clientDrift';
 import { ROW_CAP } from './rowCap';
 
 const errors: string[] = [];
@@ -105,6 +108,39 @@ function stub(rowsFor: (table: string) => any[]): { from: (t: string) => any } {
   eq(read.notAsked.length, 1, 'a roster of one hand-added client is not a failed read');
   eq(read.truncated, false, 'and nothing was truncated, because nothing was asked');
   eq(read.byClient[LOCAL]?.length, 0, 'their entry is empty, and `notAsked` is what says that emptiness is not an answer');
+}
+
+/* ── a silence may not be claimed for longer than the record was read ──────
+ *
+ * `readClientActivity` reads `historyDays` back and no further. `observedDays`
+ * runs from the day the client joined the coach's book and has no ceiling. A
+ * client of two years who stopped training in June comes back with no events —
+ * and the verdict used to print the SECOND number: "Nothing recorded in 730
+ * days on your book", on the Clients list, on their client screen, in the
+ * nudge card, and stored verbatim into `client_nudges.observed`. Seven hundred
+ * of those days are days nobody looked at, and most of them are days that
+ * client trained.
+ */
+{
+  const NOW = Date.parse('2026-09-01T12:00:00Z');
+  const old = assessDrift({ clientId: 'c', events: [], since: '2024-09-01T00:00:00Z' }, NOW);
+  ok(old.observedDays != null && old.observedDays > DEFAULT_WINDOWS.historyDays,
+    'the fixture is the case in question: on the book far longer than the read reaches back');
+  ok(!new RegExp(`\\b${old.observedDays}\\b`).test(old.reason),
+    'a two-year client silent for a fortnight is not described as two years of nothing');
+  ok(new RegExp(`last ${DEFAULT_WINDOWS.historyDays} days`).test(old.reason),
+    'the sentence names the window that was actually read');
+  eq(old.readSpanDays, DEFAULT_WINDOWS.historyDays,
+    'and the verdict carries that window, so a caller writing a message from it cannot exceed it either');
+
+  // The wording this branch was written for survives: a genuinely new client
+  // whose whole record IS inside the window.
+  const fresh = assessDrift({ clientId: 'c', events: [], since: '2026-08-20T00:00:00Z' }, NOW);
+  ok(/12 days on your book/.test(fresh.reason),
+    'a client whose whole record fits inside the window is still described from the day they joined');
+  const today = assessDrift({ clientId: 'c', events: [], since: '2026-09-01T06:00:00Z' }, NOW);
+  ok(/since today/.test(today.reason),
+    'and somebody added this morning is not charged with a gap they have not had time to leave');
 }
 
 if (errors.length) {

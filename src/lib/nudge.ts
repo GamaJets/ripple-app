@@ -350,9 +350,25 @@ export function draftMessage(name: string | null | undefined, d: Drift): string 
   // Nothing at all on record, ever. The only honest opening is that we have
   // nothing, not that they have done nothing.
   if (d.quietDays == null) {
-    const span = d.observedDays != null && d.observedDays > 0
-      ? ` since you joined ${plural(d.observedDays, 'day')} ago`
-      : '';
+    // Bounded by what was READ, not by how long they have been on the book.
+    //
+    // `observedDays` runs from the day the coaching relationship started and
+    // has no ceiling; the events this verdict was reached on were read
+    // `readSpanDays` back and no further. So for a client who joined before
+    // that window opened, "since you joined 200 days ago" is a claim about the
+    // 144 days nobody looked at — sent to the client, in the coach's name,
+    // about months they spent training. The window is the honest span, and the
+    // "since you joined" wording survives only where their whole record is
+    // inside it, which is the new client it was written for.
+    // A client added today has no span worth stating in either vocabulary, and
+    // "in the last 56 days" said to somebody who joined this morning reads as
+    // a reproach for a fortnight they were not here for. They keep the bare
+    // sentence they always had.
+    const span = d.observedDays === 0
+      ? ''
+      : d.observedDays != null && d.observedDays > 0 && d.observedDays <= d.readSpanDays
+        ? ` since you joined ${plural(d.observedDays, 'day')} ago`
+        : ` in the last ${plural(d.readSpanDays, 'day')}`;
     return `${hi}I've not had anything come through in the app from you${span}. `
       + `That might just be the app rather than you. How have you been getting on?`;
   }
