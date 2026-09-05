@@ -441,10 +441,37 @@ export default function Home() {
   const startedLeft = checklistLeft(started);
   const startedNext = nextTodo(started);
 
+  /* ── the three answers Fuel Today is built from, and whose they are ───────
+   *
+   * A weight and a body fat, which this already checked — and the member's own
+   * GOAL and DIET, which it did not. Both of those live on the `clients` row
+   * and nowhere else: src/ui/clientData.tsx deletes the local profile cache at
+   * launch under USE_SUPABASE, so a failed profile read leaves them at their
+   * constructed defaults, 'muscle' and 'meat'. Through src/lib/nutrition.ts
+   * that is a twelve per cent surplus and a 27% fat split — so a member who is
+   * cutting on keto, whose profile read failed, was shown a bulking day's
+   * protein, carb and fat meters headed "Fuel Today" and read them as theirs.
+   *
+   * The weight check does not catch it. Weight and body fat fall back to the
+   * latest SCAN, a different read on a different table, which is routinely fine
+   * when the profile read is not.
+   *
+   * And the coach's half of the same sum. `get()` returns null identically for
+   * "your coach has not adjusted you" and "we could not find out whether they
+   * have" — src/ui/coachNutrition.tsx exists to make that distinction, and the
+   * second one silently serves the uncorrected figure. Same guard the Meals tab
+   * and the Food Log already carry.
+   *
+   * Under any of these the section is not drawn at all, which is what this
+   * screen already does for a member with no weight, with the reason said in a
+   * Notice above rather than as a heading over nothing.
+   */
+  const targetInputsUnknown = !isWhole(c.profileStatus)
+    || (!solo && coachNutrition.status === 'error' && nutriAdjust == null);
   // null until there is a body to scale to. This used to run on the 70 kg /
   // 20% placeholder from clientData and present the result as the client's
   // own daily targets.
-  const macros = (c.weightKg != null && c.bodyFatPct != null)
+  const macros = (c.weightKg != null && c.bodyFatPct != null && !targetInputsUnknown)
     ? applyCoachAdjust(macrosFor({ weightKg: c.weightKg, bodyFatPct: c.bodyFatPct, activity: c.activity, goal: c.goal, diet: c.diet }), solo ? undefined : (nutriAdjust || undefined))
     : null;
   // ── What this screen draws before there is anything to draw ──────────────
@@ -784,6 +811,20 @@ export default function Home() {
           // driven by the sessions themselves is unaffected.
           <Notice tone={t.warn} kicker="Today" title="You have more training logged than we can read at once"
             note="Your streak, this week's sessions, your tonnage and your PRs are shown as dashes because they would be counted over part of your history rather than all of it. Nothing is missing from your log." />
+        ) : null}
+        {/* Fuel Today is simply absent when its inputs could not be read, which
+            is right — a meter drawn from the defaults would be somebody else's
+            day — but absent on its own reads as "you have no targets". This
+            says which read is missing. Not shown while one is still in flight:
+            an apology for a request that is proceeding normally is a nag. */}
+        {targetInputsUnknown && c.profileStatus !== 'loading' && coachNutrition.status !== 'loading' ? (
+          !isWhole(c.profileStatus) ? (
+            <Notice tone={t.warn} kicker="Today" title="We couldn’t read what you are training for"
+              note="Your goal and how you eat are what split a day into protein, carbs and fat, so Fuel Today is left out rather than drawn from the defaults. Pull down to try again." />
+          ) : (
+            <Notice tone={t.warn} kicker="Today" title="We couldn’t read your coach’s adjustment"
+              note="Fuel Today is left out rather than showing the uncorrected figures as your plan. Pull down to try again." />
+          )
         ) : null}
 
         {/* ── the one card: today's action ────────────────────────────────── */}

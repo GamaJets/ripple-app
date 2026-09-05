@@ -65,7 +65,7 @@ import {
 // The vision model is asked for a field called `weightKg` and hands back a bare
 // number off a sheet that may be printed in pounds; the OCR text of the same
 // photograph carries the word. See src/lib/inbodyVision.ts.
-import { reconcileInBodyUnit, visionMassKg } from '../../src/lib/inbodyVision';
+import { reconcileInBodyUnit, visionMassKg, visionMetricsKg } from '../../src/lib/inbodyVision';
 import { useTheme } from '../../src/ui/components';
 import { useToast } from '../../src/ui/toast';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -762,14 +762,22 @@ export default function Scans() {
       if (!read.recorded) { setSheetOutcome('record-failed'); return; }
       if (v && (v.weightKg != null || v.bodyFatPct != null || v.skeletalMuscleKg != null)) {
         setSheetOutcome('read');
-        setScanMx(v.metrics ?? null);
         // What unit the model's masses are in, decided from the printed words
         // and from whether the model's number matches the printed figure or
         // the converted one. Unknown is a real answer and is said out loud
         // rather than resolved by a guess.
+        //
+        // Reached BEFORE the composition breakdown is kept, which it was not.
+        // `setScanMx(v.metrics)` stood above this line and stored the model's
+        // fat mass, lean mass, protein, minerals, body water and five
+        // segmental figures exactly as they arrived — so a pounds-configured
+        // InBody had its weight and its skeletal muscle converted and the
+        // other ten masses filed as kilograms, 2.2× too large, in the jsonb
+        // column the coach's roster reads too. See `visionMetricsKg`.
         const verdict = reconcileInBodyUnit({
           visionWeight: v.weightKg, sheetWeight: sheet.weight, sheetUnit: sheet.unit,
         });
+        setScanMx(visionMetricsKg(v.metrics, verdict) ?? null);
         const vwKg = visionMassKg(v.weightKg, verdict);
         const vmKg = visionMassKg(v.skeletalMuscleKg, verdict);
         if (vwKg != null) setWt(fieldFromKg(vwKg));

@@ -110,3 +110,68 @@ export function visionMassKg(value: number | null | undefined, verdict: UnitVerd
   if (value == null || !Number.isFinite(value)) return null;
   return verdict.convert ? lbToKg(value) : value;
 }
+
+/**
+ * Which fields of `ScanMetrics` are MASSES off the same printout, and therefore
+ * carry the same unit as the weight the verdict was reached about.
+ *
+ * ── The defect this closes ────────────────────────────────────────────────
+ *
+ * `reconcileInBodyUnit` and `visionMassKg` were applied to exactly two figures
+ * — `weightKg` and `skeletalMuscleKg` — in app/(client)/scans.tsx, and the
+ * composition breakdown that arrives in the same model answer was stored raw.
+ * supabase/functions/vision-analyze asks for every one of these "in kg" in one
+ * prompt, so on a US-configured InBody the model transcribes ONE printout in
+ * pounds and ten of the thirteen fields — every one that is a mass — were then
+ * filed as kilograms.
+ *
+ * What the member saw: weight 81.8 kg beside "Lean Mass 137.5 kg" and "Fat
+ * Mass 42.9 kg" on the Progress screen's composition card — a lean mass larger
+ * than the whole body it belongs to — with every segmental lean figure and
+ * every month-on-month delta on the same 2.2× scale. `scans.metrics` is a
+ * stored jsonb column, so the wrong figures persist, and src/ui/roster.tsx
+ * carries the newest of them (`st[id].mx`) into the coach's own screens.
+ *
+ * ── Which fields, and which are deliberately left alone ───────────────────
+ *
+ * `visceralFat` is a LEVEL, `inbodyScore` is POINTS and `bmr` is KCAL. None of
+ * the three has a mass unit and converting them would be the mirror of the bug
+ * — a visceral fat level of 12 filed as 5.4.
+ *
+ * `bodyWaterL` IS converted, and that is the one judgement here. An InBody
+ * configured for pounds prints Total Body Water in pounds too, on the same
+ * sheet and in the same column as the masses above it; the field is named for
+ * litres because that is what a metric sheet prints and what the app charts.
+ * A litre of body water is a kilogram to well inside the precision the machine
+ * reports, so the pound reading becomes litres by the same factor. Leaving it
+ * would put "Body Water 108.9 L" against an 81.8 kg body.
+ */
+const VISION_MASS_KEYS = [
+  'fatMassKg', 'leanMassKg', 'bodyWaterL', 'proteinKg', 'mineralsKg',
+  'leanArmLKg', 'leanArmRKg', 'leanTrunkKg', 'leanLegLKg', 'leanLegRKg',
+] as const;
+
+/**
+ * The model's whole composition breakdown, in the units the scan row stores.
+ *
+ * Undefined in, undefined out — a sheet the model read nothing off must not
+ * become an object full of nulls, because `addScan` decides whether to write
+ * the `metrics` column at all by asking whether any value in it is non-null.
+ *
+ * Under `convert: false` this returns the metrics unchanged in value; a fresh
+ * object is still built rather than the input being handed back, so a caller
+ * cannot come to depend on identity that only holds on one of the two paths.
+ */
+export function visionMetricsKg<T extends Record<string, number | undefined>>(
+  metrics: T | null | undefined,
+  verdict: UnitVerdict,
+): T | undefined {
+  if (metrics == null) return undefined;
+  const out: Record<string, number | undefined> = { ...metrics };
+  if (!verdict.convert) return out as T;
+  for (const key of VISION_MASS_KEYS) {
+    const v = out[key];
+    if (typeof v === 'number' && Number.isFinite(v)) out[key] = lbToKg(v);
+  }
+  return out as T;
+}

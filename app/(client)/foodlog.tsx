@@ -118,6 +118,38 @@ export default function FoodLog() {
  // Only for a coached member. Nobody adjusts a solo member's macros, so the
  // read failing tells us nothing we needed.
  const adjustUnknown = !soloEater && coachNutrition.status === 'error' && _adj == null;
+ /* ── the two answers the target is SHAPED by, and whether they were read ──
+  *
+  * `cd.goal` starts at 'muscle' and `cd.diet` at 'meat'. Both come from exactly
+  * one place, the `clients` row, and under USE_SUPABASE src/ui/clientData.tsx
+  * deletes the local profile cache at launch — so there is no second source and
+  * a failed profile read leaves this screen holding "building muscle, eats
+  * meat": a perfectly ordinary member, indistinguishable from a real one.
+  *
+  * Those two are not decoration on the figure, they ARE the figure.
+  * `macrosFor` reads the goal straight into GOAL_ADJ (fatloss −20%, muscle
+  * +12%) and the diet straight into the fat split (keto 65%, paleo 40%,
+  * everything else 27%). A member cutting on keto whose profile read failed was
+  * shown a bulking target with a third of the fat allowance under the words
+  * "Calories Remaining", on the screen they eat against meal by meal, all day.
+  *
+  * Nothing above catches it. `dayTarget` returns null only for a missing weight
+  * or body fat, and both of those fall back to the LATEST SCAN — a different
+  * read, on a different table, which is usually fine when the profile read is
+  * not. `adjustUnknown` is the coach's half of the same sum and says nothing
+  * about the member's own answers.
+  *
+  * app/(client)/nutrition.tsx closed this for the Meals tab (`foodRulesUnknown`
+  * there) and argues it at length. This is the same door on the other screen.
+  * 'partial' counts as unread with 'error', for the reason that file gives:
+  * half a profile is not a basis for computing the other half.
+  */
+ const foodRulesUnknown = !isWhole(cd.profileStatus);
+ // Which of the two it is. `isWhole` is false while the read is still in
+ // flight, and "we couldn't read your profile" printed over a read that is
+ // proceeding perfectly well is the mistake `dayReading` below already exists
+ // to avoid on the food log itself.
+ const foodRulesReading = cd.profileStatus === 'loading';
  // null until there is a body to scale to — the 70 kg / 20% placeholder that
  // used to stand in produced a target belonging to nobody.
  const goalTracker = useGoalTracker();
@@ -125,7 +157,7 @@ export default function FoodLog() {
  // The day type is not offered here. Zero is the Off day the Meals tab's picker
  // starts on, so the two screens agree for every member who has not moved it —
  // and a member who has is reading a what-if on the tab that offers it.
- const target = adjustUnknown ? null : (dayTarget({
+ const target = (adjustUnknown || foodRulesUnknown) ? null : (dayTarget({
   weightKg: cd.weightKg, bodyFatPct: cd.bodyFatPct, activity: cd.activity,
   goal: cd.goal, diet: cd.diet,
   coachAdjust: soloEater ? null : (_adj ?? null),
@@ -710,11 +742,12 @@ export default function FoodLog() {
    ? 'You have logged more today than this screen can read in one go, so what is left in the day cannot be worked out from it. What is listed below is real.'
    : "We couldn't read all of today's log, so anything already eaten may be missing from this. What is listed below is real; the number left in the day is not something we can work out yet.")
   : (target ? `${num(tot.k)} of ${num(target.kcal)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''}`
-   // Two reasons there is no target, and only one of them is the member's to
+   // Three reasons there is no target, and only one of them is the member's to
    // fix. Sending somebody to add a weight they already have, because their
-   // coach's adjustment could not be read, is the app blaming them for its own
-   // failed request.
+   // coach's adjustment or their own profile could not be read, is the app
+   // blaming them for its own failed request.
    : adjustUnknown ? `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · we couldn’t read your coach’s adjustment, so there is no target to show`
+   : foodRulesUnknown ? `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · ${foodRulesReading ? 'reading what you are training for and how you eat' : 'we couldn’t read what you are training for or how you eat, and the target is worked out from both'}`
    : `${num(tot.k)} kcal eaten${burned ? ` · ${num(burned)} kcal burned` : ''} · add your weight for a target`)}
  arc={dayWhole && target && target.kcal ? tot.k / target.kcal : undefined}
  arcLabel="of today's calories eaten"
@@ -738,6 +771,17 @@ export default function FoodLog() {
  {!target && adjustUnknown ? (
   <Text style={{ ...ty.label, color: t.ink3 }}>
    We couldn’t read your coach’s adjustment to your macros, so these bars would be measuring you against the generic figures rather than your plan. They are left out rather than shown as yours.
+  </Text>
+ ) : null}
+ {/* And the member's own half of the same sum. Their goal and their diet are
+     what split the calories into protein, carbs and fat — a bar drawn from the
+     defaults would be measuring somebody who is cutting on keto against a
+     meat-eating bulk. */}
+ {!target && !adjustUnknown && foodRulesUnknown ? (
+  <Text style={{ ...ty.label, color: t.ink3 }}>
+   {foodRulesReading
+    ? 'Reading what you are training for and how you eat — your protein, carb and fat targets are worked out from both.'
+    : 'We couldn’t read what you are training for or how you eat, and your protein, carb and fat targets are worked out from both. Bars drawn without them would be somebody else’s split, so they are left out rather than shown as yours. Pull down to try again.'}
   </Text>
  ) : null}
  {target && !dayWhole ? (

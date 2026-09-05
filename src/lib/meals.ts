@@ -57,19 +57,63 @@ export const ALLERGENS: { id: Allergen; label: string }[] = [
  * being flagged rather than towards being fed to somebody.
  */
 const DAIRY_LOOKALIKE = /\b(peanut|almond|cashew|hazelnut|pistachio|pecan|walnut|macadamia|nut|seed|sunflower|sesame|coconut|soy|soya|oat|rice|hemp|pea|cocoa|shea)[\s-]+(butters?|milks?|creams?|yogurts?|yoghurts?|cheeses?)\b/g;
+/**
+ * Foods whose NAME contains none of the words above and which are made of the
+ * thing anyway.
+ *
+ * The tests above are word tests, and a word test only finds an allergen that
+ * is spelled out. Four components in this very file are not:
+ *
+ *   · `halloumi` and `paneer` are cheeses. Both sit in the vegetarian and keto
+ *     protein pools, both list their ingredient under the "Dairy & Eggs"
+ *     department — so the record already knew — and neither the name nor the
+ *     ingredient contains "cheese" or "milk". A member who ticked Dairy was
+ *     served "Harissa halloumi with roast potatoes & kale" as a plate the
+ *     planner had filtered FOR them, with no mark on the row, because
+ *     `mealAllergens` reads the same words and found none either.
+ *   · `seitan` is wheat gluten. Not a food that contains gluten — the word is
+ *     a synonym for it — and it is in the vegan and vegetarian protein pools,
+ *     which is exactly where somebody avoiding gluten does most of their
+ *     eating.
+ *   · `pesto` is basil, olive oil, garlic, PARMESAN and PINE NUTS. Its own
+ *     `d:` list excludes vegan, so this file already treats it as containing
+ *     dairy; nothing said so to the member.
+ *   · `teriyaki` is a soy-sauce glaze. Soy is the base ingredient, not a trace.
+ *   · `Katsu curry` is a roux. Japanese curry sauce is thickened with a
+ *     wheat-flour roux — every commercial block sold as one lists wheat and
+ *     most carry a gluten warning — and this component's single ingredient is
+ *     "Curry sauce", which no word test can tell from a gluten-free one. It is
+ *     a softer call than seitan, which IS gluten, and it is made the same way
+ *     the paragraph below says to make it.
+ *
+ * Same conservative direction as `DAIRY_LOOKALIKE` above, pointing the other
+ * way: that strip removes a false flag from something safe, this adds the flag
+ * to something that was reading as safe. Over-flagging costs a member one
+ * option out of a pool of a dozen. Under-flagging is what this whole section
+ * of the file exists to stop.
+ *
+ * Anchored with `\b` on both ends so a longer word cannot match by accident.
+ */
+const NAMED_DAIRY = /\b(halloumi|paneer|pesto)\b/;
+const NAMED_GLUTEN = /\b(seitan|katsu)\b/;
+const NAMED_NUTS = /\bpesto\b/;
+const NAMED_SOY = /\bteriyaki\b/;
 function componentAllergens(comp: Comp): Allergen[] {
   const text = (comp.n + ' ' + comp.ing.map((i) => i[0]).join(' ')).toLowerCase();
   const out: Allergen[] = [];
   // `buttermilk` is named because the boundaries that save `butternut` would
   // otherwise lose it: it is one word, and neither `\bbutter\b` nor `\bmilk\b`
   // is inside it.
-  if (/\b(milk|buttermilk|yogurt|yoghurt|cheese|whey|butter|creamy?|greek)\b/.test(text.replace(DAIRY_LOOKALIKE, ' ')))
+  if (/\b(milk|buttermilk|yogurt|yoghurt|cheese|whey|butter|creamy?|greek)\b/.test(text.replace(DAIRY_LOOKALIKE, ' '))
+    || NAMED_DAIRY.test(text))
     out.push('dairy');
-  if (/bread|pasta|couscous|wheat|barley|\brye|tortilla|wrap|\bbun|noodle|cracker|\boat|granola|cereal|toast/.test(text)) out.push('gluten');
-  if (/almond|walnut|cashew|pecan|macadamia|peanut|hazelnut|pistachio|\bnut|trail mix/.test(text)) out.push('nuts');
+  if (/bread|pasta|couscous|wheat|barley|\brye|tortilla|wrap|\bbun|noodle|cracker|\boat|granola|cereal|toast/.test(text)
+    || NAMED_GLUTEN.test(text)) out.push('gluten');
+  if (/almond|walnut|cashew|pecan|macadamia|peanut|hazelnut|pistachio|\bnut|trail mix/.test(text)
+    || NAMED_NUTS.test(text)) out.push('nuts');
   if (/prawn|shrimp|crab|lobster|scallop|mussel|oyster|shellfish/.test(text)) out.push('shellfish');
   if (/\begg/.test(text)) out.push('egg');
-  if (/tofu|tempeh|edamame|\bsoy|miso/.test(text)) out.push('soy');
+  if (/tofu|tempeh|edamame|\bsoy|miso/.test(text) || NAMED_SOY.test(text)) out.push('soy');
   return out;
 }
 /**

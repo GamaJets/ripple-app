@@ -69,6 +69,47 @@ ok(has('dairy', 'ice cream', 'Ice cream'), 'and so is ice cream');
 // front of another word still counts as dairy.
 ok(has('dairy', 'kefir milk drink', 'Kefir milk'), 'an unrecognised prefix still leaves the dairy word flagged');
 
+/* ── the foods that ARE the allergen and never say so ────────────────────── */
+//
+// A word test only finds an allergen that is spelled out, and four components
+// in src/lib/meals.ts spell out something else entirely. Every one of them was
+// served to a member who had excluded it, on a plate the planner had filtered
+// FOR them, with no mark on the row — because `mealAllergens` reads the same
+// words the pool filter does and found nothing in either.
+//
+// These are the rows, exactly as they appear in the component tables.
+
+ok(has('dairy', 'halloumi', 'Halloumi'), 'halloumi is a cheese');
+ok(has('dairy', 'paneer', 'Paneer'), 'paneer is a cheese');
+ok(has('gluten', 'seitan', 'Seitan'), 'seitan is wheat gluten — the word is a synonym for it');
+// Softer than seitan and made the same way the file says to make it: Japanese
+// curry sauce is thickened with a wheat-flour roux, and this component's only
+// ingredient is the words "Curry sauce", which no word test can tell from a
+// gluten-free one. Adding it changes no poolGaps warning — checked by hashing
+// every diet x every subset of the six allergens with and without the rule.
+ok(has('gluten', 'Katsu curry', 'Curry sauce'), 'katsu curry sauce is a wheat-flour roux');
+ok(has('dairy', 'Pesto', 'Pesto'), 'pesto has parmesan in it, which is why its own diet list excludes vegan');
+ok(has('nuts', 'Pesto', 'Pesto'), 'and pine nuts');
+ok(has('soy', 'Teriyaki', 'Teriyaki sauce'), 'teriyaki is a soy-sauce glaze');
+
+// Through the assembled dish, which is the string a member actually reads —
+// `mealAt` composes "Harissa halloumi with roast potatoes & kale" and the mark
+// under it is read off that whole name plus its ingredients.
+ok(has('dairy', 'Harissa halloumi with roast potatoes & kale', 'Halloumi', 'Harissa'),
+  'the mark survives into the composed dinner name');
+ok(has('gluten', 'Teriyaki seitan with white rice & broccoli', 'Seitan', 'Teriyaki sauce'),
+  'and so does the gluten in a vegan protein');
+
+// The same matcher is what `dishAllergens` runs over a restaurant dish and a
+// search result, where there are no ingredients at all and the NAME is the
+// whole of the evidence. src/lib/restaurant.ts ships both of these.
+ok(has('dairy', 'Halloumi & quinoa salad'), 'a dish named for its cheese is marked from the name alone');
+ok(has('soy', 'Chicken teriyaki + rice'), 'and so is the teriyaki on the Eating Out list');
+
+// Nothing widened by accident: these are the words the additions sit closest to.
+ok(!has('dairy', 'pan-seared cod', 'Cod fillet'), 'nothing else picked up a dairy mark');
+ok(!has('gluten', 'white rice', 'White rice (dry)'), 'and rice is still not gluten');
+
 /* ── and what the member is told ───────────────────────────────────────── */
 
 // The whole point of the fix. A vegan plan excluding dairy contains no dairy,

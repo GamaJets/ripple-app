@@ -146,6 +146,33 @@ eq(ageFromDob('not a date'), null, 'and neither is a string that is not one');
 eq(ageFromDob('1971-09-01', Date.parse('2026-09-01T12:00:00.000Z')), 55, 'a birthday reads as the age it is');
 eq(ageFromDob('1800-01-01', Date.parse('2026-09-01T12:00:00.000Z')), null, 'and an impossible age is refused rather than scaled against');
 
+// WHOLE years, and they turn over on the birthday. This was
+// `Math.round(years)`, which aged every member more than six months past their
+// last birthday up by one — so a member born in January 1990 was 37 in
+// September 2026 and their whole zone scale sat a beat low. It also disagreed
+// with src/lib/age.ts, which app/(client)/workouts.tsx uses for the SAME
+// member mid-set, so one reading could be Base in the session and Push on
+// Recovery.
+eq(ageFromDob('1990-01-15', Date.parse('2026-09-05T10:00:00.000Z')), 36,
+  'seven months past a birthday is still the age they turned, not the next one');
+eq(ageFromDob('1971-03-01', Date.parse('2026-09-05T10:00:00.000Z')), 55,
+  'and half a year past it does not round somebody up into a lower max heart rate');
+eq(maxHr(ageFromDob('1990-01-15', Date.parse('2026-09-05T10:00:00.000Z'))), 184,
+  'which is what the scale is actually built from');
+// LOCAL noon on each of the two days, not an instant with a Z on it: a fixed
+// UTC instant is a different calendar day in Auckland and in Los Angeles, so an
+// assertion about the day BEFORE a birthday written that way passes in one zone
+// and fails in the next. A date of birth is a calendar day in the reader's own
+// life — src/lib/localDate.ts — and this is that statement, tested the same way.
+eq(ageFromDob('1990-09-05', new Date(2026, 8, 4, 12).getTime()), 35,
+  'the day before a birthday, they are still the younger age');
+eq(ageFromDob('1990-09-05', new Date(2026, 8, 5, 12).getTime()), 36,
+  'and on the day itself they are not');
+// The one answer this file still gives on its own: a row that cannot describe a
+// living member is refused rather than drawn against.
+eq(ageFromDob('2027-01-01', Date.parse('2026-09-05T10:00:00.000Z')), null,
+  'a date of birth in the future is not an age');
+
 if (errors.length) {
   console.error(`hr.test.ts — ${errors.length} failure(s):`);
   for (const e of errors) console.error('  · ' + e);

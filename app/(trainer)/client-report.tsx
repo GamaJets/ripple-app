@@ -191,13 +191,25 @@ export default function ClientReport() {
         .eq('user_id', id)
         .order('performed_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit()),
+      // `.order('id')` behind each date, and it is not decoration. Both of
+      // these columns are a bare postgres DATE, so ties are the ordinary case
+      // rather than the rare one — `measurements` writes ONE ROW PER SITE PER
+      // DAY, so a member who tapes eight sites files eight rows carrying the
+      // identical `taken_at`. An order with ties in it is not an order: at the
+      // cap the server may break them however it likes and differently on the
+      // next read, so the oldest day on this document would carry a random
+      // subset of the sites measured that morning, and a second look would
+      // carry a different subset. Every other capped read of these two tables
+      // in the app already settles the ties this way — client-body.tsx:172,
+      // client-goals.tsx:246 and :262, clientData.tsx:642 — and this is the
+      // screen that turns them into a PDF a coach hands to somebody.
       supabase.from('scans').select(SCAN_COLS)
         .eq('client_id', id)
-        .order('taken_at', { ascending: false })
+        .order('taken_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit()),
       supabase.from('measurements').select(MEAS_COLS)
         .eq('user_id', id)
-        .order('taken_at', { ascending: false })
+        .order('taken_at', { ascending: false }).order('id', { ascending: false })
         .limit(capLimit()),
       supabase.from('clients').select(CLIENT_COLS).eq('id', id).limit(1),
     ]);

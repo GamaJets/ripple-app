@@ -23,6 +23,11 @@
 // picking better hex codes. So colour is never the only channel here: every
 // zone mark carries its NUMBER and its NAME, and colour merely confirms what
 // the text already said. Do not render a zone as a bare colour swatch.
+
+// The one answer in this codebase to "how old is this member". See ageFromDob
+// below for what happened while there were two.
+import { ageFromDob as ageFromDobExact } from './age';
+
 export type ZoneNo = 1 | 2 | 3 | 4 | 5;
 
 export interface ZoneDef {
@@ -137,13 +142,43 @@ export function splatPoints(z: ZoneSeconds): number {
 
 export interface HrSample { t: string; bpm: number }
 
-/** Age from a date-of-birth string (YYYY-MM-DD or ISO). null if unparseable. */
+/**
+ * Age from a date-of-birth string (YYYY-MM-DD or ISO). null if unparseable.
+ *
+ * ── Why this delegates rather than doing the arithmetic ───────────────────
+ *
+ * It used to be `Math.round((now − Date.parse(dob)) / 365.25 days)`, and there
+ * are two things wrong with that, one of which is not a rounding nicety.
+ *
+ * `Math.round` rounds to the NEAREST year, so every member more than six
+ * months past their last birthday was aged UP by one. Somebody born in
+ * January 1990 is 36 in September 2026 and this function said 37. That is not
+ * a display problem here: `maxHr` is 220 − age and every zone boundary is a
+ * percentage of it, so the whole scale on the Recovery screen and on the
+ * session heart-rate sheet sat one beat low.
+ *
+ * Worse, it disagreed with the app's OTHER answer to the same question.
+ * src/lib/age.ts counts whole years and rolls over on the birthday, and
+ * app/(client)/workouts.tsx — the live session runner, where a member watches
+ * the colour change mid-set — has always used it. So one member had two ages
+ * and two zone scales: a reading of 154 bpm was "Zone 3 · Base" inside the
+ * session and "Zone 4 · Push" on Recovery a tap later, and the splat points
+ * the two screens counted for the same hour did not agree either.
+ *
+ * `Date.parse` on a bare `YYYY-MM-DD` is also UTC midnight, which is the
+ * previous day west of Greenwich — the bug src/lib/localDate.ts exists for,
+ * and which `src/lib/age.ts` already reads through `dateParts` to avoid.
+ *
+ * There is one age in this codebase and it is that one. What stays here is the
+ * sanity bound: an unborn or 120-year-old member is a broken row rather than a
+ * scale to draw somebody's training zones against, and `null` sends the caller
+ * to `ASSUMED_AGE` with `hrScaleNote` saying so.
+ */
 export function ageFromDob(dob?: string | null, nowMs: number = Date.now()): number | null {
   if (!dob) return null;
-  const b = Date.parse(dob);
-  if (!isFinite(b)) return null;
-  const yrs = (nowMs - b) / (365.25 * 24 * 3600 * 1000);
-  return yrs > 0 && yrs < 120 ? Math.round(yrs) : null;
+  const age = ageFromDobExact(String(dob), new Date(nowMs));
+  if (age == null || !Number.isFinite(age)) return null;
+  return age > 0 && age < 120 ? age : null;
 }
 
 /** Seconds in each zone, inferred from the gap between consecutive samples. */

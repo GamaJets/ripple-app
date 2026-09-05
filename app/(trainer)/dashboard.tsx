@@ -947,6 +947,31 @@ export default function TrainerClients() {
   // happily write "you are not logging your meals" into a coaching summary the
   // coach sends on. See the read below.
   const [clientMeals, setClientMeals] = useState<{ name: string; kcal: number; via: string }[] | null>(null);
+  /**
+   * How many meals this client logged in the last seven days, or null when we
+   * could not find out.
+   *
+   * ── Why this is its own read and not `clientMeals.length` ────────────────
+   *
+   * It WAS `clientMeals.length`, and `clientMeals` is `.limit(6)` with no date
+   * bound at all. So the figure handed to `genSummary` below — described in its
+   * own comment as "Logged 9 meals this week" — could never exceed six and was
+   * never about a week. A client logging four meals a day for a month was
+   * reported to the model as having logged six; a client who logged six meals
+   * in March and nothing since was reported as having logged six as well. The
+   * model then wrote whichever of those it made of the number into a coaching
+   * summary the coach reads and sends on.
+   *
+   * A count over a truncated read is the thing src/lib/rowCap.ts exists about,
+   * arriving through a display limit rather than through PostgREST's own. So
+   * the count is asked for as a count — `head: true` returns no rows at all —
+   * and it is bounded to the window the sentence claims.
+   *
+   * `count == null` means unread, and `genSummary` says so to the model rather
+   * than sending a zero. Nothing on screen renders this; the list beside it is
+   * still the list.
+   */
+  const [mealsThisWeek, setMealsThisWeek] = useState<number | null>(null);
   const [aiSummary, setAiSummary] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [draftClient, setDraftClient] = useState<RosterClient | null>(null);
@@ -955,8 +980,9 @@ export default function TrainerClients() {
   useEffect(() => {
     let cancelled = false;
     setAiSummary('');
-    if (!sel) { setClientMeals(null); return; }
+    if (!sel) { setClientMeals(null); setMealsThisWeek(null); return; }
     setClientMeals(null);
+    setMealsThisWeek(null);
     (async () => {
       try {
         // `error` was not destructured here. supabase-js resolves rather than
@@ -969,6 +995,25 @@ export default function TrainerClients() {
         if (error || !data) { setClientMeals(null); return; }
         setClientMeals(data.map((r: any) => ({ name: r.name, kcal: r.kcal, via: r.via })));
       } catch { if (!cancelled) setClientMeals(null); }
+    })();
+    (async () => {
+      try {
+        // Seven local days back to this morning's midnight, which is the week
+        // the summary is written about. Built from the local getters rather
+        // than a UTC day, for the reason src/lib/offlineQueue.ts gives: a meal
+        // eaten at 9pm is that day's dinner everywhere west of Greenwich.
+        const from = new Date();
+        from.setHours(0, 0, 0, 0);
+        from.setDate(from.getDate() - 6);
+        const { count, error } = await supabase.from('food_logs')
+          .select('id', { count: 'exact', head: true })
+          .eq('client_id', sel.id).gte('logged_at', from.toISOString());
+        if (cancelled) return;
+        // A null count with no error is PostgREST declining to count rather
+        // than a client who ate nothing, and it is the same unknown.
+        if (error || count == null) { setMealsThisWeek(null); return; }
+        setMealsThisWeek(count);
+      } catch { if (!cancelled) setMealsThisWeek(null); }
     })();
     return () => { cancelled = true; };
   }, [sel]);
@@ -1699,7 +1744,14 @@ export default function TrainerClients() {
       injuryAreas: sharedAreas(client.injuries ?? []) || 'none disclosed',
       // A COUNT, not the names. "Logged 9 meals this week" is the adherence
       // fact a summary needs; "chicken shawarma, protein shake" is a diary.
-      mealsLoggedCount: clientMeals === null ? 'their food log could not be read — do not comment on their food logging' : clientMeals.length,
+      //
+      // From `mealsThisWeek`, which is an exact count over the last seven days.
+      // It used to be `clientMeals.length` — the length of a six-row display
+      // read with no date bound on it — so the number could never pass six and
+      // was not about a week at all. See the read.
+      mealsLoggedCount: mealsThisWeek == null
+        ? 'their food log could not be read — do not comment on their food logging'
+        : `${mealsThisWeek} in the last 7 days`,
       programTitle: getProgram(client.id)?.title ?? 'no coach-assigned programme',
     };
     const answer = await askAboutClient([{ role: 'user', content: 'Write a concise 3-4 sentence weekly coaching summary for this client: what is going well, one concern to watch, and one focus for next week. You have their training and attendance only — you have NOT been given any body measurement, scan or weight, so do not refer to composition or comment on it. Refer to them as {name}, written literally. Do not suggest anything that loads a flagged injury area.' }], ctx);
