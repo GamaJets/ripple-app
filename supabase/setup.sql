@@ -45729,10 +45729,51 @@ grant all on public.exercise_translations to service_role;
 -- ▶ the-catalogue-in-german.sql
 
 -- ─────────────────────────────────────────────────────────────────────────
--- The catalogue in German: 599 of 619 movements.
+-- The catalogue in German: 583 of 604 movements.
 --
 -- Part 790 built the table and argued the shape. This is the German content
 -- for it, and the only interesting decisions here are about words.
+--
+-- ── Why this says 604 and not 619 ─────────────────────────────────────────
+--
+-- It was written on 2 Sep against the 619-row catalogue that parts 49/71/74/
+-- 75/76 build on an empty database, and it carried 599 rows. That catalogue is
+-- not the one that exists. Part 2260, written two days later, collapses the
+-- fifteen movements the regenerated part 74 had split in two — 'bench-press'
+-- and 'barbell-bench-press' are one movement, and ours is the row every screen
+-- resolves to, because src/lib/machines.ts, src/lib/focus.ts and buildProgram()
+-- emit our NAME. Production never had the fifteen at all.
+--
+-- So sixteen rows here named an exercise_id that production does not hold, and
+-- exercise_id is a foreign key. Applying this file to production aborted on the
+-- first of them and took the rest of the language with it. The sixteen are gone
+-- from the VALUES below:
+--
+--   · Fifteen were DUPLICATES under a second id. Every one of them has a
+--     surviving partner in this file already carrying the right German for the
+--     name that survives — 'bench-press' is Bankdrücken, and the deleted row
+--     said Langhantel-Bankdrücken for a row whose name is "Bench Press".
+--     Nothing was lost; a second answer was removed.
+--
+--     barbell-back-squat, barbell-bench-press, barbell-deadlift,
+--     barbell-hip-thrust, barbell-overhead-press, bent-over-barbell-row,
+--     cable-face-pull, cable-glute-kickback, cable-tricep-pushdown,
+--     dumbbell-bicep-curl, dumbbell-hammer-curl, dumbbell-lateral-raise,
+--     lying-leg-curl, machine-chest-press, machine-hip-abduction.
+--
+--     Fourteen of the fifteen partners were already translated. The exception
+--     is 'cable-kickback', whose partner row was 'cable-glute-kickback': it now
+--     has no German, which is the right answer and not an oversight — Cable
+--     Kickback is in the list of twenty below, for exactly the reason given
+--     there.
+--
+--   · The sixteenth, 'stability-ball-leg-curl', is NOT a duplicate. It is one
+--     movement under two vendor names: RepDB renamed it between the generation
+--     production seeded ('ball-leg-curl', "Ball Leg Curl") and the one a fresh
+--     database seeds. Neither id is correct on both databases, so no literal
+--     row here can name it. Part 2310 writes that one by looking the movement
+--     up rather than naming it, and runs after part 2260 so the catalogue is
+--     settled by the time it does.
 --
 -- ── These are gym words, not dictionary words ─────────────────────────────
 --
@@ -45781,13 +45822,20 @@ grant all on public.exercise_translations to service_role;
 -- ── Re-running this file ──────────────────────────────────────────────────
 --
 -- The primary key is (exercise_id, locale) and the conflict clause updates, so
--- running this twice leaves 599 rows and running a corrected copy replaces the
+-- running this twice leaves 583 rows and running a corrected copy replaces the
 -- names it changes. Nothing is deleted: a row this file no longer carries
 -- stays until somebody removes it deliberately, because a name silently
 -- vanishing from a language is the failure that looks like nothing happened.
 --
+-- That last rule is why the sixteen removed above are only removed from THIS
+-- file. On a database that already ran the 599-row version they are still
+-- present, and part 790's foreign key clears them on its own: they are children
+-- of exercises part 2260 deletes, `on delete cascade`. On production, which
+-- never held those fifteen exercises, they were never inserted in the first
+-- place.
+--
 -- Descriptions are NOT translated here. `exercises.description` is one
--- sentence per movement across 617 rows, translating it is a separate and much
+-- sentence per movement across 601 rows, translating it is a separate and much
 -- larger judgement call, and part 790's read path already handles a translated
 -- name beside an untranslated description — it says so on screen rather than
 -- letting the two blur.
@@ -45833,17 +45881,12 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('banded-terminal-knee-extension', 'de', 'Terminale Kniestreckung mit Band'),
   ('banded-triceps-stretch', 'de', 'Trizepsdehnung mit Band'),
   ('barbell-ab-rollout', 'de', 'Rollout mit der Langhantel'),
-  ('barbell-back-squat', 'de', 'Langhantel-Kniebeuge'),
-  ('barbell-bench-press', 'de', 'Langhantel-Bankdrücken'),
   ('barbell-calf-raise', 'de', 'Wadenheben mit der Langhantel'),
   ('barbell-curl', 'de', 'Langhantelcurl'),
-  ('barbell-deadlift', 'de', 'Langhantel-Kreuzheben'),
   ('barbell-front-raise', 'de', 'Frontheben mit der Langhantel'),
   ('barbell-glute-bridge', 'de', 'Beckenheben mit der Langhantel'),
-  ('barbell-hip-thrust', 'de', 'Hip Thrust mit der Langhantel'),
   ('barbell-lunge', 'de', 'Ausfallschritt mit der Langhantel'),
   ('barbell-overhead-extension', 'de', 'Überkopf-Trizepsstrecken mit der Langhantel'),
-  ('barbell-overhead-press', 'de', 'Langhantel-Überkopfdrücken'),
   ('barbell-preacher-curl', 'de', 'Scottcurl mit der Langhantel'),
   ('barbell-pullover', 'de', 'Langhantel-Überzüge'),
   ('barbell-rear-delt-row', 'de', 'Rudern für die hintere Schulter mit der Langhantel'),
@@ -45874,7 +45917,6 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('bench-pull', 'de', 'Rudern in Bauchlage auf der Bank'),
   ('bent-arm-barbell-pullover', 'de', 'Überzüge mit gebeugten Armen mit der Langhantel'),
   ('bent-arm-ez-bar-pullover', 'de', 'Überzüge mit gebeugten Armen mit der SZ-Stange'),
-  ('bent-over-barbell-row', 'de', 'Vorgebeugtes Langhantelrudern'),
   ('bent-over-dumbbell-row', 'de', 'Vorgebeugtes Kurzhantelrudern'),
   ('bent-over-ez-bar-row', 'de', 'Vorgebeugtes Rudern mit der SZ-Stange'),
   ('bent-over-row', 'de', 'Vorgebeugtes Rudern'),
@@ -45902,15 +45944,12 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('cable-crunch', 'de', 'Crunch am Kabelzug'),
   ('cable-curl', 'de', 'Bizepscurl am Kabelzug'),
   ('cable-external-rotation', 'de', 'Außenrotation am Kabelzug'),
-  ('cable-face-pull', 'de', 'Face Pull am Kabelzug'),
   ('cable-front-raise', 'de', 'Frontheben am Kabelzug'),
-  ('cable-glute-kickback', 'de', 'Beinrückheben am Kabelzug'),
   ('cable-hammer-curl', 'de', 'Hammercurl am Kabelzug'),
   ('cable-lateral-raise', 'de', 'Seitheben am Kabelzug'),
   ('cable-machine', 'de', 'Kabelzug'),
   ('cable-pallof-press', 'de', 'Pallof Press am Kabelzug'),
   ('cable-tricep-kickback', 'de', 'Trizeps-Kickback am Kabelzug'),
-  ('cable-tricep-pushdown', 'de', 'Trizepsdrücken am Kabelzug'),
   ('cable-upright-row', 'de', 'Aufrechtes Rudern am Kabelzug'),
   ('cable-wrist-curl', 'de', 'Handgelenkcurl am Kabelzug'),
   ('calf-raise', 'de', 'Wadenheben'),
@@ -45989,7 +46028,6 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('drag-curl', 'de', 'Drag Curl'),
   ('dragon-flag', 'de', 'Dragon Flag'),
   ('dumbbell-bench-press', 'de', 'Kurzhantel-Bankdrücken'),
-  ('dumbbell-bicep-curl', 'de', 'Bizepscurl mit Kurzhanteln'),
   ('dumbbell-calf-raise', 'de', 'Wadenheben mit Kurzhanteln'),
   ('dumbbell-deadlift', 'de', 'Kreuzheben mit Kurzhanteln'),
   ('dumbbell-face-pull', 'de', 'Face Pull mit Kurzhanteln'),
@@ -45998,9 +46036,7 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('dumbbell-fly', 'de', 'Fliegende mit Kurzhanteln'),
   ('dumbbell-front-raise', 'de', 'Frontheben mit Kurzhanteln'),
   ('dumbbell-front-squat', 'de', 'Frontkniebeuge mit Kurzhanteln'),
-  ('dumbbell-hammer-curl', 'de', 'Hammercurl mit Kurzhanteln'),
   ('dumbbell-hip-thrust', 'de', 'Hip Thrust mit Kurzhantel'),
-  ('dumbbell-lateral-raise', 'de', 'Seitheben mit Kurzhanteln'),
   ('dumbbell-lunge', 'de', 'Ausfallschritt mit Kurzhanteln'),
   ('dumbbell-overhead-carry', 'de', 'Überkopftragen mit Kurzhantel'),
   ('dumbbell-pistol-squat', 'de', 'Pistol Squat mit Kurzhantel'),
@@ -46140,15 +46176,12 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('low-lunge', 'de', 'Tiefer Ausfallschritt'),
   ('low-lunge-to-half-split', 'de', 'Tiefer Ausfallschritt in den halben Spagat'),
   ('lunge', 'de', 'Ausfallschritt'),
-  ('lying-leg-curl', 'de', 'Liegender Beinbeuger'),
   ('lying-leg-raise', 'de', 'Liegendes Beinheben'),
   ('lying-tricep-extension', 'de', 'Liegendes Trizepsstrecken'),
   ('machine-assisted-dips', 'de', 'Dips an der Maschine mit Unterstützung'),
   ('machine-back-extension', 'de', 'Rückenstrecken an der Maschine'),
   ('machine-bicep-curl', 'de', 'Bizepscurl an der Maschine'),
   ('machine-chest-fly', 'de', 'Butterfly an der Maschine'),
-  ('machine-chest-press', 'de', 'Brustdrücken an der Maschine'),
-  ('machine-hip-abduction', 'de', 'Hüftabduktion an der Maschine'),
   ('machine-preacher-curl', 'de', 'Scottcurl an der Maschine'),
   ('machine-seated-crunch', 'de', 'Sitzender Crunch an der Maschine'),
   ('machine-shoulder-press', 'de', 'Schulterdrücken an der Maschine'),
@@ -46314,7 +46347,6 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('spoto-press', 'de', 'Spoto Press'),
   ('stability-ball-hip-bridge', 'de', 'Beckenheben am Gymnastikball'),
   ('stability-ball-knee-tuck', 'de', 'Knieanziehen am Gymnastikball'),
-  ('stability-ball-leg-curl', 'de', 'Beinbeuger am Gymnastikball'),
   ('stability-ball-push-up', 'de', 'Liegestütz am Gymnastikball'),
   ('stability-ball-push-up-hands-on-ball', 'de', 'Liegestütz mit den Händen auf dem Gymnastikball'),
   ('stability-ball-wall-squat', 'de', 'Wandkniebeuge mit dem Gymnastikball'),
@@ -46401,10 +46433,29 @@ on conflict (exercise_id, locale) do update
 -- ▶ the-catalogue-in-spanish.sql
 
 -- ─────────────────────────────────────────────────────────────────────────
--- The catalogue in Spanish: 599 of 619 movements.
+-- The catalogue in Spanish: 583 of 604 movements.
 --
 -- The same set part 791 translates into German, translated into Spanish. Part
 -- 790 argues the schema; this file's decisions are all about words.
+--
+-- ── Why this says 604 and not 619 ─────────────────────────────────────────
+--
+-- The same sixteen rows part 791 lost, lost here for the same reason and with
+-- the same ids — see that file's header for the full argument. In short:
+-- written against the 619-row catalogue a fresh database builds, applied
+-- against a production catalogue of 604 that never held fifteen of the ids,
+-- and exercise_id is a foreign key, so the insert aborted on the first of them.
+--
+-- Fifteen were duplicates whose surviving partner is already translated below
+-- ('bench-press' carries press de banca; the removed 'barbell-bench-press' said
+-- press de banca con barra for a movement whose name is "Bench Press"). The
+-- sixteenth, 'stability-ball-leg-curl', is one movement RepDB renamed between
+-- two generations — production calls it 'ball-leg-curl' — so no literal id here
+-- is right on both databases, and part 2310 writes it by lookup instead.
+--
+-- The one consequence worth naming: 'cable-kickback' now has no Spanish, its
+-- translated partner having been the removed 'cable-glute-kickback'. That is
+-- correct — it is one of the twenty below.
 --
 -- ── Gym Spanish, not translated English ───────────────────────────────────
 --
@@ -46492,17 +46543,12 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('banded-terminal-knee-extension', 'es', 'Extensión terminal de rodilla con banda'),
   ('banded-triceps-stretch', 'es', 'Estiramiento de tríceps con banda'),
   ('barbell-ab-rollout', 'es', 'Rollout abdominal con barra'),
-  ('barbell-back-squat', 'es', 'Sentadilla trasera con barra'),
-  ('barbell-bench-press', 'es', 'Press de banca con barra'),
   ('barbell-calf-raise', 'es', 'Elevación de talones con barra'),
   ('barbell-curl', 'es', 'Curl con barra'),
-  ('barbell-deadlift', 'es', 'Peso muerto con barra'),
   ('barbell-front-raise', 'es', 'Elevación frontal con barra'),
   ('barbell-glute-bridge', 'es', 'Puente de glúteos con barra'),
-  ('barbell-hip-thrust', 'es', 'Empuje de cadera con barra'),
   ('barbell-lunge', 'es', 'Zancada con barra'),
   ('barbell-overhead-extension', 'es', 'Extensión de tríceps sobre la cabeza con barra'),
-  ('barbell-overhead-press', 'es', 'Press militar con barra'),
   ('barbell-preacher-curl', 'es', 'Curl en banco Scott con barra'),
   ('barbell-pullover', 'es', 'Pullover con barra'),
   ('barbell-rear-delt-row', 'es', 'Remo para deltoides posterior con barra'),
@@ -46533,7 +46579,6 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('bench-pull', 'es', 'Remo tumbado en banco'),
   ('bent-arm-barbell-pullover', 'es', 'Pullover con barra y brazos flexionados'),
   ('bent-arm-ez-bar-pullover', 'es', 'Pullover con barra Z y brazos flexionados'),
-  ('bent-over-barbell-row', 'es', 'Remo con barra'),
   ('bent-over-dumbbell-row', 'es', 'Remo con mancuernas'),
   ('bent-over-ez-bar-row', 'es', 'Remo con barra Z'),
   ('bent-over-row', 'es', 'Remo inclinado'),
@@ -46561,15 +46606,12 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('cable-crunch', 'es', 'Crunch en polea'),
   ('cable-curl', 'es', 'Curl en polea'),
   ('cable-external-rotation', 'es', 'Rotación externa en polea'),
-  ('cable-face-pull', 'es', 'Face pull en polea'),
   ('cable-front-raise', 'es', 'Elevación frontal en polea'),
-  ('cable-glute-kickback', 'es', 'Patada de glúteo en polea'),
   ('cable-hammer-curl', 'es', 'Curl martillo en polea'),
   ('cable-lateral-raise', 'es', 'Elevación lateral en polea'),
   ('cable-machine', 'es', 'Máquina de poleas'),
   ('cable-pallof-press', 'es', 'Press Pallof en polea'),
   ('cable-tricep-kickback', 'es', 'Patada de tríceps en polea'),
-  ('cable-tricep-pushdown', 'es', 'Extensión de tríceps en polea'),
   ('cable-upright-row', 'es', 'Remo al mentón en polea'),
   ('cable-wrist-curl', 'es', 'Curl de muñeca en polea'),
   ('calf-raise', 'es', 'Elevación de talones'),
@@ -46648,7 +46690,6 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('drag-curl', 'es', 'Curl de arrastre'),
   ('dragon-flag', 'es', 'Bandera del dragón'),
   ('dumbbell-bench-press', 'es', 'Press de banca con mancuernas'),
-  ('dumbbell-bicep-curl', 'es', 'Curl de bíceps con mancuernas'),
   ('dumbbell-calf-raise', 'es', 'Elevación de talones con mancuernas'),
   ('dumbbell-deadlift', 'es', 'Peso muerto con mancuernas'),
   ('dumbbell-face-pull', 'es', 'Face pull con mancuernas'),
@@ -46657,9 +46698,7 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('dumbbell-fly', 'es', 'Aperturas con mancuernas'),
   ('dumbbell-front-raise', 'es', 'Elevación frontal con mancuernas'),
   ('dumbbell-front-squat', 'es', 'Sentadilla frontal con mancuernas'),
-  ('dumbbell-hammer-curl', 'es', 'Curl martillo con mancuernas'),
   ('dumbbell-hip-thrust', 'es', 'Empuje de cadera con mancuerna'),
-  ('dumbbell-lateral-raise', 'es', 'Elevación lateral con mancuernas'),
   ('dumbbell-lunge', 'es', 'Zancada con mancuernas'),
   ('dumbbell-overhead-carry', 'es', 'Transporte sobre la cabeza con mancuerna'),
   ('dumbbell-pistol-squat', 'es', 'Sentadilla pistol con mancuerna'),
@@ -46799,15 +46838,12 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('low-lunge', 'es', 'Zancada baja'),
   ('low-lunge-to-half-split', 'es', 'Zancada baja a medio split'),
   ('lunge', 'es', 'Zancada'),
-  ('lying-leg-curl', 'es', 'Curl femoral tumbado'),
   ('lying-leg-raise', 'es', 'Elevación de piernas tumbado'),
   ('lying-tricep-extension', 'es', 'Press francés tumbado'),
   ('machine-assisted-dips', 'es', 'Fondos asistidos en máquina'),
   ('machine-back-extension', 'es', 'Extensión lumbar en máquina'),
   ('machine-bicep-curl', 'es', 'Curl de bíceps en máquina'),
   ('machine-chest-fly', 'es', 'Aperturas en máquina'),
-  ('machine-chest-press', 'es', 'Press de pecho en máquina'),
-  ('machine-hip-abduction', 'es', 'Abducción de cadera en máquina'),
   ('machine-preacher-curl', 'es', 'Curl en banco Scott en máquina'),
   ('machine-seated-crunch', 'es', 'Crunch sentado en máquina'),
   ('machine-shoulder-press', 'es', 'Press de hombro en máquina'),
@@ -46973,7 +47009,6 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('spoto-press', 'es', 'Press Spoto'),
   ('stability-ball-hip-bridge', 'es', 'Puente de cadera con fitball'),
   ('stability-ball-knee-tuck', 'es', 'Encogimiento de rodillas con fitball'),
-  ('stability-ball-leg-curl', 'es', 'Curl femoral con fitball'),
   ('stability-ball-push-up', 'es', 'Flexión con fitball'),
   ('stability-ball-push-up-hands-on-ball', 'es', 'Flexión con las manos en el fitball'),
   ('stability-ball-wall-squat', 'es', 'Sentadilla en pared con fitball'),
@@ -57846,3 +57881,92 @@ revoke all on function public.run_invoice_ageing_notices() from public, anon, au
 
 comment on function public.run_invoice_ageing_notices() is
   'Tells a coach an invoice they ASKED for has gone past its date, once per ageing band. Says nothing about an invoice they recorded as settled (part 2100) and speaks only inside the coach''s own 7-9, once per UTC day, claimed through notice_pass_runs (part 1890). This part exists because those two fixes were written into the same function in two different files and neither could be applied without deleting the other.';
+
+-- ▶ one-movement-two-vendor-names-and-no-id-that-works-on-both.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- The one movement whose German and Spanish names cannot be written down.
+--
+-- ═══ UNAPPLIED ═══════════════════════════════════════════════════════════
+--
+-- Not run against production. It writes two rows there when it is.
+--
+-- ── The problem ───────────────────────────────────────────────────────────
+--
+-- Parts 791 and 792 carried a translation for 'stability-ball-leg-curl'. That
+-- id does not exist in production, which holds the same movement as
+-- 'ball-leg-curl' ("Ball Leg Curl"). It is not a duplicate and not a typo:
+-- RepDB renamed the movement between the generation of part 74 that production
+-- seeded and the generation on disk now, and part 2260 says at length why that
+-- one row was deliberately left unreconciled — renaming live catalogue data is
+-- not a thing to do blind at night.
+--
+-- The consequence is narrow and awkward. `exercise_translations.exercise_id` is
+-- a foreign key, and the two databases disagree about which id this movement
+-- has:
+--
+--   · production seeds 'ball-leg-curl'            — 'stability-ball-leg-curl' FKs.
+--   · a fresh setup.sql seeds 'stability-ball-leg-curl' — 'ball-leg-curl' FKs.
+--
+-- So there is no literal id that parts 791 and 792 could carry which applies on
+-- both, and a row that names either one breaks the other. Both files therefore
+-- dropped it, and it is written here instead — by LOOKING THE MOVEMENT UP
+-- rather than by naming it. Whichever of the two ids the database actually
+-- holds is the one that gets the row; the other matches nothing and writes
+-- nothing.
+--
+-- ── Why it is numbered here and not beside 791 ────────────────────────────
+--
+-- Because part 2260 has to have run first. On a fresh database the catalogue is
+-- not settled until 2260 collapses the fifteen split movements, and this part
+-- reads the catalogue to decide what to write. Anything that reads
+-- public.exercises to make a decision belongs after the last part that changes
+-- it. 2310 > 2260 in the numeric sort scripts/build-supabase-setup.mjs applies.
+--
+-- ── Row counts, exactly ───────────────────────────────────────────────────
+--
+--   · on production:                     2 rows inserted, against 'ball-leg-curl'.
+--   · on an empty database from setup.sql: 2 rows, against 'stability-ball-leg-curl'.
+--   · on a database that somehow holds both: 4 rows, all of them the same two
+--     names against the same movement under both of its vendor ids. Harmless,
+--     and it is not a state any part produces.
+--
+-- Re-running is free, as in parts 791 and 792: the primary key is
+-- (exercise_id, locale) and the conflict clause updates.
+--
+-- ── The names ─────────────────────────────────────────────────────────────
+--
+-- Unchanged from the rows parts 791 and 792 carried on 2 Sep. A leg curl
+-- performed with the heels on a gym ball: "Beinbeuger am Gymnastikball" is what
+-- part 791 uses for Beinbeuger throughout ('leg-curl' is Beinbeuger, 'seated-
+-- leg-curl' is Sitzender Beinbeuger), and Gymnastikball is the German gym word
+-- for the ball. Spanish takes "Curl femoral con fitball" — curl femoral is what
+-- part 792 uses for every leg curl, and fitball is what Spanish gyms call the
+-- ball; "pelota de estabilidad" is a translation of the English and is not said.
+--
+-- If production is ever renamed onto the newer RepDB name, this part keeps
+-- working untouched — that is the point of writing it as a lookup. What would
+-- then be worth doing is folding the row back into 791 and 792 where the rest
+-- of the language lives, and deleting this file.
+-- ─────────────────────────────────────────────────────────────────────────
+
+with target as (
+  -- Exactly one of these exists on any database this runs against.
+  select id
+    from public.exercises
+   where id in ('ball-leg-curl', 'stability-ball-leg-curl')
+),
+translated as (
+  select id as exercise_id, 'de'::text as locale, 'Beinbeuger am Gymnastikball'::text as name
+    from target
+  union all
+  select id, 'es'::text, 'Curl femoral con fitball'::text
+    from target
+)
+insert into public.exercise_translations (exercise_id, locale, name)
+select exercise_id, locale, name
+  from translated
+on conflict (exercise_id, locale) do update
+  set name       = excluded.name,
+      source     = excluded.source,
+      updated_at = now();

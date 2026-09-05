@@ -150,9 +150,35 @@ const del76Block = /delete from public\.exercises\nwhere id in \(([\s\S]*?)\);/.
 );
 if (del76Block) for (const m of del76Block[1].matchAll(/'([a-z0-9-]+)'/g)) del76.add(m[1]);
 
+// Every LATER part that deletes exercises by an explicit id list.
+//
+// This is the line that was missing, and it cost three days of a green gate.
+// The model above knows parts 49, 74, 75 and 76 by name and stops there, so it
+// never heard of part 2260 — which deletes the fifteen movements part 74's
+// regeneration had split in two (`bench-press` AND `barbell-bench-press`).
+// This file therefore validated the translations against a catalogue of 619 in
+// which fifteen were phantoms, and passed 16 rows per language naming exercises
+// that production does not have and a fresh database deletes on the way past.
+// scripts/check-catalogue.mjs, which replays the table properly, has been
+// saying 604 the whole time. Two gates, two different catalogues, and the one
+// whose entire job is catching orphaned translations was reading the wrong one.
+//
+// Read from every part rather than named, so part 2400 doing the same thing
+// does not need this file edited — which is the mistake being corrected here.
+// Only the `id in (…)` shape: part 75's `source is distinct from` inversion
+// needs per-row provenance and is already handled above.
+const deletedLater = new Set();
+for (const f of readdirSync(PARTS).filter((f) => f.endsWith('.sql')).sort()) {
+  const src = read(`supabase/parts/${f}`);
+  for (const d of src.matchAll(/delete from public\.exercises\s+where id in \(([\s\S]*?)\);/g)) {
+    for (const m of d[1].matchAll(/'([a-z0-9-]+)'/g)) deletedLater.add(m[1]);
+  }
+}
+
 const live = new Map();
 for (const r of seeded) {
   if (del76.has(r.id)) continue;
+  if (deletedLater.has(r.id)) continue;
   // A row from part 49 that part 75 does not protect is deleted by part 75.
   if (r.file.includes('/49-') && !protectedIds.has(r.id)) continue;
   if (!live.has(r.id)) live.set(r.id, r.name);

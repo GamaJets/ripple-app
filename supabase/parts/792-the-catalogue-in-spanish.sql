@@ -1,8 +1,27 @@
 -- ─────────────────────────────────────────────────────────────────────────
--- The catalogue in Spanish: 599 of 619 movements.
+-- The catalogue in Spanish: 583 of 604 movements.
 --
 -- The same set part 791 translates into German, translated into Spanish. Part
 -- 790 argues the schema; this file's decisions are all about words.
+--
+-- ── Why this says 604 and not 619 ─────────────────────────────────────────
+--
+-- The same sixteen rows part 791 lost, lost here for the same reason and with
+-- the same ids — see that file's header for the full argument. In short:
+-- written against the 619-row catalogue a fresh database builds, applied
+-- against a production catalogue of 604 that never held fifteen of the ids,
+-- and exercise_id is a foreign key, so the insert aborted on the first of them.
+--
+-- Fifteen were duplicates whose surviving partner is already translated below
+-- ('bench-press' carries press de banca; the removed 'barbell-bench-press' said
+-- press de banca con barra for a movement whose name is "Bench Press"). The
+-- sixteenth, 'stability-ball-leg-curl', is one movement RepDB renamed between
+-- two generations — production calls it 'ball-leg-curl' — so no literal id here
+-- is right on both databases, and part 2310 writes it by lookup instead.
+--
+-- The one consequence worth naming: 'cable-kickback' now has no Spanish, its
+-- translated partner having been the removed 'cable-glute-kickback'. That is
+-- correct — it is one of the twenty below.
 --
 -- ── Gym Spanish, not translated English ───────────────────────────────────
 --
@@ -90,17 +109,12 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('banded-terminal-knee-extension', 'es', 'Extensión terminal de rodilla con banda'),
   ('banded-triceps-stretch', 'es', 'Estiramiento de tríceps con banda'),
   ('barbell-ab-rollout', 'es', 'Rollout abdominal con barra'),
-  ('barbell-back-squat', 'es', 'Sentadilla trasera con barra'),
-  ('barbell-bench-press', 'es', 'Press de banca con barra'),
   ('barbell-calf-raise', 'es', 'Elevación de talones con barra'),
   ('barbell-curl', 'es', 'Curl con barra'),
-  ('barbell-deadlift', 'es', 'Peso muerto con barra'),
   ('barbell-front-raise', 'es', 'Elevación frontal con barra'),
   ('barbell-glute-bridge', 'es', 'Puente de glúteos con barra'),
-  ('barbell-hip-thrust', 'es', 'Empuje de cadera con barra'),
   ('barbell-lunge', 'es', 'Zancada con barra'),
   ('barbell-overhead-extension', 'es', 'Extensión de tríceps sobre la cabeza con barra'),
-  ('barbell-overhead-press', 'es', 'Press militar con barra'),
   ('barbell-preacher-curl', 'es', 'Curl en banco Scott con barra'),
   ('barbell-pullover', 'es', 'Pullover con barra'),
   ('barbell-rear-delt-row', 'es', 'Remo para deltoides posterior con barra'),
@@ -131,7 +145,6 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('bench-pull', 'es', 'Remo tumbado en banco'),
   ('bent-arm-barbell-pullover', 'es', 'Pullover con barra y brazos flexionados'),
   ('bent-arm-ez-bar-pullover', 'es', 'Pullover con barra Z y brazos flexionados'),
-  ('bent-over-barbell-row', 'es', 'Remo con barra'),
   ('bent-over-dumbbell-row', 'es', 'Remo con mancuernas'),
   ('bent-over-ez-bar-row', 'es', 'Remo con barra Z'),
   ('bent-over-row', 'es', 'Remo inclinado'),
@@ -159,15 +172,12 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('cable-crunch', 'es', 'Crunch en polea'),
   ('cable-curl', 'es', 'Curl en polea'),
   ('cable-external-rotation', 'es', 'Rotación externa en polea'),
-  ('cable-face-pull', 'es', 'Face pull en polea'),
   ('cable-front-raise', 'es', 'Elevación frontal en polea'),
-  ('cable-glute-kickback', 'es', 'Patada de glúteo en polea'),
   ('cable-hammer-curl', 'es', 'Curl martillo en polea'),
   ('cable-lateral-raise', 'es', 'Elevación lateral en polea'),
   ('cable-machine', 'es', 'Máquina de poleas'),
   ('cable-pallof-press', 'es', 'Press Pallof en polea'),
   ('cable-tricep-kickback', 'es', 'Patada de tríceps en polea'),
-  ('cable-tricep-pushdown', 'es', 'Extensión de tríceps en polea'),
   ('cable-upright-row', 'es', 'Remo al mentón en polea'),
   ('cable-wrist-curl', 'es', 'Curl de muñeca en polea'),
   ('calf-raise', 'es', 'Elevación de talones'),
@@ -246,7 +256,6 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('drag-curl', 'es', 'Curl de arrastre'),
   ('dragon-flag', 'es', 'Bandera del dragón'),
   ('dumbbell-bench-press', 'es', 'Press de banca con mancuernas'),
-  ('dumbbell-bicep-curl', 'es', 'Curl de bíceps con mancuernas'),
   ('dumbbell-calf-raise', 'es', 'Elevación de talones con mancuernas'),
   ('dumbbell-deadlift', 'es', 'Peso muerto con mancuernas'),
   ('dumbbell-face-pull', 'es', 'Face pull con mancuernas'),
@@ -255,9 +264,7 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('dumbbell-fly', 'es', 'Aperturas con mancuernas'),
   ('dumbbell-front-raise', 'es', 'Elevación frontal con mancuernas'),
   ('dumbbell-front-squat', 'es', 'Sentadilla frontal con mancuernas'),
-  ('dumbbell-hammer-curl', 'es', 'Curl martillo con mancuernas'),
   ('dumbbell-hip-thrust', 'es', 'Empuje de cadera con mancuerna'),
-  ('dumbbell-lateral-raise', 'es', 'Elevación lateral con mancuernas'),
   ('dumbbell-lunge', 'es', 'Zancada con mancuernas'),
   ('dumbbell-overhead-carry', 'es', 'Transporte sobre la cabeza con mancuerna'),
   ('dumbbell-pistol-squat', 'es', 'Sentadilla pistol con mancuerna'),
@@ -397,15 +404,12 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('low-lunge', 'es', 'Zancada baja'),
   ('low-lunge-to-half-split', 'es', 'Zancada baja a medio split'),
   ('lunge', 'es', 'Zancada'),
-  ('lying-leg-curl', 'es', 'Curl femoral tumbado'),
   ('lying-leg-raise', 'es', 'Elevación de piernas tumbado'),
   ('lying-tricep-extension', 'es', 'Press francés tumbado'),
   ('machine-assisted-dips', 'es', 'Fondos asistidos en máquina'),
   ('machine-back-extension', 'es', 'Extensión lumbar en máquina'),
   ('machine-bicep-curl', 'es', 'Curl de bíceps en máquina'),
   ('machine-chest-fly', 'es', 'Aperturas en máquina'),
-  ('machine-chest-press', 'es', 'Press de pecho en máquina'),
-  ('machine-hip-abduction', 'es', 'Abducción de cadera en máquina'),
   ('machine-preacher-curl', 'es', 'Curl en banco Scott en máquina'),
   ('machine-seated-crunch', 'es', 'Crunch sentado en máquina'),
   ('machine-shoulder-press', 'es', 'Press de hombro en máquina'),
@@ -571,7 +575,6 @@ insert into public.exercise_translations (exercise_id, locale, name) values
   ('spoto-press', 'es', 'Press Spoto'),
   ('stability-ball-hip-bridge', 'es', 'Puente de cadera con fitball'),
   ('stability-ball-knee-tuck', 'es', 'Encogimiento de rodillas con fitball'),
-  ('stability-ball-leg-curl', 'es', 'Curl femoral con fitball'),
   ('stability-ball-push-up', 'es', 'Flexión con fitball'),
   ('stability-ball-push-up-hands-on-ball', 'es', 'Flexión con las manos en el fitball'),
   ('stability-ball-wall-squat', 'es', 'Sentadilla en pared con fitball'),
