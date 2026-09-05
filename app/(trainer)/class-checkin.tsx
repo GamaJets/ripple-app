@@ -179,25 +179,70 @@ export default function ClassCheckin() {
     savePending.current = setTimeout(() => persistRate(text), 700);
   };
 
+  /* ── whose answer may land, and whose members may be drawn ────────────────
+   *
+   * `wanted` is the guard every sibling reader in this app already has —
+   * src/ui/clientAttendance.ts, app/(trainer)/client-week.tsx,
+   * app/(trainer)/my-register.tsx — and this screen was the one without it.
+   *
+   * The register is reached from the open-registers list on my-register.tsx, so
+   * tapping down a list of classes starts a read per tap and they do not come
+   * back in the order they went out. Tuesday's Spin (slow), back out,
+   * Wednesday's HIIT: HIIT landed and drew, then Spin's answer overwrote it. The
+   * header said HIIT, the hero said "Checked In 3 / 12", and the twelve members
+   * listed under it were Spin's — every one of them tappable, and `toggle` sends
+   * the classId this render has, so a tick on one of them was a write about a
+   * Spin member against Wednesday's HIIT.
+   *
+   * `drawn` is the other half and does not exist on the siblings, because they
+   * hold one subject's rows and this screen holds a ROOM. Dropping the late
+   * answer is not enough on its own: the rows already on screen belong to the
+   * previous class and stay there under the new class's title while the new read
+   * is in flight. So a change of class empties the register first. `loading`
+   * goes back up with it, which is the one case the note below does not cover:
+   * an empty register under "Loading roster…" is the truth about a class nothing
+   * has been read for yet.
+   *
+   * The banner goes too. `saveFailed` names a MEMBER — "Priya is still marked
+   * absent" — and a sentence about somebody who was in Tuesday's Spin, left
+   * standing over Wednesday's HIIT, is about a person who is not in the room.
+   */
+  const wanted = useRef<string | null>(null);
+  const drawn = useRef<string | null>(null);
+
   // The rejection handler is not decoration: without it a thrown read would
   // leave `loading` true forever, and "Loading roster…" is at least honest,
   // where a silent unhandled rejection is not.
-  // `loading` is deliberately NOT set back to true here. It starts true and is
-  // cleared by the first read; a refresh that raised it again would replace a
-  // register the coach is reading off in front of a room with "Loading
-  // roster…", which is the one thing worse than a slightly old count.
+  // `loading` is deliberately NOT set back to true for a re-read of the SAME
+  // class. It starts true and is cleared by the first read; a refresh that
+  // raised it again would replace a register the coach is reading off in front
+  // of a room with "Loading roster…", which is the one thing worse than a
+  // slightly old count.
   const loadRoster = useCallback(async () => {
+    wanted.current = classId;
+    if (drawn.current !== classId) {
+      drawn.current = classId;
+      setRoster(null);
+      setReadFailed(false);
+      setSaveFailed(null);
+      setLoading(true);
+    }
     try {
       const r = await classRoster(classId);
+      // The coach has moved on to another class. Dropping the answer is the
+      // whole of it: the read for the class that is on screen now will set the
+      // state, and this one may not.
+      if (wanted.current !== classId) return;
       setRoster(r);
       setReadFailed(r === null && !unlinked);
     } catch {
+      if (wanted.current !== classId) return;
       // The rows already on screen are left alone. A failed re-read is not a
       // class that emptied — `readFailed` is what says the count is unknown,
       // and blanking the register a coach is standing in front of would be the
       // worse of the two mistakes by a distance.
       setReadFailed(!unlinked);
-    } finally { setLoading(false); }
+    } finally { if (wanted.current === classId) setLoading(false); }
   }, [classId, unlinked]);
   useEffect(() => { void loadRoster(); }, [loadRoster]);
 
@@ -297,10 +342,27 @@ export default function ClassCheckin() {
       kind: 'class-attendance', classId, userId: m.userId, memberName: m.name, present: next,
     });
     if (out === 'refused') {
+      // ── and now a refusal can mean the booking is gone ────────────────────
+      //
+      // src/ui/floorQueue.ts used to report this write on the error alone, and
+      // `set_class_attendance` is `returns void` over an update that raises
+      // nothing when it matches no row. It now establishes the write instead, so
+      // 'refused' has a second cause the coach can act on and a likelier one
+      // than a permission: the member cancelled their place after this register
+      // was read, and there is no longer a booking to mark. `cancel_class`
+      // deletes the row.
+      //
+      // So the register is re-read rather than left standing. A list that still
+      // shows somebody who has cancelled, beside a sentence saying their tick
+      // did not save, invites the coach to tap them again — and it would be
+      // refused again, for the same reason, for as long as the screen is open.
       setSaveFailed(refusedLine(
         `${m.name} is still marked ${m.attended ? 'present' : 'absent'} — that change`,
-        classId === UNLINKED_CLASS ? 'This screen was opened without a class.' : null,
+        classId === UNLINKED_CLASS
+          ? 'This screen was opened without a class.'
+          : `The usual cause is that ${m.name} no longer holds a place on this class — a cancelled booking is removed, and there is nothing left to mark. This register is being read again now.`,
       ));
+      if (classId !== UNLINKED_CLASS) void loadRoster();
       return;
     }
     // Nothing was kept, so the row does not move either. A tick drawn against a

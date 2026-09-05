@@ -107,7 +107,9 @@ import { searchRoster, rosterSearchLine, rosterPickerLine } from '../../src/lib/
 import { hitSlopFor } from '../../src/lib/a11y';
 import { useCoachExercises, mergeExerciseLists } from '../../src/ui/coachExercises';
 import { useFloorQueue } from '../../src/ui/floorQueue';
-import { floorPendingNote, flushResultLine, keptOfflineLine, refusedLine } from '../../src/lib/floorQueue';
+import {
+  floorFullLine, floorPendingNote, flushResultLine, keptOfflineLine, refusedLine,
+} from '../../src/lib/floorQueue';
 // When the session happened, which this screen never asked. See the module
 // header: `new Date().toISOString()` at the moment Save was pressed put a
 // Monday evening session on the Tuesday it was written up.
@@ -115,6 +117,11 @@ import {
   hourLabel, logDayOptions, logStamp, logStampProblem, logWhenLine,
 } from '../../src/lib/sessionWhen';
 import { isoDay } from '../../src/lib/weekStart';
+// Whose record this screen is showing. This file is the eighth and last user of
+// it, and the only one that WRITES — src/lib/routeSubject.ts quotes the exact
+// line that was here and sets out why a `useState` initialiser is the wrong
+// place to read a route param on a screen that never unmounts.
+import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 // Finishing, as opposed to logging. The decision about whether Save may mark a
 // session delivered — and the sentences that report the two writes apart — live
 // there, tested, rather than in this file.
@@ -201,8 +208,16 @@ export default function LogSession() {
    * link this screen cannot make safely — and an insert refused for it takes
    * the whole hour of typing down with it. Dropped to a plain log rather than
    * risked; the coach can still mark the outcome from Mark Sessions.
+   *
+   * Both halves go through `subjectOf` for the reason src/lib/routeSubject.ts
+   * gives: `useLocalSearchParams<{ sessionId?: string }>` is an assertion by the
+   * caller and not a check, and expo-router hands back `string[]` for a repeated
+   * key on a deep link. A `string[]` reaching `session_id` is a column written
+   * from an array — and the client id it is checked against is now read the same
+   * way, so the two halves of this screen cannot disagree about which route they
+   * are looking at.
    */
-  const sessionId = sessionParam && clientId ? sessionParam : null;
+  const sessionId = subjectOf(clientId) ? subjectOf(sessionParam) : null;
   const coachEx = useCoachExercises();
   const r = useRoster();
   // A gym's fee where there is a gym, and otherwise the coach's own — the same
@@ -258,7 +273,24 @@ export default function LogSession() {
   // Seeded from the route, so the way in from a client's own screen is exactly
   // what it was: their name in the title and nothing to choose. `null` is the
   // state this screen could not previously get out of.
-  const [picked, setPicked] = useState<string | null>(clientId ?? null);
+  //
+  // Seeded ONCE, though, and this screen never unmounts — it is registered
+  // `href: null` inside <Tabs> (app/(trainer)/_layout.tsx), so a `useState`
+  // initialiser runs for the FIRST client a coach opens it for and for nobody
+  // after. Opening it for Ben used to draw Amy. `subjectChange` is the rule,
+  // with the reasoning and the string[] hazard in src/lib/routeSubject.ts; it is
+  // applied during render rather than in an effect so the wrong person is never
+  // painted, not even for one frame.
+  //
+  // This is the eighth screen to take it and the only one where the stale
+  // subject was a WRITE. The insert would have succeeded — Amy really is this
+  // coach's client, so no policy refuses it — and what Ben got was nothing while
+  // Amy got an hour of training on a day she did not train, typed by her coach
+  // and therefore not hers to delete.
+  const [picked, setPicked] = useState<string | null>(subjectOf(clientId));
+  const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
+  const moved = subjectChange(seenParam, clientId);
+  if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
   const [clientQ, setClientQ] = useState('');
 
   /* ── when it happened ──────────────────────────────────────────────────
@@ -325,13 +357,54 @@ export default function LogSession() {
   const saving = useRef(false);
   const [failure, setFailure] = useState<string | null>(null);
 
+  /* ── the draft belongs to the route it was typed under ─────────────────────
+   *
+   * `picked` following the route is only half of the fix above. `rows` — the
+   * exercises and the sets — is seeded from nothing and kept in this screen's
+   * state for as long as the app runs, so a coach who typed Amy's session,
+   * backed out without saving and opened Log a Session from Ben's screen landed
+   * on Ben's name with Amy's sets under it. One press of Save and Ben's record
+   * holds an hour he did not train, in somebody else's numbers.
+   *
+   * So a move of the SUBJECT clears the sheet. What it costs is a half-typed
+   * draft, and it is worth saying plainly that this is a loss: the coach has to
+   * type it again. It is the smaller loss. The draft was never anywhere but this
+   * screen's memory, whereas a save under the wrong name is a row in a client's
+   * history that they cannot delete because their coach typed it.
+   *
+   * The SESSION is watched as well as the client, and that is not belt and
+   * braces. Two sessions with the same person — the four o'clock and the seven
+   * o'clock — move `sessionId` and do not move `clientId`, so the client-side
+   * test alone would carry the four o'clock's sets and the four o'clock's HOUR
+   * into the write-up of the seven o'clock. `subjectChange` is asked the same
+   * question about the second param, which is the same rule and not a variant of
+   * it.
+   *
+   * The day and hour are re-seeded with the sheet rather than left, for the
+   * reason their own initialisers exist: on a cleared sheet they are the seed
+   * for the session now in the route, and `new Date()` is the ordinary case.
+   */
+  const [seenSession, setSeenSession] = useState<RouteParam>(sessionParam);
+  const movedSession = subjectChange(seenSession, sessionParam);
+  if (moved || movedSession) {
+    if (movedSession) setSeenSession(sessionParam);
+    setRows([]);
+    setFailure(null);
+    setLogDay(isoDay(seededStart ?? new Date()));
+    setLogHour((seededStart ?? new Date()).getHours());
+  }
+
   const pickedRow = r.roster.find((c) => c.id === picked) ?? null;
   // The roster's name where the roster has one, and the param's where it does
   // not — which is every case where the read failed or the client was added by
   // hand on another device. Never the param's name for a DIFFERENT id: a coach
   // who arrived on Sarah's screen and then picked Priya must not read Sarah's
   // name over Priya's sets.
-  const pickedName = pickedRow?.name ?? (picked && picked === clientId ? (name || null) : null);
+  // `subjectOf` on both sides, so this asks the same question the line above
+  // asks: the param resolves to one person or to nobody, and a repeated key
+  // names nobody rather than an array that happens not to equal `picked`.
+  const pickedName = pickedRow?.name
+    ?? (picked && picked === subjectOf(clientId) ? (typeof name === 'string' ? name : '') || null : null);
   const first = (pickedName || 'your client').split(' ')[0];
 
   /* ── the picker ────────────────────────────────────────────────────────────
@@ -370,6 +443,19 @@ export default function LogSession() {
   const patchSet = (key: string, i: number, patch: Partial<{ reps: string; kg: string }>) =>
     setRows((p) => p.map((r) => (r.key === key ? { ...r, sets: r.sets.map((s, x) => (x === i ? { ...s, ...patch } : s)) } : r)));
   const removeRow = (key: string) => setRows((p) => p.filter((r) => r.key !== key));
+
+  /** Empty the form once the write has been taken responsibility for.
+   *
+   *  Called on exactly the arms where something now holds these sets other than
+   *  this screen — the server, or the floor queue on this phone. Never on a
+   *  refusal and never on a queue that would not take them, because on those
+   *  arms this form is the only copy in existence.
+   *
+   *  It exists because `router.back()` does not unmount this screen: it is
+   *  registered `href: null` inside <Tabs> (app/(trainer)/_layout.tsx) and stays
+   *  mounted for the life of the app, so a saved session sat in `rows` waiting to
+   *  be saved again against whoever was opened next. */
+  const clearSheet = () => { setRows([]); setCustom(''); setPicker(false); };
 
   // Only sets with a rep count are real. A blank row the coach tabbed past is
   // not a set of zero reps, and writing it as one would put a lie in the log.
@@ -578,12 +664,27 @@ export default function LogSession() {
         Alert.alert(rep.title, rep.lines.join('\n\n'));
         return;
       }
+      // Written, or on this phone and going up. Either way the sheet has been
+      // taken responsibility for and must not be left behind it — see the note
+      // on the non-session arm below, which is the same rule.
+      clearSheet();
       Alert.alert(rep.title, rep.lines.join('\n\n'), [{ text: 'Done', onPress: () => router.back() }]);
       return;
     }
 
     if (out === 'stored') {
       notifySuccess();
+      /* ── and the sheet goes ────────────────────────────────────────────────
+       *
+       * `router.back()` does not unmount this screen — it is registered
+       * `href: null` inside <Tabs> and stays mounted for the life of the app —
+       * so the sets that have just been written stayed in `rows`, ready to be
+       * written a second time. The next open, for anybody, drew somebody else's
+       * session already typed in, and a coach who pressed Save on it put the
+       * same hour of training into a second person's history. The subject
+       * following the route (above) fixes whose name is on the screen; this
+       * fixes what is under it. */
+      clearSheet();
       Alert.alert(
         'Session logged',
         `${entries.length} exercise${entries.length === 1 ? '' : 's'} added to ${first}'s record. They will see it on their own phone, marked as logged by you, and it counts towards their progress.`,
@@ -613,8 +714,25 @@ export default function LogSession() {
       ));
       return;
     }
+    /* ── nothing was kept, which is not the same as being offline ────────────
+     *
+     * `queue.attempt` has a fourth answer and this arm used to swallow it: with
+     * the phone already holding FLOOR_CAP acts the write is neither sent nor
+     * queued, and the sentence below — "saved on this phone … it goes up next
+     * time this app has signal" — is then false in both halves. A coach who
+     * reads it presses Done and walks away from an hour of typing that exists
+     * nowhere. `floorFullLine` says the true thing and the sheet stays on
+     * screen, because this screen is the only thing holding it.
+     */
+    if (out === 'full') {
+      setFailure(floorFullLine('This session'));
+      return;
+    }
     // Kept. Said as a sentence and not as a success: the client cannot see this
-    // yet and neither can anybody else.
+    // yet and neither can anybody else. The sheet still goes: it is on this
+    // phone, in the queue, under its own timestamp, and leaving a copy of it in
+    // the form is how it gets sent a second time.
+    clearSheet();
     Alert.alert('Kept on this phone',
       keptOfflineLine('This session'),
       [{ text: 'Done', onPress: () => router.back() }]);

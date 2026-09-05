@@ -37,6 +37,9 @@ import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
 import { classifyWrite, registerFlush, type WriteOutcome } from '../lib/offlineQueue';
+// The register, read back to prove an attendance write actually matched a row.
+// See the 'class-attendance' arm of `send`.
+import { classRoster } from '../lib/classAttendance';
 import { entryToRow } from '../lib/workoutRow';
 import type { WorkoutEntry } from '../lib/mockData';
 import {
@@ -112,12 +115,19 @@ export async function loadFloorQueue(uid: string | null): Promise<void> {
 /**
  * Send one act, and say what became of it.
  *
- * Every arm counts the rows it wrote. A write PostgREST narrows to zero rows
- * under RLS does not fail — it succeeds having done nothing — and
- * `classifyWrite` reads `rows <= 0` as a refusal, which is what stops a tick
- * nobody was entitled to make being reported as saved.
+ * Every arm establishes what it wrote rather than assuming it. A write PostgREST
+ * narrows to zero rows under RLS does not fail — it succeeds having done nothing
+ * — and `classifyWrite` reads `rows <= 0` as a refusal, which is what stops a
+ * tick nobody was entitled to make being reported as saved.
  *
- * `rows: null` is the offline case and the only one that queues.
+ * The two table writes count the rows they got back. The RPC cannot: an UPDATE
+ * inside a `returns void` function that matches nothing raises nothing and
+ * returns nothing, so that arm establishes it by reading the register back. Its
+ * own note says why, and why the answer is not simply assumed.
+ *
+ * A write nobody answered queues. So does one whose outcome could not be
+ * established, which is the same fact about a different step and gets the same
+ * treatment for the same reason: an unproven write may not be reported as saved.
  */
 async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
   if (!USE_SUPABASE) return 'unsent';
@@ -151,11 +161,65 @@ async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
         return out;
       }
       case 'class-attendance': {
-        // An RPC, so there are no rows to count — the function either ran or it
-        // did not. `rows: 1` tells classifyWrite to judge on the error alone.
-        const { error } = await supabase.rpc('set_class_attendance',
+        /* ── the tick that updated nothing and was reported as stored ────────
+         *
+         * This said "an RPC, so there are no rows to count — the function either
+         * ran or it did not", and passed `rows: 1` to make `classifyWrite` judge
+         * on the error alone. That is exactly the shape `classifyWrite`'s own
+         * header warns about, arriving through an RPC instead of through
+         * PostgREST: `set_class_attendance` is `returns void` and its last
+         * statement is
+         *
+         *     update class_bookings set attended_at = …
+         *      where class_id = p_class and user_id = p_user
+         *
+         * — and an UPDATE that matches no row is not an error. It succeeds,
+         * having done nothing, and the function returns nothing to say so.
+         *
+         * The row goes missing in the ordinary way: `cancel_class` DELETES the
+         * booking. The register is read when the screen opens, a member cancels
+         * at 06:58, the coach ticks them in at 07:01, and the phone was told
+         * 'stored'. The row moved to ticked, the failure banner cleared, and the
+         * footnote under the register told the coach their gym owner sees this
+         * attendance for payroll. The gym had nothing, and per-attendee pay is
+         * settled from what the gym has.
+         *
+         * ── how it is proven, without a schema change ──────────────────────
+         *
+         * By reading the register back. `class_roster` carries the same guard as
+         * `set_class_attendance` — part 2320 made the two identical, and says
+         * why: "the register you may MARK and the register you may READ have to
+         * be the same register" — so a roster that comes back is an answer about
+         * exactly the rows this write was allowed to touch. The member being in
+         * it means the UPDATE's `where` matched; the member being absent means it
+         * matched nothing, which is a write the server read and did not apply.
+         *
+         * Preferred over waiting on SQL because it is true on the handset
+         * tonight, on the function as it is deployed today. The cost is one extra
+         * read per tick on the screen with the worst signal in the building, and
+         * it is worth it: the alternative is a number a gym pays wages from,
+         * asserted by a client that never checked.
+         *
+         * A roster that will not READ proves nothing either way, so the tick is
+         * kept rather than claimed — 'unsent', queued, tried again. Re-sending it
+         * is safe for the reason `flushAll` already relies on below: this is an
+         * RPC that SETS a state, so saying it twice says what it said the first
+         * time.
+         *
+         * supabase/parts/2330 is the durable fix and is UNAPPLIED: it makes the
+         * function report whether it matched, at which point `data` is a boolean
+         * and the read below never runs. Until it is applied `data` is null,
+         * which is the void function answering, and null is not evidence.
+         */
+        const { data, error } = await supabase.rpc('set_class_attendance',
           { p_class: a.classId, p_user: a.userId, p_present: a.present });
-        return classifyWrite(error as never, 1);
+        // The error arm is unchanged; `classifyWrite` does not consult the row
+        // count when there is an error to read.
+        if (error) return classifyWrite(error as never, null);
+        if (typeof data === 'boolean') return data ? 'stored' : 'refused';
+        const seen = await classRoster(a.classId);
+        if (seen === null) return 'unsent';
+        return seen.some((m) => m.userId === a.userId) ? 'stored' : 'refused';
       }
       case 'session-outcome': {
         // `a.outcome` is null for a RETRACTION, and this is the same statement
