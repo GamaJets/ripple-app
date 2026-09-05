@@ -111,12 +111,29 @@ const toAuth = (permSet: any) => {
   };
 };
 
-/** `{ startDate, endDate, limit, ascending }` in the old shape → the new one. */
+/** `{ startDate, endDate, limit, ascending }` in the old shape → the new one.
+ *
+ * ── the date range goes in `filter.date`, and getting that wrong is silent ──
+ *
+ * This first shipped as `filter: { startDate, endDate }`, which is not the
+ * shape: FilterForSamplesBase carries `uuid`, `uuids`, `metadata`, `date`,
+ * `workout` and `sources`, and a date range belongs under `date`. Unknown
+ * properties are not an error — they are ignored — so every query ran with NO
+ * predicate and returned the member's entire HealthKit history.
+ *
+ * On a real phone that read 1,208,596 active kcal and 16,265,668 steps "today",
+ * while resting heart rate was correct at 54 bpm. That split is the tell and is
+ * worth remembering: the readers that SUM samples were years out, the one that
+ * takes the latest sample was right, because the newest sample is still today's.
+ * A wrong filter does not look like a wrong filter. It looks like a wrong number.
+ *
+ * The `as any` on the call sites is what let this compile. The generic types
+ * would have rejected it. */
 const toQuery = (options: any) => {
   const start = options?.startDate ? new Date(options.startDate) : undefined;
   const end = options?.endDate ? new Date(options.endDate) : undefined;
   return {
-    filter: { startDate: start, endDate: end },
+    filter: { date: { startDate: start, endDate: end } },
     // The old API treated a missing limit as "everything" for aggregates and
     // as "nothing" for sample reads — appleHealth.ts documents that trap and
     // always passes one. Non-positive means all, which is the safe reading of
