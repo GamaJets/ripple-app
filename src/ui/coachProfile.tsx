@@ -220,7 +220,49 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
     };
     fetchReal();
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      if (cancelled || !session) return;
+      if (cancelled) return;
+      if (!session) {
+        // ── the sign-out this listener did not have ────────────────────────
+        //
+        // It was `if (cancelled || !session) return;`, so a session ending was
+        // the one auth event this provider ignored, and every field below kept
+        // the departing coach's answers: their name, their face, their tagline,
+        // their bio, what they offer, their session rate, whether their public
+        // page is live and what its address is.
+        //
+        // This provider is mounted at the root and outlives the Sign Out
+        // button's `router.replace('/welcome')`, so the next coach to sign in
+        // on the same handset — a shared gym phone, a coach handing a device to
+        // a colleague — gets app/(trainer)/profile.tsx and the dashboard header
+        // drawn from it before their own read lands. And because the read only
+        // ASSIGNS a name it actually found (`if (real.trim()) setName(...)`), a
+        // profiles row with a blank full_name, or a read that failed, leaves the
+        // previous coach's name and photo in place for the whole session.
+        //
+        // Cleared to the values the `useState` calls above open with, so a
+        // sign-out returns this provider to the state a fresh launch has. The
+        // local blob needs nothing done to it: the hydrate effect above deletes
+        // `repple.coachProfile` outright whenever USE_SUPABASE is on, and the
+        // persist effect below is gated on `mine`, which this clear makes false.
+        //
+        // `uid` null is what disarms the debounced push effect and what makes
+        // `resolveTrainerAccess` answer 'signed-out', so a cleared bio can never
+        // be written up as though the coach had erased it themselves.
+        //
+        // `synced` goes TRUE, not false, for the reason fetchReal's own
+        // signed-out branch settles rather than returns: `settled` is
+        // `hydrated && synced`, and an unsettled read resolves to 'loading',
+        // which would hold a screen on a spinner nothing is ever going to
+        // resolve. There is nothing left to wait for here — the answer is that
+        // nobody is signed in.
+        setUid(null);
+        setTrainerRow('unknown');
+        setName(''); setPhoto(null); setTagline(''); setBio('');
+        setOffers([]); setSpecialties([]); setSessionFee(null); setListed(false);
+        setPublicHandle(null); setPublicPage(false);
+        setSynced(true);
+        return;
+      }
       setSynced(false);
       fetchReal();
     });

@@ -33,7 +33,16 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} 
   ok(isPersonalDeviceKey('repple.notifyPrefs'), 'the notification categories and quiet hours are cleared');
   ok(isPersonalDeviceKey('repple.appLock.enabled'), 'so is the biometric lock, which was left armed by somebody who had gone');
   ok(isPersonalDeviceKey('repple.reminders'), 'and so are the reminders, which were scheduled on the phone itself');
-  eq(PERSONAL_DEVICE_KEYS.length, 3, 'and nothing has joined the list without a line in this file about it');
+  // The fourth, and the only one that is a credential rather than a preference.
+  // It is the member's Spotify access and refresh tokens, held on the handset
+  // and nowhere else; before this, only tapping Disconnect on Meals › Music &
+  // Playlists removed them, so the next person to sign in on a shared handset
+  // inherited a live connection to somebody else's Spotify account — one whose
+  // granted scopes let this app rewrite their playlists and control playback on
+  // their devices.
+  ok(isPersonalDeviceKey('repple.spotify.token'),
+    'and so is the Spotify token, which is a credential for an account outside Repple entirely');
+  eq(PERSONAL_DEVICE_KEYS.length, 4, 'and nothing has joined the list without a line in this file about it');
 }
 
 /* ── 2 · what must not go ──────────────────────────────────────────────── */

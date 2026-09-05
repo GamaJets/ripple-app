@@ -665,7 +665,48 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (cancelled) return;
       const id = session?.user?.id;
-      if (id) loadForUser(id);
+      if (id) { loadForUser(id); return; }
+      // ── and when the session GOES ────────────────────────────────────────
+      //
+      // This listener used to be `if (id) loadForUser(id)` and nothing else, so
+      // a sign-out was not an event this provider had. Every field below stayed
+      // exactly as the departing member left it: their first name, their photo,
+      // their date of birth, their height, their disclosed injuries, their
+      // weight and body fat, their whole scan history.
+      //
+      // Nothing is on screen at that instant — the three Sign Out buttons all
+      // `router.replace('/welcome')` — but the provider is mounted at the root
+      // and outlives that. The next person to sign in on the same handset gets
+      // app/(client)/dashboard.tsx rendered from this state before their own
+      // read can land, and its header is `Good Morning, {firstName}` off
+      // `c.name`. A gym desk handset, or a member handing a phone to a friend,
+      // is greeted by name — somebody else's — with somebody else's face in the
+      // avatar and somebody else's injuries in the cards below. If the new
+      // member's profile read then fails, or their `profiles.full_name` is
+      // blank (the read only assigns a name it actually found), it does not
+      // clear on the next frame: it stays for the session.
+      //
+      // Cleared to the same values the `useState` calls above open with, so
+      // signing out returns this provider to the state a fresh launch has. The
+      // persist effect further up notices and overwrites the `repple.profile`
+      // blob on disk with the empty one, which takes the departing member's
+      // injuries off the handset as well as off the screen.
+      //
+      // `sbUid` last, and `nameSynced` false, because those two are the push
+      // effect's arming gate: it must not see a cleared name beside a live uid
+      // and conclude the member has just erased their own profile.
+      setNameSynced(false);
+      setSbUid(null);
+      setName(''); setDob(''); setPhoto(null); setHeightCm(null);
+      setGoal('muscle'); setCoachingMode('online'); setDiet('meat');
+      setAvoid([]); setInjuries([]); setFocusAreas([]); setMealsPerDay(3);
+      setCoachLinked(null);
+      setStepGoal(null); setSleepGoalHours(null); setWaterGoalGlasses(null);
+      setScans([]); setManualWeight(null); setManualBodyFat(null); setManualAt(null);
+      setSaveFailed(false);
+      // 'ready', not 'error': there is genuinely no profile and no scan history
+      // to read for nobody, which is what the signed-out branch above says too.
+      setProfileStatus('ready'); setScansStatus('ready');
     });
     return () => { cancelled = true; sub.subscription.unsubscribe(); };
   }, [readTick]);

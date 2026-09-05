@@ -13,6 +13,12 @@
 //   · the reminders — scheduled ON the phone, so the next member's handset went
 //     on buzzing at 6am for a session that was never theirs.
 //
+// One more was found later, and it is worse than the ones above because it is
+// not a preference at all: the Spotify access and refresh tokens. They live on the
+// handset and nowhere else, under a key with no account in it, and only the
+// Disconnect button ever removed them — so the next member inherited a live,
+// writable connection to a stranger's Spotify account. See the list below.
+//
 // A shared handset at a gym desk is not a rare case; nor is a member selling a
 // phone. And app/(client)/notification-prefs.tsx says out loud that these
 // choices "are kept on this phone", which is a promise about privacy as much as
@@ -57,6 +63,30 @@ export const PERSONAL_DEVICE_KEYS: readonly string[] = [
   // notifications they were scheduled as. The ids are why cancelling has to
   // happen BEFORE this key goes; see src/ui/signOutState.ts.
   'repple.reminders',
+  // src/lib/spotify.ts — the member's Spotify access and refresh tokens.
+  //
+  // The only entry on this list that is a CREDENTIAL rather than a preference. It is stored on the handset and nowhere else — there is no
+  // server-side row for it, the key carries no account id, and the only thing
+  // that ever removed it was `spotifyDisconnect()`, which runs when a member
+  // taps Disconnect on Meals › Music & Playlists and at no other time.
+  //
+  // So it survived a sign-out, and the next person to sign in on the same
+  // handset opened that screen to somebody else's Spotify account: their
+  // display name printed as "Connected as", their private playlists listed by
+  // `spotifyMyPlaylists`, and — because the granted scopes include
+  // playlist-modify-public, playlist-modify-private and
+  // user-modify-playback-state — the ability to write to those playlists and
+  // to start and stop playback on that person's devices. A shared gym handset
+  // is the ordinary case for all three of the keys above it; this is the one
+  // where the inheritance reaches outside Repple entirely.
+  //
+  // Clearing it here does not revoke the grant at Spotify's end. Neither does
+  // Disconnect, which removes exactly this key and nothing more, so a sign-out
+  // now leaves the account in the same state tapping Disconnect leaves it in —
+  // which is the promise the Music screen already makes. Revoking properly is
+  // a Spotify-side action and belongs to the member, not to a handset they are
+  // walking away from.
+  'repple.spotify.token',
 ];
 
 /**
