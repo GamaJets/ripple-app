@@ -86,9 +86,18 @@ const draft = (o: Partial<GymCostDraft> = {}): GymCostDraft => ({
   // The other end of the same mistake. A Kuwaiti dinar has a THOUSAND fils in
   // it, so a rent of 450.000 is 450000 minor units — not 45000.
   eq(gymCostBlockers(draft({ currency: 'KWD', amountText: '450.000' })).length, 0, 'a three-place amount is an amount');
-  const kw = gymCostBlockers(draft({ currency: 'KWD', amountText: '450.005' }));
-  eq(kw.length, 1, 'and thousandths are charged in tens, so the last place must be a nought');
-  ok(kw[0].includes('KWD'), 'the refusal names the currency it is talking about');
+  // This used to assert the opposite, and asserting it is how the defect
+  // survived: Stripe's whole-ten rule was being applied to a cost, which is
+  // money that has ALREADY left the gym's account. A Kuwaiti supplier can
+  // invoice 450.005 KWD and a gym that has paid it has to be able to file it.
+  // Refused, the owner's only way forward was an amount nobody paid.
+  eq(gymCostBlockers(draft({ currency: 'KWD', amountText: '450.005' })).length, 0,
+    'a third place that is not a nought is still a real cost — Stripe is not in this transaction');
+  // The refusals that are about whether the digits are an amount at all still
+  // stand, in the same currency, on the same screen.
+  const kw = gymCostBlockers(draft({ currency: 'KWD', amountText: '450.0005' }));
+  eq(kw.length, 1, 'a fourth decimal place is more places than the dinar has');
+  ok(kw[0].includes('KWD'), 'and the refusal names the currency it is talking about');
 }
 
 /* ── 3. what they add up to, and what they never add up with ──────────────*/

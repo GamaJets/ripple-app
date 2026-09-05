@@ -299,7 +299,11 @@ export function parseRate(input: string | null | undefined, currency: string | n
   if (!raw) return { kind: 'clear' };
   if (/-/.test(raw)) return { kind: 'bad', reason: 'A rate cannot be negative. A deduction is an adjustment line, not a rate.' };
 
-  const read = readMinorAmount(raw, currency);
+  // NOT a charge. A rate is what the gym PAYS a coach, out of its own account
+  // and by whatever payroll it runs; nothing takes it to Stripe, so Stripe's
+  // whole-ten rule for the thousandth-unit currencies has no say in what a
+  // Kuwaiti gym may pay per hour.
+  const read = readMinorAmount(raw, currency, false);
   if (!read.ok) return { kind: 'bad', reason: read.reason };
 
   // `rate_cents` is a plain integer column, so anything past 2^31-1 is refused

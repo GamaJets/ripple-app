@@ -122,7 +122,11 @@ export function parseAmount(
   if (/-/.test(String(input ?? ''))) {
     return { kind: 'bad', reason: 'An invoice cannot be for a negative amount. To take one back, void it or write it off.' };
   }
-  const read = readMinorAmount(input, currency);
+  // NOT a charge. A gym invoice is a bill the gym issues and settles against a
+  // `gym_payments` row — cash, card machine, bank transfer — and no code path
+  // hands this figure to Stripe: `settleInvoice` below LINKS a payment, it does
+  // not create one. So a Kuwaiti gym bills the 82.505 KWD it means to bill.
+  const read = readMinorAmount(input, currency, false);
   if (!read.ok) return { kind: 'bad', reason: read.reason };
   // `gym_invoices.amount_cents` is a plain integer column, so anything past
   // 2^31−1 is rejected by the database with a 22003 after the form has closed.

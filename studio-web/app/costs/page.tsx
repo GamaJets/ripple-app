@@ -479,7 +479,10 @@ function Record({ w, ccy, zone, tenantId, me, onChange }: {
     if (!tenantId || !ccy) return;
     // Read once, by the same reader the blockers used. Two readers over one box
     // is how an amount comes to be shown as one figure and stored as another.
-    const amt = readMinorAmount(amountText, ccy);
+    // NOT a charge — money that has already left the gym's account — and the
+    // same setting `gymCostBlockers` read it with above. Two readers over one
+    // box disagreeing about a Kuwaiti amount is the shape this pairing avoids.
+    const amt = readMinorAmount(amountText, ccy, false);
     if (!amt.ok) { setWriteErr(amt.reason); return; }
 
     setBusy(true); setWriteErr(null);

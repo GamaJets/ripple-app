@@ -260,9 +260,7 @@ export function minorFromDecimal(raw: string | number | null | undefined, curren
 }
 
 /**
- * `chargeable` is Stripe's whole-ten rule for the three-place currencies, and
- * it is TRUE by default because nearly every box this reads is a box whose
- * value goes to Stripe.
+ * `chargeable` is Stripe's whole-ten rule for the three-place currencies.
  *
  * Pass false where the figure is not a charge: a coach recording what they
  * spent on an Instagram ad is stating a fact about their own bank statement,
@@ -274,6 +272,56 @@ export function minorFromDecimal(raw: string | number | null | undefined, curren
  * Every OTHER refusal still applies at both settings, because those are about
  * whether the digits are an amount at all rather than about what may be
  * charged.
+ *
+ * ── why the default is TRUE when most call sites pass false ────────────
+ *
+ * This paragraph used to say true was the default because "nearly every box
+ * this reads is a box whose value goes to Stripe". Nobody had counted, and it
+ * was the wrong way round. Seventeen boxes read this function. SIX are charges:
+ * the package price, the price edit beside it, the echo under it and the refund
+ * box, all on app/(trainer)/payments.tsx, plus the plan price and the pass price
+ * on the console's /money. The other ELEVEN are a record of money that has
+ * already moved — a supplier cost, a coach's hourly rate, a shift rate, a
+ * repair, an invoice the gym issues and settles against its own ledger, cash
+ * taken at the desk, the correction that takes it back off again, a returned
+ * code, a trainer's own cost sheet.
+ *
+ * Every one of those eleven was refusing an ordinary Bahraini, Jordanian,
+ * Kuwaiti, Omani or Tunisian figure. A member hands 82.505 KWD across the front
+ * desk in notes; `82505 % 10` is 5; the box says the last place must be a
+ * nought, and Stripe is not in the transaction at all. The only way forward was
+ * to record an amount nobody paid, which is the exact thing this flag was added
+ * to prevent.
+ *
+ * So the count says flip the default and pass `true` at the six. The count is
+ * not what a default is for. A default is what an UNMARKED call site gets, and
+ * the only question that matters is which way an unmarked one fails:
+ *
+ *   default TRUE, and somebody adds an unmarked COST box
+ *     The first gym in Kuwait to type 82.505 is refused — at the box, by a
+ *     sentence naming the currency and the rule, before anything is written.
+ *     Wrong, immediate, visible to the person who can report it, and nothing is
+ *     stored. The fix is one argument.
+ *
+ *   default FALSE, and somebody adds an unmarked CHARGE box
+ *     82.505 is accepted and filed. A plan price is what every member on it is
+ *     billed for ever and a pass price is COPIED onto every pass sold on it,
+ *     with no edit afterwards — so the figure has already spread by the time
+ *     anything notices. What notices is Stripe, refusing the charge, at a
+ *     checkout, in front of a member, possibly months later, and nothing on any
+ *     screen in this app points back at the box that caused it.
+ *
+ * One is a refusal a developer meets on the first run. The other is a member's
+ * payment failing on a price that is already everywhere. The default stays on
+ * the side that fails at the box, and the eleven say `false` in as many words.
+ *
+ * The shape that ends the argument is no default at all — a REQUIRED third
+ * argument, so an eighteenth call site cannot be unmarked in either direction
+ * and the compiler asks the question rather than a comment asking it. That is
+ * not done here only because three of the seventeen sites sit in files this
+ * change may not touch (app/(trainer)/payments.tsx, src/lib/codeReturn.ts and
+ * src/lib/coachInvoice.ts). It is the right end state and it is one argument
+ * per call site away, once one change can reach all of them.
  */
 export function readMinorAmount(typed: string | null | undefined, currency: string | null | undefined, chargeable = true): TypedAmount {
   const cur = (currency || '').trim().toUpperCase();

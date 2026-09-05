@@ -214,7 +214,12 @@ export function gymCostBlockers(d: GymCostDraft): string[] {
     // The reader's own reason rather than a sentence written here, so a gym in
     // Kuwait is told that the last place must be a nought and a gym in Japan is
     // told a yen has no smaller unit.
-    const read = readMinorAmount(d.amountText, cur);
+    // NOT a charge, so Stripe's whole-ten rule for the thousandth-unit
+    // currencies is switched off here. This is money that has ALREADY left the
+    // gym's account: a Kuwaiti gym's water supplier can bill it 82.505 KWD and
+    // the bank statement says so. Refused, the only way to file the line was to
+    // type an amount nobody paid — which is the hole this reader exists to stop.
+    const read = readMinorAmount(d.amountText, cur, false);
     if (!read.ok) out.push(read.reason);
     else if (read.minorUnits <= 0) {
       out.push('Enter an amount greater than zero. A cost of nothing is not a cost, and a nought here would be a statement that this supplier was free.');

@@ -844,7 +844,10 @@ export function shiftRate(
   if (!(currency ?? '').trim()) {
     return { ok: false, reason: 'Say what money that is in. An amount with no currency is read in whatever the reader happens to be thinking in — and this product has no default currency.' };
   }
-  return readMinorAmount(rate, currency);
+  // NOT a charge — a shift rate is payroll, paid out rather than billed, so
+  // Stripe's whole-ten rule for the thousandth-unit currencies is off. Every
+  // other refusal above and inside the reader still stands.
+  return readMinorAmount(rate, currency, false);
 }
 
 /**

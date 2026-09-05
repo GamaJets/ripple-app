@@ -648,7 +648,11 @@ export function logCost(cost: string, currency: string | null): TypedAmount | { 
   if (!currency) {
     return { ok: false, reason: 'This gym has not set its currency, so a cost cannot say what money it is in. Record the entry without one, or set the currency first.' };
   }
-  return readMinorAmount(cost, currency);
+  // NOT a charge. This is what a repair already cost, off the invoice of the
+  // engineer who did it, and Stripe has no opinion about that figure. Refusing
+  // a Bahraini or Kuwaiti 82.505 would put a hole in the maintenance record
+  // rather than a safety on it.
+  return readMinorAmount(cost, currency, false);
 }
 
 /** Why an entry cannot be recorded, or null when it can. */

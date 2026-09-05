@@ -364,5 +364,40 @@ ok(!stillAmbiguous.ok, 'every other refusal still stands: a thousands separator 
 ok(!readMinorAmount('250.50', 'JPY', false).ok, 'and a yen still has nothing after the point');
 ok(!readMinorAmount('250', null, false).ok, 'and no currency is still no amount');
 
+/* ── the box a three-decimal currency could not be typed into ─────────────
+   The flag was right and eleven of the seventeen call sites were not passing
+   it, so every non-Stripe money box in the product refused an ordinary Gulf
+   amount. The case that reported it: a member hands 82.505 KWD across the front
+   desk in cash, `82505 % 10` is 5, and the desk was told the last place must be
+   a nought — about money already in the till, with Stripe nowhere near it. */
+
+const kwdDesk = readMinorAmount('82.505', 'KWD', false);
+ok(kwdDesk.ok && kwdDesk.minorUnits === 82505,
+  'cash counted at a desk is recorded as the amount handed over, not refused by a rule about card charges');
+ok(!readMinorAmount('82.505', 'KWD').ok,
+  'while the same figure in a box whose value goes to Stripe is still refused rather than rounded');
+
+// All five, both ways. The rule is per-currency and a list with one of them
+// missing is the exact shape of the bug this file exists to stop.
+for (const cur of ['BHD', 'JOD', 'KWD', 'OMR', 'TND']) {
+  const stated = readMinorAmount('12.345', cur, false);
+  ok(stated.ok && stated.minorUnits === 12345,
+    `a ${cur} figure whose last place is not a nought is still an amount somebody paid`);
+  ok(!readMinorAmount('12.345', cur).ok, `and ${cur} still cannot be CHARGED one`);
+}
+
+// The flag switches off ONE refusal and no others, in the same currency.
+ok(!readMinorAmount('12.3456', 'KWD', false).ok, 'a fourth place is more places than the dinar has, charge or not');
+ok(!readMinorAmount('1.234,5', 'OMR', false).ok, 'and two separators are not a number in a rial either');
+const kwdWholeTen = readMinorAmount('450.000', 'KWD', false);
+ok(kwdWholeTen.ok && kwdWholeTen.minorUnits === 450000, 'an amount that WOULD pass the whole-ten rule is unaffected by the flag');
+
+// And it changes nothing at all for the money most gyms take, because the rule
+// it lifts only ever applied to the three-place five.
+eq((readMinorAmount('12.55', 'GBP', false) as { minorUnits: number }).minorUnits, 1255,
+  'a two-place currency has no whole-ten rule to switch off');
+eq((readMinorAmount('5000', 'JPY', false) as { minorUnits: number }).minorUnits, 5000,
+  'and neither has one with no minor unit at all');
+
 if (errors.length) { console.error(`coachMoney: ${errors.length} failure(s)\n` + errors.map((e) => '  - ' + e).join('\n')); process.exit(1); }
 console.log('coachMoney ok — currencies stay apart, the two halves of a coach’s takings add without merging currencies, unlabelled amounts stay counted, memberships have no balance');

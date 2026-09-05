@@ -1018,7 +1018,10 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
     // hundred times the money that changed hands with nothing downstream able
     // to notice. `readMinorAmount` reads it in the gym's own currency and
     // refuses what it cannot read rather than storing a different number.
-    const taken = readMinorAmount(amount, ccy);
+    // NOT a charge, for the same reason as the desk on (owner)/members: this
+    // records money that has already changed hands. The plan and pass prices
+    // higher up this file ARE charges and keep the default.
+    const taken = readMinorAmount(amount, ccy, false);
     if (!taken.ok) {
       setWriteErr(`That payment was NOT recorded: ${taken.reason} Nothing was saved \u2014 the money is not in the gym record.`);
       return;
@@ -1267,7 +1270,10 @@ function Correction({ p, all, tenantId, me, onDone, onCancel, onErr }: {
   const [method, setMethod] = useState<PaymentMethod>(p.method);
   const [busy, setBusy] = useState(false);
 
-  const read = readMinorAmount(amt, p.currency);
+  // NOT a charge. A correction is a NEGATIVE `gym_payments` row and nothing
+  // else — `reversePayment` inserts, it does not call Stripe — so the whole-ten
+  // rule must not stop a Kuwaiti gym handing back exactly what it took.
+  const read = readMinorAmount(amt, p.currency, false);
   const blocker =
     (read.ok ? null : read.reason)
     ?? reversalBlocker(p, already, read.ok ? read.minorUnits : NaN)

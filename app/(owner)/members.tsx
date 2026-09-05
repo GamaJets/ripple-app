@@ -410,7 +410,11 @@ export default function OwnerMembers() {
     //
     // Not a render bug. A figure drawn wrong is embarrassing and a figure
     // WRITTEN wrong is a gym's takings, and nothing downstream can recover it.
-    const read = readMinorAmount(amount, cur);
+    // NOT a charge. This is the desk writing down money that has already been
+    // handed over, and Stripe is nowhere in the transaction. A member paying
+    // 82.505 KWD in notes was refused here by Stripe's whole-ten rule, and the
+    // only way forward was to record an amount nobody paid.
+    const read = readMinorAmount(amount, cur, false);
     if (!read.ok) { setPayErr(read.reason); return; }
     const minorUnits = read.minorUnits;
     if (minorUnits <= 0) { setPayErr('A payment has to be for more than nothing.'); return; }
