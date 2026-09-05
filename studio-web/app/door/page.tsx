@@ -1549,6 +1549,12 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
       inside: inside.map((v) => ({ memberId: v.memberId, memberName: v.memberName, enteredAt: v.enteredAt })),
       records,
       openFromEarlierDays: openBefore,
+      // The gym's clock, on paper. Every other time on this screen is drawn
+      // with `zone` already; the printed sheet was the one thing still on the
+      // reader's, and it is the one that leaves the building and can no longer
+      // be asked about. Where the gym has not set a timezone the document adds
+      // its own caveat saying whose clock it fell back to.
+      zone,
     });
     const w = window.open('', '_blank');
     if (!w) {

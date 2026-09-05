@@ -127,23 +127,28 @@ function walk(dir, out = []) {
  * The backlog: console imports of a reader's-clock formatter standing on the
  * day this gate learned to follow an import, and why each is still there.
  *
- * A RATCHET, not an exemption. Both are in `src/lib`, which this lane does not
- * write, and both are a real defect: a printed door sheet and a member's note
- * attribution drawn on whichever machine has the tab open rather than on the
- * gym's clock. What must not happen in the meantime is a third.
+ * EMPTY, and it stays empty. It held two, both real defects and both a module
+ * away in `src/lib`:
+ *
+ *   · `studio-web/app/door/page.tsx rollCallHtml` — `src/lib/rollCall.ts` drew
+ *     the printed roll call's "printed at" and every "in since" with a bare
+ *     `toLocaleString()` / `toLocaleTimeString()`. That sheet is PRINTED and
+ *     pinned to a door: it outlives the browser that drew it and there is
+ *     nobody left to ask whose clock it was. `RollCall` now carries `zone` and
+ *     both go through `gymDateTimeText` / `gymTimeText`; a gym with no timezone
+ *     set gets `NO_ZONE_NOTE` in the sheet's own caveats.
+ *   · `studio-web/app/members/page.tsx noteAttribution` — `src/lib/memberNotes.ts`
+ *     dated every note on whichever laptop had the tab open, on the one record
+ *     an owner opens in a dispute. `noteAttribution` now takes the zone beside
+ *     the note.
+ *
+ * So a hit here is now a regression rather than a backlog, which is the only
+ * state a ratchet is worth anything in. Adding an entry to get a run green is
+ * how this file would stop being a gate; the fix goes in the module, and the
+ * two above are the worked examples of what that costs (a parameter, and a
+ * field on a type the console already had to hand).
  */
-const KNOWN_IMPORTS = new Map([
-  ['studio-web/app/door/page.tsx rollCallHtml', {
-    fix: 'src/lib/rollCall.ts:168 `new Date(r.printedAtIso).toLocaleString()` and :156 '
-      + '`new Date(t).toLocaleTimeString([], …)`. The sheet is PRINTED and pinned to a door, so the '
-      + 'clock on it is the gym\'s by definition. gymDateTimeText / gymTimeText, with the zone '
-      + 'threaded through RollCall.',
-  }],
-  ['studio-web/app/members/page.tsx noteAttribution', {
-    fix: 'src/lib/memberNotes.ts:123 `new Date(n.writtenAt).toLocaleString()`. gymDateTimeText, '
-      + 'with the zone passed in beside the note.',
-  }],
-]);
+const KNOWN_IMPORTS = new Map([]);
 
 const HELP = 'Use gymDateText / gymDateTimeText / gymTimeText from src/lib/gymWhen.ts '
   + '(the reader’s locale, the gym’s zone), or calendarDateText for a YYYY-MM-DD '

@@ -34,6 +34,14 @@
 // comes in as an argument so the console and the phone app can both use it.
 
 import { assertWhole, capLimit } from './rowCap';
+// The reader's locale, the GYM's zone. `noteAttribution` used to draw its date
+// with a bare `toLocaleString()`, which is whichever machine has the tab open —
+// so "Tim, 01/09/2026, 01:30" on an owner's laptop in London was a note a Dubai
+// desk wrote at 05:30 on the 1st, and the same row read as 31 August at a third
+// desk further west. This is the record an owner opens in a dispute, where the
+// day a thing was written on is the whole of what is being disputed, so the
+// date on it is a fact about the gym's clock and not about the reader's.
+import { gymDateTimeText } from './gymWhen';
 
 type Queryable = { from: (table: string) => any };
 
@@ -114,13 +122,29 @@ export function withLegacy(
   }];
 }
 
-/** Who and when, in the desk's words. Never a bare dash: this line sits inside
- *  a sentence about a person, and an em dash as the subject of one reads as the
- *  screen having broken. */
-export function noteAttribution(n: MemberNote): string {
+/**
+ * Who and when, in the desk's words. Never a bare dash: this line sits inside
+ * a sentence about a person, and an em dash as the subject of one reads as the
+ * screen having broken.
+ *
+ * `zone` is `tenants.timezone`, passed in beside the note because this module
+ * never reads it — it takes rows it is handed, like the rest of `src/lib`, and
+ * the caller is the screen that already knows which gym it is showing. It is
+ * optional and omitting it falls back to the reader's own zone, which is what
+ * `src/lib/gymWhen.ts` does everywhere and is the honest answer for a gym that
+ * has never set a timezone; a screen taking that fallback owes the reader
+ * `whoseClockNote` somewhere on the page.
+ *
+ * The date is the raw stored value when it will not parse. That is not
+ * cosmetic: "Invalid Date" in the middle of a sentence naming a member of staff
+ * reads as that person having written something wrong, whereas the ISO string
+ * reads as a stored value nobody could make sense of, which is what it is.
+ */
+export function noteAttribution(n: MemberNote, zone?: string | null): string {
   if (n.legacy) return 'written before notes were kept — no author or date';
   const who = n.writtenByName ?? 'somebody whose account has since gone';
-  return n.writtenAt ? `${who}, ${new Date(n.writtenAt).toLocaleString()}` : who;
+  if (!n.writtenAt) return who;
+  return `${who}, ${gymDateTimeText(n.writtenAt, zone) ?? n.writtenAt}`;
 }
 
 /* ── reads ─────────────────────────────────────────────────────────────────*/

@@ -981,7 +981,7 @@ function Dossier({ d, rec, active, onClose, ccy, today, zone, gymRec, gymRecsRea
 
       <Notes
         memberId={d.memberId} name={d.name} legacy={gymRec?.note ?? null}
-        gymRecsRead={gymRecsRead} tenantId={tenantId} me={me}
+        gymRecsRead={gymRecsRead} tenantId={tenantId} me={me} zone={zone}
       />
 
       <Invites d={d} rec={rec} zone={zone} />
@@ -1150,7 +1150,7 @@ function GymRecordEditor({ memberId, name, rec, read, zone, tenantId, me, onSave
  * that use the feature most. The cost is that this section has its own three
  * states, which it renders itself.
  */
-function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me }: {
+function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me, zone }: {
   memberId: string;
   name: string | null;
   /** The one-line note from `gym_member_records`, which predates this list. */
@@ -1160,6 +1160,12 @@ function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me }: {
   gymRecsRead: boolean;
   tenantId: string;
   me: Me;
+  /** `tenants.timezone`, or null when the gym has not set one. The date under
+   *  each note is the day the desk wrote it, which is a fact about the gym and
+   *  not about whichever laptop is open — a note written at 01:00 in Dubai read
+   *  from London is dated the previous day, on the one record an owner reaches
+   *  for when the day a thing was written on is what is being disputed. */
+  zone: string | null;
 }) {
   const [notes, setNotes] = useState<MemberNote[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -1254,7 +1260,7 @@ function Notes({ memberId, name, legacy, gymRecsRead, tenantId, me }: {
               >
                 <p style={{ margin: 0, fontSize: 13, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{n.body}</p>
                 <p style={{ margin: '5px 0 0', fontSize: 11.5, color: 'var(--ink3)' }}>
-                  {noteAttribution(n)}
+                  {noteAttribution(n, zone)}
                 </p>
               </li>
             ))}
