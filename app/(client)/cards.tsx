@@ -163,8 +163,6 @@ export default function Cards() {
   // smaller number than their own app had just congratulated them on.
   const streak = shownStreak(log);
   const best = longestStreak(log);
-  const prs = personalRecords(log, c.weightSeries).sort((a, b) => b.est1RM - a.est1RM);
-  const topPr = prs[0];
   // `weightSeries` is derived from the SCANS, and this file asked the workout
   // log's status about everything and the scans' status about nothing. Under a
   // refused scan read the series is empty, so a member with twenty weigh-ins
@@ -173,6 +171,22 @@ export default function Cards() {
   // app/(client)/social.tsx checks exactly this on exactly this provider.
   const scansKnown = isWhole(c.scansStatus);
   const w = scansKnown ? c.weightSeries : [];
+  // ── the second read the Top Lift card was never asking about ──────────
+  //
+  // `personalRecords` skips any set whose `setLoadKg` comes back null, and with
+  // no weight history that is EVERY bodyweight set — so under a scans read that
+  // failed or truncated, an 84 kg member whose top record is a +20 kg pull-up
+  // had every calisthenic record silently drop off the board and `topPr` became
+  // the best BARBELL lift instead. The card then announced their bench as their
+  // top lift, with Share still enabled, and these cards are exported as PNGs
+  // and posted publicly.
+  //
+  // Priced from `w` and not `c.weightSeries`, so the board is built from the
+  // same gated series the Progress card uses rather than from whatever the
+  // provider happened to be holding when the read failed. That also settles
+  // `shareText` below, which reads `topPr` directly.
+  const prs = personalRecords(log, w).sort((a, b) => b.est1RM - a.est1RM);
+  const topPr = prs[0];
   const wDelta = w.length > 1 ? +(w[w.length - 1].v - w[0].v).toFixed(1) : 0;
   // The change in the client's unit, converted as one span and rounded once at
   // the end rather than at each weigh-in. A measured half-kilo that rounds to a
@@ -198,8 +212,16 @@ export default function Cards() {
   // 'loading' it also stops the first frame offering a streak of zero to share.
   const logKnown = isWhole(logStatus);
   const hasStreak = logKnown && (streak > 0 || best > 0);
-  const hasPr = logKnown && !!topPr;
+  // Both reads, because this card is priced from both. `scansKnown` is the
+  // gate two lines above, and it was applied to the Progress card and to
+  // nothing else on the screen.
+  const hasPr = logKnown && scansKnown && !!topPr;
   const UNREAD = logStatus === 'loading' ? 'Reading your training log…' : logStatus === 'partial' ? 'More logged than can be read at once — a “best ever” over part of it is not one' : 'We couldn’t read your training log';
+  // The same three sentences for the OTHER read, in the words
+  // app/(client)/records.tsx already uses for this exact case.
+  const UNWEIGHED = c.scansStatus === 'loading' ? 'Reading your weight history…'
+    : c.scansStatus === 'partial' ? 'More weigh-ins on record than can be read at once — a top lift priced against part of them is not one'
+    : 'We couldn’t read your weight history, and pull-ups and dips are priced against it';
 
   const cards = [
     // `available: true` was hardcoded on this one card while the other two
@@ -212,7 +234,10 @@ export default function Cards() {
     // as the figure somebody screenshots and posts. That is the exact failure
     // fig() was written for, and this was the one screen in the app printing a
     // convertible weight without it.
-    { kicker: 'Top Lift', big: hasPr ? fig(weightIn(topPr.est1RM, wu)) : '—', unit: hasPr ? wu : '', sub: hasPr ? `${topPr.exercise} · est 1RM` : logKnown ? 'Log a lift to unlock' : UNREAD, available: hasPr },
+    // The unread sentence names WHICH read: "we couldn't read your training
+    // log" over a log that came back whole and a weight history that did not
+    // points the member at the wrong thing to pull down on.
+    { kicker: 'Top Lift', big: hasPr ? fig(weightIn(topPr.est1RM, wu)) : '—', unit: hasPr ? wu : '', sub: hasPr ? `${topPr.exercise} · est 1RM` : !logKnown ? UNREAD : !scansKnown ? UNWEIGHED : 'Log a lift to unlock', available: hasPr },
     // No second weigh-in means no measured change — show the card locked rather
     // than a manufactured "+0 kg since you started".
     // `hasProgress` asks whether there are two weigh-ins; it never asked

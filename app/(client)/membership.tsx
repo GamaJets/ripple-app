@@ -400,6 +400,17 @@ export default function Membership() {
           label="Sessions Logged This Month"
           figure={logKnown ? fig(visits) : fig(null)}
           note={logStatus === 'loading' ? 'Reading your training log…'
+            // Three arms, as on Home, and for the reason the comment above that
+            // hero gives: "we couldn’t read it" is not true of all three ways
+            // this can fail to be a number. Under 'partial' NOTHING failed —
+            // the server answered, and src/ui/workoutLog.tsx reads
+            // `performed_at` DESCENDING before capping, so what did not come
+            // back is the far end of the member's history, not this month. The
+            // count is still withheld, because `capped` cannot promise where
+            // the page stopped; but telling somebody their log could not be
+            // read, when it was read and only the oldest of it was left behind,
+            // is a sentence that is simply false.
+            : logStatus === 'partial' ? 'You have more training logged than we can read in one go, so this month is left blank rather than counted over part of it. Nothing failed and nothing is missing from your log.'
             : !logKnown ? 'We couldn’t read your training log — this is not a month with nothing in it.'
             : visits > 0 ? `Last logged ${last}` : 'No sessions logged yet this month'}
         />

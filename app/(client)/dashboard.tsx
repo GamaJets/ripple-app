@@ -12,6 +12,9 @@ import { useReadStamp } from '../../src/ui/readStamp';
 import { oldestFetch } from '../../src/lib/freshness';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useNow } from '../../src/ui/today';
+// The one answer to "is this booking still ahead of the member", with the hour
+// of grace on it that keeps a session they are walking into on their screen.
+import { isUpcoming } from '../../src/lib/upcomingWindow';
 import { useReachability } from '../../src/ui/reachability';
 import { offlineBanner } from '../../src/lib/reachability';
 import { useOutbox } from '../../src/ui/outbox';
@@ -290,7 +293,30 @@ export default function Home() {
   const todayIdx = weekIndexOf(new Date());
   const workout = planDays[todayIdx % (planDays.length || 1)] || planDays[0] || { focus: 'Rest Day', exercises: [] };
 
-  const freezes = freezeBudget(log);
+  // ── all three of these are totals over the WHOLE log ──────────────────
+  //
+  // The freeze budget is earned from the count of active days, the streak is a
+  // chain through them, and `atRisk` is a claim about yesterday and today that
+  // a log read at the row cap cannot make either — src/lib/rowCap.ts drops the
+  // OLDEST rows, but a chain of 200 days counted over the most recent thousand
+  // sets is still a chain measured over part of the history, and `activeDays`
+  // has no way to know where the read stopped.
+  //
+  // They were gated on nothing while `logKnown` twenty lines up correctly gated
+  // the ring, Sessions, Lifted, New PRs and the WeekDots. So a member on a
+  // 200-day streak whose log came back 'partial' read the banner "Your 47-day
+  // streak is on the line" four inches above a ring showing a dash, with the
+  // screen's own 'partial' notice sitting between them explaining that the
+  // figures are dashed because they would be counted over part of their
+  // history. And "Remind Me Tonight" on that banner scheduled a LOCAL
+  // NOTIFICATION carrying the same wrong number into their evening.
+  //
+  // The banner goes rather than getting a dash of its own: "Your —-day streak
+  // is on the line" is not a sentence, and there is nothing to warn somebody
+  // about when we cannot tell whether the chain is unbroken. The two notices
+  // below already say the streak is being withheld and why, which is the
+  // sentence this screen owes the reader.
+  const freezes = logKnown ? freezeBudget(log) : 0;
   // ONE number on this screen. The ring took the frozen streak and the banner
   // four inches above it took `risk.streak`, which is the raw chain — so a
   // member whose freeze had bridged a missed day read "23" in the ring and
@@ -298,8 +324,8 @@ export default function Home() {
   // the freeze. `streakRisk` is still asked WHETHER the streak is at risk,
   // because that question is about the unhelped chain; it is no longer asked
   // how long it is.
-  const streak = shownStreak(log);
-  const risk = streakRisk(log);
+  const streak = logKnown ? shownStreak(log) : 0;
+  const risk = logKnown ? streakRisk(log) : { atRisk: false, streak: 0, trainedToday: false };
   const protectedTonight = risk.atRisk && freezes > 0;
   const sevInj = severeSummary(c.injuries);
   const remindTonight = async () => {
@@ -336,6 +362,11 @@ export default function Home() {
       return;
     }
     let id: string | null = null;
+    // `streak` is only ever a number here because the banner this button lives
+    // on is gated on `risk.atRisk`, which is false whenever the log did not
+    // come back whole — see the note at `freezes` above. A notification is the
+    // one thing on this screen that outlives the screen, so the figure in it
+    // must not be one the screen itself was refusing to print.
     try { id = await scheduleLocal('Keep your streak alive', 'One session today keeps your ' + streak + '-day streak going.', when, { route: '/(client)/workouts' }, 'motivation'); } catch { id = null; }
     if (!id) {
       Alert.alert('Nothing scheduled', 'That reminder could not be set — this phone may not be allowing notifications from us. Nothing has changed about your streak.');
@@ -479,9 +510,26 @@ export default function Home() {
   const wSince = ws.length > 1 ? shortDayLabel(c.weightSeries[0].t) : null;
   const scanSince = scPrev ? shortDayLabel(scPrev.takenAt) : null;
 
-  const now = Date.now();
+  // ── the hour of grace, and the row that vanished without it ───────────
+  //
+  // `Date.parse(sx.startsAt) > now` drops a session from Home the instant its
+  // clock strikes. Every other screen answering "what have I got coming" asks
+  // `isUpcoming` (src/lib/upcomingWindow.ts), which draws the line an hour
+  // BEHIND the start and says why: "A session that started ten minutes ago has
+  // not stopped being the member's next appointment. They are walking to it."
+  //
+  // At 18:05 for an 18:00 booking this screen told an in-person client "No
+  // Sessions Booked · Tap to book" while Book Sessions still listed the same
+  // hour — and for an online-only client the row is gated `booksSessions ||
+  // nextSession` below, so it DISAPPEARED altogether, which is the exact
+  // outcome the comment above that gate exists to prevent.
+  //
+  // `nowMs` rather than a bare `Date.now()` in the render body, for the reason
+  // this screen already gives at `useNow()`: a clock read once per render, on a
+  // screen with no reason to re-render, is frozen at whatever time the member
+  // opened it.
   const nextSession = sessions
-    .filter((sx) => sx.status === 'booked' && sx.clientId === c.id && Date.parse(sx.startsAt) > now)
+    .filter((sx) => sx.status === 'booked' && sx.clientId === c.id && isUpcoming(sx.startsAt, nowMs))
     .sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
 
   const d = new Date();

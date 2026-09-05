@@ -81,7 +81,11 @@ import { useClientData } from '../../src/ui/clientData';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useSettings } from '../../src/ui/settings';
-import { liftLabel, type WeightUnit } from '../../src/lib/units';
+// `liftIn` and not `liftLabel`: `setChipLabel` appends the unit itself, so a
+// labeller that also carries one renders "8×60 kg kg". `liftIn` is the
+// LIFTED-load reader (half-pound steps, the grain the plates justify) —
+// `weightIn` is for body weight and rounds to whole pounds.
+import { liftIn, type WeightUnit } from '../../src/lib/units';
 import { setChipLabel } from '../../src/lib/timedSets';
 import type { TrainingSession } from '../../src/lib/types';
 import type { WorkoutEntry } from '../../src/lib/mockData';
@@ -217,7 +221,12 @@ function logDetail(e: WorkoutEntry, wu: WeightUnit): string {
   // It also fixes a hold: a plank read "45×—" on this screen, forty-five
   // repetitions of nothing.
   if (e.sets && e.sets.length) {
-    return e.sets.map((_x, i) => setChipLabel(e, i, (kg) => fig(liftLabel(kg, wu)), wu)).join(' · ');
+    // The callback returns the NUMBER only. `setChipLabel` puts `unit` on the
+    // end of a loaded set and inside the "+" clause of a bodyweight one, so a
+    // labeller that attaches the unit too made every set on this screen read
+    // "8×60 kg kg" and every weighted pull-up "8 reps at bodyweight +20 kg kg".
+    // app/(client)/workouts.tsx passes `fig(liftIn(kg, wu))` for exactly this.
+    return e.sets.map((_x, i) => setChipLabel(e, i, (kg) => fig(liftIn(kg, wu)), wu)).join(' · ');
   }
   if (e.cardio) {
     const c = e.cardio;
@@ -1186,7 +1195,18 @@ export default function Calendar() {
               rather than either asserting emptiness or leaving a heading over
               nothing at all. Only when there is genuinely nothing to draw yet:
               a day with a session on it needs no line about the reading. */}
-          {!(logWhole && sessionsCountable && takenWhole) && logStatus !== 'error' && sessionsStatus !== 'error'
+          {/* `waitStatus !== 'error'` alongside the other two, which it was
+              missing. The three sentences inside this block are all about a
+              read that SUCCEEDED and was cut short, and `takenWhole` is false
+              under 'error' as well as 'partial' — so a failed waitlist read
+              fell into the `!takenWhole` arm and told the member their coach
+              has more hours booked than can be read at once, inviting them to
+              look for a slot to join the waitlist for. Ninety lines below, the
+              flag for that same read says the hours could not be read at all
+              and that this is a connection problem. Two contradictory sentences
+              about one read on one screen; the flag is the true one, and it
+              renders whether or not the day is empty. */}
+          {!(logWhole && sessionsCountable && takenWhole) && logStatus !== 'error' && sessionsStatus !== 'error' && waitStatus !== 'error'
             && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center' }}>

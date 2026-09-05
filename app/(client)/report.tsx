@@ -34,6 +34,10 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useMeasurements } from '../../src/ui/measurements';
 import { useCheckIns } from '../../src/ui/checkins';
 import { shownStreak, statsSince, personalRecords, streakMilestone } from '../../src/lib/streaks';
+// The one sentence that goes under a tonnage the app knows to be short. Five
+// other client screens print it — history, trends and the workout runner — and
+// this one printed the figure bare. See src/lib/bodyweightSets.ts.
+import { tonnageNote } from '../../src/lib/bodyweightSets';
 import { useState, useEffect, useCallback } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { askAboutMyWeek, coachAvailable } from '../../src/lib/coach';
@@ -151,6 +155,21 @@ export default function WeeklyReport() {
   weekStart.setHours(0, 0, 0, 0);
   const range = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${today.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
   const wk = statsSince(log, weekStart.getTime(), c.weightSeries);
+  // ── the tonnage that needed no failed read to be wrong ────────────────
+  //
+  // `statsSince` returns `unpricedSets` alongside `volumeKg` and its doc says
+  // in as many words that "a screen that prints the tonnage without checking
+  // this is stating a total over a set it knows to be short". This screen
+  // printed `wk.volumeKg` in the KPI row, in the fallback prose, and in the
+  // fact list handed to the model, and checked it in none of the three.
+  //
+  // The failure needs nothing to go wrong: a member nobody has ever weighed has
+  // an empty `weightSeries`, so a week of pull-ups and dips has no load to
+  // price and the report reads "Volume 0.0 t" over a paragraph saying they
+  // moved 0.0 tonnes — about a week they trained hard. The note names how many
+  // sets are missing and what to do about it, in the same words history.tsx,
+  // trends.tsx and workouts.tsx already use.
+  const volNote = tonnageNote({ kg: wk.volumeKg, unknownSets: wk.unpricedSets });
 
   const comp = compositionInsights(isWhole(c.scansStatus) ? c.scans : []);
   // Facts only. A line built from a read that did not land whole is not a
@@ -175,6 +194,12 @@ export default function WeeklyReport() {
     `Week of ${range}.`,
     trainingWhole ? `Trained ${wk.workouts} time(s) across ${wk.days} active day(s).` : '',
     trainingWhole ? `Volume ${(wk.volumeKg / 1000).toFixed(1)} tonnes, ~${num(wk.kcal)} kcal.` : '',
+    // Said to the model too, for the same reason the caveats above and below
+    // are: the fact lines are its only source, so a tonnage handed over bare is
+    // one it will describe as the whole of their week's work.
+    trainingWhole && volNote
+      ? `That tonnage leaves out ${wk.unpricedSets} bodyweight set(s) whose load is not recorded, so it is a floor and not a total. Do not call it their whole week's work.`
+      : '',
     trainingWhole ? `Streak ${streak} day(s).` : '',
     // Said to the model in as many words, so it does not fill the silence with
     // a guess about a quiet week.
@@ -220,7 +245,14 @@ export default function WeeklyReport() {
     if (!trainingWhole) bits.push(logStatus === 'loading'
       ? 'Reading your week…'
       : 'We could not read your training this week, so this summary leaves it out. It is not a week with nothing in it.');
-    else if (wk.workouts > 0) bits.push(`You trained ${wk.workouts} time${wk.workouts === 1 ? '' : 's'} over ${wk.days} day${wk.days === 1 ? '' : 's'}, moving ${(wk.volumeKg / 1000).toFixed(1)} tonnes of volume.`);
+    // The tonnage clause is dropped, not dashed, when the week holds sets the
+    // app could not price: "moving 0.0 tonnes of volume" was the sentence a
+    // never-weighed member read about a week of pull-ups and dips. The count of
+    // sessions and active days is unaffected — those are facts — and the note
+    // underneath the KPI row says which sets are missing and why.
+    else if (wk.workouts > 0) bits.push(volNote
+      ? `You trained ${wk.workouts} time${wk.workouts === 1 ? '' : 's'} over ${wk.days} day${wk.days === 1 ? '' : 's'}.`
+      : `You trained ${wk.workouts} time${wk.workouts === 1 ? '' : 's'} over ${wk.days} day${wk.days === 1 ? '' : 's'}, moving ${(wk.volumeKg / 1000).toFixed(1)} tonnes of volume.`);
     else bits.push('No logged workouts this week — a fresh chance to get one on the board.');
     if (trainingWhole && streak > 0) bits.push(`Your streak is at ${streak} day${streak === 1 ? '' : 's'} — keep it alive.`);
     // Gated on the CONVERTED change: a fifth of a kilogram is under half a
@@ -403,12 +435,41 @@ export default function WeeklyReport() {
             // wrong enough to matter. A tonne of bar work is understood.
             { label: 'Volume', value: `${(wk.volumeKg / 1000).toFixed(1)}`, unit: 't', delta: `${wk.kcal.toLocaleString()} kcal` },
             { label: 'Streak', value: `${streak}`, unit: streak === 1 ? 'day' : 'days', delta: streak > 0 ? 'running' : 'not started', good: streak > 0 },
-            { label: 'PRs on Record', value: fig(prs.length), delta: 'all-time' },
+            // ── the board this count is taken over needs TWO reads ────────
+            //
+            // `personalRecords` skips any set whose `setLoadKg` comes back
+            // null, and that is every bodyweight set when the weight history is
+            // empty or short — the series is built from the scans plus the
+            // member's own logged weight, which is exactly what `c.status`
+            // (worstStatus of profile and scans) answers for. `bodyWhole` sat
+            // one line below `trainingWhole` and was already applied to `comp`
+            // and to the Body block; this count was gated on the log alone.
+            //
+            // So a member with nine records — five barbell, four calisthenic —
+            // whose scans read failed while their log came back whole was told
+            // "PRs on Record: 4", all-time, on a document they send to their
+            // coach. app/(client)/records.tsx carries a written notice for this
+            // same case; the line under this row is its short form.
+            { label: 'PRs on Record', value: bodyWhole ? fig(prs.length) : fig(null), delta: bodyWhole ? 'all-time' : 'not read' },
           ] : [
             { label: 'Volume', value: fig(null), unit: 't' },
             { label: 'Streak', value: fig(null) },
             { label: 'PRs on Record', value: fig(null), delta: 'not read' },
           ]} />
+          {/* Under the figure, not instead of it. The tonnage that came back is
+              real; what it is missing is sets nobody could price. */}
+          {trainingWhole && volNote ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{volNote}</Text>
+          ) : null}
+          {trainingWhole && !bodyWhole ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {c.status === 'loading'
+                ? 'Reading your weight history, so the PR count is not counted yet.'
+                : c.status === 'partial'
+                  ? 'You have more on your record than this screen can read at once, so your PR count is left blank rather than counted over part of it. Nothing has been reset.'
+                  : 'Pull-ups, dips and press-ups are priced against what you weighed on the day, and that history could not be read — so a count of your records would be short by every one of them. It is left blank rather than stated wrong, and nothing has been reset.'}
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />
