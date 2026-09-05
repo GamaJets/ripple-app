@@ -70,7 +70,12 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ── 1 · the view the owner's queue reads ──────────────────────────────────
-create or replace view public.pending_deletions as
+-- The WITH clause is not decoration and is not optional. `create or replace
+-- view` with no WITH clause RESETS the view's reloptions, so omitting it here
+-- silently stripped `security_invoker` off a view that part 41 created with it
+-- — see this part's postscript. Every view in this schema carries it.
+create or replace view public.pending_deletions
+with (security_invoker = true) as
   select id as subject_id,
          tenant_id,
          -- A name nobody typed is absent, not empty. Same form as my_coach()
@@ -81,6 +86,12 @@ create or replace view public.pending_deletions as
          greatest(0, 30 - extract(day from now() - deletion_requested_at)::integer) as days_remaining
     from profiles p
    where deletion_requested_at is not null;
+
+-- The view carried the Supabase default grants, which give anon full DML on
+-- anything created in `public`. Restated to what this view actually needs.
+revoke all on public.pending_deletions from anon;
+revoke insert, update, delete on public.pending_deletions from authenticated;
+grant select on public.pending_deletions to authenticated;
 
 -- ── 2 · the function that freezes it ──────────────────────────────────────
 create or replace function public.action_account_deletion(p_subject uuid)
@@ -113,3 +124,35 @@ end $function$;
 -- exist leaves EXECUTE with PUBLIC, which in a Supabase project includes anon.
 revoke all on function public.action_account_deletion(uuid) from public, anon;
 grant execute on function public.action_account_deletion(uuid) to authenticated;
+
+-- ── postscript · what the first version of this part broke ────────────────
+--
+-- The first applied version of section 1 was `create or replace view
+-- public.pending_deletions as ...` with no WITH clause. Part 41 created this
+-- view `with (security_invoker = true)`; `create or replace view` resets
+-- reloptions that the new statement does not restate, so that one omission
+-- turned it back into a definer view owned by `postgres`.
+--
+-- A definer view does not consult the RLS on the table underneath it. This view
+-- selects from `profiles`, and `profiles` is where the tenant boundary lives.
+-- Worse, the view carried the Supabase default grants — anon and authenticated
+-- both held SELECT — so for as long as it stood, the deletion queue of EVERY
+-- gym was readable: names, tenant ids, and the date each member asked to be
+-- erased. Signed out was enough.
+--
+-- Nothing in the app would have shown it, which is the part worth keeping. All
+-- three readers state in a comment that they deliberately do NOT filter by
+-- tenant, because the view is invoker-scoped and therefore already scoped:
+-- app/(owner)/deletions.tsx:29, app/(owner)/settings.tsx:227 and
+-- studio-web/app/deletions/page.tsx:32. Their isolation was entirely this one
+-- reloption. The screens would have looked identical and been wrong.
+--
+-- Found by get_advisors, which reported `security_definer_view` against
+-- `pending_deletions` — the only view of the six in this schema without the
+-- flag. Repaired live with `alter view ... set (security_invoker = true)`,
+-- verified against pg_class.reloptions, and the grants tightened past where
+-- they started: anon now holds nothing on this view and authenticated holds
+-- SELECT alone.
+--
+-- scripts/check-views.mjs exists so the next omission fails the build instead
+-- of an advisor run.
