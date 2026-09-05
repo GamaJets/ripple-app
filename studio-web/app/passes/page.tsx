@@ -34,13 +34,19 @@ import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
-import { fetchMemberships, fetchPlans, money } from '@lib/gymRecord';
+import { fetchMemberships, fetchPlans, money, summarise } from '@lib/gymRecord';
 import { fetchPassVisits } from '@lib/passVisits';
 import { fetchPasses } from '@lib/gymPasses';
 import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { toCsv } from '@lib/gymExport';
-import { sliceLoading, sliceReady, sliceFailed, type Slice } from '@lib/memberView';
+import { sliceLoading, sliceReady, sliceFailed, rowsOf, type Slice } from '@lib/memberView';
+// The one rule about what a SUM is denominated in, and the one wording for
+// the silence a mixed ledger produces. Imported rather than restated: the
+// sentence under a withheld total is the whole point of the module, and a
+// screen that writes its own drifts into blaming the gym's currency setting
+// for something that setting has nothing to do with.
+import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '@lib/sumCurrency';
 import { noGymNote } from '@lib/gymLink';
 import { Fetched, useFetched } from '@/components/Fetched';
 import { Banner } from '@/components/Banner';
@@ -402,7 +408,7 @@ export default function Passes() {
       <CallList c={c} rec={rec} contacts={contacts} contactsErr={contactsErr} />
       <Holders c={c} rec={rec} ccy={ccy} contacts={contacts} />
       <Hosts c={c} rec={rec} />
-      <Money c={c} rec={rec} />
+      <Money c={c} rec={rec} ccy={ccy} />
     </Shell>
   );
 }
@@ -842,8 +848,50 @@ function Hosts({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
 
 /* ── money: two figures, and no total ──────────────────────────────────────── */
 
-function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
+function Money({ c, rec, ccy }: {
+  c: PassConversion; rec: PassConversionRecord; ccy: TenantCurrency;
+}) {
   const m = c.money;
+  /**
+   * What the MEMBERSHIP figure is denominated in — which is not what the
+   * PASSES were sold in.
+   *
+   * The second tile below rendered `money(m.followingMrrCents, m.currency)`.
+   * `m.currency` is what the priced PASSES agree on; `followingMrrCents` is the
+   * sum of the PLAN prices of the memberships those holders now hold. Two
+   * different sets of rows, so a gym selling day passes in EUR at the door and
+   * billing memberships in GBP had its recurring figure labelled EUR — wrong
+   * before `passRevenueCents` was corrected, and newly EXPENSIVE after it: that
+   * field now goes null the moment the passes hold two moneys, which withheld a
+   * membership figure that is perfectly sound and printed a note about the
+   * passes underneath the hole.
+   *
+   * The contributing rows are the plans, and `summarise` in gymRecord already
+   * reports what they share, as `mrrCurrency`. `moneyOf` in
+   * src/lib/passConversion.ts computes exactly that summary and keeps only the
+   * cents; `PassMoney` has no field to carry the currency. So the same summary
+   * is asked again here, over the same rows read from the same slices through
+   * the same `rowsOf` — the same function and the same inputs, so this label
+   * and the figure it labels cannot disagree.
+   */
+  const mrrStated = useMemo(() => {
+    const memberships = rowsOf(rec.memberships);
+    const plans = rowsOf(rec.plans);
+    if (!c.holders || !memberships || !plans) return null;
+    const joiners = new Set(
+      c.holders.filter((h) => h.outcome === 'joined-after').map((h) => h.holderId),
+    );
+    return summarise([], memberships.filter((mm) => joiners.has(mm.memberId)), plans).mrrCurrency;
+  }, [c.holders, rec.memberships, rec.plans]);
+  // `emptyTotalMoney` where there is no figure at all: nothing has contradicted
+  // the gym's own setting, and that is the currency the dash would have been in.
+  // `totalMoney` everywhere else — it withholds the label when the plans state
+  // more than one money, and never substitutes the tenant's code for a figure
+  // whose own rows disagree. The same pair, in the same order, as
+  // app/(owner)/financials.tsx.
+  const mrrCcy = m == null || m.followingMrrCents == null
+    ? emptyTotalMoney(ccy)
+    : totalMoney(m.followingMrrCents, mrrStated, ccy);
   return (
     <Section
       title="The money, in two parts"
@@ -864,21 +912,53 @@ function Money({ c, rec }: { c: PassConversion; rec: PassConversionRecord }) {
               note={
                 m.passCents == null
                   ? 'no pass carries a recorded price — which is not the same as free'
-                  // The total is known and the money it is in is not, so the
-                  // tile shows a dash rather than a figure the reader
-                  // denominates for themselves.
-                  : !m.currency ? NO_CURRENCY_NOTE
-                  : `from ${m.passesPriced} of ${m.passesTotal} passes${m.mixedCurrency ? ', across more than one currency' : ''}`
+                  /* ── two silences, and neither of them is an Ops field ──────
+                     This dash used to be explained with NO_CURRENCY_NOTE —
+                     "this gym has not set its currency". `m.currency` has never
+                     come from the tenant: it is what the PRICED passes agree
+                     on. So that sentence sent an owner to Ops to fix a field
+                     that is very often already set and was never the reason,
+                     and it now fires in a second state as well, because
+                     `passRevenueCents` returns null here whenever the priced
+                     passes hold more than one money. The two are kept apart the
+                     way app/(owner)/financials.tsx keeps its own silences
+                     apart, and with the wording studio-web/app/close/page.tsx
+                     settled on for the same tile: a month genuinely holding two
+                     moneys is not a mistake and there is nothing to correct,
+                     while priced passes that state no currency at all is a desk
+                     taking money without recording in what. */
+                  : m.mixedCurrency ? MIXED_CURRENCY_NOTE
+                  : !m.currency
+                    ? `${m.passesPriced} of ${m.passesTotal} passes ${m.passesPriced === 1 ? 'carries' : 'carry'} a recorded price, but not one of those rows says what money it was taken in, so there is no figure to write here. The gym’s own currency is not the answer: it is not evidence about what somebody was charged at the desk.`
+                    /* The mixed-currency clause that used to trail this line is
+                       gone rather than repaired. `mixedCurrency` and a non-null
+                       `currency` can no longer both be true — mixed rows are
+                       exactly the case that withholds the code — so it could
+                       never render again; and making it reachable would mean
+                       printing a total under one code while saying underneath
+                       that it spans several, which is the figure the gate now
+                       exists to withhold. The state is not lost: it is the
+                       MIXED_CURRENCY_NOTE branch above and the red paragraph
+                       below. */
+                    : `from ${m.passesPriced} of ${m.passesTotal} passes`
               }
             />
             <Kpi
               label="Memberships that followed, per month"
-              text={money(m.followingMrrCents, m.currency)}
+              text={money(m.followingMrrCents, mrrCcy.currency)}
               note={
                 rec.plans.state === 'failed' ? 'price book not read'
                   : rec.memberships.state === 'failed' ? 'roster not read'
-                  : m.followingMrrCents != null && !m.currency ? NO_CURRENCY_NOTE
                   : m.followingMrrCents == null ? 'none of them is on a priced plan'
+                  // The PLANS behind this figure are not all in one money.
+                  // Nothing about the passes withholds it, and there is nothing
+                  // in Ops to go and correct.
+                  : mrrCcy.gap === 'unstated' ? MIXED_CURRENCY_NOTE
+                  // The figure is known, the rows behind it stated nothing to
+                  // contradict the gym's own setting, and the gym has not set
+                  // one — the only branch on this tile that really is an Ops
+                  // field, and the only one entitled to say so.
+                  : mrrCcy.gap === 'no_gym_currency' ? NO_CURRENCY_NOTE
                   : `${m.followingActive} active membership${m.followingActive === 1 ? '' : 's'}`
               }
             />
