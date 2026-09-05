@@ -71,6 +71,10 @@ import {
 // Kuwait and Bahrain. `minorFromWhole` asks `currencyDecimals` rather than
 // assuming; see the note on it in src/lib/coachMoney.ts.
 import { minorFromWhole } from '@lib/coachMoney';
+// The three-layer pay rule, in the one place that holds it. /payroll,
+// /sessions and /coach/earnings all resolve rates through this pair before any
+// figure is computed; this screen — the one that FILES the month — did not.
+import { fetchTrainerPay, withResolvedRates, type PayIndex } from '@lib/gymPay';
 import { gymLink, noGymNote } from '@lib/gymLink';
 // How many gyms this account owns. See `siteNotice` for why a month-end sheet
 // in particular is a screen that has to say it.
@@ -124,6 +128,30 @@ export default function Close() {
   const [zone, setZone] = useState<string | null>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
   const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
+  /**
+   * What this gym pays EACH coach, from `gym_trainer_pay`.
+   *
+   * ── The layer this screen skipped ─────────────────────────────────────
+   *
+   * src/lib/gymPay.ts holds one three-layer rule — the rate snapshotted on the
+   * session, then the coach's own agreed rate, then the gym's standard fee —
+   * and its header says in writing why it is one function: three copies of that
+   * fallback is how a screen came to say AED 1,500 owed while the button handed
+   * over 900. /payroll, /sessions and /coach/earnings all call
+   * `withResolvedRates` before they compute anything. This screen applied layer
+   * one and layer three and skipped layer two entirely, so every session with
+   * no snapshotted rate was priced at `tenants.session_fee` — the wrong figure
+   * for every coach on a rate of their own, and the figure that gets SNAPSHOTTED
+   * into `gym_month_closes.payroll_cents`, exported in the handoff CSV and read
+   * back by every later drift line. /payroll and /close reported two different
+   * payrolls for one month, and this was the one that was filed.
+   *
+   * Null means the read has not landed or did not come back — never an empty
+   * map standing in for "this gym pays everybody the standard fee".
+   */
+  const [pay, setPay] = useState<PayIndex | null>(null);
+  /** Why the per-coach rates could not be read. Null when they came back. */
+  const [payErr, setPayErr] = useState<string | null>(null);
 
   // The record is stored WITH the month it was read for, and used only when the
   // two agree. Without that, switching from June to July renders one frame of
@@ -211,6 +239,16 @@ export default function Close() {
     // catch. An invoice table that 500s must not take the payments down with
     // it: the close is allowed to be partial, but only if it says which part
     // failed and refuses to be called closed over it.
+    // The per-coach rates ride with the five, and are handled separately below
+    // for the same reason /payroll handles them separately: they are not one of
+    // `CLOSE_PARTS`, so a failure here does not make the month's takings
+    // unknown — it makes the PAYROLL figure the gym's standard fee applied to
+    // everybody, which is a wrong number rather than a missing one. It is a
+    // blocker on the button, not a hole in the sheet.
+    const payRead = fetchTrainerPay(supabase, tenantId).then(
+      (m) => ({ ok: true as const, map: m }),
+      (e: any) => ({ ok: false as const, why: e?.message ?? 'The per-coach pay rates could not be read.' }),
+    );
     const [payments, invoices, sessions, memberships, passes] = await Promise.all([
       // Bounded at BOTH ends. This computed a start date and no end, so a close
       // opened on a month from a year ago read every payment from that month up
@@ -226,6 +264,9 @@ export default function Close() {
       slice(() => fetchPasses(supabase, tenantId)),
     ]);
     setLoaded({ key: mw.key, rec: { payments, invoices, sessions, memberships, passes } });
+    const pr = await payRead;
+    if (pr.ok) { setPay(pr.map); setPayErr(null); }
+    else { setPay(null); setPayErr(pr.why); }
 
     /*
      * The month's costs, and the run of months before it.
@@ -261,10 +302,14 @@ export default function Close() {
       setClosesErr(e?.message ?? 'The record of closed months could not be read.');
       return false;
     }
-    // Whole only when all five reads AND the record of closes came back.
+    // Whole only when all five reads, the per-coach rates AND the record of
+    // closes came back. The rates are in the test because the payroll figure on
+    // this sheet is made of them: a stamp saying "read just now" over a payroll
+    // priced at the standard fee for a gym that pays three coaches their own
+    // rates is a fresh timestamp on a wrong number.
     return payments.state === 'ready' && invoices.state === 'ready'
       && sessions.state === 'ready' && memberships.state === 'ready'
-      && passes.state === 'ready';
+      && passes.state === 'ready' && pr.ok;
   }, []);
 
   /*
@@ -432,11 +477,36 @@ export default function Close() {
     });
   }, [w, costsThisMonth, costsBefore]);
 
+  /**
+   * The month's sessions with the effective rate written onto each one.
+   *
+   * Resolved ONCE, up front, exactly as /payroll and /sessions do it — see the
+   * note on `pay` above and the header of `withResolvedRates`. `buildClose` is
+   * then handed rows that already carry their rate, and its `fallbackRateCents`
+   * is `null`: applying the gym fee a second time inside `payrollByTrainer` is
+   * how the three functions came to disagree the first time.
+   *
+   * `pay ?? new Map()` and not a bail-out: a failed rates read leaves every
+   * session on the gym's fee, which is what this screen has always done, and
+   * `payErr` turns that into a refusal to CLOSE rather than a blank sheet.
+   */
+  const pricedSessions = useMemo<Slice<PtSession>>(() => {
+    const s = rec.sessions;
+    if (s.state !== 'ready') return s;
+    return sliceReady(withResolvedRates(s.rows, pay ?? new Map(), feeCents, gymCcy));
+  }, [rec.sessions, pay, feeCents, gymCcy]);
+
+  const pricedRec = useMemo<CloseRecord>(
+    () => ({ ...rec, sessions: pricedSessions }),
+    [rec, pricedSessions],
+  );
+
   const close: MonthClose | null = useMemo(() => {
     if (!w) return null;
-    return buildClose(rec, w, {
+    return buildClose(pricedRec, w, {
       policy,
-      fallbackRateCents: feeCents,
+      // `null`, because `pricedSessions` has already applied all three layers.
+      fallbackRateCents: null,
       // The GYM's day, which this call was not passing at all.
       //
       // `CloseOptions.today` in src/lib/monthEnd.ts exists for this one caller
@@ -468,7 +538,7 @@ export default function Close() {
       now: nowMs,
       fmt: (c) => money(c, currency) ?? '—',
     });
-  }, [rec, w, policy, feeCents, currency, zone, nowMs]);
+  }, [pricedRec, w, policy, currency, zone, nowMs]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -573,7 +643,7 @@ export default function Close() {
         <Banner tone="crit">{key} is not a month this console can open.</Banner>
       ) : (
         <CloseView
-          c={close} rec={rec} currency={currency} gymCcy={gymCcy} zone={zone} feeRead={feeRead} sessionFee={sessionFee} feeCents={feeCents}
+          c={close} rec={rec} currency={currency} gymCcy={gymCcy} zone={zone} feeRead={feeRead} payErr={payErr} sessionFee={sessionFee} feeCents={feeCents}
           nowMs={nowMs}
           gymName={gymName} monthKey={key} tenantId={me.tenantId!} me={me}
           closes={closes} closesErr={closesErr}
@@ -587,7 +657,7 @@ export default function Close() {
 
 /* ── the close itself ──────────────────────────────────────────────────────── */
 
-function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, sessionFee, feeCents, gymName, monthKey, tenantId, me, closes, closesErr, costs, costsReason, onChange }: {
+function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, sessionFee, feeCents, gymName, monthKey, tenantId, me, closes, closesErr, costs, costsReason, onChange }: {
   c: MonthClose;
   rec: CloseRecord;
   /** The instant this sheet's figures were read, and therefore the one every
@@ -611,6 +681,9 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, sessionFee,
    *  in: the session fee, and therefore payroll. */
   gymCcy: TenantCurrency;
   feeRead: 'ok' | 'failed';
+  /** Why the per-coach pay rates could not be read, or null. A close taken over
+   *  this prices every coach at the gym's standard fee and files it. */
+  payErr: string | null;
   sessionFee: number | null;
   /** The same fee in MINOR units, or null when it cannot be stated in them.
    *  Two values rather than one because the sentences differ: a gym with no fee
@@ -654,7 +727,7 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, sessionFee,
       <CostsBeforeClose v={costs} reason={costsReason} monthKey={monthKey} />
       <Signoff
         c={c} currency={currency} monthKey={monthKey} zone={zone} tenantId={tenantId} me={me}
-        closes={closes} closesErr={closesErr} costs={costs} onChange={onChange}
+        closes={closes} closesErr={closesErr} costs={costs} payErr={payErr} onChange={onChange}
       />
       <Handoff c={c} rec={rec} currency={currency} owedCcy={owedCcy} gymCcy={gymCcy} gymName={gymName} monthKey={monthKey} />
 
@@ -663,6 +736,19 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, sessionFee,
         <Banner tone="crit">
           The gym&rsquo;s session fee could not be read, so any session without its
           own snapshotted rate is left unpriced rather than valued at nothing.
+        </Banner>
+      ) : null}
+      {/* The layer between the two. A session with no snapshotted rate is
+          priced at the coach's OWN agreed rate before it falls back to the
+          gym's fee, and when that read fails every coach silently drops to the
+          standard fee — which is the wrong figure for anybody on a rate of
+          their own, and this is the screen that files it permanently. */}
+      {payErr ? (
+        <Banner tone="crit">
+          {payErr} Until it does, every session without its own snapshotted rate is
+          priced at the gym&rsquo;s standard fee, which is the wrong figure for any coach
+          on a rate of their own &mdash; so the payroll figure below is not safe to file
+          and the Close button is held.
         </Banner>
       ) : null}
 
@@ -818,7 +904,7 @@ function Verdict({ c }: { c: MonthClose }) {
  * standing. A month that closed and then moved is two facts and an auditor
  * wants both.
  */
-function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr, costs, onChange }: {
+function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr, costs, payErr, onChange }: {
   c: MonthClose; currency: TenantCurrency; monthKey: string;
   /** The costs verdict, for the confirmation and for what gets stored. */
   costs: CostVerdict | null;
@@ -826,6 +912,10 @@ function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr,
    *  which date it is is a fact about the gym, not about the reader. */
   zone: string | null;
   tenantId: string; me: Me;
+  /** Why the per-coach pay rates could not be read, or null when they came
+   *  back. A close taken over this files a payroll figure priced at the gym's
+   *  standard fee for coaches who are not on it. */
+  payErr: string | null;
   closes: MonthCloseRow[] | null; closesErr: string | null; onChange: () => void;
 }) {
   const [note, setNote] = useState('');
@@ -872,6 +962,14 @@ function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr,
   const ended = monthEnded(c.window);
   const blocker = closes === null
     ? 'The record of closed months could not be read, so this console cannot tell whether this month is already closed. Closing it again would be refused by the database with an error nobody could act on.'
+    // The per-coach rates. Same refusal /payroll makes before a settlement run,
+    // and for a stronger reason: this button writes a PERMANENT snapshot of the
+    // payroll figure into `gym_month_closes`, and a close taken while the rates
+    // are unread prices every coach at the gym's standard fee — silently smaller
+    // for anybody on a rate of their own, and the number every later drift line
+    // is read back against.
+    : payErr
+    ? `${payErr} Until it does, the payroll figure on this sheet is the gym's standard fee applied to everybody, which is the wrong figure for anyone on their own rate — and closing would file it.`
     : closeBlocker(monthKey, ended, live);
 
   const drift = live ? driftSince(live, snap, (cents) => money(cents, live.currency ?? currency) ?? 'an unstateable amount') : [];

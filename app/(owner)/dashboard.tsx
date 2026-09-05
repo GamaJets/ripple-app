@@ -381,8 +381,22 @@ export default function OwnerOverview() {
         ) : null}
 
         {/* ── the hero ───────────────────────────────────────────────────── */}
+        {/* ── "Delivered" was the one word this figure could not carry ─────
+            `roll.sessions30` is every booking whose clock has passed, WHATEVER
+            its outcome — src/lib/ownerAnalytics.ts says so at the field and
+            src/lib/gymTrainers.ts:155 counts it that way: a no-show, a
+            cancellation and a late cancellation all keep `status = 'booked'`
+            (markOutcome writes `outcome` and never touches `status`), so all
+            three are in here and in neither `delivered30` nor `unmarked30`.
+
+            The money underneath is `payroll30`, which is `delivered30 × fee` —
+            the sessions somebody actually marked completed. So the two halves of
+            one hero counted two different populations, and an owner dividing the
+            money by the figure above it reads a session fee the gym does not
+            charge. The count is worth having and the word was not; `delivered`
+            now appears only beside the figure that means it. */}
         <Hero
-          label="Sessions Delivered · 30 Days"
+          label="Sessions · 30 Days"
           figure={trainersUnknown ? '—' : num(roll.sessions30)}
           note={loading
             ? 'Reading your roster…'
@@ -396,7 +410,7 @@ export default function OwnerOverview() {
               // unguarded ${} would say "Worth null at your session fee".
               : gymMoney(roll.payroll30, cur) == null
               ? "Set your gym's currency in Ops to value these"
-              : `Worth ${gymMoney(roll.payroll30, cur)} at your session fee`}
+              : `${num(roll.delivered30)} marked delivered · worth ${gymMoney(roll.payroll30, cur)} at your session fee`}
           onPress={() => router.push('/(owner)/revenue')}
         />
 
@@ -408,7 +422,11 @@ export default function OwnerOverview() {
           <KpiRow items={[
             { label: 'Trainers', value: trainersUnknown ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${roll.avgSessionsPerTrainer} sessions avg` },
             { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
-            { label: 'Payroll · 30d', value: trainersUnknown ? '—' : fig(gymMoney(roll.payroll30, cur)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.payroll30 == null ? 'no session fee set' : 'at your session fee' },
+            // The delta names the population the money is priced over, which is
+            // `delivered30` and not the count in the hero above. Without it the
+            // two figures sit on one screen with nothing saying they are made of
+            // different sessions.
+            { label: 'Payroll · 30d', value: trainersUnknown ? '—' : fig(gymMoney(roll.payroll30, cur)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.payroll30 == null ? 'no session fee set' : `${num(roll.delivered30)} of ${num(roll.sessions30)} delivered, at your fee` },
           ]} />
         </Section>
 

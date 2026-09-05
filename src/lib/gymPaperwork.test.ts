@@ -245,6 +245,11 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
       { id: 'rm1', subjectKind: 'payment', subjectId: 'p1', state: 'accepted', note: 'matches the bank line', markedById: 'o1', markedByName: 'Owner', markedAt: '2026-08-05T00:00:00Z' },
       { id: 'rm2', subjectKind: 'invoice', subjectId: 'i2', state: 'flagged', note: 'Bo disputes it', markedById: 'o1', markedByName: 'Owner', markedAt: '2026-08-06T00:00:00Z' },
     ]),
+    // The gym's own outgoings. About nobody in particular, which is the point:
+    // a member's bundle must come back EMPTY here, not carry the gym's rent.
+    costs: sliceReady([
+      { id: 'c1', description: 'Rent, August', supplier: 'Landlord Ltd', category: 'rent', amountCents: 420000, currency: 'GBP', paidOn: '2026-08-01', note: null, recordedById: 'o1', recordedByName: 'Owner', createdAt: '2026-08-01T00:00:00Z' },
+    ]),
   };
 
   const mine = memberSlices(base, 'm1');
@@ -272,6 +277,7 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
   eq(rows('shifts'), 0, 'and the rota');
   eq(rows('promos'), 0, 'and the promo codes');
   eq(rows('settlements'), 0, 'and what the gym paid its staff');
+  eq(rows('costs'), 0, 'and what the gym paid its landlord — the purchase ledger is the gym’s commercial position and is about no member');
 
   // The three F3 was about. A subject-access bundle that omitted the member's
   // own file — contact, next of kin, medical note, desk note — and every waiver

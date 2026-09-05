@@ -344,10 +344,15 @@ export default function OwnerRevenue() {
             {
               label: 'Sessions · 30 Days',
               value: trainersUnknown ? '—' : num(roll.sessions30),
+              // Not the bare word 'delivered'. `sessions30` is every booking
+              // whose clock has passed whatever its outcome — a no-show and a
+              // cancellation keep `status = 'booked'` and are in this count —
+              // while `At Your Fee` beside it prices `delivered30` alone. The
+              // caption names which of the two the figure is.
               delta: loading ? 'not read yet'
                 : trainersUnread ? unreadNote
                 : delta !== 0 ? `${deltaSign(delta, 0)}${num(Math.abs(delta))} vs last month`
-                : 'delivered',
+                : `${num(roll.delivered30)} marked delivered`,
             },
             {
               // What the COACHING is worth, and it is deliberately not added to
@@ -356,7 +361,10 @@ export default function OwnerRevenue() {
               // links the two.
               label: 'At Your Fee',
               value: trainersUnknown ? '—' : fig(gymMoney(revenue30, cur)),
-              delta: fee == null ? 'no session fee set' : 'sessions × fee, not takings',
+              // "sessions × fee" named the count in the tile to its left, which
+              // is not the one this is priced over: `payroll30` is
+              // `delivered30 × fee` and skips every no-show and cancellation.
+              delta: fee == null ? 'no session fee set' : 'delivered sessions × fee, not takings',
             },
             { label: 'Session Fee', value: fig(gymMoney(fee, cur)), delta: fee == null ? 'not set' : 'per delivered session' },
             { label: 'Value / Client', value: trainersUnknown ? '—' : fig(gymMoney(valuePerClient, cur)),

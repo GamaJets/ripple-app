@@ -214,6 +214,12 @@ const base: GymExportInput = {
     { id: 'rIn', subjectKind: 'payment', subjectId: 'pIn', state: 'accepted', note: 'paid by card at the desk, matches the Stripe line', markedById: 'o1', markedByName: 'Owner', markedAt: '2026-02-02T00:00:00Z' },
     { id: 'rOut', subjectKind: 'payment', subjectId: 'pOut', state: 'flagged', note: 'no invoice found', markedById: 'o1', markedByName: 'Owner', markedAt: '2025-02-02T00:00:00Z' },
   ]),
+  // Money out. Bounded by `paid_on`, which is a DATE, so the in/out pair here is
+  // the same shape as every other dated part rather than an instant.
+  costs: sliceReady([
+    { id: 'cIn', description: 'Rent, February', supplier: 'Landlord Ltd', category: 'rent', amountCents: 420000, currency: 'GBP', paidOn: '2026-02-01', note: null, recordedById: 'o1', recordedByName: 'Owner', createdAt: '2026-02-01T00:00:00Z' },
+    { id: 'cOut', description: 'Rent, February last year', supplier: 'Landlord Ltd', category: 'rent', amountCents: 400000, currency: 'GBP', paidOn: '2025-02-01', note: null, recordedById: 'o1', recordedByName: 'Owner', createdAt: '2025-02-01T00:00:00Z' },
+  ]),
 };
 
 const Q1: GymExportInput = { ...base, ...windowFromDays('2026-01-01', '2026-03-31') };

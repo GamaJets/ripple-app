@@ -1015,6 +1015,16 @@ ok(reconcile(0, 0).state === 'not_entered', 'nothing typed against a real zero i
 ok(reconcileNote(reconcile(34500, 34500), 'MRR') === null, 'agreement says nothing — no self-congratulation');
 ok((reconcileNote(reconcile(40000, 34500), 'MRR') ?? '').includes('less'), 'a shortfall is described as less');
 ok((reconcileNote(reconcile(30000, 34500), 'MRR') ?? '').includes('more'), 'a surplus is described as more');
+// The PERIOD the register figure covers, in the sentence that quotes it. The
+// figure is offered under a "Use It" button that writes it into the owner's own
+// monthly numbers, so a register figure over one window quoted under a field
+// naming another is a wrong number in the scorecard the grade is computed from.
+ok((reconcileNote(reconcile(0, 31), 'joined this month', String, 'August 2026') ?? '').includes('for August 2026'),
+  'an un-entered figure names the month it is over');
+ok((reconcileNote(reconcile(40000, 34500), 'MRR', String, 'August 2026') ?? '').includes('for August 2026'),
+  'and so does a disagreement');
+ok(!(reconcileNote(reconcile(40000, 34500), 'MRR') ?? '').includes(' for '),
+  'and a check with no period names none rather than inventing one');
 ok((reconcileNote(reconcile(40000, null), 'MRR') ?? '').includes('Nothing recorded'), 'no-record note explains why');
 
 // ── an unread register is not an empty one ────────────────────────────────
@@ -2964,7 +2974,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
     // Stated for the same reason as the twelve above — this fixture is the
     // tripwire that makes adding a part to EXPORT_PARTS a compile error.
     orders: sliceReady([]), closes: sliceReady([]), adjustments: sliceReady([]),
-    equipmentLog: sliceReady([]), reconciles: sliceReady([]),
+    equipmentLog: sliceReady([]), reconciles: sliceReady([]), costs: sliceReady([]),
   };
 
   // ── escaping: the assertion the whole file stands on ──

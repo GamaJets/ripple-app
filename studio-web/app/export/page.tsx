@@ -72,7 +72,7 @@ import {
   type ExportIntervention, type ExportPromo, type ExportEvent, type ExportPurchase,
   type ExportMemberRecord, type ExportAgreement, type ExportSignature, type ExportDocument,
   type ExportOrder, type ExportClose, type ExportAdjustment, type ExportEquipmentLog,
-  type ExportReconcileMark,
+  type ExportReconcileMark, type ExportCost,
 } from '@lib/gymExport';
 
 /**
@@ -131,6 +131,7 @@ const PENDING: Reads = {
   adjustments: sliceLoading(),
   equipmentLog: sliceLoading(),
   reconciles: sliceLoading(),
+  costs: sliceLoading(),
 };
 
 const EMPTY: Reads = {
@@ -161,6 +162,7 @@ const EMPTY: Reads = {
   adjustments: sliceReady([]),
   equipmentLog: sliceReady([]),
   reconciles: sliceReady([]),
+  costs: sliceReady([]),
 };
 
 export default function ExportPage() {
@@ -188,7 +190,7 @@ export default function ExportPage() {
   const [zone, setZone] = useState<string | null>(null);
   const [reads, setReads] = useState<Reads>(PENDING);
   /**
-   * When the twenty-eight reads behind this page came back — and why this is
+   * When the twenty-nine reads behind this page came back — and why this is
    * the one screen in the console that deliberately does NOT carry a
    * `<Fetched>` stamp over it.
    *
@@ -201,7 +203,7 @@ export default function ExportPage() {
    *     it. A `<Fetched>` beside it would be a second sentence about the same
    *     fact in different words, six inches from the first.
    *   · `useFetched` re-reads on every `visibilitychange`. Here that is
-   *     twenty-eight queries fired because somebody looked at another tab —
+   *     twenty-nine queries fired because somebody looked at another tab —
    *     and it would reset `reads` to PENDING under an owner who is mid-way
    *     through choosing a member, which is what the header above means by
    *     reading the record once and narrowing it afterwards.
@@ -253,7 +255,7 @@ export default function ExportPage() {
       sessions, passTypes, passes, visits, invites,
       invoices, settlements, equipment, shifts, interventions, promos, events, purchases,
       memberRecords, agreements, signatures, documents,
-      orders, closes, adjustments, equipmentLog, reconciles,
+      orders, closes, adjustments, equipmentLog, reconciles, costs,
     ] = await Promise.all([
       slice(() => fetchPlans(supabase, tenantId)),
       slice(() => fetchMemberships(supabase, tenantId)),
@@ -300,13 +302,21 @@ export default function ExportPage() {
       slice(() => readAdjustments(tenantId)),
       slice(() => readEquipmentLog(tenantId)),
       slice(() => readReconciles(tenantId)),
+      // What the gym PAID OUT. Every other money read above is money coming in
+      // or money going to staff, and a bundle headed "the gym's record" held one
+      // side of the ledger: rent, power, the cleaner, the engineer, the licence,
+      // insurance, stock and the accountant were in no file, while the month
+      // closes that WERE in the bundle quote totals whose lines were nowhere in
+      // it. The README's "every part of the record was read, and read whole" was
+      // the claim that made it a defect rather than a gap.
+      slice(() => readCosts(tenantId)),
     ]);
 
     setReads({
       plans, memberships, payments, classes, attendance, sessions, passTypes, passes, visits, invites,
       invoices, settlements, equipment, shifts, interventions, promos, events, purchases,
       memberRecords, agreements, signatures, documents,
-      orders, closes, adjustments, equipmentLog, reconciles,
+      orders, closes, adjustments, equipmentLog, reconciles, costs,
     });
     setReadAt(new Date().toISOString());
   }, []);
@@ -421,7 +431,7 @@ export default function ExportPage() {
         accident book, the rota, member contact, promo codes, the activity log,
         PT packs, what members bought online with the Stripe reference each one
         reconciles to, the months that were signed off, the reconciliation marks,
-        and the paperwork — every version of what people are asked to sign,
+        what the gym paid out, and the paperwork — every version of what people are asked to sign,
         every signature with who actually gave it, and the index of the filing
         cabinet. It is the gym’s record, and leaving with it has to be possible.
         A period can be set below; one member’s own file can be taken from the
@@ -1387,6 +1397,49 @@ async function readAdjustments(tenantId: string): Promise<ExportAdjustment[]> {
     createdAt: r.created_at ?? null,
     createdById: r.created_by ?? null,
     createdByName: r.created_by ? names.get(r.created_by) ?? null : null,
+  }));
+}
+
+/**
+ * The purchase ledger — everything the gym paid out.
+ *
+ * PAGED rather than `fetchGymCosts`, which is the module's own read and is
+ * right for the screens that use it: those ask for a month or a quarter and
+ * `assertWhole` refuses a prefix of a bounded set in words an owner can act on.
+ * This screen asks for the WHOLE record, and a gym with four years of rent,
+ * power and stock crosses a thousand rows without ever having been large — so
+ * refusing would have replaced the file with a stub for exactly the gyms that
+ * have the most to take with them. `readAll` finishes the read instead, and its
+ * contract needs a TOTAL order: `paid_on` is a DATE and a gym pays several
+ * suppliers on the same day, so `id` breaks the tie.
+ */
+async function readCosts(tenantId: string): Promise<ExportCost[]> {
+  const rows = await readAll<any>(
+    (from, to) => supabase
+      .from('gym_costs')
+      .select('id, description, supplier, category, amount_cents, currency, paid_on, note, recorded_by, created_at')
+      .eq('tenant_id', tenantId)
+      .order('paid_on', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+    "this gym's costs",
+  );
+  if (!rows.length) return [];
+  const names = await namesFor(rows.map((r) => r.recorded_by));
+  return rows.map((r) => ({
+    id: r.id,
+    description: r.description ?? '',
+    supplier: r.supplier ?? null,
+    category: r.category ?? null,
+    // Not `?? 0`. A cost recorded with no figure is money of unknown size, and
+    // `minorToDecimal` writes null as an EMPTY cell rather than as a free line.
+    amountCents: Number.isFinite(r.amount_cents) ? Number(r.amount_cents) : null,
+    currency: r.currency ?? null,
+    paidOn: r.paid_on ?? null,
+    note: r.note ?? null,
+    recordedById: r.recorded_by ?? null,
+    recordedByName: r.recorded_by ? names.get(r.recorded_by) ?? null : null,
+    createdAt: r.created_at ?? null,
   }));
 }
 

@@ -242,7 +242,22 @@ Deno.serve(async (req: Request) => {
   set('workouts7', wk);
   // sessions gained its own tenant_id in 33-session-outcomes.sql, backfilled
   // from the trainer and kept current by a trigger, so filter it directly.
-  set('ptSessions30', await count('sessions', 'tenant_id', (q) => q.eq('status', 'booked').gte('starts_at', iso(30 * DAY))));
+  //
+  // ── The window had a floor and no CEILING ─────────────────────────────────
+  //
+  // This was `.eq('status','booked').gte('starts_at', iso(30 * DAY))` with no
+  // upper bound, under a tile the console labels "PT sessions, 30 days —
+  // booked and already started". 'booked' is precisely the status a session
+  // that has NOT happened yet carries — an outcome is what moves it off — so
+  // the count was every session in the last thirty days PLUS every session on
+  // the books for the rest of time. A gym whose coaches take bookings six weeks
+  // out reported roughly double, and the number an owner reads as "how much PT
+  // did this gym deliver last month" was mostly a diary of next month.
+  //
+  // `.lt('starts_at', iso(0))` is the same "up to this moment" bound the class
+  // fill read below already uses, and for the same reason it gives: a class —
+  // or a session — that has not started has nothing to count yet.
+  set('ptSessions30', await count('sessions', 'tenant_id', (q) => q.eq('status', 'booked').gte('starts_at', iso(30 * DAY)).lt('starts_at', iso(0))));
 
   // Class fill (attended / booked) over the last 30 days.
   //

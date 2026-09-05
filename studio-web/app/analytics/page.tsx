@@ -105,6 +105,11 @@ import { readAll } from '@lib/rowCap';
 // rule one level down ('gbp', ' GBP ' and 'GBP' are one currency, '' and null
 // are one silence) and is what the payments are grouped by instead.
 import { money, normaliseCurrency } from '@lib/gymRecord';
+// The gym's own clock. `gymHour` is the ONLY place in TypeScript that turns an
+// instant into an hour of the gym's day — see the header of src/lib/gymZone.ts
+// on why two implementations of a calendar rule is how one Sunday's takings end
+// up in two places.
+import { gymHour, parseGymZone, NO_ZONE_NOTE } from '@lib/gymZone';
 import { num1 } from '@/lib/num';
 
 const DAY = 86400000;
@@ -168,6 +173,19 @@ export default function Analytics() {
   // either, and that is a sentence about the owner's ACCOUNT produced by a
   // query that failed. Carrying this one bit is what lets the rail say which.
   const [gymNameUnread, setGymNameUnread] = useState(false);
+  /**
+   * The gym's own clock, from `tenants.timezone`.
+   *
+   * The hour histogram below said "in the gym's own time" over
+   * `new Date(t).getHours()` — the READER's machine. Those are the same hour
+   * only when the owner happens to be standing in the gym. An owner in London
+   * looking at their Dubai gym read the 10am rush as a 6am one and would staff
+   * against it; /classes has bucketed its slots through `gymHour(zone)` all
+   * along, and this page was the one screen making the claim without the read
+   * behind it. Null means the gym has not set one — `NO_ZONE_NOTE` is then
+   * printed rather than a zone being guessed at.
+   */
+  const [zone, setZone] = useState<string | null>(null);
 
   const [memberships, setMemberships] = useState<Read<Membership>>(reading);
   const [visits, setVisits] = useState<Read<Visit>>(reading);
@@ -270,8 +288,17 @@ export default function Analytics() {
       // The error is now read off the result. Not because the name matters — it is
       // a label — but because "we could not ask" and "there is no gym" must not
       // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
-      const { data: t, error: tErr } = await supabase.from('tenants').select('name').eq('id', who.tenantId).single();
-      if (live) { setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr); }
+      // `timezone` alongside the name, in the one read this page already makes
+      // of the gym row. The hour histogram is the only figure that needs it,
+      // and a failed read leaves it null — which prints NO_ZONE_NOTE rather
+      // than quietly substituting the reader's clock and calling it the gym's.
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
+      if (live) {
+        setGymName(tErr ? null : t?.name ?? null);
+        setGymNameUnread(!!tErr);
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as { timezone?: string | null } | null)?.timezone);
+        setZone(z.kind === 'zone' ? z.zone : null);
+      }
     })();
     return () => { live = false; };
     // Identity and the gym record only — the five reads are the effect below's.
@@ -442,21 +469,33 @@ export default function Analytics() {
    *
    * `entered_at` has been read by this page all along and nothing has ever
    * drawn an hour out of it — while "when is my gym busy" is the single most
-   * actionable staffing question an owner has. Local hours, not UTC: an owner
-   * in Dubai staffing against a UTC histogram would put people on four hours
-   * early.
+   * actionable staffing question an owner has.
+   *
+   * THE GYM'S hour, not the reader's. This was `new Date(t).getHours()` under a
+   * heading that said "in the gym's own time", which is true only while the
+   * owner is standing in the gym: the same 06:00–07:00 bar is the Dubai gym's
+   * 10am rush when the laptop is in London, and an owner rostering against it
+   * puts staff on four hours early. `tenants.timezone` is the stored answer and
+   * `gymHour` is the only place in TypeScript that turns an instant into one —
+   * the same function /classes buckets its slots with, so the two screens
+   * cannot land on two different mornings for one gym.
+   *
+   * With no zone set there is no gym hour to compute, so the histogram is drawn
+   * on the reader's own clock and SAYS SO (`NO_ZONE_NOTE` below). That is the
+   * house rule from src/lib/gymZone.ts: no zone means no answer, and the
+   * caller's job is to have a sentence ready rather than to fall back silently.
    */
   const hours = useMemo<HourRow[] | null>(() => {
     if (!visits.rows) return null;
     const counts = new Array(24).fill(0) as number[];
     for (const v of visits.rows) {
-      const t = Date.parse(v.enteredAt);
-      if (!Number.isFinite(t)) continue;
-      counts[new Date(t).getHours()] += 1;
+      const h = zone ? gymHour(v.enteredAt, zone) : localHour(v.enteredAt);
+      if (h == null) continue;
+      counts[h] += 1;
     }
     const peak = Math.max(...counts);
     return counts.map((n, h) => ({ hour: h, visits: n, share: peak > 0 ? n / peak : 0 }));
-  }, [visits.rows]);
+  }, [visits.rows, zone]);
 
   /* ── the four figures an owner watches ─────────────────────────────────── */
 
@@ -790,7 +829,7 @@ export default function Analytics() {
 
       <Money series={moneySeries} state={payments.state} mixed={moneyMixed} />
 
-      <ByHour rows={hours} state={visits.state} doorState={doorState} doorNote={doorNote} />
+      <ByHour rows={hours} state={visits.state} doorState={doorState} doorNote={doorNote} zone={zone} />
     </Shell>
   );
 }
@@ -1024,15 +1063,23 @@ function MoneyTable({ series, named }: { series: MoneySeries; named: boolean }) 
  *
  * `entered_at` has been read by this page since it was written and nothing has
  * ever drawn an hour out of it, while "when is my gym busy" is the single most
- * actionable staffing question an owner has. LOCAL hours: an owner in Dubai
- * staffing against a UTC histogram would put people on four hours early.
+ * actionable staffing question an owner has.
+ *
+ * THE GYM'S hours, from `tenants.timezone`, and the heading says which. It said
+ * "in the gym's own time" over the reader's own clock — the same claim /costs,
+ * /classes and /staff all make with `gymZone` behind it and this one made with
+ * nothing behind it. A gym that has set no zone gets the reader's clock and
+ * `NO_ZONE_NOTE` in place of the claim, rather than a guess dressed as the gym's
+ * morning.
  *
  * Hours with nobody in them are shown rather than filtered out. A gap at 3pm is
  * the finding; a table that skipped it would draw a smooth day.
  */
-function ByHour({ rows, state, doorState, doorNote }: {
+function ByHour({ rows, state, doorState, doorNote, zone }: {
   rows: HourRow[] | null; state: Unread;
   doorState: 'loading' | 'failed' | 'silent' | 'stale' | 'live'; doorNote: string;
+  /** The gym's IANA zone, or null when it has not set one. */
+  zone: string | null;
 }) {
   const busiest = rows ? rows.reduce((a, b) => (b.visits > a.visits ? b : a), rows[0]) : null;
   const hour = (h: number) => `${String(h).padStart(2, '0')}:00`;
@@ -1051,7 +1098,7 @@ function ByHour({ rows, state, doorState, doorNote }: {
   return (
     <Section
       title="When the gym is busy"
-      sub="Door entries in the last 30 days, by hour, in the gym's own time. Hours with nobody in them are shown — a gap at three is the finding, and a table that skipped it would draw a smooth day."
+      sub={`Door entries in the last 30 days, by hour, ${zone ? `in the gym’s own time (${zone})` : 'on your own device’s clock'}. Hours with nobody in them are shown — a gap at three is the finding, and a table that skipped it would draw a smooth day.`}
     >
       {state === 'loading' ? <Loading /> : null}
       {state === 'failed' ? <Unreadable what="the door log" cost="when the gym is busy is unknown, not quiet" /> : null}
@@ -1064,10 +1111,19 @@ function ByHour({ rows, state, doorState, doorNote }: {
       ) : null}
       {state === null && doorState === 'live' && rows ? (
         <>
+          {/* Said above the figure, not under it. A busiest hour on the wrong
+              clock is the one number on this page somebody rosters against. */}
+          {zone ? null : (
+            <p style={{ margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--warn)', fontSize: 12.5, maxWidth: '80ch' }}>
+              {capitalise(NO_ZONE_NOTE)}. The bars below are drawn on your machine&rsquo;s clock, so a
+              colleague opening this page from another country sees a different busiest hour for the
+              same gym. Set the timezone on Settings and this becomes the gym&rsquo;s own morning.
+            </p>
+          )}
           {busiest && busiest.visits > 0 ? (
             <p style={{ margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13 }}>
               Busiest hour: <strong>{hour(busiest.hour)}</strong> &mdash; {busiest.visits} entr
-              {busiest.visits === 1 ? 'y' : 'ies'} in 30 days.
+              {busiest.visits === 1 ? 'y' : 'ies'} in 30 days{zone ? '' : ', on your own device’s clock'}.
             </p>
           ) : null}
           <DataTable noun="hours of the day" rows={rows} columns={cols} rowKey={(r) => String(r.hour)} empty="—" />
@@ -1508,6 +1564,25 @@ async function lastVisitAt(tenantId: string): Promise<string | null> {
 /** A plain 'YYYY-MM-DD' as local noon, so any module that parses it and reads
  *  the month back in local time gets the month the gym meant. Midnight UTC does
  *  not survive the trip west of Greenwich. */
+/**
+ * The hour of an instant on the READER's own clock — the fallback, and only
+ * where the gym has stated no zone.
+ *
+ * Separate from `gymHour` and named for what it is, so a later reader cannot
+ * mistake one for the other: this is the answer the histogram used to give for
+ * every gym while claiming to give the gym's. Null on an unparseable instant,
+ * matching `gymHour`, so the caller's `== null` skip covers both.
+ */
+function localHour(at: string): number | null {
+  const t = Date.parse(at);
+  return Number.isFinite(t) ? new Date(t).getHours() : null;
+}
+
+/** First letter up, for a shared sentence that was written to sit mid-line. */
+function capitalise(s: string): string {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
 function localNoon(day: string): string {
   const [y, m, d] = day.slice(0, 10).split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1, 12, 0, 0, 0).toISOString();

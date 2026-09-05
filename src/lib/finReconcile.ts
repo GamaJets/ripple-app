@@ -115,7 +115,15 @@ export function reconcileNote(
   r: Reconciliation,
   label: string,
   fmt: (n: number) => string = String,
+  basis?: string | null,
 ): string | null {
+  // WHICH PERIOD the register figure covers, said in the sentence that quotes
+  // it. Optional so nothing that does not have a period has to invent one, and
+  // it is not decoration: the caller on app/(owner)/financials.tsx offers this
+  // figure under a "Use It" button that WRITES it into the owner's own numbers,
+  // and a figure over one window filed under a field that names another is a
+  // wrong number in the scorecard the grade is computed from.
+  const over = basis ? ` for ${basis}` : '';
   switch (r.state) {
     case 'no_record':
       return `Nothing recorded yet, so your ${label} cannot be checked against the register.`;
@@ -124,9 +132,9 @@ export function reconcileNote(
       // what this used to render and an owner has to be able to tell them apart.
       return `Your register could not be read, so your ${label} has not been checked — this is a failed read, not an empty register.`;
     case 'not_entered':
-      return `Your records show ${fmt(r.derived as number)}. Use that, or type your own figure.`;
+      return `Your records show ${fmt(r.derived as number)}${over}. Use that, or type your own figure.`;
     case 'differs':
-      return `Your records show ${fmt(r.derived as number)}, which is ${fmt(Math.abs(r.delta as number))} ${
+      return `Your records show ${fmt(r.derived as number)}${over}, which is ${fmt(Math.abs(r.delta as number))} ${
         (r.delta as number) > 0 ? 'more' : 'less'
       } than the ${fmt(r.typed)} entered here.`;
     case 'agrees':

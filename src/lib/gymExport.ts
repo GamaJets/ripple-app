@@ -407,11 +407,17 @@ export type ExportPart =
   | 'closes'
   | 'adjustments'
   | 'equipmentLog'
-  | 'reconciles';
+  | 'reconciles'
+  // What the gym PAID OUT. Every other money part here is money coming in or
+  // money going to staff; `gym_costs` is rent, power, the cleaner, the engineer,
+  // the music licence, insurance, stock and the accountant. Without it a bundle
+  // headed "the gym's record" holds one side of a ledger, and the month closes
+  // it does hold quote totals whose lines are in no file.
+  | 'costs';
 
 export const EXPORT_PARTS: ExportPart[] = [
   'plans', 'members', 'memberRecords', 'memberships', 'payments', 'invoices',
-  'orders', 'reconciles', 'closes',
+  'orders', 'reconciles', 'costs', 'closes',
   'classes', 'attendance', 'sessions',
   'passTypes', 'passes', 'visits', 'invites',
   'settlements', 'adjustments', 'equipment', 'equipmentLog', 'shifts',
@@ -692,6 +698,23 @@ export interface ExportReconcileMark {
   markedById: string | null; markedByName: string | null; markedAt: string | null;
 }
 
+/**
+ * One row of `gym_costs` — money the gym paid out.
+ *
+ * Nullable amount and nullable currency for the same reason every other money
+ * shape here is: a cost with no amount is money of unknown size and must export
+ * as a blank, and an amount with no currency on it is not an amount of money.
+ * `paidOn` is a DATE column and stays one — it is the day the money went out,
+ * and turning it into an instant would move a Monday payment to Sunday for
+ * every gym west of Greenwich.
+ */
+export interface ExportCost {
+  id: string; description: string; supplier: string | null; category: string | null;
+  amountCents: number | null; currency: string | null;
+  paidOn: string | null; note: string | null;
+  recordedById: string | null; recordedByName: string | null; createdAt: string | null;
+}
+
 /** What each part is called in a sentence an owner reads. */
 export const EXPORT_LABEL: Record<ExportPart, string> = {
   plans: 'the price book',
@@ -722,6 +745,7 @@ export const EXPORT_LABEL: Record<ExportPart, string> = {
   adjustments: 'payroll adjustments',
   equipmentLog: 'the maintenance and accident book',
   reconciles: 'the reconciliation marks',
+  costs: 'what the gym paid out',
 };
 
 /** What leaving a part out of the bundle actually costs. Named so the warning
@@ -755,6 +779,7 @@ export const EXPORT_COST: Record<ExportPart, string> = {
   adjustments: 'the bonuses, deductions, reimbursements and advances behind what the staff were actually paid',
   equipmentLog: 'when each machine was serviced, what the engineer found, and every incident recorded on one',
   reconciles: 'which payments and invoices somebody accepted as explained, and the reason they gave',
+  costs: 'everything the gym spent — rent, power, staff off payroll, maintenance, stock, insurance and the rest of what leaves the account',
 };
 
 /** The basename each part writes to, before the bundle prefix. */
@@ -787,6 +812,7 @@ export const EXPORT_FILE: Record<ExportPart, string> = {
   adjustments: 'payroll-adjustments.csv',
   equipmentLog: 'equipment-log.csv',
   reconciles: 'reconciliation-marks.csv',
+  costs: 'costs.csv',
 };
 
 /* ── what a period does and does not narrow ────────────────────────────────── */
@@ -841,6 +867,10 @@ export const EXPORT_DATE_FIELD: Record<ExportPart, string | null> = {
   adjustments: 'applies_on',
   equipmentLog: 'happened_on',
   reconciles: 'marked_at',
+  // The day the money went out, which is also the day the month close counts it
+  // in — see src/lib/closeCosts.ts. A period asked for by an accountant and the
+  // period the gym signed off therefore hold the same lines.
+  costs: 'paid_on',
 };
 
 /**
@@ -933,6 +963,7 @@ export interface GymExportInput {
   adjustments: Slice<ExportAdjustment>;
   equipmentLog: Slice<ExportEquipmentLog>;
   reconciles: Slice<ExportReconcileMark>;
+  costs: Slice<ExportCost>;
 }
 
 /** The slice a part is read from. `members` rides on `memberships`. */
@@ -972,6 +1003,10 @@ export function partSlice(input: GymExportInput, part: ExportPart): Slice<unknow
     // in this bundle to be silently wrong about.
     case 'equipmentLog': return input.equipmentLog;
     case 'reconciles': return input.reconciles;
+    // Its own read. The gym's outgoings are not derivable from anything else in
+    // this bundle — payroll settlements are one line of them and the month
+    // closes hold only totals.
+    case 'costs': return input.costs;
   }
 }
 
@@ -1019,6 +1054,7 @@ export function rowDate(part: ExportPart, row: unknown): string | null {
       return k && /^\d{4}-\d{2}$/.test(k) ? `${k}-01` : null;
     }
     case 'adjustments': return str('appliesOn');
+    case 'costs': return str('paidOn');
     case 'equipmentLog': return str('happenedOn');
     case 'reconciles': return str('markedAt');
   }
@@ -1313,6 +1349,10 @@ export function memberSlices(input: GymExportInput, memberId: string): GymExport
     closes: none(input.closes),
     adjustments: none(input.adjustments),
     equipmentLog: none(input.equipmentLog),
+    // The gym's purchase ledger. Rent, power and the engineer are the gym's
+    // commercial position and are about no member at all, so a subject-access
+    // response is EMPTY here rather than missing it — read fine, not theirs.
+    costs: none(input.costs),
 
     memberRecords: keep(input.memberRecords, (r) => r.memberId === memberId),
     memberships: keep(input.memberships, (m) => m.memberId === memberId),
@@ -1696,6 +1736,7 @@ function tableFor(part: ExportPart, input: GymExportInput): Table {
     case 'adjustments': return adjustmentsTable(readyRows(input.adjustments));
     case 'equipmentLog': return equipmentLogTable(readyRows(input.equipmentLog));
     case 'reconciles': return reconcilesTable(readyRows(input.reconciles));
+    case 'costs': return costsTable(readyRows(input.costs));
   }
 }
 
@@ -2028,6 +2069,36 @@ function reconcilesTable(rows: ExportReconcileMark[]): Table {
       + '\u2014 join it to invoices.csv or payments.csv accordingly. One live mark per line: changing your mind '
       + 'replaced the row rather than adding one, so this file is the current answer and not a history of '
       + 'the arguing. An "accepted" row always carries a reason, because the database refuses one without.',
+  };
+}
+
+/**
+ * What the gym paid out.
+ *
+ * `amount` goes through `minorToDecimal`, which asks the currency how many
+ * places it has and returns an EMPTY cell where nobody stated one — the stored
+ * integer sits beside it in `amount_cents` and is the figure to believe. There
+ * is deliberately no total row and no total anywhere: a gym that has ever paid
+ * a supplier in another currency has two moneys in this file, and a column sum
+ * across them is not a bigger number about the same thing. The note says so, in
+ * the file, because the person adding the column up is doing it in a spreadsheet
+ * six months from now with none of this screen's caveats in the room.
+ */
+function costsTable(rows: ExportCost[]): Table {
+  return {
+    header: ['paid_on', 'description', 'supplier', 'category', 'amount', 'currency', 'amount_cents', 'note', 'recorded_by', 'recorded_by_id', 'recorded_at', 'cost_id'],
+    rows: rows.map((c) => [
+      c.paidOn, c.description, c.supplier, c.category,
+      minorToDecimal(c.amountCents, c.currency), c.currency, c.amountCents,
+      c.note, c.recordedByName, c.recordedById, c.createdAt, c.id,
+    ]),
+    note:
+      'Money OUT, as somebody at this gym wrote it down. It is not a complete picture of the gym\u2019s '
+      + 'outgoings by itself: what the gym settles with its trainers is in payroll-settlements.csv and '
+      + 'payroll-adjustments.csv and is deliberately not repeated here, so adding this file to those two '
+      + 'is the total that left the account and adding this one alone is not. A blank amount is a cost '
+      + 'recorded with no figure \u2014 not a free one. Rows may be in more than one currency; nothing here '
+      + 'is converted and no column may be summed across them.',
   };
 }
 

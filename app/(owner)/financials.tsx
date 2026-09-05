@@ -38,7 +38,7 @@
 // only — the empty state shows no hero of zeros), the bordered KPI grid became
 // hairline-divided KPI rows, the flag boxes became a hairline-divided list with
 // a tone dot beside ink-coloured text, and the Georgia serif header is gone.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Alert, TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -63,8 +63,9 @@ import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE, type TotalMoney } fro
 // `tenants.timezone`, and the one function that turns it into a calendar day.
 // The "joined this month" check compares against `memberships.started_on`,
 // which app/(owner)/members.tsx writes on the gym's own calendar.
-import { fetchGymZone, gymDay } from '../../src/lib/gymZone';
-import { isoDate, num, num1 } from '../../src/lib/format';
+import { num, num1 } from '../../src/lib/format';
+// The calendar month, not a rolling thirty days. See the note on `basisMonth`.
+import { monthWindow, recentMonths } from '../../src/lib/monthEnd';
 // When the register was read, whether the phone can reach us, and a way to ask
 // again — the three things nineteen of the twenty owner screens did without.
 import { Fetched } from '../../src/ui/fetched';
@@ -155,6 +156,15 @@ export default function Financials() {
   const [derivedRevenue, setDerivedRevenue] = useState<number | null>(null);
   const [derivedNew, setDerivedNew] = useState<number | null>(null);
   /**
+   * Which month the register figures above are OVER — 'August 2026'.
+   *
+   * On the sentence rather than in a comment, because the figure is offered
+   * under a button that writes it into the owner's own numbers. A register
+   * figure quoted with no period named is how a rolling thirty days came to be
+   * filed as a calendar month's joiners.
+   */
+  const [basisMonth, setBasisMonth] = useState<string | null>(null);
+  /**
    * The register could not be read.
    *
    * `fetchPlans`/`fetchMemberships`/`fetchPayments` all throw on a PostgREST
@@ -204,27 +214,13 @@ export default function Financials() {
    *  is the half that can be out of date. */
   const reread = useCallback(() => setAgain((n) => n + 1), []);
 
-  /**
-   * `tenants.timezone`, held in a ref rather than in state.
-   *
-   * A ref because nothing on this screen RENDERS the zone — it is used once,
-   * inside the read effect, to cut one calendar day. Putting it in state would
-   * add a second render pass and a dependency that re-runs the register read
-   * every time the zone read lands, for a value that changes what the effect
-   * computes and nothing that is drawn. Null covers a gym with no zone, a read
-   * that failed and a read still in flight, and `gymDay` answers all three the
-   * same way: null, which falls back to the reader's day at the call site.
-   */
-  const zoneRef = useRef<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    const id = tenant?.id;
-    if (!id) { zoneRef.current = null; return; }
-    fetchGymZone(supabase, id)
-      .then((z) => { if (live) zoneRef.current = z.zone; })
-      .catch((e) => { reportError('financials.zone', e); if (live) zoneRef.current = null; });
-    return () => { live = false; };
-  }, [tenant?.id]);
+  // The zone read that used to sit here is gone with the thing it was for.
+  // It existed to cut ONE instant — "thirty days ago" — into the gym's own
+  // calendar day, so that a rolling window could be compared against
+  // `memberships.started_on`. The window is now a calendar month and its two
+  // ends are already days, so there is no instant left to cut and no zone left
+  // to need. A read nothing consumes is a trap for the next person, which is
+  // why it is removed rather than left holding a value in a ref.
   const pull = usePullToRefresh(reread);
 
   useEffect(() => {
@@ -278,12 +274,43 @@ export default function Financials() {
          * asks for the window it always wanted, which is a bounded set that
          * cannot outgrow the cap the way "all of history" does.
          */
-        const sinceMs = Date.now() - 30 * 86400000;
-        const since = new Date(sinceMs).toISOString();
+        /**
+         * ── And it is a MONTH, which it was not ────────────────────────────
+         *
+         * The window was `Date.now() - 30 days`, and every field it is checked
+         * against is monthly: "Total Revenue / Mo", "Joined This Month". On the
+         * 3rd of a month a rolling thirty days is almost entirely the PREVIOUS
+         * month, so the register figure offered under "Joined This Month" was
+         * made of somebody else's month — and the sentence beside it read "Your
+         * records show 37. Use that, or type your own figure." One tap wrote 37
+         * into `newMembers`, which is the numerator of `growthPct` in
+         * src/lib/finReview.ts and 25 of the 100 points behind the grade this
+         * screen prints. The owner who had typed the right number was told
+         * their records disagreed and offered the wrong one.
+         *
+         * The LAST FULL month, not the running one, and that is the second half
+         * of the fix. A month-to-date total compared against a figure somebody
+         * typed for a whole month always reads short, so a correct entry would
+         * be flagged as disagreeing every day of every month — which teaches an
+         * owner to ignore the one sentence on this screen that matters. A
+         * finished month is the only period where the register's figure and a
+         * monthly figure are the same kind of thing, and `basisMonth` below
+         * puts its name in the sentence so nobody has to guess which.
+         *
+         * The day columns are compared as day STRINGS against the month's own
+         * `firstDay`/`lastDay`, which need no timezone at all: the days of a
+         * month are the days of that month wherever it is read. Only the
+         * payments read takes instants, and those come from `monthWindow` —
+         * local midnight, shared with /close and /accounting.
+         */
+        const mw = monthWindow(recentMonths(2)[1]);
         const [plans, memberships, payments] = await Promise.all([
           fetchPlans(supabase, tenant.id),
           fetchMemberships(supabase, tenant.id),
-          fetchPayments(supabase, tenant.id, since),
+          // Bounded at BOTH ends now. The read is one finished month, which is
+          // a smaller and firmer set than thirty rolling days and still cannot
+          // outgrow the cap the way "all of history" did.
+          mw ? fetchPayments(supabase, tenant.id, mw.fromIso, mw.toIso) : Promise.resolve([]),
         ]);
         if (!live) return;
         const sum = summarise(payments, memberships, plans);
@@ -332,12 +359,11 @@ export default function Financials() {
           : null);
         setDerivedMembers(memberships.length ? sum.activeMembers : null);
 
-        // `since` above is thirty days back in whole days, so the window does
-        // not slide by the hour of day the screen happened to be opened. The
-        // filter is kept even though the read is now bounded by the same
-        // instant: the two must agree, and the cheapest way to guarantee that
-        // is for them to be the same value.
-        const recent = payments.filter((p) => p.takenAt >= since);
+        // Filtered as well as read within the window. The two must agree, and
+        // the cheapest way to guarantee that is for them to be the same bounds.
+        const recent = mw
+          ? payments.filter((p) => p.takenAt >= mw.fromIso && p.takenAt < mw.toIso)
+          : [];
         // The currency has to AGREE before there is a total: a gym that changed
         // its currency has two in its ledger and adding them is not a sum. Null
         // withholds the check rather than comparing a typed figure against a
@@ -365,26 +391,24 @@ export default function Financials() {
           : null);
 
         /**
-         * The cut-off day, on the GYM's calendar — not UTC's.
+         * Who joined in the month, compared as DAYS against the month's own
+         * first and last day.
          *
-         * This was `since.slice(0, 10)`, which is a UTC date slice by another
-         * name: `since` is an ISO instant, so its first ten characters are
-         * Greenwich's day whatever the gym's is. `memberships.startedOn` is
-         * written by app/(owner)/members.tsx as the GYM's calendar day, so the
-         * two sides of this `>=` were being cut on different calendars — a
-         * member who joined on the boundary day is counted or not depending on
-         * which side of Greenwich the gym is, and nothing on the screen says
-         * which. The comparison is a string compare on `YYYY-MM-DD`, so both
-         * halves have to be the same kind of day or it is not a comparison.
-         *
-         * `gymDay` returns null for a gym that has not set a zone, for a zone
-         * this runtime cannot resolve, and while the zone read is in flight.
-         * All three fall back to the reader's own calendar day — the same
-         * fallback `gymTodayWindow` makes, and the same one `members.tsx` was
-         * writing the start dates with — so the two sides still agree.
+         * This was `startedOn >= gymDay(now - 30 days)` — the gym's calendar
+         * day, correctly cut, of the wrong window. The cut needed a timezone
+         * because one end of it was an instant; a calendar month has two ends
+         * that are already days, and the days of August are the days of August
+         * wherever the screen is opened. `memberships.startedOn` is a DATE
+         * column written by app/(owner)/members.tsx on the gym's own calendar,
+         * so both sides of these comparisons are the same kind of day, with no
+         * zone in between them to get wrong.
          */
-        const sinceDay = gymDay(sinceMs, zoneRef.current) ?? isoDate(new Date(sinceMs));
-        setDerivedNew(memberships.length ? memberships.filter((m) => m.startedOn >= sinceDay).length : null);
+        setDerivedNew(
+          mw && memberships.length
+            ? memberships.filter((m) => m.startedOn >= mw.firstDay && m.startedOn <= mw.lastDay).length
+            : null,
+        );
+        setBasisMonth(mw ? mw.label : null);
         setDerivedFailed(false);
         setFetchedAt(Date.now());
       } catch (e) {
@@ -393,7 +417,7 @@ export default function Financials() {
         // so they are cleared rather than left standing beside the failure.
         if (!live) return;
         setDerivedMrr(null); setDerivedMembers(null);
-        setDerivedRevenue(null); setDerivedNew(null); setDerivedFailed(true);
+        setDerivedRevenue(null); setDerivedNew(null); setBasisMonth(null); setDerivedFailed(true);
         setMrrCcy(null); setRevCcy(null);
       } finally {
         if (live) setBusy(false);
@@ -619,7 +643,13 @@ export default function Financials() {
                       + 'nothing here has been checked against what you typed.'
                     : currencyBlind
                     ? NO_CURRENCY_CHECK_NOTE
-                    : reconcileNote(chk, f.label.toLowerCase(), fmtv);
+                    // The month the register figure covers, named in the
+                    // sentence that quotes it. The three checks that have a
+                    // period — revenue, MRR-adjacent counts and joiners — are
+                    // all over the last full month; `members` is a headcount
+                    // today and takes no basis.
+                    : reconcileNote(chk, f.label.toLowerCase(), fmtv,
+                        f.key === 'members' || f.key === 'mrr' ? null : basisMonth);
                   if (!note) return null;
                   return (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 6 }}>

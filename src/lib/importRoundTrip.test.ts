@@ -161,7 +161,7 @@ function bundleFor(m: Money, timezone: string | null = null) {
     memberRecords: ready([]), agreements: ready([]),
     signatures: ready([]), documents: ready([]),
     orders: ready([]), closes: ready([]), adjustments: ready([]),
-    equipmentLog: ready([]), reconciles: ready([]),
+    equipmentLog: ready([]), reconciles: ready([]), costs: ready([]),
   };
   return { input, plans, payments, bundle: buildGymExport(input) };
 }
