@@ -209,6 +209,43 @@ async function signedInAs(expected: string | null): Promise<boolean> {
   } catch { return false; }
 }
 
+/**
+ * Every live `useNotifications` instance, so one of them changing the list
+ * changes all of them.
+ *
+ * ── the bug this exists for ───────────────────────────────────────────────
+ *
+ * The list lives in `useState`, so each call site got its OWN copy. The bell in
+ * the dashboard header and the inbox screen are two call sites. Deleting a
+ * notification in the inbox updated the inbox's copy and the server, and the
+ * bell — still mounted behind the pushed screen, never re-run — went on drawing
+ * the old number. The badge was not stale by a moment; it was stale until
+ * something unrelated happened to remount it.
+ *
+ * The comment on `markUnread` already argues the principle: the badge is
+ * `items.filter(i => !i.read).length` and is DERIVED, because "a separate
+ * counter kept alongside the list is how they drift". Two separate LISTS is the
+ * same defect one level up, and it drifted the same way.
+ *
+ * Keyed by account as well as app: a coach and a client sharing a phone have
+ * two accounts and two inboxes, and a delete in one must not touch the other.
+ * `cacheKey` above is keyed per account for exactly that reason.
+ */
+type InboxSink = (next: InboxItem[]) => void;
+const inboxSinks = new Map<string, Set<InboxSink>>();
+const sinkKey = (group: AppVariant, uid: string) => `${group}:${uid}`;
+
+/** Hand `next` to every instance for this account and app EXCEPT the one that
+ *  produced it, which has already set its own state and must not be told again. */
+function broadcastInbox(group: AppVariant, uid: string, next: InboxItem[], from: InboxSink): void {
+  const set = inboxSinks.get(sinkKey(group, uid));
+  if (!set) return;
+  for (const fn of set) {
+    if (fn === from) continue;
+    try { fn(next); } catch { /* one dead listener is not the others' problem */ }
+  }
+}
+
 export function useNotifications(group: AppVariant): InboxValue {
   const authRev = useAuthRevision();
   const [items, setItemsState] = useState<InboxItem[]>([]);
@@ -223,12 +260,27 @@ export function useNotifications(group: AppVariant): InboxValue {
    *  next launch open on part of the list with no way to know it. */
   const cacheable = useRef(true);
 
-  const setItems = (next: InboxItem[], owner: string | null) => {
+  /** This instance's own way of receiving a list from a sibling. Stable for the
+   *  life of the hook, because it is also the identity `broadcastInbox` skips. */
+  const selfSink = useRef<InboxSink>((next: InboxItem[]) => {
+    listRef.current = next;
+    setItemsState(next);
+  });
+
+  /**
+   * `share` is false for the one write that is not authoritative: seeding from
+   * the AsyncStorage cache on mount. A newly mounted bell holding yesterday's
+   * cached rows must not push them over an inbox that has already read the
+   * server — that would turn this fix into a way of going backwards.
+   */
+  const setItems = (next: InboxItem[], owner: string | null, share = true) => {
     listRef.current = next;
     setItemsState(next);
     if (owner && cacheable.current) {
       AsyncStorage.setItem(cacheKey(owner), JSON.stringify(next)).catch(() => { /* the list is right this session either way */ });
     }
+    const who = owner ?? uid.current;
+    if (share && who) broadcastInbox(group, who, next, selfSink.current);
   };
 
   const load = useCallback(async (): Promise<void> => {
@@ -255,7 +307,7 @@ export function useNotifications(group: AppVariant): InboxValue {
       const raw = await AsyncStorage.getItem(cacheKey(id));
       if (raw) local = (JSON.parse(raw) as any[]).map((r) => rowToItem(r, group));
     } catch { /* no usable cache; the server read below is the only source */ }
-    if (local.length && !listRef.current.length) setItems(local, null);
+    if (local.length && !listRef.current.length) setItems(local, null, false);
 
     try {
       // No `.eq('user_id', …)`. `notif_self` is what decides whose rows come
@@ -281,6 +333,30 @@ export function useNotifications(group: AppVariant): InboxValue {
   }, [group]);
 
   useEffect(() => { void load(); }, [load, authRev]);
+
+  /**
+   * Join the set of live instances for this account and app.
+   *
+   * Keyed on `liveUid` rather than the ref, because the ref changing does not
+   * re-run an effect and a sign-in would otherwise leave this instance
+   * registered under nobody — deaf to every sibling for the rest of its life.
+   */
+  useEffect(() => {
+    if (!liveUid) return;
+    const key = sinkKey(group, liveUid);
+    const mine = selfSink.current;
+    let set = inboxSinks.get(key);
+    if (!set) { set = new Set(); inboxSinks.set(key, set); }
+    set.add(mine);
+    return () => {
+      const live = inboxSinks.get(key);
+      if (!live) return;
+      live.delete(mine);
+      // The last one out takes the key with it, so a phone that has had several
+      // accounts on it does not accumulate an empty set per account forever.
+      if (live.size === 0) inboxSinks.delete(key);
+    };
+  }, [group, liveUid]);
 
   /* ── live ────────────────────────────────────────────────────────────────
    *
