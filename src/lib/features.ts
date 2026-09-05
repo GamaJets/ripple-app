@@ -524,6 +524,13 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'my-training', label: 'My Training', note: 'Your own workout log', route: '/(trainer)/my-training', icon: 'train', keywords: 'my training own workout log lift my workouts personal record myself' },
   { key: 'my-nutrition', label: 'My Nutrition', note: 'Your own food log, calories & macros', route: '/(trainer)/my-nutrition', icon: 'meals', keywords: 'my nutrition own food log calories macros diet eating myself' },
   { key: 'my-progress', label: 'My Progress', note: 'Your own body stats, weight trend & scans', route: '/(trainer)/my-progress', icon: 'trending', keywords: 'my progress own body weight scan inbody stats trend myself' },
+  // The fourth of the coach's own screens, and the one that feeds the other
+  // three. Until it existed the only way a coach could connect anything was
+  // the single Apple Health button inside My Nutrition, so a coach wearing a
+  // WHOOP searched 'whoop', found nothing, and had no reason to think the app
+  // could read it — while the client build had read WHOOP for months. The
+  // keywords carry the brand names for exactly that search.
+  { key: 'devices', label: 'Watch & Devices', note: 'Connect your own watch, ring or strap', route: '/(trainer)/devices', icon: 'clock', keywords: 'watch devices wearable apple watch healthkit health whoop oura ring garmin fitbit google fit health connect heart rate hrv resting steps calories strap band connect my watch myself' },
   { key: 'feedback', label: 'Send Feedback', note: 'Report a bug or share an idea', route: '/(trainer)/feedback', icon: 'message', keywords: 'feedback bug idea report suggest' },
   // 'how i coach', 'online', 'in person' and 'hybrid' are here because Profile
   // is where the answer is CHANGED (part 410), and a coach who wants their

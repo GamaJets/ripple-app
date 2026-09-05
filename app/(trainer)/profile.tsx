@@ -874,6 +874,30 @@ export default function CoachProfile() {
 
         <Rule />
 
+        {/* ── the coach's own devices ────────────────────────────────────── */}
+        {/* Its own section rather than a row under Your Training, for the
+            reason the Help row two sections down records: a heading that does
+            not describe the rows beneath it is worse than no heading, and
+            somebody hunting for their watch does not read "Your Training".
+
+            This row is the ONLY way into app/(trainer)/devices.tsx, which is
+            why it is here rather than only in Explore — and it is the reason
+            scripts/check-reachable.mjs exists. Before that screen, the whole
+            of a coach's access to their own wearables was a single Apple
+            Health button inside My Nutrition: no way to connect WHOOP or Oura,
+            no way to disconnect anything, and nowhere to read what their own
+            devices reported. It mirrors the client's Watch & Devices row on
+            app/(client)/profile.tsx, deliberately — coaches self-track on the
+            same hooks, and the two screens share every rule that matters. */}
+        <Section>
+          <SectionHead title="Your Devices" />
+          <ListRow icon="clock" title="Watch & Devices"
+            note="Connect your own Apple Watch, WHOOP or Oura — and see what they read today"
+            onPress={() => router.push('/(trainer)/devices')} />
+        </Section>
+
+        <Rule />
+
         {/* ── money ──────────────────────────────────────────────────────── */}
         {/* Account — the in-app route to sign out, export, and account deletion.
             Repple Coach had none of the three before this. */}

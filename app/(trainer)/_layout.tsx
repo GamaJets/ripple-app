@@ -73,6 +73,7 @@ export default function TrainerLayout() {
       <Tabs.Screen name="my-training" options={{ href: null, title: 'My Training' }} />
       <Tabs.Screen name="my-nutrition" options={{ href: null, title: 'My Nutrition' }} />
       <Tabs.Screen name="my-progress" options={{ href: null, title: 'My Progress' }} />
+      <Tabs.Screen name="devices" options={{ href: null, title: 'Watch & Devices' }} />
       <Tabs.Screen name="checklists" options={{ href: null, title: 'Their Checklists' }} />
       <Tabs.Screen name="client-goals" options={{ href: null, title: 'Working Toward' }} />
       <Tabs.Screen name="client-photos" options={{ href: null, title: 'Progress Photos' }} />
