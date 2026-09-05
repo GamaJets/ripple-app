@@ -297,8 +297,11 @@ export type LinkState =
   | 'unconfigured'
   | 'disconnected'
   | 'connecting'
-  /** Connected, but Google issued no refresh token — the grant lasts about an
-   *  hour. Reconnecting is the only fix. */
+  /** Connected, but Repple holds no refresh token for the account: either
+   *  Google never issued one, or it issued one and has since refused it. The
+   *  edge function clears the stored token on Google's `invalid_grant`, which
+   *  is what brings a REVOKED grant to this state instead of leaving the row
+   *  reading 'connected' for ever. Reconnecting is the only fix for both. */
   | 'needs-reconnect'
   | 'connected'
   /** Connected and writing sessions back. */
@@ -327,7 +330,15 @@ export const LINK_NOTES: Record<LinkState, string> = {
   unconfigured: 'Repple has not finished setting Google Calendar up in this version, so there is nothing here to sign in to yet and nothing is wrong with your Google account. Reading your phone calendar and blocking time by hand both work today.',
   disconnected: 'Not connected. Repple reads nothing from Google until you sign in, and blocking time by hand is unaffected either way.',
   connecting: 'Waiting for Google to finish signing you in…',
-  'needs-reconnect': 'Google did not give Repple permission to keep this connection alive, so it stops working about an hour after it is made. Connect again to fix it.',
+  // Two causes, one sentence, because the coach's next step is the same for
+  // both and the screen cannot tell them apart: `has_refresh` is one boolean.
+  // It used to say only the first — "Google did not give Repple permission to
+  // keep this connection alive" — which is a sentence about the moment they
+  // connected, and reads as nonsense to the coach who connected six weeks ago
+  // and has just removed Repple's access in their Google account. That coach
+  // now reaches this state at all, which they did not before: the edge function
+  // clears the dead token rather than leaving the row claiming to work.
+  'needs-reconnect': 'Repple can no longer renew this connection to Google — either Google never gave it permission to, or that permission has since been removed in your Google account. Nothing is being read or written until you connect again.',
   connected: 'Connected. Repple reads when you are busy on your main Google calendar, and writes nothing back.',
   'two-way': 'Connected. Repple reads when you are busy, and puts the sessions clients book into a separate calendar of its own.',
 };
@@ -577,6 +588,57 @@ export function syncClassesNote(classesKnown: boolean): string | null {
   return 'Your class timetable could not be read, so only your one-to-one sessions are in this. Anybody reading your calendar will see the hours you teach as free.';
 }
 
+/**
+ * How far ahead Repple writes sessions into a coach's own calendar.
+ *
+ * Four weeks. It is a WINDOW rather than "everything", because a push is a
+ * reconciliation — anything of ours inside the window that is not in the list
+ * sent is removed, which is how a cancellation reaches Google — and a window
+ * bounds what a single bad read could undo. Four weeks is also what
+ * `generateSlots` fills, so the two halves of the schedule screen agree about
+ * how far ahead a coach's week is a real thing rather than an intention.
+ */
+export const PUSH_DAYS = 28;
+
+/**
+ * The span a push reconciles, from the coach's own clock.
+ *
+ * ── why the near edge is not midnight ─────────────────────────────────────
+ *
+ * It was: `new Date(y, m, d)`, local midnight today, and that put hours into
+ * the reconcile window that ONE of the two reads feeding the plan cannot see.
+ * The class timetable (src/ui/classes.tsx) is read `starts_at >= now - 1h`,
+ * because a member looking at what is on next must not be shown last Tuesday.
+ * So from about half past one every afternoon, this morning's class was inside
+ * the window, absent from the plan for a reason that had nothing to do with the
+ * coach's diary, and deleted out of their Google calendar as a tidy-up. A coach
+ * who taught a 7am class watched it disappear from their own calendar over
+ * lunch, and the auto-push does it silently.
+ *
+ * `floorMs` is that read's floor, passed in rather than repeated here, so the
+ * window can never again describe a span the plan is not entitled to speak
+ * about. The consequence is deliberate and is the safe direction: a session
+ * cancelled earlier TODAY, before the floor, is no longer reconciled out of
+ * Google — a stale event for an hour that has already passed. The alternative
+ * is deleting classes a coach actually taught, which is the same wrong answer
+ * about an hour that has already passed, told about the wrong thing.
+ *
+ * The far edge stays anchored to local midnight, so the window is a whole
+ * number of the coach's own days and does not slide a fraction of a day forward
+ * every time the screen re-renders.
+ */
+export function pushWindow(
+  nowMs: number,
+  floorMs: number,
+  days: number = PUSH_DAYS,
+): { fromMs: number; toMs: number } {
+  const now = new Date(nowMs);
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const to = new Date(midnight.getFullYear(), midnight.getMonth(), midnight.getDate());
+  to.setDate(to.getDate() + days);
+  return { fromMs: nowMs - Math.max(0, floorMs), toMs: to.getTime() };
+}
+
 /** What the server did, as counts. Nothing about which sessions, because the
  *  coach does not need it and a log line naming one would be a client's
  *  appointment in a table. */
@@ -606,6 +668,32 @@ export function pushSummaryLine(r: PushResult): string {
   // so it is said in those words rather than in the name of one of the two
   // kinds of thing it creates.
   return `${parts.join(', ')} in your Google calendar. Only events Repple put there are ever touched.`;
+}
+
+/**
+ * What to add to a FAILURE when part of the write had already landed, or null
+ * when none of it had.
+ *
+ * A push is a sequence of calls, and the server stops at the first one it
+ * cannot account for — carrying the counts of what really did happen up to that
+ * point. Nothing read them, so a coach whose push made nine events and then hit
+ * a 403 was told "Your sessions could not be written to Google just now.
+ * Nothing in Repple has changed", which is true about Repple and silent about
+ * the nine events now sitting in their Google account. Silence there is the
+ * same failure as a false count, one step removed: the coach believes their
+ * calendar is untouched and it is half written.
+ *
+ * Null for an all-zero result so the ordinary failure — nothing reached Google
+ * at all — keeps the plain sentence it has. There is nothing to add and adding
+ * "0 added" would make a clean failure read as a messy one.
+ */
+export function pushPartialLine(r: PushResult): string | null {
+  const parts: string[] = [];
+  if (r.created > 0) parts.push(`${r.created} added`);
+  if (r.updated > 0) parts.push(`${r.updated} updated`);
+  if (r.removed > 0) parts.push(`${r.removed} removed`);
+  if (parts.length === 0) return null;
+  return `Part of it did reach Google before this stopped: ${parts.join(', ')}. The rest is still only in Repple, and the next send finishes the job.`;
 }
 
 /**

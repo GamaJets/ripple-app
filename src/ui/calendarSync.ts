@@ -285,7 +285,22 @@ export async function setCalendarWrite(enabled: boolean, label: string): Promise
 
 export type PushOutcome =
   | { ok: true; result: PushResult }
-  | { ok: false; reason: string };
+  /** `partial` is what the server had already done when it stopped, and it is
+   *  carried rather than dropped because a half-written calendar reported as an
+   *  untouched one is the same lie as a false count. Null when the server did
+   *  not say — a transport failure, or a refusal before any write. */
+  | { ok: false; reason: string; partial: PushResult | null };
+
+/** The counts off a push response, whether it succeeded or stopped part-way.
+ *  `|| 0` on each, because a field the server did not send must not become NaN
+ *  in a sentence a coach reads. */
+function pushCounts(payload: any): PushResult {
+  return {
+    created: Number(payload?.created) || 0,
+    updated: Number(payload?.updated) || 0,
+    removed: Number(payload?.removed) || 0,
+  };
+}
 
 /**
  * Send the coach's booked sessions to the calendar Repple made.
@@ -293,33 +308,38 @@ export type PushOutcome =
  * The payload is `SyncWireEvent[]` and that type has three string fields, none
  * of which could carry a client's name. The server builds the event body from a
  * fixed template and drops anything else it is given.
+ *
+ * `label` is the brand's name, and it is here for a repair rather than for a
+ * first run: the coach is invited to delete Repple's calendar (see
+ * WRITE_PRIVACY_NOTE) and the server re-creates it when the events listing
+ * comes back 404, which needs a name for it. The server sanitises the string
+ * and falls back to its own default, so an old build that sends nothing still
+ * recovers — with a generic name rather than the brand's.
  */
 export async function pushSessions(
   events: readonly SyncWireEvent[],
   fromMs: number,
   toMs: number,
+  label: string,
 ): Promise<PushOutcome> {
   try {
     const { data, error } = await supabase.functions.invoke('calendar-sync', {
-      body: { action: 'push', fromMs, toMs, events },
+      body: { action: 'push', fromMs, toMs, events, label },
     });
-    if (error) return { ok: false, reason: 'Repple could not reach the server to write your sessions.' };
+    if (error) return { ok: false, reason: 'Repple could not reach the server to write your sessions.', partial: null };
     const payload = data as any;
     if (!payload?.ok) {
       reportError('calendarSync.push', String(payload?.reason || payload?.error || 'push refused'));
-      return { ok: false, reason: 'Your sessions could not be written to Google just now. Nothing in Repple has changed.' };
+      return {
+        ok: false,
+        reason: 'Your sessions could not all be written to Google just now. Nothing in Repple has changed.',
+        partial: pushCounts(payload),
+      };
     }
-    return {
-      ok: true,
-      result: {
-        created: Number(payload.created) || 0,
-        updated: Number(payload.updated) || 0,
-        removed: Number(payload.removed) || 0,
-      },
-    };
+    return { ok: true, result: pushCounts(payload) };
   } catch (e) {
     reportError('calendarSync.push', e instanceof Error ? e.name : 'push failed');
-    return { ok: false, reason: 'Your sessions could not be written to Google just now. Nothing in Repple has changed.' };
+    return { ok: false, reason: 'Your sessions could not be written to Google just now. Nothing in Repple has changed.', partial: null };
   }
 }
 

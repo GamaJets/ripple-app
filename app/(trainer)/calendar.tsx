@@ -26,7 +26,7 @@ import { insideNoticeWindow, feeAmountLine, unstatedCurrencyCoach, noticeLabel, 
 // quarters meant forty-eight separate additions for ONE day.
 import { expandRange, rangeBlocker, rangeSlotCount, remainderNote, splitAgainstExisting,
   addButtonLabel, rangeSummary, addOutcome, type RangeInput } from '../../src/lib/availabilityRange';
-import { useClasses } from '../../src/ui/classes';
+import { useClasses, CLASS_READ_FLOOR_MS } from '../../src/ui/classes';
 import { useSessions, useSessionWaitlistCounts, useLateCancelCharges, useMyCancellationPolicy, promoteWaitlist } from '../../src/ui/sessions';
 import { useAvailability, upcomingDates, useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -88,7 +88,7 @@ import { floorPendingNote, flushResultLine, keptOfflineLine, refusedLine } from 
 // Paging back into a month the read never reached must not draw an empty grid.
 // See `monthNote` below. Surgical addition alongside the calendar-sync work in
 // this file — three lines of state and one Flag under the grid, nothing else.
-import { readBoundary, monthCoverage, monthCoverageNote } from '../../src/lib/sessionHistory';
+import { readBoundary, monthCoverage, monthCoverageNote, rangeCoverage } from '../../src/lib/sessionHistory';
 import { appLocale } from '../../src/lib/locale';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useCoachReminders } from '../../src/ui/coachReminders';
@@ -161,7 +161,7 @@ import {
 // a coach turns writing on, and reaches only a calendar Repple itself made.
 import {
   combineBusy, linkState, missingSourceNote, plannedSyncEvents, pushLabel, pushSummaryLine,
-  syncClassesNote, type SyncTeaching,
+  pushPartialLine, pushWindow, syncClassesNote, PUSH_DAYS, type SyncTeaching,
   LINK_NOTES, NO_CALENDAR_LINK, REMOTE_SCOPE_NOTE, WRITE_PRIVACY_NOTE,
   type BusySourceState, type CalendarLink, type SyncSource,
 } from '../../src/lib/calendarSync';
@@ -248,17 +248,6 @@ const HOURS = Array.from({ length: 24 }, (_, h) => h);
 // picker that could offer one would be a control whose value the server throws
 // away. One list, stated once, and the three sheets below cannot drift from it.
 const MINUTES = SERIES_MINUTES;
-/**
- * How far ahead Repple writes sessions into a coach's own calendar.
- *
- * Four weeks. It is a WINDOW rather than "everything", because a push is a
- * reconciliation — anything of ours inside the window that is not in the list
- * sent is removed, which is how a cancellation reaches Google — and a window
- * bounds what a single bad read could undo. Four weeks is also what
- * `generateSlots` fills, so the two halves of this screen agree about how far
- * ahead a coach's week is a real thing rather than an intention.
- */
-const PUSH_DAYS = 28;
 /** An hour of the day as a person says it, including the 24 that means the
  *  end of it. Written once because three places were saying it and only two
  *  of them knew about midnight. */
@@ -559,30 +548,36 @@ export default function TrainerSchedule() {
     setFloorNote(null);
     try { setFloorNote(flushResultLine(await floor.flush())); } finally { setFloorSending(false); }
   };
-  const remindable = known
-    ? sessions.map((s) => ({
-      id: s.id,
-      startsAt: s.startsAt,
-      status: s.status,
-      // `TrainingSession` carries no outcome — this provider reads the diary
-      // rather than the delivery record. Null is the honest value and it is
-      // also the safe one: `toArm` only refuses a session whose outcome is
-      // KNOWN to be set, and the arming window is seven days ahead, where
-      // nothing has an outcome yet by definition.
-      outcome: null as string | null,
-      clientName: s.clientId ? (roster.find((c) => c.id === s.clientId)?.name ?? null) : null,
-    }))
-    : null;
-  // The provider reads from the start of the current month forward, and the
-  // grid pages through months, so the honest window is "everything this screen
-  // has looked at". Taken from the rows themselves rather than assumed.
-  const readFrom = remindable && remindable.length
-    ? Math.min(...remindable.map((s) => Date.parse(s.startsAt)).filter(Number.isFinite))
-    : Date.now();
-  const readTo = remindable && remindable.length
-    ? Math.max(...remindable.map((s) => Date.parse(s.startsAt)).filter(Number.isFinite))
-    : Date.now();
-  useCoachReminders(user?.id ?? null, remindable, readFrom, readTo);
+  const remindable = sessions.map((s) => ({
+    id: s.id,
+    startsAt: s.startsAt,
+    status: s.status,
+    // `TrainingSession` carries no outcome — this provider reads the diary
+    // rather than the delivery record. Null is the honest value and it is
+    // also the safe one: `toArm` only refuses a session whose outcome is
+    // KNOWN to be set, and the arming window is seven days ahead, where
+    // nothing has an outcome yet by definition.
+    outcome: null as string | null,
+    clientName: s.clientId ? (roster.find((c) => c.id === s.clientId)?.name ?? null) : null,
+  }));
+  // ── the window is the READ, not the rows that came back ─────────────────
+  //
+  // This used to hand the hook `min(starts)` and `max(starts)` over the rows it
+  // had, with a note claiming the provider "reads from the start of the current
+  // month forward". It does not: `useSessions` reads the whole diary
+  // newest-first under one row cap (src/ui/sessions.tsx). Worse, a window
+  // stated as the outermost rows CANNOT see the one row whose disappearance is
+  // the point of a cancellation pass — delete the furthest-future session and
+  // `max(starts)` retreats with it, putting that session's own armed reminder
+  // outside the window, where `staleReminders` will not touch it. The coach
+  // then gets a banner an hour before a session that does not exist, and it is
+  // the last session in their book every single time.
+  //
+  // The status goes in instead and `readWindow` decides — the rule the client
+  // side was built on (src/lib/clientReminders.ts) and the coach side never
+  // got. 'loading' and 'error' now do NOTHING rather than running a pass over
+  // a one-instant window, which is what `Date.now()` to `Date.now()` was.
+  useCoachReminders(user?.id ?? null, remindable, sessionsStatus);
   const [viewYear, setViewYear] = useState(now.getFullYear());
   const [viewMonth, setViewMonth] = useState(now.getMonth());
   const [selKey, setSelKey] = useState(`${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`);
@@ -1711,14 +1706,17 @@ export default function TrainerSchedule() {
   /** The sessions Repple would put in the coach's Google calendar: the booked
    *  ones in the four weeks around today, and nothing else. An open slot is an
    *  offer rather than a commitment, and a blocked period is Repple telling the
-   *  coach's calendar what the coach's calendar told Repple. */
-  const pushWindow = () => {
-    const now = new Date();
-    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const to = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-    to.setDate(to.getDate() + PUSH_DAYS);
-    return { fromMs: from.getTime(), toMs: to.getTime() };
-  };
+   *  coach's calendar what the coach's calendar told Repple.
+   *
+   *  The window itself is `pushWindow` in src/lib/calendarSync.ts, which is
+   *  where the argument for its near edge is written and where it can be
+   *  asserted. It was four lines here and its near edge was local midnight,
+   *  which reached an hour and a half further back than the class timetable
+   *  read ever does — so this morning's class was inside the reconcile window,
+   *  missing from the plan, and deleted out of the coach's calendar over lunch.
+   *  `CLASS_READ_FLOOR_MS` is that read's own floor, taken from the module that
+   *  performs it so the two cannot drift. */
+  const currentPushWindow = () => pushWindow(Date.now(), CLASS_READ_FLOOR_MS);
   /**
    * What this coach's Google calendar should contain.
    *
@@ -1735,25 +1733,65 @@ export default function TrainerSchedule() {
    */
   const teachingForSync = (): SyncTeaching => ({ classes: gymClasses, uid: coachId ?? null });
   const plannedEvents = () => {
-    const w = pushWindow();
+    const w = currentPushWindow();
     return plannedSyncEvents(sessions, w.fromMs, w.toMs, teachingForSync());
   };
 
   /**
+   * Whether the diary read actually covers the span a push would reconcile.
+   *
+   * ── why this replaced `isWhole(sessionsStatus)` ───────────────────────────
+   *
+   * `isWhole` was the right instinct and the wrong question, and it had a dead
+   * end at the bottom of it. `useSessions` reads the coach's whole diary under
+   * one row cap with NO date floor (src/ui/sessions.tsx), so a coach past a
+   * thousand sessions on file is 'partial' on every read they will ever do.
+   * `isWhole` refused the push, correctly in the sense that it refused to
+   * delete, and then offered "pull down to refresh and try again" — a remedy
+   * that cannot work, because refreshing runs the identical query and gets the
+   * identical thousand rows back. Calendar writing stopped permanently for the
+   * busiest coaches on the product, with a sentence telling them to keep trying.
+   *
+   * But 'partial' here is not the usual "an unknown fraction of the set". The
+   * read is ordered NEWEST FIRST, so the thousand rows it keeps are the
+   * thousand latest, and everything from the oldest returned row forward is
+   * present in full. The push window starts about now, and a diary long enough
+   * to truncate is one whose thousandth-newest session is in the past — so the
+   * window is entirely inside what was read, and the plan for it is complete.
+   *
+   * `readBoundary` + `rangeCoverage` are the pair this screen already uses to
+   * decide the same question about a month of the grid, and they answer
+   * 'covered' for exactly that case: whole read, or truncated read whose oldest
+   * row is at or before the window's start. 'loading' and 'error' stay
+   * 'unknown' and still refuse — an empty list for want of a read would clear
+   * the coach's week out of Google, which is what the original guard was for
+   * and is not weakened here.
+   */
+  const pushCoverage = (): 'covered' | 'edge' | 'beyond' | 'unknown' => {
+    const w = currentPushWindow();
+    return rangeCoverage(w.fromMs, w.toMs, readBoundary(sessions, sessionsStatus === 'partial'), sessionsStatus);
+  };
+  const sessionsCoverPush = pushCoverage() === 'covered';
+
+  /**
    * Send the booked sessions.
    *
-   * `isWhole(sessionsStatus)` is the guard that matters and it guards against
+   * `sessionsCoverPush` is the guard that matters and it guards against
    * DELETION. A push is a reconciliation: anything in Repple's calendar that is
    * not in the list sent is removed, because that is how a cancellation reaches
    * Google at all. Under 'error' the session list is empty for want of a read
-   * rather than for want of bookings, and under 'partial' it is a truncated
-   * fraction of the set (src/ui/loadStatus.ts) — so pushing either one would
-   * quietly clear a coach's whole week out of their Google calendar while every
-   * session was still in Repple, and the calendar would then be exactly as
-   * wrong as it can be: confidently empty.
+   * rather than for want of bookings — so pushing it would quietly clear a
+   * coach's whole week out of their Google calendar while every session was
+   * still in Repple, and the calendar would then be exactly as wrong as it can
+   * be: confidently empty.
    *
    * The same sentence the generate-slots path already refuses to say, on the
    * other side of the wire.
+   *
+   * It is a coverage question rather than `isWhole` because a truncated
+   * newest-first read still holds the whole of the window this push speaks
+   * about, and refusing it forever was how calendar writing died for every
+   * coach past a thousand sessions. See `pushCoverage` above for the argument.
    *
    * `isWhole(classStatus)` is the SAME guard for the same reason, and it was
    * missing. Classes are half of what this push plans: `teachingForSync()`
@@ -1769,11 +1807,11 @@ export default function TrainerSchedule() {
    * "pass nothing" that also reconciles, so the push waits.
    */
   const doPush = async (announce: boolean) => {
-    if (!isWhole(sessionsStatus)) {
+    if (!sessionsCoverPush) {
       if (announce) {
         Alert.alert(
           'Can’t send yet',
-          'Your Repple calendar could not be read in full, so Repple does not know what you have booked — and sending now would remove sessions from Google that are still here.\n\nNothing has been changed. Pull down to refresh and try again.',
+          'Your Repple calendar could not be read, so Repple does not know what you have booked — and sending now would remove sessions from Google that are still here.\n\nNothing has been changed. Pull down to refresh and try again.',
           [{ text: 'OK' }],
         );
       }
@@ -1789,14 +1827,32 @@ export default function TrainerSchedule() {
       }
       return;
     }
-    const w = pushWindow();
+    const w = currentPushWindow();
     const events = plannedSyncEvents(sessions, w.fromMs, w.toMs, teachingForSync());
     setPushBusy(true);
-    const out = await pushSessions(events, w.fromMs, w.toMs);
+    const out = await pushSessions(events, w.fromMs, w.toMs, BRAND.label);
     setPushBusy(false);
+    // ── a silent push that FAILED has not been done ───────────────────────
+    //
+    // `pushIsDue()` marks the slot taken before this runs, so a failure used to
+    // buy fifteen minutes of not trying again — on top of `if (!announce)
+    // return` below, which threw the reason away. A coach whose Google grant
+    // had been revoked therefore had nothing anywhere telling them their
+    // sessions had stopped arriving. The server end of that is fixed (a refused
+    // refresh token is cleared, so this screen stops saying Connected), and
+    // this is the other half: a push that did not happen does not count as a
+    // push, so the next change to the diary tries again instead of waiting out
+    // a quarter of an hour for a call that never landed.
+    if (!out.ok) pushAgainSoon();
     if (!announce) return;
-    if (!out.ok) Alert.alert('Not sent', out.reason);
-    else {
+    if (!out.ok) {
+      // The counts the server got through before it stopped, said out loud.
+      // "Nothing has changed" over a calendar with nine new events in it is the
+      // same false statement as a count that was never taken — see
+      // `pushPartialLine`.
+      const part = out.partial ? pushPartialLine(out.partial) : null;
+      Alert.alert('Not sent', [out.reason, part].filter(Boolean).join('\n\n'));
+    } else {
       // A timetable that could not be read means the classes are missing from
       // what was just sent, and the coach has no way to tell from a count of
       // events. Said here rather than swallowed: somebody reading their
@@ -1821,8 +1877,8 @@ export default function TrainerSchedule() {
    *
    * A sync a coach has to press is a sync that goes stale, and a stale sync on
    * this feature is the double booking the whole item exists to prevent. So
-   * when writing is on and the session list is WHOLE, the sessions go across on
-   * their own — at most once every fifteen minutes (`pushIsDue` holds that
+   * when writing is on and the diary read covers the window, the sessions go
+   * across on their own — at most once every fifteen minutes (`pushIsDue` holds that
    * floor at module scope, so navigating away and back does not restart it).
    *
    * Silent on purpose: `announce` is false, so a coach who is doing something
@@ -1832,7 +1888,12 @@ export default function TrainerSchedule() {
    */
   useEffect(() => {
     if (!syncLink.connected || !syncLink.writeEnabled || !syncLink.hasWriteCalendar) return;
-    if (!isWhole(sessionsStatus)) return;
+    // `sessionsCoverPush`, the same guard `doPush` applies and for the same
+    // reason. Not `isWhole`: a coach past the row cap is 'partial' for ever and
+    // this effect would never fire again for them, which is how the automatic
+    // half of this feature stopped existing for the busiest books on the
+    // product. See `pushCoverage`.
+    if (!sessionsCoverPush) return;
     // And the timetable, on the same terms. This effect is where the deletion
     // actually happened: `lastPushMs` starts at 0 at module scope, so the first
     // push after every launch is due, and the sessions read lands well before
@@ -1850,7 +1911,7 @@ export default function TrainerSchedule() {
     // nothing about how many there are, and the whole point of writing is that
     // the time in Google is the time in Repple.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions, sessionsStatus, gymClasses, classStatus, syncLink.connected, syncLink.writeEnabled, syncLink.hasWriteCalendar]);
+  }, [sessions, sessionsStatus, sessionsCoverPush, gymClasses, classStatus, syncLink.connected, syncLink.writeEnabled, syncLink.hasWriteCalendar]);
 
   const toggleBusyPick = (key: string) =>
     setBusyPicked((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
@@ -4060,17 +4121,21 @@ export default function TrainerSchedule() {
           <ScrollView showsVerticalScrollIndicator={false}>
             {(() => {
               const state = linkState({ configured: CALENDAR_SYNC_CONFIGURED, connecting: syncBusy, link: syncLink });
-              // `isWhole(sessionsStatus)`, not nothing at all. `plannedEvents`
-              // reads `sessions` with no status test, and under 'error' that
-              // list is empty for want of a read — so a coach with a full
+              // A status test, not nothing at all. `plannedEvents` reads
+              // `sessions` with no status test of its own, and under 'error'
+              // that list is empty for want of a read — so a coach with a full
               // fortnight was told "there are 0 sessions in the next 28 days
               // to send", beside a Send button that `pushLabel(0)` had quietly
-              // disabled with no reason given. Under 'partial' it was a
-              // plausible short number, which is worse. `doPush` twenty lines
-              // up already refuses this case and explains it at length; the
-              // sentence the coach actually reads was the only part that had
-              // not been told.
-              const plannedKnown = isWhole(sessionsStatus);
+              // disabled with no reason given.
+              //
+              // `sessionsCoverPush` and not `isWhole`, so that the number, the
+              // button and the push itself all answer the same question. A
+              // truncated newest-first read still holds every session inside
+              // the push window, so the count over it is a real count rather
+              // than the "plausible short number" `isWhole` was here to
+              // refuse — and a coach past the row cap gets a working screen
+              // instead of a permanent apology. See `pushCoverage`.
+              const plannedKnown = sessionsCoverPush;
               const planned = plannedKnown && syncLink.writeEnabled && syncLink.hasWriteCalendar ? plannedEvents().length : null;
               return (<>
                 {/* 'error' is its own sentence and comes first. Every state
@@ -4133,7 +4198,7 @@ export default function TrainerSchedule() {
                   ) : null}
                   {state === 'two-way' && classesKnown ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-                      {/* `planned == null` is `!isWhole(sessionsStatus)` (see
+                      {/* `planned == null` is `!sessionsCoverPush` (see
                           `plannedKnown` above), and that is EXACTLY the state
                           `doPush` returns from before it sends anything — a
                           push is a reconciliation, and a diary read short by an
@@ -4147,10 +4212,18 @@ export default function TrainerSchedule() {
                           the moment. This is a pause, not a change" — and this
                           half now says it too. It is not cosmetic: a coach
                           reading the old sentence believes their Google
-                          calendar is current, and a coach whose diary is over
-                          ROW_CAP is in this state permanently. */}
+                          calendar is current.
+
+                          The last line of this note used to add "and a coach
+                          whose diary is over ROW_CAP is in this state
+                          permanently", which was true and is the defect
+                          `pushCoverage` closed: a truncated newest-first read
+                          still holds every session inside the push window, so
+                          that coach is no longer here at all. What is left is
+                          a read still in flight or one that failed, and both
+                          of those do come back. */}
                       {planned == null
-                        ? `Your Repple calendar could not be read in full just now, so nothing is being sent to Google for the moment. This is a pause, not a change: what is already in your Google calendar is untouched, and sending resumes on its own once your calendar has come back whole. That is a connection problem and not an empty diary.`
+                        ? `Your Repple calendar could not be read just now, so nothing is being sent to Google for the moment. This is a pause, not a change: what is already in your Google calendar is untouched, and sending resumes on its own once your calendar has been read. That is a connection problem and not an empty diary.`
                         : `Your booked sessions go across on their own while this screen is open, and there ${planned === 1 ? 'is 1 session' : `are ${planned} sessions`} in the next ${PUSH_DAYS} days to send. Open slots and blocked time are never written.`}
                     </Text>
                   ) : null}
@@ -4179,8 +4252,8 @@ export default function TrainerSchedule() {
                unread timetable its length is short by an unknown number of
                them — a button reading "Send 3 Sessions" would be putting that
                short number on the one control a coach reads as a total. */
-            <Cta wide disabled={pushBusy || (isWhole(sessionsStatus) && classesKnown && pushLabel(plannedEvents().length) === null)}
-              label={pushBusy ? 'Sending…' : (isWhole(sessionsStatus) && classesKnown ? (pushLabel(plannedEvents().length) ?? 'Send Sessions') : 'Send Sessions')}
+            <Cta wide disabled={pushBusy || (sessionsCoverPush && classesKnown && pushLabel(plannedEvents().length) === null)}
+              label={pushBusy ? 'Sending…' : (sessionsCoverPush && classesKnown ? (pushLabel(plannedEvents().length) ?? 'Send Sessions') : 'Send Sessions')}
               onPress={() => { void doPush(true); }} />
           ) : null}
           {syncLink.connected ? (<>

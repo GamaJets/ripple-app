@@ -40,10 +40,11 @@ import { scheduleLocal, cancelReminders } from './pushNotifications';
 import { weekKey } from '../lib/nudge';
 import { bookAlert, type BookState } from '../lib/coachNotify';
 import {
-  toArm, staleReminders, expiredReminders, remindAt, reminderBody,
+  toArm, staleReminders, expiredReminders, remindAt, reminderBody, readWindow,
   backlogDue, BACKLOG_PROMPT_KEY,
   type ArmedMap, type RemindableSession,
 } from '../lib/coachReminders';
+import type { LoadStatus } from './loadStatus';
 
 /** Per account, and that is not tidiness. A gym's front-desk handset is signed
  *  in and out all day, and a shared map would leave one trainer holding
@@ -216,34 +217,49 @@ export async function promptBookAlerts(
 /**
  * Keep the handset's reminders in step with a screen's own session read.
  *
- * `sessions` null means the read has not landed or did not answer, and NOTHING
- * happens on a null — not an arm and, more importantly, not a cancel. Cancelling
- * every armed reminder because one query failed would leave a coach with a
- * silent phone and no way to know it.
+ * ── the window is the read's status, not the read's rows ──────────────────
+ *
+ * This took `windowFrom`/`windowTo` and app/(trainer)/calendar.tsx computed
+ * them as the min and max of the starts that came back. That is the one shape
+ * this cannot be given, because `staleReminders` refuses to cancel outside the
+ * window and the row whose banner needs cancelling is the row that is GONE: a
+ * deleted or cancelled session at the far end of the diary takes `windowTo`
+ * with it as it goes, so its own arming falls outside the window on the very
+ * pass that would have taken it back. The coach keeps a banner for the last
+ * session in their book, for ever, and is sent to it.
+ *
+ * `readWindow` states the window from the LoadStatus instead — a fact about
+ * what was asked for rather than about what came back — which is what the
+ * member's side has been doing since src/lib/clientReminders.ts was written.
+ * Under 'loading' and 'error' it returns null and NOTHING happens: not an arm
+ * and, more importantly, not a cancel, because a cancellation pass over a list
+ * that is empty for want of a read would disarm a coach's whole phone on one
+ * failed query.
  */
 export function useCoachReminders(
   uid: string | null,
-  sessions: readonly RemindableSession[] | null,
-  windowFrom: number,
-  windowTo: number,
+  sessions: readonly RemindableSession[],
+  status: LoadStatus,
 ): { armed: number; cancelled: number } | null {
   const [result, setResult] = useState<{ armed: number; cancelled: number } | null>(null);
   // The set of ids and their starts, so a re-render that changed nothing does
   // not re-walk the diary and re-write storage. Same reasoning as `rosterKey`
-  // in src/ui/nudges.ts.
-  const key = sessions
-    ? sessions.map((s) => `${s.id}:${s.startsAt}:${s.status}:${s.outcome ?? ''}`).join(',')
-    : null;
+  // in src/ui/nudges.ts. The status is in the key because a read going from
+  // 'error' to 'ready' changes what this pass is allowed to say without
+  // changing a single row.
+  const key = `${status}|${sessions.map((s) => `${s.id}:${s.startsAt}:${s.status}:${s.outcome ?? ''}`).join(',')}`;
   const last = useRef<string | null>(null);
 
   const run = useCallback(async () => {
-    if (!USE_SUPABASE || !uid || sessions == null) return;
-    const r = await syncCoachReminders(uid, sessions, windowFrom, windowTo);
+    if (!USE_SUPABASE || !uid) return;
+    const window = readWindow(status, sessions.map((s) => s.startsAt));
+    if (!window) return;
+    const r = await syncCoachReminders(uid, sessions, window.from, window.to);
     setResult(r);
-  }, [uid, key, windowFrom, windowTo]);
+  }, [uid, key]);
 
   useEffect(() => {
-    if (key == null || key === last.current) return;
+    if (key === last.current) return;
     last.current = key;
     void run();
   }, [key, run]);

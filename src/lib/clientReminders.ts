@@ -34,18 +34,20 @@
 //   · the WORDS. The coach's banner names the client, because a coach with four
 //     sessions today needs to know which one. A member has one session at a
 //     time and needs to know whose it is, which is the opposite substitution.
-//   · the WINDOW. `staleReminders` deliberately refuses to cancel an arming for
-//     a time the caller did not read, and the coach's screen derives that window
-//     from the rows that came back — which cannot see a session that was
-//     DELETED, because a deleted row is exactly the one that is missing. The
-//     member's diary is read whole or not at all (src/ui/sessions.tsx reads
-//     every one of their sessions under one cap, newest first), so the window
-//     can be stated from the READ rather than from the rows, and a cancelled or
-//     deleted session is then inside it. `readWindow` below is that rule.
+//   · the WINDOW — which is no longer a difference, and the paragraph that used
+//     to stand here is worth keeping as the reason. `staleReminders` refuses to
+//     cancel an arming for a time the caller did not read, and BOTH screens
+//     used to derive that window from the rows that came back — which cannot
+//     see a session that was DELETED, because a deleted row is exactly the one
+//     that is missing. The member's side was built on `readWindow`, which
+//     states the window from the READ's own status instead; the coach's side
+//     was not, and its furthest-future session could therefore never have its
+//     banner cancelled. `readWindow` now lives beside the rest of the shared
+//     arithmetic in coachReminders.ts and both screens use it. It is re-exported
+//     here because this is the file that argued for it.
 //
 // Pure — no React, no Supabase, no clock of its own. The scheduling is in
 // src/ui/clientReminders.ts, which cannot be asserted without a handset.
-import type { LoadStatus } from '../ui/loadStatus';
 import type { RemindableSession } from './coachReminders';
 
 /**
@@ -114,39 +116,13 @@ export function myRemindable(
 }
 
 /**
- * The span of time this read is entitled to speak about, or null when it is
- * entitled to speak about nothing.
+ * The span of time a read is entitled to speak about, re-exported.
  *
- * `staleReminders` will not cancel an arming that falls outside the window it
- * is given, and that refusal is the whole reason this function exists: get the
- * window wrong in one direction and a cancelled session keeps its banner; get
- * it wrong in the other and a session the read never looked at loses one.
- *
- *   'ready'   every session this member has is in the read, whatever its date.
- *             The window is therefore unbounded, and a session that is NOT in
- *             the list is genuinely gone — which is the case a window derived
- *             from the returned rows can never see, because the row it needs to
- *             notice is the one that is missing.
- *   'partial' the read is the newest ROW_CAP of the member's diary, so the
- *             oldest row that came back is the edge of what was actually looked
- *             at. Everything from there forward may be spoken about; anything
- *             earlier was not read and is left alone.
- *   'loading' nothing has been read. Null, and the caller does nothing at all —
- *   'error'   NOT a cancellation pass over an empty list, which would silently
- *             disarm every reminder a member has because one query failed.
+ * The rule and its reasoning are in src/lib/coachReminders.ts beside
+ * `staleReminders`, which is the function it protects, and beside `toArm` and
+ * `remindAt`, which this file already takes from there. It is named again here
+ * because this is the module that argued for it and because the member's
+ * screens import their reminder vocabulary from this file; a second definition
+ * would be a second thing to fix.
  */
-export function readWindow(
-  status: LoadStatus,
-  starts: readonly string[],
-): { from: number; to: number } | null {
-  if (status === 'ready') return { from: -Infinity, to: Infinity };
-  if (status !== 'partial') return null;
-  let min = Infinity;
-  for (const s of starts) {
-    const t = Date.parse(s);
-    if (Number.isFinite(t) && t < min) min = t;
-  }
-  // A truncated read that returned nothing readable says nothing about any
-  // instant, so it may not cancel anything.
-  return Number.isFinite(min) ? { from: min, to: Infinity } : null;
-}
+export { readWindow } from './coachReminders';

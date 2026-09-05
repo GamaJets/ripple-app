@@ -76,6 +76,45 @@ const SYNC_ID_RE = /^repple[0-9a-f]{32}$/;
  *  coach knows who, and Google does not need to. */
 const EVENT_SUMMARY = 'Coaching session';
 
+/** What the coach reads inside the calendar Repple made. It ends by telling
+ *  them they may delete it, which is why `makeWriteCalendar` below has to be
+ *  callable from the push path as well as from the toggle. */
+const WRITE_CALENDAR_DESCRIPTION =
+  'Sessions your clients have booked. This calendar was made by your coaching app and only it writes here; delete this calendar to remove everything the app added.';
+
+/** The brand's own name, sanitised HERE rather than trusted. It is the one
+ *  string the app supplies that a person ever reads, and a free-text field on a
+ *  path that writes into somebody's Google account should not be one. */
+function calendarLabel(raw: unknown): string {
+  return String(raw ?? '').replace(/[^\p{L}\p{N} .&'-]/gu, '').trim().slice(0, 40) || 'Coaching';
+}
+
+/**
+ * Make the secondary calendar Repple writes into.
+ *
+ * One function rather than two copies because it is now reached from two
+ * places, and the second one is a REPAIR. `write_calendar_id` was only ever
+ * filled when it was null, so a coach who took up the invitation in
+ * WRITE_PRIVACY_NOTE — "removing this calendar removes everything Repple
+ * added" — was left with a stored id naming a calendar that no longer exists.
+ * Every push after that 404s on the events listing, writing stops for good, and
+ * the only route back is a full Disconnect and reconnect, which nothing on the
+ * screen suggests because nothing on the screen knows. See the push path.
+ */
+async function makeWriteCalendar(
+  token: string,
+  rawLabel: unknown,
+): Promise<{ ok: true; id: string } | { ok: false; status: number | 'empty' }> {
+  const label = calendarLabel(rawLabel);
+  const made = await api(token, '/calendars', {
+    method: 'POST',
+    body: { summary: `${label} coaching`, description: WRITE_CALENDAR_DESCRIPTION },
+  });
+  if (!made.ok) return { ok: false, status: made.status };
+  if (!made.body?.id) return { ok: false, status: 'empty' };
+  return { ok: true, id: String(made.body.id) };
+}
+
 /**
  * Client credentials, in the form Google wants them.
  *
@@ -96,7 +135,21 @@ function tokenForm(base: Record<string, string>): URLSearchParams | null {
 
 interface TokenAnswer { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string }
 
-async function postToken(form: URLSearchParams): Promise<{ ok: true; tok: TokenAnswer } | { ok: false; why: string }> {
+/**
+ * A token exchange.
+ *
+ * `code` on a failure is Google's own machine-readable `error` field, and it is
+ * carried separately from `why` for one caller: `usableToken` has to be able to
+ * tell a grant that Google has REFUSED from a request that never reached
+ * Google. The two look identical from here — both are "no token" — and they
+ * have opposite correct responses. A refusal means the stored refresh token is
+ * dead and the row must stop claiming otherwise; a network failure means the
+ * token is fine and clearing it would destroy a working connection over a
+ * dropped packet, irreversibly, because a refresh token cannot be recovered
+ * once it is forgotten. Empty string when Google said nothing, which includes
+ * every case where the request did not arrive.
+ */
+async function postToken(form: URLSearchParams): Promise<{ ok: true; tok: TokenAnswer } | { ok: false; why: string; code: string }> {
   let res: Response;
   try {
     res = await fetch(TOKEN_URL, {
@@ -105,7 +158,7 @@ async function postToken(form: URLSearchParams): Promise<{ ok: true; tok: TokenA
       body: form.toString(),
     });
   } catch {
-    return { ok: false, why: 'Google’s sign-in server could not be reached.' };
+    return { ok: false, why: 'Google’s sign-in server could not be reached.', code: '' };
   }
   let parsed: TokenAnswer = {};
   try { parsed = await res.json(); } catch { parsed = {}; }
@@ -115,7 +168,7 @@ async function postToken(form: URLSearchParams): Promise<{ ok: true; tok: TokenA
     // them carries diary content, and all of them are useless to diagnose
     // without the text, so this one is passed through.
     const detail = parsed.error_description || parsed.error || `HTTP ${res.status}`;
-    return { ok: false, why: String(detail) };
+    return { ok: false, why: String(detail), code: String(parsed.error ?? '') };
   }
   return { ok: true, tok: parsed };
 }
@@ -329,21 +382,9 @@ Deno.serve(async (req) => {
 
     let calendarId = row.write_calendar_id;
     if (!calendarId) {
-      // The brand's own name, sanitised HERE rather than trusted. It is the one
-      // string the app supplies that a person ever reads, and a free-text field
-      // on a path that writes into somebody's Google account should not be one.
-      const label = String(body.label || '').replace(/[^\p{L}\p{N} .&'-]/gu, '').trim().slice(0, 40) || 'Coaching';
-      const made = await api(token, '/calendars', {
-        method: 'POST',
-        body: {
-          summary: `${label} coaching`,
-          description: 'Sessions your clients have booked. This calendar was made by your coaching app and only it writes here; delete this calendar to remove everything the app added.',
-        },
-      });
-      if (!made.ok || !made.body?.id) {
-        return json({ ok: false, connected: true, reason: `calendar_create_http_${made.ok ? 'empty' : made.status}` });
-      }
-      calendarId = String(made.body.id);
+      const made = await makeWriteCalendar(token, body.label);
+      if (!made.ok) return json({ ok: false, connected: true, reason: `calendar_create_http_${made.status}` });
+      calendarId = made.id;
     }
     const { error } = await service.from('calendar_links')
       .update({ write_calendar_id: calendarId, write_enabled: true, updated_at: new Date().toISOString() })
@@ -375,31 +416,150 @@ Deno.serve(async (req) => {
       wanted.set(id, { startIso: new Date(s).toISOString(), endIso: new Date(t).toISOString() });
     }
 
-    const calPath = `/calendars/${encodeURIComponent(row.write_calendar_id)}/events`;
-    const existing = new Map<string, { startMs: number; endMs: number }>();
-    let pageToken = '';
-    for (let page = 0; page < 10; page++) {
-      const q = new URLSearchParams({
-        timeMin: new Date(fromMs).toISOString(),
-        timeMax: new Date(toMs).toISOString(),
-        maxResults: '2500',
-        showDeleted: 'false',
-      });
-      if (pageToken) q.set('pageToken', pageToken);
-      const listed = await api(token, `${calPath}?${q.toString()}`);
-      if (!listed.ok) return json({ ok: false, connected: true, reason: `events_list_http_${listed.status}` });
-      for (const ev of Array.isArray(listed.body?.items) ? listed.body.items : []) {
-        const id = String(ev?.id ?? '');
-        if (!SYNC_ID_RE.test(id)) continue;
-        const s = Date.parse(String(ev?.start?.dateTime ?? ''));
-        const e = Date.parse(String(ev?.end?.dateTime ?? ''));
-        existing.set(id, { startMs: Number.isFinite(s) ? s : NaN, endMs: Number.isFinite(e) ? e : NaN });
+    /**
+     * Everything Repple has in the coach's calendar for this window.
+     *
+     * Returns the status rather than a response, because its caller has a
+     * REMEDY for one of them and cannot apply it from inside here.
+     */
+    const listWindow = async (
+      calId: string,
+    ): Promise<{ ok: true; events: Map<string, { startMs: number; endMs: number }> } | { ok: false; status: number }> => {
+      const events = new Map<string, { startMs: number; endMs: number }>();
+      const path = `/calendars/${encodeURIComponent(calId)}/events`;
+      let pageToken = '';
+      for (let page = 0; page < 10; page++) {
+        const q = new URLSearchParams({
+          timeMin: new Date(fromMs).toISOString(),
+          timeMax: new Date(toMs).toISOString(),
+          maxResults: '2500',
+          showDeleted: 'false',
+        });
+        if (pageToken) q.set('pageToken', pageToken);
+        const listed = await api(token, `${path}?${q.toString()}`);
+        if (!listed.ok) return { ok: false, status: listed.status };
+        for (const ev of Array.isArray(listed.body?.items) ? listed.body.items : []) {
+          const id = String(ev?.id ?? '');
+          if (!SYNC_ID_RE.test(id)) continue;
+          const s = Date.parse(String(ev?.start?.dateTime ?? ''));
+          const e = Date.parse(String(ev?.end?.dateTime ?? ''));
+          events.set(id, { startMs: Number.isFinite(s) ? s : NaN, endMs: Number.isFinite(e) ? e : NaN });
+        }
+        pageToken = String(listed.body?.nextPageToken ?? '');
+        if (!pageToken) break;
       }
-      pageToken = String(listed.body?.nextPageToken ?? '');
-      if (!pageToken) break;
+      return { ok: true, events };
+    };
+
+    // ── the calendar might not be there any more ──────────────────────────
+    //
+    // WRITE_PRIVACY_NOTE tells the coach, in as many words, that removing this
+    // calendar removes everything Repple added — so deleting it is a thing the
+    // product invites. Nothing then re-made it: the `write` action fills
+    // `write_calendar_id` only when it is null, so the row went on naming a
+    // calendar that no longer existed, every push 404'd on the listing above,
+    // and writing was over for good. The screen still said two-way, because
+    // `has_write_calendar` is `write_calendar_id is not null` and the id was
+    // still sitting there.
+    //
+    // A 404 or a 410 on the LISTING is the one unambiguous signal: the id is
+    // unusable, whatever became of it, so a new calendar is made and recorded
+    // and this push fills it. Nothing can be lost by that — the new calendar is
+    // empty, so the reconcile below has nothing to delete and creates the
+    // window from scratch. Any other status is left alone and reported: a 403
+    // is a scope or a suspended account and making a second calendar would not
+    // help.
+    let calendarId = row.write_calendar_id;
+    let read = await listWindow(calendarId);
+    if (!read.ok && (read.status === 404 || read.status === 410)) {
+      const made = await makeWriteCalendar(token, body.label);
+      if (!made.ok) return json({ ok: false, connected: true, reason: `calendar_remake_http_${made.status}` });
+      // Stored BEFORE anything is written into it. A calendar whose id we could
+      // not record is a calendar this function would abandon and re-create on
+      // every push, leaving the coach's account filling up with empty ones —
+      // so a failed write here stops the push, at the cost of the single empty
+      // calendar just made.
+      const { error: idErr } = await service.from('calendar_links')
+        .update({ write_calendar_id: made.id, updated_at: new Date().toISOString() })
+        .eq('user_id', userId).eq('provider', PROVIDER);
+      if (idErr) return json({ ok: false, connected: true, reason: 'calendar_remake_not_stored' });
+      calendarId = made.id;
+      read = { ok: true, events: new Map<string, { startMs: number; endMs: number }>() };
     }
+    if (!read.ok) return json({ ok: false, connected: true, reason: `events_list_http_${read.status}` });
+    const existing = read.events;
+    const calPath = `/calendars/${encodeURIComponent(calendarId)}/events`;
 
     let created = 0, updated = 0, removed = 0;
+
+    /**
+     * Put an event into the calendar at the times the plan asks for, whether or
+     * not Google is already holding that id.
+     *
+     * ── why the 409 could not stay a shrug ────────────────────────────────
+     *
+     * The line here used to read "409 is this event already existing outside
+     * the listed window, which is a success for our purposes: the session is in
+     * the calendar." Both halves are wrong, and the second one is the write
+     * that reported a success it did not have.
+     *
+     * Google RESERVES the id of an event that has been deleted. The listing
+     * above asks for `showDeleted: 'false'`, so an event Repple deleted on an
+     * earlier push is absent from `existing` — and the id is nevertheless
+     * taken, so the insert comes back 409 and the coach's calendar stays empty.
+     * That is not a corner: `cancel_my_session` frees a slot and
+     * `_promote_session_waitlist` re-books THE SAME sessions row, so a
+     * cancelled-then-rebooked hour keeps its uuid, keeps its Repple event id,
+     * and could never come back. The coach's diary showed the hour as free for
+     * a session a client was booked into off the waitlist.
+     *
+     * The other reading of a 409 is an event of ours at a time OUTSIDE the
+     * listed window — a session moved from six weeks out to next Tuesday. That
+     * one really is in the calendar, at the wrong hour, and was left there.
+     *
+     * `events.update` is the one call that fixes both. A PUT on a reserved id
+     * restores a deleted event and rewrites the times of a live one, so the end
+     * state is the same in either case: the event exists, once, at the hour the
+     * plan asks for.
+     *
+     * Counted as `created`, and that is a decision rather than an accident. The
+     * listing said this window did not contain the event and now it does, which
+     * is what "added" means to the person reading their calendar; calling it an
+     * update would be describing the API call instead of the diary.
+     */
+    const writeEvent = async (
+      id: string,
+      times: { start: { dateTime: string }; end: { dateTime: string } },
+    ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+      // The whole event body, written here and nowhere else. No description,
+      // no location, no attendees — an attendee would make Google e-mail an
+      // invitation to a client who never asked Google for anything — and no
+      // reminder overrides, because a coach's own alert settings are theirs.
+      const eventBody = {
+        id,
+        summary: EVENT_SUMMARY,
+        ...times,
+        visibility: 'private',
+        transparency: 'opaque',
+        reminders: { useDefault: true },
+        extendedProperties: { private: { repple: 'session' } },
+      };
+      const made = await api(token, calPath, { method: 'POST', body: eventBody });
+      if (made.ok) { created++; return { ok: true }; }
+      if (made.status !== 409) return { ok: false, reason: `event_insert_http_${made.status}` };
+      // `status: 'confirmed'` is what takes a deleted event back out of the
+      // bin; on an event that was never deleted it is what the event already
+      // says. PUT rather than PATCH because a restore has to state the whole
+      // resource.
+      const put = await api(token, `${calPath}/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: { ...eventBody, status: 'confirmed' },
+      });
+      if (!put.ok) return { ok: false, reason: `event_restore_http_${put.status}` };
+      created++;
+      return { ok: true };
+    };
+
     for (const [id, want] of wanted) {
       const have = existing.get(id);
       const times = {
@@ -407,41 +567,68 @@ Deno.serve(async (req) => {
         end: { dateTime: want.endIso },
       };
       if (!have) {
-        // The whole event body, written here and nowhere else. No description,
-        // no location, no attendees — an attendee would make Google e-mail an
-        // invitation to a client who never asked Google for anything — and no
-        // reminder overrides, because a coach's own alert settings are theirs.
-        const made = await api(token, calPath, {
-          method: 'POST',
-          body: {
-            id,
-            summary: EVENT_SUMMARY,
-            ...times,
-            visibility: 'private',
-            transparency: 'opaque',
-            reminders: { useDefault: true },
-            extendedProperties: { private: { repple: 'session' } },
-          },
-        });
-        // 409 is this event already existing outside the listed window, which
-        // is a success for our purposes: the session is in the calendar.
-        if (made.ok) created++;
-        else if (made.status !== 409) return json({ ok: false, connected: true, reason: `event_insert_http_${made.status}`, created, updated, removed });
+        const w = await writeEvent(id, times);
+        if (!w.ok) return json({ ok: false, connected: true, reason: w.reason, created, updated, removed });
         continue;
       }
       if (have.startMs !== Date.parse(want.startIso) || have.endMs !== Date.parse(want.endIso)) {
         const patched = await api(token, `${calPath}/${encodeURIComponent(id)}`, { method: 'PATCH', body: times });
-        if (patched.ok) updated++;
+        if (patched.ok) { updated++; continue; }
+        // ── the branch that was not here at all ──────────────────────────
+        //
+        // `if (patched.ok) updated++;` and no else. A PATCH is how a MOVED or
+        // shortened session reaches Google, so every failure of it left the
+        // coach's calendar naming the old hour — and left `updated` at zero,
+        // which `pushSummaryLine` renders as "Your Google calendar already
+        // matches what is on your Repple schedule, so nothing was changed."
+        // The coach was told the two agreed at the exact moment they did not,
+        // about the exact session that had moved. House rule 1, on the one
+        // path in this function where the calendar is wrong AFTERWARDS.
+        //
+        // A 404 or 410 means the event is gone from under us — deleted in
+        // Google between the listing and this call — so it is written again
+        // rather than reported, which lands in the same place the patch was
+        // trying to reach. Anything else stops the push with the status, the
+        // same as a failed insert, carrying the counts of what really did
+        // happen before it.
+        if (patched.status === 404 || patched.status === 410) {
+          const w = await writeEvent(id, times);
+          if (!w.ok) return json({ ok: false, connected: true, reason: w.reason, created, updated, removed });
+          continue;
+        }
+        return json({ ok: false, connected: true, reason: `event_patch_http_${patched.status}`, created, updated, removed });
       }
     }
-    for (const id of existing.keys()) {
+    for (const [id, have] of existing) {
       if (wanted.has(id)) continue;
       // Only ids this product minted, inside a calendar this product made, on a
       // grant that reaches nothing else. Three fences, and the innermost one is
       // this line.
       if (!SYNC_ID_RE.test(id)) continue;
+      // ── and a fourth: the plan's own window ─────────────────────────────
+      //
+      // `wanted` is built by `plannedSyncEvents` from events whose START is
+      // inside [fromMs, toMs). The listing is not: Google returns every event
+      // that OVERLAPS the window, so an event that began before `fromMs` and
+      // runs into it arrives here, is absent from `wanted` because it could
+      // never have been in it, and was deleted for it. A class the coach was
+      // standing in front of when the auto-push fired came out of their diary
+      // mid-lesson.
+      //
+      // So the sweep speaks only about the span the plan speaks about. An event
+      // with no readable start cannot be placed in that span and is left alone;
+      // Repple writes `dateTime` on everything, so that is a shape we did not
+      // create and have no business removing.
+      if (!Number.isFinite(have.startMs) || have.startMs < fromMs || have.startMs >= toMs) continue;
       const gone = await api(token, `${calPath}/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (gone.ok || gone.status === 404 || gone.status === 410) removed++;
+      // 404 and 410 are the event already being gone, which is the state this
+      // call was asking for. Every OTHER status was counted as nothing at all
+      // and swallowed — so a cancelled session that Google refused to delete
+      // left `removed` at zero and the coach was told their calendar already
+      // matched, with the cancelled hour still in it and a client's slot still
+      // showing as taken.
+      if (gone.ok || gone.status === 404 || gone.status === 410) { removed++; continue; }
+      return json({ ok: false, connected: true, reason: `event_delete_http_${gone.status}`, created, updated, removed });
     }
 
     return json({ ok: true, connected: true, created, updated, removed });
@@ -479,6 +666,36 @@ async function usableToken(
   if (!form) return { ok: false, why: 'Google Calendar is not set up in this deployment.' };
   const r = await postToken(form);
   if (!r.ok) {
+    // ── the row has to stop saying this connection works ────────────────
+    //
+    // This returned `{ok:false}` and wrote NOTHING back, so a coach who removed
+    // Repple's access in their Google account — or whose refresh token was
+    // rotated out from under a failed store — kept a `calendar_links` row with
+    // a refresh token in it. `my_calendar_links()` answers `has_refresh` as
+    // `refresh_token is not null`, `linkState` reads that as 'connected', and
+    // the screen said Connected for ever about a connection that could not make
+    // a single further call. The one thing that would have surfaced it — the
+    // silent auto-push — throws its failures away (`if (!announce) return;`)
+    // AFTER `pushIsDue()` has spent the fifteen-minute slot, so the coach's
+    // sessions stopped reaching Google and nothing anywhere said so.
+    //
+    // Clearing the token is what makes the screen tell the truth: `has_refresh`
+    // goes false, `linkState` becomes 'needs-reconnect', and LINK_NOTES for
+    // that state names the remedy.
+    //
+    // ONLY on `invalid_grant`, which is Google's own word for a refresh token
+    // that has been revoked or expired. A refresh token cannot be recovered
+    // once it is forgotten, so a timeout, a DNS failure or one of Google's own
+    // 500s must never reach this line: it would destroy a working connection
+    // over a dropped packet and make the coach re-consent for nothing. Those
+    // come back with an empty `code` and leave the row exactly as it was, to be
+    // retried on the next call.
+    if (r.code === 'invalid_grant') {
+      const { error: clearErr } = await service.from('calendar_links')
+        .update({ refresh_token: null, updated_at: new Date().toISOString() })
+        .eq('user_id', userId).eq('provider', PROVIDER);
+      if (clearErr) console.error('calendar-sync: Google refused the refresh token for ' + userId + ' and the row could not be marked, so the screen may still show this connection as working:', clearErr.message);
+    }
     return { ok: false, why: 'Google would not renew this connection, which usually means access was removed in your Google account. Connect again.' };
   }
   const access = r.tok.access_token!;

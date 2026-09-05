@@ -33,7 +33,8 @@
 import {
   remoteBusySpan, remoteBusySpans, combineBusy, missingSourceNote,
   linkState, LINK_NOTES, syncEventId, isSyncEventId, SYNC_ID_PREFIX,
-  plannedSyncEvents, pushSummaryLine, pushLabel, reversedClientRedirect,
+  plannedSyncEvents, pushSummaryLine, pushPartialLine, pushLabel, pushWindow,
+  reversedClientRedirect,
   WRITE_PRIVACY_NOTE, REMOTE_SCOPE_NOTE, GOOGLE_READ_SCOPE, GOOGLE_WRITE_SCOPE,
   NO_CALENDAR_LINK, syncClassEventId, syncClassesNote,
   type BusySourceState, type SyncSessionInput, type SyncClassInput,
@@ -261,6 +262,18 @@ const google = (status: BusySourceState['status']): BusySourceState =>
   for (const [state, note] of Object.entries(LINK_NOTES)) {
     ok(note.length > 20, `${state} has a sentence a coach can read`);
   }
+  // 'needs-reconnect' now has TWO causes reaching it. It always meant "Google
+  // never issued a refresh token"; it also means "Google has since refused the
+  // one it issued", because the edge function clears a token Google answers
+  // `invalid_grant` for — which is what stops a revoked grant reading as
+  // Connected for ever. The sentence has to cover both, or the coach who
+  // removed Repple's access in their Google account six weeks after connecting
+  // reads a note about the moment they connected and nothing about what they
+  // did.
+  ok(/removed|revoked|no longer/i.test(LINK_NOTES['needs-reconnect']),
+    'needs-reconnect covers a grant that was taken away, not only one never given');
+  ok(/connect again|reconnect/i.test(LINK_NOTES['needs-reconnect']),
+    'and names the one remedy both causes share');
   // The owner's setup instructions are for the owner. src/lib/wearables/
   // oauthConfig.ts has a whole field that exists because a gym member was told
   // to register an app at dev.fitbit.com and set two Supabase secrets.
@@ -455,6 +468,60 @@ const google = (status: BusySourceState['status']): BusySourceState =>
   // — and it is said in those words now that classes go in the same calendar.
   ok(pushSummaryLine({ created: 1, updated: 0, removed: 0 }).includes('Only events Repple put there'),
     'and every summary repeats what is never touched');
+
+  // A push stops at the first call it cannot account for and reports what it
+  // had already done. Saying nothing about that is the same false statement as
+  // a count that was never taken: the coach believes their calendar is
+  // untouched and it is half written.
+  eq(pushPartialLine({ created: 0, updated: 0, removed: 0 }), null,
+    'a failure that wrote nothing keeps the plain sentence it has');
+  ok((pushPartialLine({ created: 9, updated: 0, removed: 0 }) || '').includes('9 added'),
+    'a failure after nine inserts says nine reached Google');
+  ok((pushPartialLine({ created: 0, updated: 2, removed: 1 }) || '').includes('2 updated'),
+    'and counts the moves it made');
+  ok((pushPartialLine({ created: 0, updated: 2, removed: 1 }) || '').includes('1 removed'),
+    'and the removals');
+  ok(!/\b0\b/.test(pushPartialLine({ created: 9, updated: 0, removed: 0 }) || ''),
+    'and never pads the sentence with the zeroes');
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   4b. THE WINDOW A PUSH RECONCILES
+
+   This is the one number in the feature that can DELETE something. Anything
+   of Repple's inside it that is not in the plan is removed, so a window that
+   reaches back further than the reads feeding the plan is a window that
+   deletes what those reads could not see.
+   ════════════════════════════════════════════════════════════════════════ */
+
+{
+  const HOUR = 3600_000;
+  const noon = at(2026, 9, 5, 12, 0);
+  const w = pushWindow(noon, HOUR);
+
+  // The defect: the near edge was local midnight, and the class timetable is
+  // read from an hour ago. Between those two instants sat every class the coach
+  // taught this morning — inside the reconcile window, absent from the plan,
+  // and deleted for it.
+  eq(w.fromMs, noon - HOUR, 'the near edge is the class read’s own floor, not midnight');
+  ok(w.fromMs > at(2026, 9, 5), 'so this morning is outside what a push may remove');
+
+  // The far edge stays anchored to local midnight: a window whose end slid
+  // forward by a few milliseconds on every render would put the last day of it
+  // in and out of the plan as the screen re-rendered.
+  eq(w.toMs, at(2026, 10, 3), 'the far edge is midnight PUSH_DAYS days out');
+  eq(pushWindow(at(2026, 9, 5, 23, 59), HOUR).toMs, at(2026, 10, 3),
+    'and does not move as the day wears on');
+
+  // Just after midnight the floor reaches back into yesterday — which is
+  // correct, because the timetable read does too, so the plan can speak about
+  // it.
+  const small = pushWindow(at(2026, 9, 5, 0, 30), HOUR);
+  eq(small.fromMs, at(2026, 9, 4, 23, 30), 'half past midnight reaches back an hour into yesterday');
+
+  eq(pushWindow(noon, 0).fromMs, noon, 'a zero floor is now');
+  eq(pushWindow(noon, -HOUR).fromMs, noon, 'and a nonsense one is never the future');
+  ok(pushWindow(noon, HOUR).toMs > pushWindow(noon, HOUR).fromMs, 'the window is always forwards');
 }
 
 /* ════════════════════════════════════════════════════════════════════════

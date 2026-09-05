@@ -41,6 +41,20 @@ import { useRecoverRead } from './readRefresh';
  */
 const CLASS_CACHE_HORIZON_MS = 2 * 24 * 60 * 60 * 1000;
 
+/**
+ * How far back the timetable read reaches.
+ *
+ * An hour, so a class that is running RIGHT NOW is still on the screen of the
+ * member standing outside the studio door, and last Tuesday is not. It is
+ * exported because it is not only a display decision any more:
+ * app/(trainer)/calendar.tsx reconciles the coach's Google calendar against
+ * this list, and a reconcile window reaching further back than the read that
+ * fills it deletes the classes in the gap — see `pushWindow` in
+ * src/lib/calendarSync.ts, which takes this value rather than repeating the
+ * number and letting the two drift.
+ */
+export const CLASS_READ_FLOOR_MS = 3600_000;
+
 /** What the cache holds. Two keys rather than one blob, because the timetable
  *  and which seats I hold have different lifetimes and one may be readable when
  *  the other is not. */
@@ -193,7 +207,7 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
             // Past classes are dropped here for the same reason the server read
             // filters them: a member looking for what is on next must not be
             // shown last Tuesday.
-            const cutoff = Date.now() - 3600_000;
+            const cutoff = Date.now() - CLASS_READ_FLOOR_MS;
             const live = cachedList.rows.filter((c) => Date.parse(c.startsAt) >= cutoff);
             setClasses(live.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt)));
             setCachedAt(cachedList.at);
@@ -216,7 +230,7 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
         } catch { /* no usable cache; the read below is the only source */ }
       }
 
-      const nowIso = new Date(Date.now() - 3600_000).toISOString();
+      const nowIso = new Date(Date.now() - CLASS_READ_FLOOR_MS).toISOString();
       // Soonest-first and capped. Ascending is the right half to keep here, and
       // for once that is not a coincidence: the read is already filtered to
       // classes that have not finished, so the first thousand are the next

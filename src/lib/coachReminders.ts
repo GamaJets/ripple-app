@@ -42,6 +42,7 @@
 // with a cancellation pass over what the diary no longer contains, and a
 // session whose START TIME moved counts as stale even though its id has not
 // changed.
+import type { LoadStatus } from '../ui/loadStatus';
 import { weekKey } from './nudge';
 
 /** What is remembered about one armed reminder. Stored on the device. */
@@ -200,6 +201,61 @@ export function staleReminders(
     }
   }
   return out;
+}
+
+/**
+ * The span of time a read is entitled to speak about, or null when it is
+ * entitled to speak about nothing.
+ *
+ * ── why this is not `min(rows)` to `max(rows)` ────────────────────────────
+ *
+ * Because the row that matters is the one that is MISSING. `staleReminders`
+ * above will not cancel an arming outside the window it is given, which is the
+ * right refusal and is also a loaded gun: derive the window from the starts
+ * that came BACK and the furthest-future session is exactly `windowTo`, so the
+ * moment that session is cancelled or deleted the read returns one row fewer,
+ * `windowTo` retreats to the next session in, and the armed banner for the
+ * removed one is now outside the window and can never be cancelled. The coach
+ * is sent, an hour early, to a session that no longer exists — and it is the
+ * LAST session in their diary every time, because that is the only row whose
+ * disappearance moves the edge.
+ *
+ * The same applies at the near end for a member whose oldest row goes.
+ *
+ * So the window is stated from the READ's own status instead, which is a fact
+ * about what was asked for rather than about what came back:
+ *
+ *   'ready'   the provider holds the whole set, whatever its dates, so the
+ *             window is unbounded and a session that is not in the list is
+ *             genuinely gone.
+ *   'partial' the read stopped at the row cap (src/lib/rowCap.ts) with the
+ *             NEWEST rows, so the oldest row that came back is the edge of what
+ *             was actually looked at. Everything from there forward may be
+ *             spoken about; anything earlier was never read and is left alone.
+ *   'loading' nothing has been read. Null, and the caller does nothing at all —
+ *   'error'   NOT a cancellation pass over an empty list, which would silently
+ *             disarm every reminder on the handset because one query failed.
+ *
+ * Written for the client's diary first (src/lib/clientReminders.ts, which
+ * re-exports it) and lives here for the same reason `toArm`, `staleReminders`
+ * and `remindAt` do: the coach and the member are asking the identical question
+ * and two copies of the answer would be two chances to fix only one of them.
+ * The coach's screen was the one that still derived its window from the rows.
+ */
+export function readWindow(
+  status: LoadStatus,
+  starts: readonly string[],
+): { from: number; to: number } | null {
+  if (status === 'ready') return { from: -Infinity, to: Infinity };
+  if (status !== 'partial') return null;
+  let min = Infinity;
+  for (const s of starts) {
+    const t = Date.parse(s);
+    if (Number.isFinite(t) && t < min) min = t;
+  }
+  // A truncated read that returned nothing readable says nothing about any
+  // instant, so it may not cancel anything.
+  return Number.isFinite(min) ? { from: min, to: Infinity } : null;
 }
 
 /**
