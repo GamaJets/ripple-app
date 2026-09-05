@@ -47,6 +47,15 @@
 //    cancellation are recorded facts with a person's name on them, and
 //    'unmarked' means the opposite: nobody has said what happened.
 //
+// 9. A GYM PASS PAYS ONLY AT THE GYM THAT SOLD IT. Route 2 of part 370 matches
+//    `p.tenant_id = new.tenant_id` — the pass's gym must equal the SESSION's
+//    gym — and `sessions.tenant_id` is the TRAINER's `profiles.tenant_id`. So a
+//    member's live gym PT pass pays for nothing when the hour is with an
+//    independent coach or with a coach on another gym's staff, and counting it
+//    is the same defect as 7 pointed the other way: the app naming a payer the
+//    server will not use, and the coach later told they delivered it unpaid.
+//    The pass is real, though, so it is named rather than shown as a nought.
+//
 // No formatted date is asserted against a literal — `npm test` runs under six
 // timezones — and every instant here is an explicit ISO string.
 import {
@@ -54,6 +63,7 @@ import {
   coachPackLines, ledgerStateOf, buildLedger, expectedDraws,
   clientLedgerLine, coachLedgerLine, shortfallLine, bookingCreditNote,
   bookableCredits, creditsHeroNote, creditsEmptyLine,
+  passesElsewhere, passesElsewhereLine,
   type CreditSession, type Entitlement, type LedgerState,
 } from './sessionCredits';
 
@@ -492,5 +502,150 @@ ok(clientLedgerLine(row('cancelled')).includes('Nothing came off'),
   'each of them still answers the question this module exists for: what happened to the credit');
 
 
+/* ── 10 · a pass pays at the gym that sold it, and nowhere else ──────────── */
+//
+// The same shape as 8, run the other way. There, a pack the server WOULD pick
+// had been filtered out, so the app named the wrong route. Here a pass the
+// server will NOT pick was left in.
+//
+// Route 2 of part 370, read live:
+//
+//     where p.holder_id = new.client_id
+//       and p.tenant_id = new.tenant_id     ← and again in the shortfall test
+//       and ty.covers = 'pt' … and (p.expires_on is null or p.expires_on >= v_on)
+//
+// `sessions.tenant_id` is filled by `sessions_fill_tenant()` from
+// `profiles.tenant_id` OF THE TRAINER, and part 06 gives every account its own
+// personal tenant at signup. So an hour with an independent coach carries that
+// coach's personal tenant and no gym's pass can equal it. `myPtPasses` read on
+// `holder_id` alone — `gym_passes_own_r` has no tenant clause either — so a
+// member holding a live six-credit pass from Gym A, booking with an independent
+// coach or with a coach on Gym B's staff, was routed to 'gym_pass' and shown
+// six credits that nothing was ever going to draw.
+
+const GYM_A = 'tenant-a';
+const GYM_B = 'tenant-b';
+// An independent coach's "gym" is their own personal tenant (part 06), which is
+// a real uuid that simply matches no gym_pass anywhere.
+const SOLO = 'tenant-personal-of-the-coach';
+
+const passOf = (tenantId: string, p: Partial<{ id: string; passTypeName: string; usesTotal: number; usesSpent: number; expiresOn: string | null; covers: string }> = {}) =>
+  ({ id: 'g1', passTypeId: 't1', passTypeName: 'PT 6-pack', covers: 'pt', expiresOn: null, usesTotal: 6, usesSpent: 0, tenantId, ...p });
+
+// (a) A pass from the session's OWN gym still pays. Nothing about this fix may
+//     take a credit away from the member it was sold to.
+const ownGym = bookableCredits([], [passOf(GYM_A)], DAY, GYM_A);
+eq(ownGym.route, 'gym_pass', 'a pass sold by the gym this session belongs to is still what pays');
+eq(ownGym.left, 6, 'and the six credits are counted, exactly as before');
+eq(ownGym.elsewhere, [], 'with nothing set aside, because nothing was held anywhere else');
+eq(passesElsewhereLine(ownGym), null, 'so there is no sentence about another gym');
+eq(creditsEmptyLine(ownGym), null, 'and no sentence instead of a figure, because there is a figure');
+eq(creditsHeroNote(ownGym), 'On the PT pass your gym sold you',
+  'the caption is the plain one — no clause about a pass that does not exist');
+
+// (b) A pass from ANOTHER gym does not pay, and is not shown as paying.
+const otherGym = bookableCredits([], [passOf(GYM_A)], DAY, GYM_B);
+eq(otherGym.route, 'none',
+  'a pass sold by a different gym cannot be drawn on here, so it is not the route — part 370 matches p.tenant_id = new.tenant_id');
+eq(otherGym.left, 0, 'and it contributes nothing to the bookable figure it was never going to cover');
+eq(otherGym.lines, [], 'it is not in the paying lines, because listing it invites somebody to book against it');
+eq((otherGym.elsewhere || []).map((l) => l.id), ['g1'],
+  'but it is carried, because it is a real pass with real credits on it');
+
+const elsewhereLine = creditsEmptyLine(otherGym) || '';
+ok(elsewhereLine.includes('do not belong to the gym that sold you'),
+  'the member is told WHY it cannot pay, which is a fact about the session and not about their pass');
+ok(elsewhereLine.includes('6 PT credits') && elsewhereLine.includes('still yours'),
+  'and that the six credits are still theirs — telling somebody their valid pass shows 0 would be its own wrong answer');
+ok(!elsewhereLine.includes('You are not on a session pack or a gym PT pass'),
+  'never the old sentence, which was false about somebody who is holding one');
+ok(!elsewhereLine.includes(' 0 '), 'and no nought anywhere in it');
+eq(creditsHeroNote(otherGym), null,
+  'there is no figure for a caption to sit under, so there is no caption — not a caption over a nought');
+
+// The independent coach. Same member, same pass; the coach is on no gym's
+// staff, so the session carries their personal tenant.
+const independent = bookableCredits([], [passOf(GYM_A)], DAY, SOLO);
+eq(independent.route, 'none',
+  'an hour with an independent coach belongs to that coach’s own tenant, which no gym pass will ever equal');
+eq(independent.left, 0, 'so the pass buys nothing here');
+eq((independent.elsewhere || []).map((l) => l.id), ['g1'], 'and is set aside rather than dropped');
+ok((creditsEmptyLine(independent) || '').includes('still good at the gym that sold it'),
+  'the sentence works for an independent coach too, without making the member learn the word tenant');
+
+// A coach who is on NO tenant at all — `staff_tenant_of` returns null, and
+// route 2's first line is `if new.tenant_id is null then return new`.
+const noTenant = bookableCredits([], [passOf(GYM_A)], DAY, null);
+eq(noTenant.route, 'none', 'a session belonging to no gym draws on no gym pass, which is route 2’s own first line');
+eq((noTenant.elsewhere || []).length, 1, 'and the pass is still named rather than silently gone');
+
+// (c) A member holding BOTH: one from this gym, one from another.
+const bothGyms = bookableCredits([], [passOf(GYM_A, { id: 'a1', usesTotal: 6 }), passOf(GYM_B, { id: 'b1', usesTotal: 4 })], DAY, GYM_A);
+eq(bothGyms.route, 'gym_pass', 'the pass from this gym is what pays');
+eq(bothGyms.left, 6, 'and the figure is its six — never the ten a sum of the two would print');
+eq((bothGyms.lines || []).map((l) => l.id), ['a1'], 'only the one this session can draw on is listed');
+eq((bothGyms.elsewhere || []).map((l) => l.id), ['b1'], 'the other is carried');
+ok((creditsHeroNote(bothGyms) || '').includes('another gym'),
+  'and the caption under the six says a second pass exists and is not behind that figure');
+eq(creditsEmptyLine(bothGyms), null, 'there is a figure, so nothing is printed instead of one');
+
+// A coach pack beats both, and neither pass is named — the same silence the
+// coach-pack route has always kept about a gym pass it is not spending.
+const packBeatsBoth = bookableCredits([pack({ left: 2 })], [passOf(GYM_A)], DAY, GYM_A);
+eq(packBeatsBoth.route, 'coach_pack', 'a coach pack still names both people in the room and still wins');
+eq(packBeatsBoth.left, 2, 'and the figure is the pack’s');
+ok(!(creditsHeroNote(packBeatsBoth) || '').includes('another gym'),
+  'with no clause about passes, because none of them is what pays');
+
+// (d) The discriminator is three-state, like everything else on this path.
+const noDiscriminator = bookableCredits([], [ptPass()], DAY);
+eq(noDiscriminator.route, 'gym_pass',
+  'a caller who names no gym judges nothing — this is app/(trainer)/client.tsx, whose read gym_passes_staff_r has already narrowed to my_tenant()');
+eq(noDiscriminator.left, 8, 'so its figure is unchanged by this fix');
+eq(noDiscriminator.elsewhere, [], 'and nothing is set aside, because nothing was judged');
+
+// Carried on the rows by `myPtPasses`, which is how the three client screens
+// get the answer without being handed an extra argument.
+const carried = bookableCredits([], [{ ...passOf(GYM_A), sessionTenantId: GYM_B }], DAY);
+eq(carried.route, 'none', 'a session gym carried up on the row is judged exactly as one passed as an argument');
+eq((carried.elsewhere || []).length, 1, 'and the pass is set aside the same way');
+
+const carriedMatching = bookableCredits([], [{ ...passOf(GYM_A), sessionTenantId: GYM_A }], DAY);
+eq(carriedMatching.route, 'gym_pass', 'and a row whose gyms agree still pays');
+eq(carriedMatching.left, 6, 'for its full six');
+
+// The argument wins over the row: the caller is answering for the session in
+// front of them, the row for whenever it was fetched.
+const argWins = gymPtLines([{ ...passOf(GYM_A), sessionTenantId: GYM_B }], DAY, GYM_A);
+eq((argWins || []).map((l) => l.id), ['g1'], 'an explicit session gym overrides the one carried on the row');
+
+// A row that cannot be compared is not counted — the safe direction — and is
+// still named, so nothing is silently blanked.
+const noRowTenant = bookableCredits([], [{ ...ptPass(), sessionTenantId: GYM_A }], DAY);
+eq(noRowTenant.route, 'none', 'a pass whose own gym did not come back cannot be shown as paying');
+eq((noRowTenant.elsewhere || []).length, 1, 'but it is named rather than dropped into silence');
+
+// Unread stays unread on both sides.
+eq(passesElsewhere(null, DAY, GYM_A), null, 'an unread pass list has no “elsewhere” either — it has no answer at all');
+const unread = bookableCredits([], null, DAY, GYM_A);
+eq(unread.elsewhere, null, 'and bookableCredits carries that null through rather than manufacturing an empty list');
+eq(unread.route, 'unknown', 'with the route unknown, as it already was');
+ok((creditsEmptyLine(unread) || '').includes('could not'), 'and the unread sentence, not the other-gym one');
+
+// Things that cannot be spent anywhere are in neither list. "Your class pack is
+// from another gym" would be a sentence about the wrong thing.
+eq(passesElsewhere([passOf(GYM_A, { covers: 'visit' })], DAY, GYM_B), [],
+  'a class pass is not a PT pass and is not the subject of this sentence');
+eq(passesElsewhere([passOf(GYM_A, { expiresOn: '2026-08-31' })], DAY, GYM_B), [],
+  'and neither is one whose last day has passed — it pays nowhere, not merely not here');
+
+// A foreign pass with nothing left on it: named, without the hollow
+// reassurance about credits it does not have.
+const spentElsewhere = bookableCredits([], [passOf(GYM_A, { usesTotal: 6, usesSpent: 6 })], DAY, GYM_B);
+ok((passesElsewhereLine(spentElsewhere) || '').includes('nothing comes off it'),
+  'a spent pass from another gym is still explained');
+ok(!(passesElsewhereLine(spentElsewhere) || '').includes('still yours'),
+  'but “its 0 credits are still yours” is not a kindness, so it is not said');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('sessionCredits: ok (an empty OR EXPIRED coach pack still beats a gym pass, unread is never nought, a marked session is not an unmarked one)');
+console.log('sessionCredits: ok (an empty OR EXPIRED coach pack still beats a gym pass, a pass pays only at the gym that sold it, unread is never nought)');

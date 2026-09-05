@@ -1250,17 +1250,60 @@ export async function archivePromoCode(promotionCodeId: string): Promise<{ ok: b
  *
  * **Null is a read that did not land, and is not an empty pass list.** A member
  * holding six PT credits whose read failed must not be shown a zero.
+ *
+ * ── the pass's gym, and the session's gym ─────────────────────────────────
+ *
+ * This read used to filter on `holder_id` alone and did not even select
+ * `tenant_id`, so nothing downstream could tell one gym's pass from another's.
+ * Route 2 of part 370 can:
+ *
+ *     where p.holder_id = new.client_id
+ *       and p.tenant_id = new.tenant_id      ← and again in the shortfall test
+ *
+ * The pass's gym must equal the SESSION's gym. And `gym_passes_own_r` is
+ * `holder_id = auth.uid()` with no tenant clause at all — verified live — so
+ * this read returns every pass every gym has ever sold this member, while the
+ * coach's own copy of the same list (`gym_passes_staff_r`, `tenant_id =
+ * my_tenant()`) is already narrowed to the one gym that can pay. The two apps
+ * were reading different sets and only one of them matched the trigger.
+ *
+ * `sessions.tenant_id` is what route 2 compares against, and it is filled by
+ * `sessions_fill_tenant()` — a BEFORE INSERT trigger, read live — from
+ * `profiles.tenant_id` **of the trainer**. `staff_tenant_of(uuid)` is that same
+ * column, SECURITY DEFINER and granted to `authenticated`, so it is asked here
+ * rather than guessed: a client cannot read their coach's profile row directly
+ * unless the coach happens to be listed in the public directory.
+ *
+ * Every account is given its own personal tenant at signup (part 06), so an
+ * INDEPENDENT coach's tenant is their own personal space and no gym's pass will
+ * ever equal it. That is the case this fix is really about: a member holding a
+ * live gym PT pass who books an hour with an independent coach was counted onto
+ * that pass by the app, while the server matched nothing, drew nothing, and
+ * stamped `pack_draw_shortfall_at` on the coach's delivered hour.
+ *
+ * Three-state, like everything else on this path. The discriminator is carried,
+ * NOT filtered on: a member may hold passes from more than one gym and is owed
+ * a sentence about the one that cannot pay here, not a silently shorter list.
+ * `gymPtLines` in sessionCredits.ts is what judges it, because that is where
+ * the rest of route 2's predicate (`covers = 'pt'`, the expiry window) already
+ * lives. A discriminator that could not be READ makes the whole answer null —
+ * an unreadable "does this pass pay?" is not an answer of "yes" and not one of
+ * "no", and this module's rule is that an unread balance is unknown.
  */
 export async function myPtPasses(): Promise<PtPassRow[] | null> {
   try {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id; if (!uid) return null;
-    const { data, error } = await supabase
-      .from('gym_passes')
-      .select('id, pass_type_id, expires_on, uses_total, uses_spent, gym_pass_types(name, covers)')
-      .eq('holder_id', uid)
-      .order('issued_on', { ascending: false })
-      .limit(capLimit());
+    const [passRes, coachRes] = await Promise.all([
+      supabase
+        .from('gym_passes')
+        .select('id, pass_type_id, tenant_id, expires_on, uses_total, uses_spent, gym_pass_types(name, covers)')
+        .eq('holder_id', uid)
+        .order('issued_on', { ascending: false })
+        .limit(capLimit()),
+      supabase.from('clients').select('trainer_id').eq('id', uid).maybeSingle(),
+    ]);
+    const { data, error } = passRes;
     if (error) { reportError('connect.myPtPasses', error); return null; }
     if (!data) return null;
     const page = capped(data as unknown[]);
@@ -1271,6 +1314,29 @@ export async function myPtPasses(): Promise<PtPassRow[] | null> {
       reportError('connect.myPtPasses', new TruncatedRead('your gym passes', ROW_CAP));
       return null;
     }
+
+    // The gym a session with this member's coach will belong to.
+    //
+    // `undefined` and `null` are different answers and are both real. A member
+    // with no coach has no session to price, so there is nothing to compare a
+    // pass against and the passes are left unjudged — their balance at their own
+    // gym is still true and is still theirs. A coach who is on no gym's staff
+    // gives a null tenant, which route 2 answers with `if new.tenant_id is null
+    // then return new` — no pass pays, and that is a judgement, not an absence.
+    let sessionTenantId: string | null | undefined;
+    if (coachRes.error) {
+      // Not "they hold nothing" and not "the pass pays". We cannot say which,
+      // so we say we could not read it, which is what null means here.
+      reportError('connect.myPtPasses', coachRes.error);
+      return null;
+    }
+    const coachId = (coachRes.data as { trainer_id: string | null } | null)?.trainer_id ?? null;
+    if (coachId) {
+      const { data: tId, error: tErr } = await supabase.rpc('staff_tenant_of', { u: coachId });
+      if (tErr) { reportError('connect.myPtPasses', tErr); return null; }
+      sessionTenantId = (tId ?? null) as string | null;
+    }
+
     return page.rows.map((r: any) => {
       const ty = Array.isArray(r.gym_pass_types) ? r.gym_pass_types[0] : r.gym_pass_types;
       return {
@@ -1278,6 +1344,8 @@ export async function myPtPasses(): Promise<PtPassRow[] | null> {
         passTypeId: (r.pass_type_id ?? null) as string | null,
         passTypeName: (ty?.name ?? null) as string | null,
         covers: (ty?.covers ?? null) as string | null,
+        tenantId: (r.tenant_id ?? null) as string | null,
+        sessionTenantId,
         expiresOn: (r.expires_on ?? null) as string | null,
         usesTotal: (r.uses_total ?? 0) as number,
         usesSpent: (r.uses_spent ?? 0) as number,
@@ -1295,6 +1363,22 @@ export interface PtPassRow {
    *  NOT the same as a type that covers visits — an unnamed coverage is never
    *  assumed to be the one that lets a credit be spent. */
   covers: string | null;
+  /**
+   * The gym that SOLD this pass. `gym_passes.tenant_id`, which is NOT NULL in
+   * the live schema — a null here means the column did not come back, never a
+   * pass belonging to no gym.
+   */
+  tenantId: string | null;
+  /**
+   * The gym a session with this member's coach will BELONG to — the value route
+   * 2 compares `tenant_id` against, not a property of the pass.
+   *
+   * It is stamped on every row because the array is the only thing that reaches
+   * a caller, and the same answer is true of all of them. `undefined` is "there
+   * is no session to price" (the member has no coach); `null` is "the coach is
+   * on no gym's staff, so no pass can pay". See `gymPtLines`.
+   */
+  sessionTenantId?: string | null;
   expiresOn: string | null;
   usesTotal: number;
   usesSpent: number;
