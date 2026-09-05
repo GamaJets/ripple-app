@@ -28,7 +28,7 @@ import { HealthPill } from '../../src/ui/charts';
 import { deltaSign } from '../../src/lib/deltaLabel';
 import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 import { cohorts } from '../../src/lib/ownerAnalytics';
-import { ownerReportDoc, shareDoc } from '../../src/lib/exportShare';
+import { ownerReportDoc, shareDoc, pdfExportAvailable } from '../../src/lib/exportShare';
 import { reportError } from '../../src/lib/reportError';
 import { Linking } from 'react-native';
 import { supabase } from '../../src/lib/supabase';
@@ -266,7 +266,24 @@ export default function OwnerOverview() {
       currency: cur,
     });
     const how = await shareDoc(doc.html, doc.text, 'Platform report');
-    if (how === 'text') Alert.alert('Report shared', 'Shared as text — branded PDF export turns on after the next native build.');
+    // Which of the three reasons it fell back to text, rather than asserting
+    // the one that is now usually false. shareDoc returns 'text' when
+    // printToFileAsync is MISSING, when it THREW, or when sharing is
+    // unavailable — and only the first is a build problem. expo-print and
+    // expo-sharing are dependencies now and are in ios/Podfile.lock, so on a
+    // current binary the old sentence sent an owner to wait for an App Store
+    // update for a PDF that had simply failed to render.
+    //
+    // The same reasoning as the wearable copy in oauthConfig.ts and the
+    // withdrawn Google Calendar row: an update the reader cannot get, offered
+    // as the fix for something an update would not change. Where a newer build
+    // GENUINELY is the answer this app still says so — calendar.tsx keeps
+    // exactly that sentence, and says in a comment why it earned it.
+    if (how === 'text') {
+      Alert.alert('Report shared', pdfExportAvailable()
+        ? 'Shared as text — the PDF could not be produced on this phone. Nothing is missing from the figures.'
+        : 'Shared as text — this build cannot make a PDF. A newer build of the app can.');
+    }
   };
   const G = layout.gutter;
 

@@ -48,7 +48,11 @@ import { classSummary, summariseClassRows, type ClassSummaryRow } from '../../sr
 import { useTenant } from '../../src/ui/tenant';
 import { reportError } from '../../src/lib/reportError';
 import { supabase } from '../../src/lib/supabase';
-import { money } from '../../src/lib/gymRecord';
+// `normaliseCurrency` alongside `money` because this screen has to COUNT the
+// currencies its payroll total is made of, not just format one: ' gbp ' and
+// 'GBP' are one currency and a count that says two withholds a total the gym is
+// entitled to. It is the same normaliser `payCurrency` and `sharedCurrency` use.
+import { money, normaliseCurrency } from '../../src/lib/gymRecord';
 // The inverse of the `readMinorAmount` that `parseRate` reads this screen's
 // rate field back with: minor units → the major-unit string a person types,
 // with the number of places taken from the currency rather than assumed to be
@@ -57,8 +61,8 @@ import { majorFromMinor } from '../../src/lib/coachMoney';
 import {
   fetchTrainerPay, saveTrainerPay, fetchClassPay, addClassPay,
   classPayAmount, classPayBlocker, parseRate, payRateBlocker,
-  CLASS_PAY_LABEL,
-  type PayIndex, type ClassPayLine, type ClassPayKind,
+  payCurrency, CLASS_PAY_LABEL,
+  type PayIndex, type TrainerPay, type ClassPayLine, type ClassPayKind,
 } from '../../src/lib/gymPay';
 // `tenants.timezone`, parsed, with a failed read kept apart from a gym that
 // has not set one. The tenant context does not carry the zone, and this screen
@@ -418,6 +422,27 @@ export default function OwnerClassAnalytics() {
     return classPayAmount(own.classPayKind, own.classRateCents, r.attended);
   };
 
+  /**
+   * What ONE coach's class money is in — their own stated rate currency, and
+   * the gym's only where they have stated none.
+   *
+   * `gym_trainer_pay.currency` is nullable PER COACH and is never inherited
+   * from `tenants.currency` at read time; src/lib/gymPay.ts states the contract
+   * in writing — a gym that changes its currency must not retroactively
+   * re-denominate what it agreed to pay somebody. So a coach still on an AED
+   * rate at a gym that now works in GBP is owed dirhams, and `worth()` returns
+   * minor units of THAT coach's money, not the gym's.
+   *
+   * One expression, read by the figure beside "Add To Payroll" AND by the write
+   * that files the line. It was two: the label said `cur` while the insert said
+   * `own.currency ?? cur`, so at exactly that gym the owner read one currency
+   * and the line was filed in another — which is character for character the
+   * defect scripts/check-currency.mjs opens with, the Members payment form whose
+   * label was corrected and whose write was left alone. Two copies of a currency
+   * rule is that bug waiting for its second outing, so there is one copy.
+   */
+  const coachCurrency = (own: TrainerPay | null | undefined): string | null => own?.currency ?? cur;
+
   const totals = useMemo(() => {
     // Both rates come from one helper, so this screen and the timetable can no
     // longer disagree about what "fill" means. Each stays null when its
@@ -426,11 +451,33 @@ export default function OwnerClassAnalytics() {
     let cents = 0;
     let priced = 0;
     let unpriced = 0;
+    /**
+     * The rates that actually CONTRIBUTED to `cents`, one entry per coach.
+     *
+     * Kept because the sum above is only a sum of money if they agree on which
+     * money it is. `worth()` returns minor units in each coach's own currency
+     * and this loop adds them together, so the set of currencies behind the
+     * total is the only thing that can honestly label it. Coaches with no rate
+     * contributed nothing and are not asked.
+     */
+    const contributors: TrainerPay[] = [];
+    const seen = new Set<string>();
     for (const row of list) {
       const c = worth(row);
       if (c == null) { unpriced += 1; continue; }
       cents += c; priced += 1;
+      const own = pay?.get(row.trainerId);
+      if (own && !seen.has(own.trainerId)) { seen.add(own.trainerId); contributors.push(own); }
     }
+    // Which currencies were actually STATED by those rates. `payCurrency` below
+    // is the rule and returns one code or null; this is the same question asked
+    // a second time only to say WHICH silence a null is, the way
+    // app/(owner)/financials.tsx keeps its four apart. A rate that states
+    // nothing does not disagree with anything — it is filed in the gym's own
+    // currency by the write, which is why it is filtered out here too.
+    const stated = [...new Set(
+      contributors.map((p) => normaliseCurrency(p.currency)).filter((c): c is string => !!c),
+    )];
     return {
       ...r,
       showPct: r.show == null ? null : Math.round(r.show * 100),
@@ -439,11 +486,50 @@ export default function OwnerClassAnalytics() {
       // and its note says why — rather than a confident zero over a range full
       // of classes somebody taught.
       payrollCents: priced ? cents : null,
+      /**
+       * What that sum may be LABELLED, and null where nothing may.
+       *
+       * It was `cur` — `tenants.currency` — at four sites, over a figure built
+       * from per-coach rates that are deliberately not denominated in it. A gym
+       * that switched from AED to GBP and left one coach on the old rate had
+       * its dirhams added to its pounds and the result headed GBP.
+       *
+       * `payCurrency` is the rule, it already existed, and this screen was the
+       * half of the product that never got it: null for a mixed set, and null
+       * for a single currency that is not the gym's, because that is two
+       * answers and neither is the total's.
+       */
+      payrollCurrency: payCurrency(contributors, cur),
+      /** More than one money in the sum. */
+      mixedPayCurrencies: stated.length > 1,
+      /** One money in the sum, and it is not the one this gym works in. */
+      otherPayCurrency: stated.length === 1 && !!cur && stated[0] !== cur ? stated[0] : null,
       priced,
       unpriced,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `worth` closes over `pay`, which is the dependency that matters
-  }, [list, pay]);
+  }, [list, pay, cur]);
+
+  /**
+   * Why the payroll total is not stated, when it is not — and which of the two
+   * reasons it is.
+   *
+   * The pattern is `queued` below, in this same file: two currencies never sum,
+   * the COUNT of classes is still true, so the sentence keeps what is true and
+   * drops the amount. The two silences are kept apart for the reason
+   * app/(owner)/financials.tsx keeps its four apart: a range whose coaches are
+   * paid in two moneys and a range whose one money is not the gym's are
+   * different facts, and folding either into "your gym has not set a currency"
+   * sends an owner to Ops to set a field that is already set.
+   *
+   * Null when there is nothing to withhold — including at a gym with no
+   * currency at all, where `noCurrency` is already the whole answer.
+   */
+  const payGap: string | null = totals.mixedPayCurrencies
+    ? 'these coaches are paid in more than one currency, so there is no one total to state'
+    : totals.otherPayCurrency
+    ? `these class rates are recorded in ${totals.otherPayCurrency} and this gym works in ${cur}, so there is no one total to state`
+    : null;
 
   const byGroup = (key: (r: ClassSummaryRow) => string) => {
     const m: Record<string, { attended: number; booked: number; classes: number }> = {};
@@ -477,13 +563,19 @@ export default function OwnerClassAnalytics() {
 
   // ── pricing a class, and why the typed rate is gone ──────────────────────
   //
-  // Every output of this section goes through `money(..., cur)`, which returns
-  // null when the gym has not set `tenants.currency` — so at such a gym the
-  // hero, the section note and every per-trainer figure render a dash no matter
-  // what is stored. A control whose every result is withheld is a control that
-  // does nothing, so where there is no currency it is replaced by the reason and
-  // the way to fix it. The check-in and class counts are unaffected: they are
-  // not money and they still stand.
+  // Every output of this section goes through `money()`, which returns null
+  // when it is handed no currency — so at a gym that has not set
+  // `tenants.currency` the hero, the section note and every per-trainer figure
+  // render a dash no matter what is stored. A control whose every result is
+  // withheld is a control that does nothing, so where there is no currency it is
+  // replaced by the reason and the way to fix it. The check-in and class counts
+  // are unaffected: they are not money and they still stand.
+  //
+  // WHICH currency each of those figures is handed is not one answer and used to
+  // be: `cur` — the gym's — labelled all four, over amounts `worth()` returns in
+  // each COACH's own money. A per-coach figure now takes `coachCurrency`, and
+  // the two totals take `payCurrency`, which withholds rather than choose
+  // between two moneys. See both.
   //
   // What is offered instead of the old single typed rate is a rate PER COACH,
   // saved to `gym_trainer_pay`, with the thing a single number could not say —
@@ -573,6 +665,14 @@ export default function OwnerClassAnalytics() {
     if (blocker) { setWriteErr(blocker); return; }
     const cents = worth(r);
     if (cents == null || !own || own.classRateCents == null || own.classPayKind == null) return;
+    // The one expression, read here and by the figure printed beside the button
+    // that calls this. `classPayBlocker` above already refuses a coach whose
+    // rate states no currency, and `cur` is non-null by the guard at the top, so
+    // this cannot be null — the check is written out anyway because a currency
+    // must never be inferred at a write, least of all from a guard three
+    // branches away.
+    const lineCur = coachCurrency(own);
+    if (!lineCur) return;
     setBusy(r.classId);
     try {
       await addClassPay(supabase, tenantId, {
@@ -585,7 +685,7 @@ export default function OwnerClassAnalytics() {
         rateCents: own.classRateCents,
         attendees: own.classPayKind === 'per_attendee' ? r.attended : null,
         amountCents: cents,
-        currency: own.currency ?? cur,
+        currency: lineCur,
         createdBy: null,
       });
       setWriteErr(null);
@@ -670,7 +770,7 @@ export default function OwnerClassAnalytics() {
               setting. */}
           <Hero
             label="Trainer Payroll"
-            figure={fig(money(totals.payrollCents, cur))}
+            figure={fig(money(totals.payrollCents, totals.payrollCurrency))}
             note={[
               `${totals.attended} check-ins`,
               `${totals.classes} classes`,
@@ -679,6 +779,11 @@ export default function OwnerClassAnalytics() {
                 ? "set your gym's currency to value them"
                 : pay === null
                 ? 'the pay rates could not be read, so nothing here is priced'
+                // Said before the unpriced count, because this one explains the
+                // DASH where the figure is. An unpriced class makes the total
+                // smaller than the range; a mixed set means there is no total.
+                : payGap
+                ? payGap
                 : totals.unpriced > 0
                 ? `${totals.unpriced} class${totals.unpriced === 1 ? '' : 'es'} priced at nothing because the coach has no class rate`
                 : null,
@@ -716,8 +821,20 @@ export default function OwnerClassAnalytics() {
 
           {/* ── payroll by trainer ───────────────────────────────────────── */}
           <Section>
-            <SectionHead title="Payroll by Trainer" note={money(totals.payrollCents, cur) ?? undefined} />
+            {/* The same figure as the hero and therefore the same currency
+                rule: withheld where the rates behind it do not agree on one
+                money, rather than headed in the gym's. */}
+            <SectionHead title="Payroll by Trainer" note={money(totals.payrollCents, totals.payrollCurrency) ?? undefined} />
             {cur ? null : noCurrency}
+            {/* And said here as well as on the hero, because this is the
+                section whose per-coach lines an owner would otherwise add up
+                themselves. One string, framed twice, so the two cannot drift
+                into two different accounts of the same silence. */}
+            {payGap ? (
+              <Flag tone={t.warn} style={{ marginBottom: sp.md }}>
+                {`The total for this section is not stated: ${payGap}. Each coach's line below is in that coach's own currency.`}
+              </Flag>
+            ) : null}
             {writeErr ? (
               <Flag tone={t.crit} style={{ marginBottom: sp.md }}>{writeErr}</Flag>
             ) : null}
@@ -744,11 +861,16 @@ export default function OwnerClassAnalytics() {
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
                         {v.classes} classes · {v.attended} check-ins
                         {own?.classRateCents != null && own.classPayKind
-                          ? ` · ${money(own.classRateCents, own.currency ?? cur) ?? '—'} ${own.classPayKind === 'per_attendee' ? 'each person' : 'the class'}`
+                          ? ` · ${money(own.classRateCents, coachCurrency(own)) ?? '—'} ${own.classPayKind === 'per_attendee' ? 'each person' : 'the class'}`
                           : ' · no class rate set'}
                       </Text>
                     </View>
-                    <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{fig(money(cents, cur))}</Text>
+                    {/* This coach's own money, not the gym's — the same
+                        expression the rate beside the name is printed in, and
+                        the same one the write below files a line with. This
+                        line is one coach's rows and they are all in one
+                        currency, so it is stated rather than withheld. */}
+                    <Text style={{ ...ty.body, fontWeight: '600', ...numeric, color: t.ink }}>{fig(money(cents, coachCurrency(own)))}</Text>
                   </View>
                   {cur ? (
                     editing === v.id
@@ -804,7 +926,8 @@ export default function OwnerClassAnalytics() {
             {list.map((r, i) => {
               const on = already.has(r.classId);
               const cents = worth(r);
-              const blocker = classPayBlocker(pay?.get(r.trainerId), r.attended, on);
+              const own = pay?.get(r.trainerId);
+              const blocker = classPayBlocker(own, r.attended, on);
               return (
                 <View key={r.classId} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
@@ -830,7 +953,14 @@ export default function OwnerClassAnalytics() {
                       ) : (
                         <>
                           <Ghost label={busy === r.classId ? 'Adding…' : 'Add To Payroll'} onPress={() => putOnPayroll(r)} />
-                          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{money(cents, cur) ?? '—'}</Text>
+                          {/* THE SAME EXPRESSION `putOnPayroll` files the line
+                              with. It said `cur` while the insert said the
+                              coach's own currency, so at a gym that had changed
+                              currency the owner read one money beside this
+                              button and another one was written to
+                              `gym_class_pay` — a permanent record of what
+                              somebody is owed. */}
+                          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{money(cents, coachCurrency(own)) ?? '—'}</Text>
                         </>
                       )}
                     </View>

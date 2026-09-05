@@ -62,7 +62,7 @@ import {
   fetchTrainerPay, saveTrainerPay, withResolvedRates, payRateBlocker, parseRate,
   fetchAdjustments, addAdjustment, adjustmentBlocker, adjustmentSign,
   fetchClassPay, reverseSettlement, reversalReasonBlocker, stampRunExtras,
-  runTotal, runCurrencyBlocker, payCurrency, adjustmentsTotal, scopedToRun, runScopeOf,
+  runTotal, runCurrencyBlocker, adjustmentsTotal, scopedToRun, runScopeOf,
   ADJUSTMENT_KINDS, ADJUSTMENT_LABEL, CLASS_PAY_LABEL,
   type PayIndex, type TrainerPay, type Adjustment, type AdjustmentKind,
   type ClassPayLine, type ClassPayKind,
