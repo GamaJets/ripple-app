@@ -58627,7 +58627,7 @@ end $$;
 -- bare, it requires a coach_invites row, anon cannot execute the function and
 -- authenticated can, and the count of anon-executable SECURITY DEFINER
 -- functions held at 2 — the two deliberate entry points.
-----
+--
 -- `link_coaching` is SECURITY DEFINER, `authenticated` may EXECUTE it, and the
 -- first arm of its guard was:
 --
