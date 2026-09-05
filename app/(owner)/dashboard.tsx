@@ -163,7 +163,28 @@ export default function OwnerOverview() {
       : null);
     setSetupPlans(planRes.status === 'fulfilled' && !planRes.value.error ? planRes.value.count ?? null : null);
     setSetupMembers(memberRes.status === 'fulfilled' && !memberRes.value.error ? memberRes.value.count ?? null : null);
-    if (gymRes.status === 'rejected') reportError(gymRes.reason, 'owner.dashboard.setup');
+    // Arguments in the order reportError declares them — `(context, err)`. This
+    // was the one reversed call in the repository, and it typechecks because
+    // PromiseRejectedResult.reason is `any`. The row it filed read
+    // `[Error: …the real message…] owner.dashboard.setup`, with the label and
+    // the error swapped; the stack was dropped, because `err` was a string and
+    // reportError only keeps a stack for an Error; and the once-a-minute
+    // throttle keys on context + detail, so it grouped per MESSAGE instead of
+    // per context and stopped throttling anything.
+    //
+    // And it was on a branch that almost never fires. supabase-js RESOLVES on a
+    // database error rather than rejecting, so the real failure is
+    // `res.value.error` — which the three lines above already test, to blank the
+    // checklist, and then never reported. An RLS refusal emptied the owner's
+    // setup checklist and left no trace at all. Reported for all three reads
+    // rather than only the gym one: they fail the same way and blank the same
+    // checklist.
+    if (gymRes.status === 'rejected') reportError('owner.dashboard.setup', gymRes.reason);
+    else if (gymRes.value.error) reportError('owner.dashboard.setup', gymRes.value.error);
+    if (planRes.status === 'rejected') reportError('owner.dashboard.setup.plans', planRes.reason);
+    else if (planRes.value.error) reportError('owner.dashboard.setup.plans', planRes.value.error);
+    if (memberRes.status === 'rejected') reportError('owner.dashboard.setup.members', memberRes.reason);
+    else if (memberRes.value.error) reportError('owner.dashboard.setup.members', memberRes.value.error);
   }, [tenantId]);
   useEffect(() => { void loadSetup(); }, [loadSetup]);
 

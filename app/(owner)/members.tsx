@@ -37,7 +37,7 @@ import {
   setMembershipStatus, recordPayment, summarise, money,
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON } from '../../src/ui/direction';
 // What money a SUM is in. `summarise` reports it and this screen used to throw
 // it away — see the header of src/lib/sumCurrency.ts for what that printed.
 import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '../../src/lib/sumCurrency';
@@ -453,7 +453,7 @@ export default function OwnerMembers() {
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
+            <Icon name={BACK_ICON} size={20} color={t.ink3} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Members</Text>
         </View>

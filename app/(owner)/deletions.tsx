@@ -41,10 +41,11 @@ import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag } from '../../src/u
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { supabase } from '../../src/lib/supabase';
+import { isoDate } from '../../src/lib/format';
 import { reportError } from '../../src/lib/reportError';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON } from '../../src/ui/direction';
 import { capLimit, capped } from '../../src/lib/rowCap';
 
 /** How far back the audit trail is read. A BOUND, not a cap — the screen only
@@ -78,8 +79,27 @@ const ROLE_LABEL: Record<string, string> = {
 /** A timestamp as the day it happened, or a dash. Never the string "null". */
 function day(iso: string | null): string {
   if (!iso) return '—';
-  const d = String(iso).slice(0, 10);
-  return d.length === 10 ? d : '—';
+  // Parsed, not sliced. Every value that reaches here is a `timestamptz` —
+  // profiles.deletion_requested_at, deletion_log.requested_at and .actioned_at,
+  // all three confirmed against the live schema — and PostgREST serialises
+  // those in UTC. `String(iso).slice(0, 10)` is therefore Greenwich's calendar
+  // day, not anybody's.
+  //
+  // check-utc-day.mjs deliberately does not flag this shape; its header says
+  // whether a slice is wrong "depends entirely on what column `iso` came from"
+  // and that telling them apart "needs the schema, not the line". This is the
+  // case where the schema says it is wrong.
+  //
+  // A member in Dubai (UTC+4) asking to be deleted at 01:30 on 6 September
+  // stores 2026-09-05T21:30Z, and this queue said they asked on the 5th — in
+  // the two-step confirmation of an irreversible delete, and permanently in the
+  // audit log below it. In Los Angeles it runs the other way.
+  //
+  // The reader's own day, because neither screen reads a gym timezone and no
+  // tenant has one set — the same fallback financials.tsx and equipment.tsx
+  // take.
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? isoDate(new Date(ms)) : '—';
 }
 
 /**
@@ -265,7 +285,7 @@ export default function OwnerDeletions() {
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
+            <Icon name={BACK_ICON} size={20} color={t.ink3} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Deletion Requests</Text>
         </View>

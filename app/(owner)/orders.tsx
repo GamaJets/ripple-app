@@ -63,7 +63,7 @@ import {
   fetchGymOrders, orderLine, orderTrouble, paidPots,
   ORDER_STATUS_LABEL, type GymOrderRow,
 } from '../../src/lib/gymOrders';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON } from '../../src/ui/direction';
 
 /** How far back the order book is read. Ninety days is a quarter — long enough
  *  to cover a Stripe payout cycle and every dispute window an owner is likely
@@ -165,7 +165,7 @@ export default function OwnerOrders() {
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.lg, marginBottom: sp.lg }}>
           <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back">
-            <Icon name={FORWARD_ICON} size={20} color={t.ink3} />
+            <Icon name={BACK_ICON} size={20} color={t.ink3} />
           </Pressable>
           <Text style={{ ...ty.title, color: t.ink, flex: 1 }}>Online Orders</Text>
         </View>

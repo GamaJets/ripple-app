@@ -5,9 +5,10 @@
 // scale (`src/theme/scale`); the dead emoji TabIcon is gone.
 import { Tabs, Redirect } from 'expo-router';
 import { groupAllowed } from '../../src/lib/variant';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { sp, type as ty } from '../../src/theme/scale';
+import { sp, type as ty, grown } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { WhatsNewSheet, useWhatsNew } from '../../src/ui/WhatsNew';
 export default function OwnerLayout() {
@@ -38,6 +39,28 @@ export default function OwnerLayout() {
   const { user } = useAuth();
   const whatsNew = useWhatsNew(user?.id ?? null);
 
+  // The bar sat under the home indicator, and this was the only one of the
+  // three groups where it did. The client and trainer layouts both compute the
+  // inset and pad by it; this file imported useSafeAreaInsets at all.
+  //
+  // Two separate causes, and the fixed `height` is the one that hid the other.
+  // getTabBarHeight in expo-router's BottomTabBar short-circuits on an explicit
+  // numeric height — `if (typeof customHeight === 'number') return customHeight`
+  // — before it ever reads the inset, and `tabBarStyle` is applied LAST in the
+  // container's style array, so it also overrode the navigator's own
+  // paddingBottom: insets.bottom. On an iPhone with a home indicator the other
+  // two apps got 49 + 34 with 34pt of bottom padding; this one got a hard 62
+  // with 8, drawing five tab items 26pt lower, inside the strip iOS paints the
+  // indicator over.
+  //
+  // minHeight rather than height for the second half, and grown() for the same
+  // reason app/(client)/_layout.tsx gives: the bar has to grow with the
+  // reader's text, because 56 was drawn around an 11pt name that is 22 or 33 on
+  // Larger Text, and safe-area padding then pushes it off the bottom of a bar
+  // that never moved.
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 10);
+
   // This build is one of three separate apps. If the owner portal is not
   // the one it ships, nothing here is reachable — a deep link or a tapped
   // notification pointing into it goes home instead of rendering a portal
@@ -46,7 +69,7 @@ export default function OwnerLayout() {
 
   return (
     <>
-    <Tabs backBehavior="history" screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, height: 62, paddingTop: sp.sm, paddingBottom: sp.sm }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' }, sceneStyle: { backgroundColor: t.bg } }}>
+    <Tabs backBehavior="history" screenOptions={{ headerShown: false, tabBarStyle: { backgroundColor: t.surface, borderTopColor: t.ring, minHeight: grown(56) + bottomPad, paddingTop: sp.sm, paddingBottom: bottomPad }, tabBarActiveTintColor: t.brand, tabBarInactiveTintColor: t.ink3, tabBarLabelStyle: { ...ty.micro, textTransform: 'none', letterSpacing: 0.2, fontWeight: '500' }, sceneStyle: { backgroundColor: t.bg } }}>
       <Tabs.Screen name="dashboard" options={{ title: 'Overview', tabBarIcon: ({ color }) => <Icon name="grid" size={23} color={color} /> }} />
       <Tabs.Screen name="trainers" options={{ title: 'Trainers', tabBarIcon: ({ color }) => <Icon name="people" size={23} color={color} /> }} />
       <Tabs.Screen name="brand" options={{ title: 'Brand', tabBarIcon: ({ color }) => <Icon name="palette" size={23} color={color} /> }} />

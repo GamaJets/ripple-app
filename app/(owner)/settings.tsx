@@ -45,6 +45,7 @@ import { useAuth } from '../../src/ui/auth';
 import { useAppLock } from '../../src/ui/appLock';
 import { useSettings } from '../../src/ui/settings';
 import { lockSettingNote } from '../../src/lib/appLock';
+import { isoDate } from '../../src/lib/format';
 import { useTenant } from '../../src/ui/tenant';
 import { exportMyDataDetailed, requestAccountDeletion, withdrawAccountDeletion } from '../../src/lib/gdpr';
 import { shareTextFile } from '../../src/lib/exportShare';
@@ -78,8 +79,27 @@ const ROLE_LABEL: Record<string, string> = {
 /** A timestamp as the day it happened, or a dash. Never the string "null". */
 function day(iso: string | null): string {
   if (!iso) return '—';
-  const d = String(iso).slice(0, 10);
-  return d.length === 10 ? d : '—';
+  // Parsed, not sliced. Every value that reaches here is a `timestamptz` —
+  // profiles.deletion_requested_at, deletion_log.requested_at and .actioned_at,
+  // all three confirmed against the live schema — and PostgREST serialises
+  // those in UTC. `String(iso).slice(0, 10)` is therefore Greenwich's calendar
+  // day, not anybody's.
+  //
+  // check-utc-day.mjs deliberately does not flag this shape; its header says
+  // whether a slice is wrong "depends entirely on what column `iso` came from"
+  // and that telling them apart "needs the schema, not the line". This is the
+  // case where the schema says it is wrong.
+  //
+  // A member in Dubai (UTC+4) asking to be deleted at 01:30 on 6 September
+  // stores 2026-09-05T21:30Z, and this queue said they asked on the 5th — in
+  // the two-step confirmation of an irreversible delete, and permanently in the
+  // audit log below it. In Los Angeles it runs the other way.
+  //
+  // The reader's own day, because neither screen reads a gym timezone and no
+  // tenant has one set — the same fallback financials.tsx and equipment.tsx
+  // take.
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? isoDate(new Date(ms)) : '—';
 }
 
 /** Everything the owner's confirmation needs, or nulls where a read failed. */
