@@ -761,6 +761,10 @@ export default function ClientNutrition() {
               </View>
               <Ghost label="Close" onPress={() => setPick(null)} />
             </View>
+            {/* keyboard-ok: this box sits at the top of a sheet capped at 85% of the
+                screen, directly under its header, with the results list scrolling
+                beneath it. The keyboard rises into the list, not over the field —
+                which is the point of a search box on a sheet this tall. */}
             <TextInput
               value={query} onChangeText={setQuery} placeholder="Search this slot" placeholderTextColor={t.ink3}
               autoCorrect={false} accessibilityLabel="Search meals"

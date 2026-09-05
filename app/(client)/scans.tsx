@@ -2304,6 +2304,25 @@ export default function Scans() {
           scan on the same day, which `sorted` folds by day so the wrong one
           would simply have won again. */}
       <Modal visible={editing != null} transparent animationType="slide" onRequestClose={() => setEditId(null)}>
+        {/* The keyboard covered all three fields, and nothing here could move.
+            This sheet is anchored to the bottom of the screen and had neither a
+            KeyboardAvoidingView nor a scroller, so a decimal-pad keyboard came up
+            over Weight, Body fat and Muscle and the member was typing into boxes
+            they could not see — on the sheet whose entire purpose is checking a
+            digit. The Add sheet above got this right; this one was written as a
+            plain View and never revisited.
+
+            scripts/check-keyboard.mjs did not catch it, and says why in its own
+            header: it walks to the scroller CONTAINING the field, so a short
+            sheet with no scroller in it is invisible to the rule. That is a
+            deliberate narrowing, not an oversight, and this is the case it names.
+
+            Same mechanism as the Add sheet at the top of this file: `padding`
+            needs something above the sheet for it to compress, and the scrim
+            Pressable below is that flex:1 sibling. Without a sibling to eat the
+            padding the wrapper is inert — which is the exact dead-KeyboardAvoidingView
+            bug that check-keyboard.mjs was written for. */}
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }} onPress={() => setEditId(null)} accessibilityLabel="Close" accessibilityRole="button" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.lg }}>
@@ -2343,6 +2362,7 @@ export default function Scans() {
             <Ghost label="Delete This Scan" onPress={removeScan} />
           </View>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={physOpen} transparent animationType="slide" onRequestClose={() => setPhysOpen(false)}>

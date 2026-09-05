@@ -63,11 +63,47 @@
 //     argues that in full. Flagging those here would push people towards the
 //     mechanism that is wrong for them.
 //
-//     It is also the reason this check is narrower than the bug: a short
-//     bottom sheet with no scroller in it can sit entirely behind the keyboard
-//     and this will not say so. Widening it to every TextInput anywhere would
-//     flag every compose bar in the app, and a gate people disable is worse
-//     than no gate. Narrow and quiet, on purpose.
+//     Widening rule 1 to every TextInput anywhere would flag every compose
+//     bar in the app, and a gate people disable is worse than no gate.
+//
+// ── rule 2: a sheet that cannot move and cannot scroll ────────────────────
+//
+// This paragraph used to concede a gap: "a short bottom sheet with no scroller
+// in it can sit entirely behind the keyboard and this will not say so." It said
+// so because rule 1 walks to the scroller CONTAINING the field, and a sheet
+// with no scroller in it has nothing for that walk to find.
+//
+// It was not hypothetical. app/(client)/scans.tsx's "Correct This Scan" sheet
+// was a bottom-anchored `<View>` holding Weight, Body fat and Muscle, with no
+// KeyboardAvoidingView and no scroller. A decimal-pad keyboard covered all
+// three fields, on the sheet whose entire purpose is checking a digit — the
+// same bug as log-session.tsx, in the one shape this file could not see. The
+// Add sheet forty lines above it had been written correctly and the two were
+// never read against each other.
+//
+// So: a `<TextInput>` inside a `<Modal>` with NO vertical scroller between the
+// two must have a `KeyboardAvoidingView` between the two. A sheet with neither
+// cannot move and cannot scroll, and every pixel the keyboard covers is gone.
+//
+// This stays inside the modal deliberately. Outside one, a field with no
+// scroller is the docked compose bar of exclusion 1, which has its own answer;
+// the `<Modal>` is what distinguishes "this is a sheet and it is stuck" from
+// "this is a bar and it is lifted".
+//
+// ── what rule 2 does NOT check, and why it says so out loud ───────────────
+//
+// Whether that KeyboardAvoidingView is a LIVE one. Rule 1 can test this for a
+// scroller: the padding needs a sibling with height between the wrapper's first
+// child and the scroller, and the offsets make that measurable. For a sheet
+// with no scroller there is no second landmark to measure to — the field sits
+// somewhere in the middle of the sheet's own markup, and the run of text before
+// it is never empty. Measuring to it would return "lifted" for every sheet in
+// the tree, which is a check that always passes.
+//
+// A dead wrapper on a scroller-less sheet is therefore still possible and still
+// invisible here. Stated rather than papered over, because the first draft of
+// rule 1 shipped a test that green-lit its own defect, and the honest move when
+// a rule cannot see something is to write down what it cannot see.
 //
 //  2. `horizontal` scrollers. A strip of chips is not what a focused field
 //     scrolls inside; the enclosing scroller that matters is the vertical one
@@ -339,6 +375,22 @@ for (const f of files) {
           }
         }
       }
+      // ── rule 2 ────────────────────────────────────────────────────────
+      // No scroller at all. Outside a modal that is the docked compose bar,
+      // which is exclusion 1 and is left alone. Inside one it is a sheet that
+      // can neither rise nor scroll, so it needs a wrapper that lifts it.
+      if (!scroller) {
+        const modalAt = stack.map((fr) => fr.name).lastIndexOf('Modal');
+        if (modalAt !== -1) {
+          const lifter = stack.slice(modalAt + 1).some((fr) => fr.name === 'KeyboardAvoidingView');
+          if (!lifter) {
+            const line = lineOf(src, m.index);
+            if (!excused(lines, line - 1)) {
+              problems.push({ rel, line, sheet: true, modalLine: lineOf(src, stack[modalAt].index) });
+            }
+          }
+        }
+      }
       if (!t.selfClosing) stack.push({ name, open, index: m.index, contentStart: t.end + 1 });
       continue;
     }
@@ -392,6 +444,11 @@ if (problems.length) {
   console.error(`\n${problems.length} field${problems.length === 1 ? '' : 's'} the keyboard can cover:\n`);
   for (const p of problems) {
     console.error(`  ${p.rel}:${p.line}`);
+    if (p.sheet) {
+      console.error(`    a TextInput in the Modal opened on line ${p.modalLine}, with no scroller between`);
+      console.error('    the two and no KeyboardAvoidingView either — the sheet can neither rise nor\n    scroll, so the keyboard simply covers it\n');
+      continue;
+    }
     console.error(`    a TextInput inside the scroller opened on line ${p.scrollerLine}, which has no`);
     console.error(p.deadWrapper
       ? '    automaticallyAdjustKeyboardInsets — and the KeyboardAvoidingView above it is the\n    scroller\'s own wrapper, so its padding has nothing to push\n'
@@ -410,4 +467,4 @@ if (problems.length) {
   process.exit(1);
 }
 
-console.log(`check-keyboard — ok, ${inputsInScrollers} fields inside a scroller, every one of them with a way out from under the keyboard`);
+console.log(`check-keyboard — ok, ${inputsSeen} fields seen, ${inputsInScrollers} inside a scroller, every one of them with a way out from under the keyboard`);

@@ -195,6 +195,10 @@ export default function PhoneSignIn() {
             paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: sp.xxl, maxHeight: '76%',
           }}>
             <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.md }}>Country</Text>
+            {/* keyboard-ok: the search box is the first thing in a sheet capped at 76%
+                of the screen, above the country list that scrolls under it. The
+                keyboard covers the list, which still scrolls, and never the field
+                being typed into. */}
             <TextInput value={search} onChangeText={setSearch} placeholder="Search"
               placeholderTextColor={t.ink3} autoCorrect={false}
               accessibilityLabel="Search countries" style={{ ...field, marginBottom: sp.md }} />
