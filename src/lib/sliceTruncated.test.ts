@@ -253,7 +253,9 @@ const record = (payments: Slice<GymPayment>): MemberRecord => ({
   eq(truncatedCloseParts(rec).join(','), 'payments', 'a truncated close part is named');
   const w = { key: '2026-01', label: 'January 2026', firstDay: '2026-01-01', lastDay: '2026-01-31',
     fromIso: '2026-01-01T00:00:00.000Z', toIso: '2026-02-01T00:00:00.000Z' } as any;
-  const blockers = closeBlockers(rec, w, null, null, null, null, Date.parse('2026-03-01T00:00:00Z'));
+  // `passes` is the seventh argument now: `closeBlockers` could not see the
+  // month's pass sales at all, so no currency question was ever asked of them.
+  const blockers = closeBlockers(rec, w, null, null, null, null, null, Date.parse('2026-03-01T00:00:00Z'));
   ok(blockers.some((b) => b.kind === 'read_truncated'),
     'and a month cannot be closed over it — got ' + blockers.map((b) => b.kind).join(','));
   ok(!blockers.some((b) => b.kind === 'read_failed'),

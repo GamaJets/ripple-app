@@ -28,6 +28,7 @@ const closeOf = (o: Partial<MonthClose> = {}): MonthClose => ({
   ended: true,
   income: {
     takenCents: 420000, count: 14, byMethod: [], currencies: ['GBP'],
+    mixedCurrency: false,
     unattributed: 1, unattributedCents: 2500, unattributedCurrency: 'GBP',
   },
   purpose: [],
@@ -35,13 +36,13 @@ const closeOf = (o: Partial<MonthClose> = {}): MonthClose => ({
     issued: 6, settledCents: 300000, settled: 4,
     outstandingCents: 90000, outstanding: 2,
     overdueCents: 45000, overdue: 1,
-    droppedCents: null, dropped: 0, currencies: ['GBP'],
+    droppedCents: null, dropped: 0, currencies: ['GBP'], mixedCurrency: false,
   },
   arrears: {
     issued: 9, settledCents: 300000, settled: 4,
     outstandingCents: 155000, outstanding: 5,
     overdueCents: 60000, overdue: 2,
-    droppedCents: null, dropped: 0, currencies: ['GBP'],
+    droppedCents: null, dropped: 0, currencies: ['GBP'], mixedCurrency: false,
   },
   check: null,
   payroll: {

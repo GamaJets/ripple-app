@@ -62,6 +62,7 @@ import { summarise, type Membership, type MembershipPlan, type MembershipStatus 
 import type { Visit } from './gymVisits';
 import { rowsOf, type Slice } from './memberView';
 import { isoDay } from './weekStart';
+import { localDate } from './localDate';
 import { MIN_COHORT_FOR_RATE, pointsPerMember, rateOf } from './gymRetention';
 
 const DAY = 86_400_000;
@@ -248,8 +249,8 @@ export interface PassMoney {
   /** How many of those memberships are active right now. */
   followingActive: number;
   /**
-   * The currency the priced passes were sold in, or null when NONE of them
-   * states one.
+   * The currency the priced passes were sold in, or null when they do not agree
+   * on one — which includes both "they name two" and "none of them names any".
    *
    * It used to be `currencies[0] ?? 'AED'`, so a gym whose passes carry no
    * currency was told its pass revenue in dirhams — a figure with a currency
@@ -257,10 +258,15 @@ export interface PassMoney {
    * gym actually sold in. Null instead: the amount is known and the money it is
    * in is not, and `money()` withholds the figure rather than denominating it
    * for us.
+   *
+   * Read from `passRevenueCents` and not derived here — see `moneyOf`, which
+   * derived it twice and disagreed with itself about the answer.
    */
   currency: string | null;
-  /** True when the passes were sold in more than one currency, in which case
-   *  `passCents` adds unlike things and the screen must say so. */
+  /** True when the PRICED passes were not all in one money — two stated codes,
+   *  or a stated code beside a priced row that states none. `passCents` then
+   *  adds unlike things and the screen must say so. Not `currency == null`: an
+   *  unpriced pass has no price to be denominated and never sets this. */
   mixedCurrency: boolean;
 }
 
@@ -420,10 +426,25 @@ export function buildHolders(
   }
 
   // First door visit per pass id, when the door log is here at all.
+  //
+  // `gym_visits.entered_at` is a `timestamptz` and PostgREST serialises it in
+  // UTC, so `String(v.enteredAt).slice(0, 10)` named GREENWICH's calendar day:
+  // somebody who walked in at 18:00 on 11 January in California was printed
+  // under "First seen at the door — 2026-01-12", a day they were not there.
+  // `isoDay(localDate(...))` reads the LOCAL parts of the same instant. The
+  // `<` comparison below is unaffected — the local day is monotonic in the
+  // instant, so the earliest day string is still the earliest visit.
+  //
+  // `firstUsedOn` is only ever DISPLAYED; nothing subtracts it. `daysToJoin`
+  // is measured from the issue date through `daysBetween`, whose ends are
+  // UTC-anchored by `dateOf` on purpose — see the `utc-day-ok` note there.
+  // This day and those days are not compared with one another.
   const firstUse = new Map<string, string>();
   for (const v of visits ?? []) {
     if (!v.passId) continue;
-    const at = String(v.enteredAt).slice(0, 10);
+    const entered = localDate(v.enteredAt);
+    if (!entered) continue;
+    const at = isoDay(entered);
     const seen = firstUse.get(v.passId);
     if (!seen || at < seen) firstUse.set(v.passId, at);
   }
@@ -592,8 +613,33 @@ export function moneyOf(
   memberships: Membership[] | null,
   plans: MembershipPlan[] | null,
 ): PassMoney {
-  const { cents, priced, total } = passRevenueCents(passes);
-  const currencies = [...new Set(passes.map((p) => p.currency).filter(Boolean))];
+  // Every field from `passRevenueCents`, including the two this function used
+  // to derive again on the line below.
+  //
+  // What that line was: `[...new Set(passes.map((p) => p.currency).filter(
+  // Boolean))]`, over the RAW column of EVERY pass. Three things wrong with it,
+  // and each one moved a figure on /passes:
+  //
+  //  · It did not normalise, so a row written ' gbp ' and a row written 'GBP'
+  //    were two currencies. A gym with one currency and one price list read
+  //    "across more than one currency" under its pass takings and a red
+  //    paragraph under that, and the total itself was withheld — `currency`
+  //    came out as whichever spelling sorted first out of a Set, so `money()`
+  //    printed a figure denominated by an accident of insertion order.
+  //  · It counted UNPRICED rows. A pass with no price contributes nothing to
+  //    the sum, so its currency cannot make the sum mixed; a free guest pass
+  //    stamped EUR withheld a month of GBP takings it was not part of.
+  //  · `.filter(Boolean)` dropped the nulls, which is the same fault from the
+  //    other side and the one that mattered most: a PRICED pass stating no
+  //    currency vanished from the set, so GBP-plus-unstated read as plain GBP
+  //    and the tile printed a total with an amount of unknown money inside it,
+  //    labelled £, with nothing anywhere saying so.
+  //
+  // `passRevenueCents` answers all three — normalised, priced rows only, and
+  // `null` kept as a member of the set — and it is the same answer the month
+  // close reads through `ClosePasses`. Derived once so the two screens cannot
+  // quote different money for the same passes.
+  const { cents, priced, total, currency, mixedCurrency } = passRevenueCents(passes);
 
   // The memberships held by people who joined AFTER a pass, and only those.
   // `summarise` from gymRecord does the interval arithmetic — a yearly plan is
@@ -615,8 +661,8 @@ export function moneyOf(
     passesTotal: total,
     followingMrrCents,
     followingActive,
-    currency: currencies[0] ?? null,
-    mixedCurrency: currencies.length > 1,
+    currency,
+    mixedCurrency,
   };
 }
 

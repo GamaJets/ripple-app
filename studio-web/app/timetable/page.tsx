@@ -29,6 +29,7 @@ import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
 import { Fetched, useFetched } from '@/components/Fetched';
 import { settledLanded } from '@lib/readLanded';
+import { changedFailure } from '@lib/changedRows';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchEquipment, capacityFor, type Equipment } from '@lib/gymEquipment';
 import {
@@ -719,6 +720,37 @@ function EditClass({ gymClass, tenantId, zone, onClose }: {
     try {
       if (scope === 'series' && gymClass.seriesId) {
         const n = await updateSeriesFrom(supabase, gymClass.seriesId, gymClass.startsAt, patch);
+        // The COUNT, not the absence of an error. `updateSeriesFrom` ends
+        // `.select('id')` and hands back a row count, and this interpolated it
+        // into a success sentence without ever comparing it to zero — the exact
+        // defect src/lib/changedRows.ts was written for, quoted in its own
+        // header. The fix landed on the phone half (app/(trainer)/classes.tsx)
+        // and not here. The two policies on `gym_classes` FILTER rather than
+        // refuse, so an owner editing a series they may not touch matches no
+        // rows, gets no error, and read "0 classes changed, from this one
+        // onward" over a term that is still on.
+        //
+        // Zero can only be a refusal here: the class this sheet was opened on
+        // is itself in the series and its own start is the lower bound, so
+        // `series_id = X and starts_at >= gymClass.startsAt` matches at least
+        // that row for anybody permitted to change it.
+        //
+        // `changedFailure` and not `assertChanged`, which is what the phone
+        // uses: throwing would land in the catch below, and that catch words
+        // itself through `writeFailedText`. A locally thrown Error carries no
+        // `code` and no `status`, so `writeFate` classifies it 'unanswered' and
+        // the owner would be told the change "was sent and nothing came back …
+        // it may have been saved and only the reply lost". The server answered.
+        // It matched nothing. Saying otherwise is a worse sentence than the one
+        // being replaced.
+        const refused = changedFailure('That change to the series', n);
+        if (refused) {
+          setMsg(refused);
+          // Deliberately NOT `onClose(true)`: that closes the sheet and tells
+          // the board to refresh, which is how a refused write comes to look
+          // like a saved one.
+          return;
+        }
         setMsg(`${n} ${n === 1 ? 'class' : 'classes'} changed, from this one onward. The ones already past are untouched — they are the attendance record.`);
       } else {
         // Time only ever moves one occurrence. See the note above.

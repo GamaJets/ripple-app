@@ -40,6 +40,15 @@ import {
 } from '@lib/closeCosts';
 import { readByIds } from '@lib/idLookup';
 import { NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
+// The sentence for a figure whose own rows hold two moneys. Imported rather
+// than worded here for the reason sumCurrency.ts gives at length: it is a
+// different missing thing from `NO_CURRENCY_NOTE` above, and a screen that
+// prints the tenant sentence over a mixed ledger sends an owner to Ops to set
+// a field that is already right.
+import { MIXED_CURRENCY_NOTE } from '@lib/sumCurrency';
+// Only for the label map below, so a reconciliation state with no caption is a
+// compile error rather than a blank line above the sentence.
+import type { Reconciliation } from '@lib/finReconcile';
 import { sliceLoading, sliceReady, sliceFailed, sliceNote, type Slice } from '@lib/memberView';
 // The reader's locale, the GYM's zone. This page is printed for an accountant
 // and every date on it is a month boundary; drawn on the reader's clock, a
@@ -619,7 +628,22 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, sessionFee,
   // What the INVOICES agree on, and what the PASSES agree on. Null when a set
   // disagrees with itself, which is not a currency and must not borrow one.
   const owedCcy = rec.invoices.state === 'ready' ? agreedCurrency(rec.invoices.rows) : null;
-  const passesCcy = rec.passes.state === 'ready' ? agreedCurrency(rec.passes.rows) : null;
+  // The passes side does NOT recompute, and that is the fix rather than the
+  // shortcut. `agreedCurrency(rec.passes.rows)` asked the wrong set twice over:
+  // `fetchPasses` takes no window, so it ran over every pass this gym has ever
+  // issued — September's first EUR walk-in withheld August's GBP pass total on
+  // the August close, a month whose own passes are all in one money — and it ran
+  // over UNPRICED rows, so a pass with no price and a currency of its own
+  // withheld a figure it contributes nothing to, having contributed nothing to
+  // it.
+  //
+  // `buildClose` already filtered the passes to the month, and
+  // `passRevenueCents` already agreed the currency across the PRICED rows only,
+  // normalised — the `summarise`/`contributing` rule gymRecord.ts states, one
+  // level down. Reading its answer is what keeps the currency and the sum
+  // derived from the same rows; deriving it again from a wider set is how they
+  // came to disagree.
+  const passesCcy = c.passes?.currency ?? null;
 
   return (
     <>
@@ -1368,11 +1392,29 @@ function Reconciliation({ c, rec }: { c: MonthClose; rec: CloseRecord }) {
   );
 }
 
-const RECON_LABEL: Record<string, string> = {
+/**
+ * The caption above the reconciliation, one per state of it.
+ *
+ * Keyed `Record<Reconciliation['state'], string>` and not `Record<string,
+ * string>`, which is the whole reason this comment exists. With the loose key
+ * type a state with no entry is not an error anywhere — it is `undefined`
+ * rendered into a `<div className="micro">`, which is an EMPTY LINE. That is
+ * what 'unreadable' did: `moneyCheck` returns it for all three of its
+ * uncomparable cases, and each of those printed a complete, correct sentence
+ * about two currencies underneath a caption that was not there. Blank is the
+ * one thing a screen that refuses must never be, and the type now says so.
+ */
+const RECON_LABEL: Record<Reconciliation['state'], string> = {
   no_record: 'Nothing to check against',
   not_entered: 'The register says money arrived that no payment shows',
   agrees: 'Agrees',
   differs: 'Does not reconcile',
+  // Covers all three of `MoneyCheck.uncomparable` — mixed payments, mixed
+  // invoices, and the two sides each agreeing with themselves in a different
+  // money. It says the comparison did not happen and not that it failed: the
+  // records are readable and this month is not one number. Which of the three,
+  // and in which currencies, is the sentence below.
+  unreadable: 'Not compared — these records are not in one money',
 };
 
 /* ── what is unmarked, and therefore blocking payroll ──────────────────────── */
@@ -1485,8 +1527,11 @@ function Payroll({ c, rec, currency, zone, nowMs, sessionFee, feeCents }: {
 /* ── passes ────────────────────────────────────────────────────────────────── */
 
 function Passes({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currency: TenantCurrency }) {
-  // Null for either silence — no priced pass, or no gym currency — and the
-  // sentence below has a branch for each.
+  // Null for three separate silences — no priced pass, priced passes in two
+  // moneys, and priced passes that name no money at all — and the sentence
+  // below has a branch for each. `currency` is what the month's PRICED passes
+  // agree on, never `tenants.currency`, so none of the three is the gym having
+  // left a field unset and none of them says so.
   const passesTotal = c.passes ? money(c.passes.cents, currency) : null;
   return (
     <Section
@@ -1508,7 +1553,35 @@ function Passes({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
                   ? <>and not one carried a recorded price — so the amount is unknown, not nothing.</>
                   : passesTotal
                     ? <>{passesTotal} recorded across {c.passes.priced} of them.</>
-                    : <>{c.passes.priced} of them carr{c.passes.priced === 1 ? 'ies' : 'y'} a recorded price, but what they come to cannot be stated because {NO_CURRENCY_NOTE}.</>}
+                    /* ── two silences, and neither is the gym's currency setting ──
+                       This branch used to say the total could not be stated
+                       "because this gym has not set its currency". The figure
+                       above is denominated by the PASSES, not by the tenant, so
+                       that sentence named a field that is very often already
+                       set — and sent an owner to Ops to fix something that was
+                       never the reason. The two real reasons are kept apart the
+                       way app/(owner)/financials.tsx keeps its own several
+                       silences apart, because an owner acts differently on each:
+                       a month genuinely holding two moneys is not a mistake and
+                       there is nothing to go and correct, while priced passes
+                       that record no currency at all is a desk that has been
+                       taking money without saying in what. */
+                    : c.passes.mixedCurrency
+                      ? <>
+                          {c.passes.priced} of them carr{c.passes.priced === 1 ? 'ies' : 'y'} a recorded price
+                          {c.passes.currencies.length > 1
+                            ? <>, in {c.passes.currencies.join(' and ')}</>
+                            : c.passes.currencies.length === 1
+                              ? <>, some in {c.passes.currencies[0]} and at least one stating no currency at all</>
+                              : null}
+                          . {MIXED_CURRENCY_NOTE}
+                        </>
+                      : <>
+                          {c.passes.priced} of them carr{c.passes.priced === 1 ? 'ies' : 'y'} a recorded price, but not
+                          one of those rows says what money it was taken in, so there is no figure to write here.
+                          The gym&rsquo;s own currency is not the answer: it is not evidence about what somebody was
+                          charged at the desk.
+                        </>}
                 {' '}Nothing links a pass row to a payment row, so this is not added to
                 what came in: summing them would double-count every pass paid for at
                 the desk, and ignoring it would drop the rest. Both records are shown

@@ -35,6 +35,9 @@
 // numbers; `emptyFinances()` is all zeros and `hasFigures()` gates the review
 // so an un-filled screen shows an empty state instead of fiction.
 import { deltaLabel } from './deltaLabel';
+// The one formatter that knows how many places a currency has. See `moneyIn`
+// below for what this file was doing instead.
+import { wholeMoney } from './coachMoney';
 
 export interface FinInputs {
   // MAJOR units, in the gym's own currency — whatever `tenants.currency` says
@@ -76,8 +79,30 @@ export interface FinReview {
  * `tenants.currency` is nullable on purpose and a gym that has not set one has
  * no figure to be told — see `reviewFinances`, which withholds the sentence
  * rather than picking a currency for it.
+ *
+ * ── AND IT IS NO LONGER A FORMATTER OF ITS OWN ────────────────────────────
+ *
+ * Fixing the hardcoded code left the rest of the line in place: a private
+ * `${currency} ${Math.round(n).toLocaleString()}`, which is the same figure
+ * this product formats through `currencyDecimals` everywhere else, rounded to
+ * a whole unit and printed by hand. `app/(owner)/financials.tsx` renders these
+ * amounts TWICE on one screen — the KPI tiles through `gymMoney`, which is
+ * `wholeMoney`, and the sentences under them through this — so a Bahraini owner
+ * who typed 12500.25 of net profit read "BHD 12,500.250" in the tile and
+ * "BHD 12,500" three lines below it, and had no way to tell which was their
+ * money. Rounding a figure the owner typed is not a display choice at that
+ * point; it is a second, quieter answer to the same question.
+ *
+ * `wholeMoney` asks `currencyDecimals` how many places the money actually has —
+ * none for the sixteen zero-decimal currencies, three for the five that have a
+ * thousand minor units — and nothing here divides, multiplies or rounds. It
+ * also returns null for a currency nobody stated, which is exactly the silence
+ * `m()` below already branches on, so the null-currency wording is unchanged.
+ *
+ * The bare `.toLocaleString()` that went with it was never the defect;
+ * scripts/check-locale.mjs permits it. The rounding and the bypass were.
  */
-const moneyIn = (n: number, currency: string) => `${currency} ${Math.round(n).toLocaleString()}`;
+const moneyIn = (n: number, currency: string): string | null => wholeMoney(n, currency);
 // A `pct` helper stood here with no caller and a ternary whose two arms were
 // both the empty string — a sign-prefix somebody removed without removing the
 // branch. Left in place it is a formatter the next person reaches for believing

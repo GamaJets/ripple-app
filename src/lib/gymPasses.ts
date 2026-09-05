@@ -18,6 +18,10 @@ import { assertWrote } from './wroteRows';
 // because a pass and a membership that disagree about what day it is at the
 // same front desk is worse than either being wrong on its own.
 import { todayIso } from './memberRecord';
+// The one rule about what a set of money rows is denominated in. Imported
+// rather than restated: `passRevenueCents` below used to have no opinion about
+// currency at all, and a rule about money that exists twice becomes two rules.
+import { normaliseCurrency } from './gymRecord';
 
 type Queryable = { from: (table: string) => any };
 
@@ -222,18 +226,69 @@ export { expiryFor };
  * Returns null when not one pass carries a recorded price, so the caller shows
  * a dash. Passes with no price are skipped rather than treated as zero, and
  * `priced` reports how many were counted so the screen can say "from 12 of 19".
+ *
+ * ── THE CURRENCY IS PART OF THE ANSWER ────────────────────────────────────
+ *
+ * The parameter used to be `Pick<GymPass, 'paidCents'>`, which narrowed away
+ * the one field that decides whether `cents` is an amount of anything.
+ * `GymPass.currency` is nullable ON PURPOSE — a row that does not say — and
+ * `gym_passes.currency` carries no ISO check, so a gym that changed currency
+ * mid-month has two codes in one set of rows. Adding those together produces a
+ * number, and a number is exactly what a caller then puts a currency label in
+ * front of.
+ *
+ * So the same two facts `moneyOf` in src/lib/passConversion.ts already derives
+ * for /passes are returned from HERE instead, once, beside the sum they are
+ * about: `currency` (the one every priced pass agrees on, or null) and
+ * `mixedCurrency` (they do not agree, so `cents` is not an amount of any
+ * money). A caller holding `mixedCurrency: true` must withhold the figure or
+ * say what it is; it may not denominate it.
+ *
+ * `cents` itself is deliberately UNCHANGED in the mixed case — still the raw
+ * sum, not null — because "not one pass carried a price" and "the prices are in
+ * two currencies" are different facts and callers already word the first one.
+ * Nulling it here would put the first sentence over the second.
+ *
+ * Only the PRICED rows are asked about currency, exactly as `summarise` in
+ * gymRecord.ts asks only the plans that contribute to its MRR: a pass carrying
+ * no price contributes nothing to the sum, so a currency it does or does not
+ * state cannot make the sum unsayable.
  */
 export function passRevenueCents(
-  passes: Pick<GymPass, 'paidCents'>[],
-): { cents: number | null; priced: number; total: number } {
+  passes: Pick<GymPass, 'paidCents' | 'currency'>[],
+): {
+  cents: number | null;
+  priced: number;
+  total: number;
+  currency: string | null;
+  /** The codes the priced rows actually STATE, normalised and sorted, so a
+   *  caller can name them in a sentence. A row stating none has no code to put
+   *  in one and is carried by `mixedCurrency` instead. */
+  currencies: string[];
+  mixedCurrency: boolean;
+} {
   let cents = 0;
   let priced = 0;
+  // `string | null` and not `string`: a priced pass that states no currency is
+  // its own member of this set, so GBP-plus-unstated reads as a disagreement
+  // rather than as GBP. Normalised for the reason `normaliseCurrency` exists —
+  // ' gbp ' and 'GBP' are one currency, and a set that says otherwise withholds
+  // a total the gym is entitled to.
+  const codes = new Set<string | null>();
   for (const p of passes) {
     if (p.paidCents == null) continue;
     cents += p.paidCents;
     priced += 1;
+    codes.add(normaliseCurrency(p.currency));
   }
-  return { cents: priced === 0 ? null : cents, priced, total: passes.length };
+  return {
+    cents: priced === 0 ? null : cents,
+    priced,
+    total: passes.length,
+    currency: codes.size === 1 ? ([...codes][0] ?? null) : null,
+    currencies: [...codes].filter((c): c is string => c != null).sort(),
+    mixedCurrency: codes.size > 1,
+  };
 }
 
 export interface PassSummary {
