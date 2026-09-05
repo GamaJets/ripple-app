@@ -37,6 +37,7 @@
 // what put 180 lb into somebody's calorie target.
 import { lbToKg } from './units';
 import { ASSUMED_METRIC_NOTE, CONVERTED_FROM_LB_NOTE, type SheetUnit } from './inbodySheet';
+import type { ScanMetrics } from './inbodyMetrics';
 
 /** How far apart two readings of the same printed figure may be and still be
  *  the same figure. OCR drops a decimal point and a model rounds; 2% of 180 is
@@ -162,16 +163,16 @@ const VISION_MASS_KEYS = [
  * object is still built rather than the input being handed back, so a caller
  * cannot come to depend on identity that only holds on one of the two paths.
  */
-export function visionMetricsKg<T extends Record<string, number | undefined>>(
-  metrics: T | null | undefined,
+export function visionMetricsKg(
+  metrics: ScanMetrics | null | undefined,
   verdict: UnitVerdict,
-): T | undefined {
+): ScanMetrics | undefined {
   if (metrics == null) return undefined;
-  const out: Record<string, number | undefined> = { ...metrics };
-  if (!verdict.convert) return out as T;
+  const out: ScanMetrics = { ...metrics };
+  if (!verdict.convert) return out;
   for (const key of VISION_MASS_KEYS) {
     const v = out[key];
     if (typeof v === 'number' && Number.isFinite(v)) out[key] = lbToKg(v);
   }
-  return out as T;
+  return out;
 }
