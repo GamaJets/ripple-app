@@ -256,7 +256,7 @@ export default function OwnerOps() {
   // the provider is still in flight when this screen mounts — and then never
   // catch up.
   const [feeDraft, setFeeDraft] = useState<string | null>(null);
-  const feeField = feeDraft ?? sessionFeeFieldValue(tenant?.sessionFee ?? null);
+  const feeField = feeDraft ?? sessionFeeFieldValue(tenant?.sessionFee ?? null, tenant?.currency ?? null);
   const [feeBusy, setFeeBusy] = useState(false);
   const [feeMsg, setFeeMsg] = useState<{ bad: boolean; text: string } | null>(null);
 
@@ -439,7 +439,7 @@ export default function OwnerOps() {
 
   const feeKnown = tenantStatus === 'ready' && !!tenant;
   const saveFee = async () => {
-    const parsed = parseSessionFee(feeField);
+    const parsed = parseSessionFee(feeField, tenant?.currency ?? null);
     if (parsed.kind === 'bad') { setFeeMsg({ bad: true, text: parsed.reason }); return; }
     const next = parsed.kind === 'clear' ? null : parsed.fee;
     setFeeBusy(true); setFeeMsg(null);

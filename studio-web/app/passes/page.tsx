@@ -626,13 +626,31 @@ function Holders({ c, rec, ccy, contacts }: {
         : <span className="dash">none</span>,
     },
     {
-      key: 'paid', header: 'Paid for passes', value: (h) => h.paidCents, numeric: true,
-      // `amount`, not `money`: this is a sum over one person's passes with no
-      // currency of its own, and `money()` was writing the currency it defaults
-      // to over it. Two silences, and they are different — nobody recorded a
-      // price, or the gym never said what money it takes.
-      render: (h) => amount(h.paidCents, ccy)
-        ?? <span className="dash">{h.paidCents == null ? 'no price recorded' : NO_CURRENCY_NOTE}</span>,
+      // Sorted on the figure only where the figure is one — a cross-currency
+      // sum is not a bigger number and must not order the table either.
+      key: 'paid', header: 'Paid for passes', value: (h) => (h.paidCurrency ? h.paidCents : null), numeric: true,
+      /* ── the currency the PASSES agree on, never the gym's setting ──────
+         This was `amount(h.paidCents, ccy)`. `paidCents` is `passRevenueCents`'s
+         blind sum over every priced pass this person holds, and `ccy` is
+         `tenants.currency` as it stands today, so:
+
+           · a holder with a GBP pass and an AED pass had the two ADDED and the
+             result printed in whatever the gym charges in now — and adding
+             minor units across a two-place and a zero-place currency is wrong
+             twice over;
+           · a gym that has ever changed its currency had every holder's figure
+             silently re-denominated.
+
+         The "Taken for passes" tile at the top of this same screen already
+         refuses both, on `money(m.passCents, m.currency)`, and /members carries
+         the identical repair with the identical reasoning. This was the row
+         that was left. */
+      render: (h) => h.paidCents == null
+        ? <span className="dash">no price recorded</span>
+        : money(h.paidCents, h.paidCurrency)
+          ?? <span className="dash">{h.paidMixed
+            ? `priced in ${h.paidCurrencies.length ? h.paidCurrencies.join(' and ') : 'more than one currency'} — not one figure`
+            : NO_CURRENCY_NOTE}</span>,
     },
   ];
 

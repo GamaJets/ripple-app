@@ -156,8 +156,13 @@ export function gymRollup(trainers: TrainerLike[], sessionFee: number | null): G
     sessions30,
     delivered30,
     unmarked30,
+    // Not `Math.round(delivered30 * sessionFee)`. Rounding money to a whole
+    // unit is a zero-decimal-places assumption, and there is no default number
+    // of places in this product — see the note on `payroll30For` in
+    // src/lib/gymTrainers.ts, which held the identical line and the identical
+    // defect. The formatters take the places from the gym's own currency.
     payroll30:
-      sessionFee == null || unmarked30 > 0 ? null : Math.round(delivered30 * sessionFee),
+      sessionFee == null || unmarked30 > 0 ? null : delivered30 * sessionFee,
     atRiskCount,
     atRiskClients,
     avgClientsPerTrainer: n ? Math.round((clients / n) * 10) / 10 : null,

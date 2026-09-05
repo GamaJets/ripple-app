@@ -59,6 +59,9 @@ import { minorFromWhole } from '@lib/coachMoney';
 // total below. `sessions.rate_currency` (supabase/parts/1010) is what makes it
 // answerable at all.
 import { runCurrency, totalNote } from '@lib/gymRateCurrency';
+// The middle of the three layers that price a session — what this gym pays THIS
+// coach. RLS hands a coach their own row and nobody else's.
+import { fetchTrainerPay, withResolvedRates, type PayIndex } from '@lib/gymPay';
 import { payPolicyOf, PAY_POLICY_LABEL, type PayPolicyCode } from '@lib/gymPolicy';
 import { isoDate } from '@lib/format';
 import { assertWhole, capLimit, capped, readAll, type CappedRead } from '@lib/rowCap';
@@ -433,6 +436,24 @@ export default function CoachEarnings() {
   // into the banner would tell a coach their month could not be read.
   const [namesErr, setNamesErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  /**
+   * What this gym pays THIS coach per delivered session — the middle of the
+   * three layers that price a session, which this screen did not read at all.
+   *
+   * /payroll resolves all three and pays from that. This one resolved the first
+   * and the third, so a coach on a rate above their gym's standard fee was
+   * shown, on their own earnings screen, what they would be owed if they were
+   * on the standard one. RLS scopes the read to their own row
+   * (`gym_trainer_pay_self_r`), so the same call the owner console makes hands a
+   * coach exactly the one row that concerns them.
+   *
+   * The error is held apart from the map: an empty map is "this gym has set no
+   * per-coach rate", which is a real and common answer, and a failed read is
+   * "we do not know", which must not be shown as the former on the screen a
+   * coach checks their pay against.
+   */
+  const [pay, setPay] = useState<PayIndex | null>(null);
+  const [payErr, setPayErr] = useState<string | null>(null);
 
   /**
    * Read the month.
@@ -452,9 +473,13 @@ export default function CoachEarnings() {
     // sessions — so a screen whose only fault was not knowing what had been paid
     // would instead report a month with no work in it, and the two wrong facts
     // point opposite ways.
-    const [sRes, rRes] = await Promise.allSettled([
+    const [sRes, rRes, pRes] = await Promise.allSettled([
       fetchMySessions(tenantId, trainerId, p.fromIso, p.toIso),
       fetchMySettlements(tenantId, trainerId),
+      // Under the same allSettled and for the same reason: a refused rates read
+      // must not empty the month, and it must not be reported as "this gym pays
+      // you its standard fee".
+      fetchTrainerPay(supabase, tenantId),
     ]);
 
     // A read superseded by a month change writes nothing and stamps nothing:
@@ -469,18 +494,22 @@ export default function CoachEarnings() {
     setRuns(rRes.status === 'fulfilled' ? rRes.value.rows : null);
     setRunsPrefix(rRes.status === 'fulfilled' && rRes.value.truncated);
 
+    setPay(pRes.status === 'fulfilled' ? pRes.value : null);
+
     const s = failure(sRes, 'your sessions for this month');
     const r = failure(rRes, 'what you have already been paid');
-    setSessionsErr(s); setRunsErr(r);
+    const pf = failure(pRes, 'what this gym pays you per session');
+    setPayErr(pf);
 
-    const trouble = [s, r].filter((x): x is string => x !== null);
+    const trouble = [s, r, pf].filter((x): x is string => x !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
+    setSessionsErr(s); setRunsErr(r);
 
     // Whole means both came back. `useFetched` stamps only on a whole read, so
     // a month read without the settlements — the half that says what has
     // already been paid — leaves the stamp where it was rather than dating an
     // outstanding figure that is missing its subtrahend.
-    return settledLanded([sRes, rRes]);
+    return settledLanded([sRes, rRes, pRes]);
   }, []);
 
   useEffect(() => {
@@ -576,6 +605,56 @@ export default function CoachEarnings() {
   // owed, and the banner below now says which of the two cases this is.
   const policy: PayPolicy = stated ?? PAY_DELIVERED_ONLY;
 
+  /**
+   * The sessions with the rate that actually applies written onto each one —
+   * and the money that rate is in written beside it.
+   *
+   * ── The defect this closes ────────────────────────────────────────────
+   *
+   * This screen priced its FIGURE with the gym's standard fee (`fallbackCents`
+   * went to `payrollByTrainer`) and priced its OUTSTANDING SET without it
+   * (`settleableSessions(sessions, policy)` — no fourth argument). Those two
+   * functions have already disagreed about what "priced" means once, and
+   * src/lib/gymSessions.ts carries the account of it at length; this is that
+   * disagreement, reintroduced on the one screen a coach reads to check they
+   * are being paid.
+   *
+   * What it looked like: `settleableSessions` keeps only rows whose
+   * `rateCents ?? fallback` is non-null, so with no fallback passed it dropped
+   * every session priced off the gym's fee. `outstanding` came back empty,
+   * `settlementBlocker(total)` saw nothing wrong — the fee HAD priced them for
+   * the total — and the Outstanding tile rendered `amount(0, ccy)` under the
+   * note "Nothing outstanding for this trainer." Verified against the live
+   * database: of 262 sessions, ONE carries `rate_cents`. So that tile read a
+   * confident nought for essentially every coach at every gym, while /payroll
+   * — which resolves rates up front, exactly as below — showed the owner the
+   * real figure for the same month.
+   *
+   * ── Why `withResolvedRates` and not two layers here ──────────────────
+   *
+   * It is the same function /payroll and /sessions resolve with, so all three
+   * screens read one implementation of the three-layer rule rather than three
+   * copies of it — which is what the header of src/lib/gymPay.ts says the whole
+   * shape exists for. It also brings the middle layer, `gym_trainer_pay`, which
+   * this screen never read: a coach on a rate above their gym's standard fee
+   * was shown what the standard fee would pay them.
+   *
+   * The gym's currency goes in with the fee so the unit is resolved with the
+   * number. `runCurrency` reads `rateCurrency` off the rows, so without it a
+   * set of fallback-priced sessions is a run in no money at all and the tile
+   * falls through to a dash — for a figure whose unit is simply the gym's, one
+   * column away. Where the gym has named no currency, `fallbackCents` is null
+   * anyway and nothing is priced: unpriced work stays unpriced rather than
+   * becoming a nought.
+   *
+   * Nothing is written to the database. `sessions.rate_cents` still holds only
+   * what was snapshotted at delivery.
+   */
+  const priced = useMemo(
+    () => (sessions ? withResolvedRates(sessions, pay ?? new Map(), fallbackCents, ccy) : null),
+    [sessions, pay, fallbackCents, ccy],
+  );
+
   // Stays null while `sessions` is null rather than collapsing to []. Handing
   // payrollByTrainer an empty array produces a confident, complete-looking month
   // in which nothing is owed, built out of a read that never returned.
@@ -586,8 +665,12 @@ export default function CoachEarnings() {
     // at the moment the tab was opened. A session finished since then simply did
     // not appear, and a coach reading a complete-looking month has no reason to
     // go and ask about it.
-    () => sessions && payrollByTrainer(sessions, policy, fallbackCents, nowMs),
-    [sessions, policy, fallbackCents, nowMs],
+    //
+    // `null` and not `fallbackCents`: the fallback has already been applied by
+    // `priced` above, and passing it a second time is exactly how the three
+    // functions came to disagree the first time. /payroll takes the same care.
+    () => priced && payrollByTrainer(priced, policy, null, nowMs),
+    [priced, policy, nowMs],
   );
   const total = useMemo(() => payrollTotal(lines ?? []), [lines]);
 
@@ -679,13 +762,26 @@ export default function CoachEarnings() {
       ? null
       : gymError && total.priced < total.payable
         ? `Your gym could not be read, so there is no session fee to price the rest with: ${gymError}`
-        : settlementBlocker(total);
+        // A refused rates read leaves every session priced at the gym's
+        // STANDARD fee, and for a coach on their own rate that is silently
+        // smaller than what they are owed. On the screen a coach checks their
+        // pay against, a figure that can only be too low is worse than a dash:
+        // the dash sends them back in a minute, the figure sends them to their
+        // owner with the wrong number.
+        : payErr
+          ? `${payErr} Without it every session here would be priced at the gym's standard fee, which is the wrong figure if you are on a rate of your own — so this month has no outstanding total yet.`
+          : settlementBlocker(total);
 
   // Marked, payable, priced, and not already stamped with a payment. Paying by
   // session rather than by period is what stops a late-marked session being paid
   // twice — and it is why a coach's outstanding figure can be right even when a
   // previous month was settled before they finished marking it.
-  const outstanding = sessions ? settleableSessions(sessions, policy) : null;
+  //
+  // Over `priced`, not over `sessions`: see the note on `priced` above. Given
+  // the raw rows this filter drops every session the gym's standard fee is what
+  // pays for, which is all of them at a gym that snapshots no rates — and the
+  // tile then says nought is owed.
+  const outstanding = priced ? settleableSessions(priced, policy) : null;
 
   /*
    * The outstanding figure, and the single most important decision on this
@@ -983,9 +1079,14 @@ function Blocking({ sessions, unread, namesUnread, ccy, zone }: {
     // somebody says what happened, this session has no price, only a rate it
     // might turn out to be worth.
     { key: 'worth', header: 'If delivered', value: (s) => s.rateCents ?? -1, numeric: true,
+      // The row's own currency where it has one, for the reason the Rate column
+      // below gives: a snapshotted rate is denominated in what the gym charged
+      // in then, not in what it charges in now.
       render: (s) => s.rateCents == null
         ? <span className="dash">not rated</span>
-        : <span className="dash">{amount(s.rateCents, ccy) ?? NO_CURRENCY_NOTE}</span> },
+        : <span className="dash">
+            {(s.rateCurrency ? money(s.rateCents, s.rateCurrency) : amount(s.rateCents, ccy)) ?? NO_CURRENCY_NOTE}
+          </span> },
   ];
   return (
     <Section
@@ -1053,9 +1154,17 @@ function LineItems({ sessions, unread, namesUnread, policy, ccy, zone }: {
       // Null is a session nobody priced, which is not a session worth nothing.
       // Shown as unrated so it reads as a question for the gym rather than as a
       // free hour.
+      //
+      // The row's OWN currency wins where it has one. This was `amount(s.rateCents,
+      // ccy)` flat — the gym's code today, printed over a rate snapshotted in
+      // whatever the gym charged in at the time. That is the substitution the
+      // note on the settled total above calls the defect, made row by row: a gym
+      // that changed `tenants.currency` had every line item in its history
+      // relabelled by this column, with nothing marking a single one.
       render: (s) => s.rateCents == null
         ? <span className="dash">not rated</span>
-        : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
+        : ((s.rateCurrency ? money(s.rateCents, s.rateCurrency) : amount(s.rateCents, ccy))
+            ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
     { key: 'paid', header: 'Paid', value: (s) => (s.settlementId ? 1 : 0), numeric: true,
       render: (s) => s.settlementId
         ? <span style={{ color: 'var(--ink2)' }}>settled</span>

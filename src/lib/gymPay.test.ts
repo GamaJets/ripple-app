@@ -16,6 +16,10 @@ import {
   type PayIndex, type TrainerPay,
 } from './gymPay';
 import { payrollByTrainer, settleableSessions, settlementAmount, PAY_DELIVERED_ONLY, type PtSession } from './gymSessions';
+// The reader that decides whether a run may be paid as one payment. It is the
+// consumer of the currency `withResolvedRates` now carries, and it is what makes
+// those assertions about behaviour rather than about a field.
+import { settleCurrencyBlocker } from './gymRateCurrency';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -91,6 +95,57 @@ const rate = (o: Partial<TrainerPay> = {}): TrainerPay => ({
   const bare = withResolvedRates([sess({ id: 'z', trainerId: 't9' })], pay, null);
   eq(bare[0].rateCents, null, 'unpriced stays unpriced');
   eq(settleableSessions(bare, PAY_DELIVERED_ONLY, NOW).length, 0, 'and is not settleable');
+}
+
+/* ── the unit is resolved with the number ──────────────────────────────────
+ *
+ * A resolved row used to carry an amount and no currency, and
+ * `settleCurrencyBlocker` reads a run of those as 'unrecorded' — which it
+ * deliberately waves through at a gym that HAS a currency. So a coach whose own
+ * rate row states the code the gym charged in before it changed would have been
+ * settled with the new code stamped on the old money, on a permanent payment
+ * row an accountant reconciles. These are the assertions that keep the unit
+ * travelling with the figure, layer by layer.
+ */
+{
+  const pay: PayIndex = new Map([
+    ['t1', rate({ sessionRateCents: 4500, currency: 'EUR' })],
+    ['t2', rate({ trainerId: 't2', sessionRateCents: 9000, currency: null })],
+  ]);
+  const rows = withResolvedRates([
+    sess({ id: 'snap', trainerId: 't1', rateCents: 3000, rateCurrency: 'AED' }),
+    sess({ id: 'own', trainerId: 't1' }),
+    sess({ id: 'ownNoCcy', trainerId: 't2' }),
+    sess({ id: 'fee', trainerId: 't9' }),
+  ], pay, 2500, 'gbp');
+
+  const of = (id: string) => rows.find((s) => s.id === id)!;
+  eq(of('snap').rateCurrency, 'AED',
+    'layer 1: a snapshotted rate keeps its snapshotted currency — nothing here may relabel history');
+  eq(of('snap').rateCents, 3000, 'and its amount is untouched too');
+  eq(of('own').rateCurrency, 'EUR',
+    'layer 2: the coach’s own rate is in the coach’s own rate currency, NOT the gym’s — which is exactly the run that must be refused rather than settled as GBP');
+  eq(of('ownNoCcy').rateCurrency, 'GBP',
+    'a rate row stating no currency falls back to the gym’s, because that is what it was set in');
+  eq(of('fee').rateCurrency, 'GBP',
+    'layer 3: the gym’s standard fee is in the gym’s currency, normalised to upper case');
+  eq(of('fee').rateCents, 2500, 'and still carries the fee itself');
+
+  // The whole reason the unit is carried: `settleCurrencyBlocker` can now SEE
+  // the disagreement. Without a currency on the resolved row this run reads as
+  // 'unrecorded' and settles silently.
+  const clash = settleCurrencyBlocker([of('own')], 'GBP');
+  ok(clash !== null, 'a coach’s EUR rate at a GBP gym blocks the settlement instead of being stamped GBP');
+  ok(/EUR/.test(clash ?? '') && /GBP/.test(clash ?? ''),
+    'and the refusal names both codes, because the person reading it has to know which is which');
+
+  eq(settleCurrencyBlocker([of('fee')], 'GBP'), null,
+    'while a run priced off the gym’s own fee agrees with the gym and settles as it always did');
+
+  // And with no gym currency nothing is priced anyway, so nothing is labelled.
+  const unnamed = withResolvedRates([sess({ id: 'x', trainerId: 't9' })], new Map(), null, null);
+  eq(unnamed[0].rateCurrency, null, 'a gym that has named no currency labels nothing');
+  eq(unnamed[0].rateCents, null, 'and prices nothing, which is not a rate of zero');
 }
 
 /* ── one currency, or none ─────────────────────────────────────────────────── */

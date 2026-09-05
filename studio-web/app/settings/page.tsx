@@ -178,7 +178,10 @@ export default function Settings() {
     if (profile) {
       setName(profile.name ?? '');
       setCurrency(profile.currency ?? '');
-      setFee(sessionFeeFieldValue(profile.sessionFee));
+      // The gym's STORED currency, not the picker's — this runs before the
+      // owner has touched anything, so the two are the same, and reading the
+      // profile keeps the fee's places tied to the money it was recorded in.
+      setFee(sessionFeeFieldValue(profile.sessionFee, profile.currency ?? null));
       // '' is "the gym has not decided", which is a real option in the picker
       // and not the same as the conservative reading. An unrecognised stored
       // value lands here too, and the note beside the control says so.
@@ -284,7 +287,11 @@ export default function Settings() {
   // Checked as the owner types, so a refusal arrives beside the field rather
   // than after the save. Each is null when the field is fine.
   const nameCheck = parseGymName(name);
-  const feeCheck = parseSessionFee(fee);
+  // Validated against the currency SELECTED in the form rather than the stored
+  // one, so an owner switching this gym to KWD can immediately type the third
+  // place — and one switching to JPY is told a fractional yen is not an amount
+  // before they save, not after.
+  const feeCheck = parseSessionFee(fee, currency || null);
   const ccyCheck = parseTenantCurrency(currency);
   const colCheck = parseBrandColor(colour);
   const tzCheck = parseGymZone(zone);

@@ -267,7 +267,12 @@ export default function OwnerRevenue() {
   // `roll.payroll30` is delivered × fee over an empty roster, which is a real 0
   // when the gym delivered nothing and an unknown when we could not ask.
   const revenue30 = trainersUnknown ? null : roll.payroll30;
-  const valuePerClient = revenue30 != null && roll.clients > 0 ? Math.round(revenue30 / roll.clients) : null;
+  // Not `Math.round(...)`. That is "to zero decimal places", which is the right
+  // number of places for sixteen currencies and wrong for the rest: at a gym
+  // with twelve clients and a payroll of 728.50 it printed 61 where the figure
+  // is 60.71, and `gymMoney` then drew it as "GBP 61.00". The formatter takes
+  // the places from the gym's own currency; nothing needs rounding first.
+  const valuePerClient = revenue30 != null && roll.clients > 0 ? revenue30 / roll.clients : null;
   // Said the same way wherever a figure is missing for the same reason, so an
   // owner reading three dashes is told once what they mean.
   const unreadNote = 'Your trainers could not be read';

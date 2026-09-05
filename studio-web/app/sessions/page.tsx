@@ -39,6 +39,11 @@ import { money } from '@lib/gymRecord';
 // sessions it covers were not priced in.
 import { minorFromWhole } from '@lib/coachMoney';
 import { settleCurrencyBlocker } from '@lib/gymRateCurrency';
+// What this gym pays THIS coach, which is the middle of the three layers that
+// price a session. This screen had two of them — the rate snapshotted at
+// delivery, then the gym's standard fee — and settled from that, while /payroll
+// settled the same sessions from all three. See the note on `priced` below.
+import { fetchTrainerPay, withResolvedRates, type PayIndex } from '@lib/gymPay';
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
 // What became of a past session, in one vocabulary shared with both phone apps.
 import { pastSessions, pastVerdict, tallyPast, PAST_STATE_LABEL } from '@lib/sessionHistory';
@@ -98,6 +103,18 @@ export default function Sessions() {
   const [policyCode, setPolicyCode] = useState<string | null>(null);
   const [settlements, setSettlements] = useState<Settlement[] | null>(null);
   const [settlementsError, setSettlementsError] = useState<string | null>(null);
+  /**
+   * What this gym pays each coach per delivered session, and whether that could
+   * be read.
+   *
+   * Null for the map and a sentence for the error are two different facts and
+   * both matter to a button that hands money over: an empty map prices every
+   * coach at the gym's standard fee, which is the RIGHT answer for a gym that
+   * has set no per-coach rates and the WRONG one — silently smaller, for exactly
+   * the coaches paid above the standard — when the read was refused.
+   */
+  const [pay, setPay] = useState<PayIndex | null>(null);
+  const [payErr, setPayErr] = useState<string | null>(null);
   const [settling, setSettling] = useState<string | null>(null);
   /**
    * How the money is actually moving, for the settlement about to be recorded.
@@ -124,9 +141,13 @@ export default function Sessions() {
    * to that is to pay them all again.
    */
   const load = useCallback(async (tenantId: string): Promise<boolean> => {
-    const [rows, runs] = await Promise.allSettled([
+    const [rows, runs, rates] = await Promise.allSettled([
       fetchSessions(supabase, tenantId, new Date(Date.now() - 30 * DAY).toISOString()),
       fetchSettlements(supabase, tenantId),
+      // Its own read, under the same allSettled, for the same reason as the
+      // other two: a refused rates query must not empty the session record, and
+      // it must not be reported as "this gym pays nobody a special rate".
+      fetchTrainerPay(supabase, tenantId),
     ]);
 
     if (rows.status === 'fulfilled') {
@@ -148,11 +169,20 @@ export default function Sessions() {
       setSettlementsError((runs.reason as any)?.message ?? 'Could not read what has already been paid.');
     }
 
-    // Whole means both came back. `useFetched` stamps only on a whole read, so
-    // a refresh that lost the settlements — the read that says what has ALREADY
-    // been paid — leaves the stamp where it was rather than dating a screen
-    // that is about to offer to pay those sessions again.
-    return settledLanded([rows, runs]);
+    if (rates.status === 'fulfilled') {
+      setPay(rates.value);
+      setPayErr(null);
+    } else {
+      setPay(null);
+      setPayErr((rates.reason as any)?.message ?? 'Could not read what this gym pays each coach.');
+    }
+
+    // Whole means all three came back. `useFetched` stamps only on a whole read,
+    // so a refresh that lost the settlements — the read that says what has
+    // ALREADY been paid — or the per-coach rates leaves the stamp where it was
+    // rather than dating a screen that is about to offer to pay those sessions
+    // again, or to pay them at the wrong rate.
+    return settledLanded([rows, runs, rates]);
   }, []);
 
   useEffect(() => {
@@ -264,9 +294,44 @@ export default function Sessions() {
   // pricing it at zero.
   const feeCents = useMemo(() => minorFromWhole(sessionFee, ccy), [sessionFee, ccy]);
 
+  /**
+   * The sessions with the rate that actually applies written onto each one.
+   *
+   * ── The disagreement this closes ──────────────────────────────────────
+   *
+   * Three layers price a session: the rate snapshotted at delivery, then what
+   * this gym pays THIS coach (`gym_trainer_pay.session_rate_cents`), then the
+   * gym's standard fee. /payroll resolves all three, through this same
+   * function. This screen resolved TWO — it never read the per-coach table at
+   * all — and it has a Settle button.
+   *
+   * So a gym paying a senior coach above its standard fee saw one figure on
+   * /payroll and a smaller one here, out of the same sessions; and settling
+   * from here handed over the smaller one and stamped every session with a
+   * settlement id, which is what stops them ever appearing on a run again. The
+   * coach is short by the difference and the record says they were paid in
+   * full. src/lib/gymSessions.ts carries the account of the last time two
+   * readers of these rows disagreed about what "priced" means; this is the same
+   * defect between two screens rather than inside one.
+   *
+   * Nothing is written to the database — `sessions.rate_cents` still holds only
+   * what was snapshotted at delivery, and `recordSettlement` snapshots what was
+   * actually handed over.
+   */
+  const priced = useMemo(
+    // The gym's currency goes with the fee, so a resolved row carries its unit
+    // as well as its amount — `settleCurrencyBlocker` below reads it, and a row
+    // with no unit is one it waves through. See the note on `withResolvedRates`.
+    () => (sessions ? withResolvedRates(sessions, pay ?? new Map(), feeCents, ccy) : null),
+    [sessions, pay, feeCents, ccy],
+  );
+
   const lines = useMemo(
-    () => sessions && payrollByTrainer(sessions, policy, feeCents, nowMs),
-    [sessions, policy, feeCents, nowMs],
+    // `null` and not `feeCents`: the fallback has already been applied by
+    // `priced` above. Passing it twice is how these functions came to hold two
+    // opinions of the same money the first time.
+    () => priced && payrollByTrainer(priced, policy, null, nowMs),
+    [priced, policy, nowMs],
   );
   // Totalling nothing gives zeros, which is fine here only because every place
   // that renders one of them checks `sessions` first and shows a dash instead.
@@ -281,9 +346,9 @@ export default function Sessions() {
   // every trainer is square, which is the single most expensive wrong sentence
   // on this page.
   const owed = useMemo(() => {
-    if (sessions === null) return null;
+    if (priced === null) return null;
     const byTrainer = new Map<string, { name: string | null; rows: PtSession[]; unmarked: number }>();
-    for (const s of sessions) {
+    for (const s of priced) {
       const e = byTrainer.get(s.trainerId)
         ?? { name: s.trainerName, rows: [] as PtSession[], unmarked: 0 };
       if (isAwaitingOutcome(s, nowMs)) e.unmarked += 1;
@@ -296,15 +361,22 @@ export default function Sessions() {
     // settlement, and the list of sessions the settlement would cover. Read from
     // two different clocks they can disagree, and the disagreement is a button
     // that pays for a period one of them still calls unfinished.
-    for (const s of settleableSessions(sessions, policy, nowMs, feeCents)) {
+    for (const s of settleableSessions(priced, policy, nowMs)) {
       const e = byTrainer.get(s.trainerId);
       if (e) e.rows.push(s);
     }
     return [...byTrainer.entries()]
       .map(([trainerId, e]) => ({
         trainerId, name: e.name, rows: e.rows, unmarked: e.unmarked,
-        cents: settlementAmount(e.rows, feeCents),
+        cents: settlementAmount(e.rows),
         blocker: settleBlocker(e.rows, e.unmarked)
+          // A refused rates read prices every coach at the gym's standard fee,
+          // which for anybody on their own rate is silently smaller — and this
+          // button writes a permanent payment row and stamps the sessions paid.
+          // A banner saying "do not settle" is not a guard; this is.
+          ?? (e.rows.length && payErr
+            ? `${payErr} Until it does, this run would pay every coach the gym's standard fee, which is the wrong figure for anyone on their own rate.`
+            : null)
           ?? (e.rows.length && !ccy
             ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
             : null)
@@ -316,7 +388,7 @@ export default function Sessions() {
           ?? settleCurrencyBlocker(e.rows, ccy),
       }))
       .filter((x) => x.rows.length > 0 || x.unmarked > 0);
-  }, [sessions, policy, feeCents, ccy, nowMs]);
+  }, [priced, policy, payErr, ccy, nowMs]);
 
   /* ── the record, one month at a time ──────────────────────────────────────
    *

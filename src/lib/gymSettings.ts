@@ -44,7 +44,17 @@ export type FeeInput =
  * src/ui/tenant.tsx for the AED 63 / AED 6,300 incident that came of getting
  * that boundary wrong in the other direction.
  */
-export function parseSessionFee(input: string | null | undefined): FeeInput {
+import { readMinorAmount, majorFromMinor, currencyDecimals } from './coachMoney';
+
+export function parseSessionFee(
+  input: string | null | undefined,
+  /**
+   * The gym's own currency, which decides how many decimal places are an
+   * amount. Required, and not defaulted: this function used to hardcode two,
+   * and a default is the same hardcoding written somewhere less visible.
+   */
+  currency: string | null | undefined,
+): FeeInput {
   const raw = String(input ?? '').trim().replace(/[,\s]/g, '');
   if (!raw) return { kind: 'clear' };
   // A currency symbol is what a person types when asked for an amount of money,
@@ -53,10 +63,23 @@ export function parseSessionFee(input: string | null | undefined): FeeInput {
   // a second opinion on that and is simply dropped.
   const bare = raw.replace(/^[^\d.-]+/, '');
   if (/^-/.test(bare) || /-/.test(raw)) return { kind: 'bad', reason: 'A session fee cannot be negative.' };
-  if (!/^\d+(\.\d{1,2})?$/.test(bare)) {
-    return { kind: 'bad', reason: 'Enter the fee as a number — 75, or 82.50. Leave it empty if you have not set one.' };
-  }
-  const fee = Number(bare);
+  // ── the rule this function used to carry the opposite of ────────────────
+  //
+  // It was `/^\d+(\.\d{1,2})?$/` — two decimal places, hardcoded, with no
+  // currency in the signature at all. So an owner of a Kuwaiti gym typing
+  // 82.505, an ordinary Gulf amount, was told "Enter the fee as a number — 75,
+  // or 82.50", and the only fee they could record was one they do not charge.
+  // Five currencies hold thousandths and sixteen hold none.
+  //
+  // `readMinorAmount` is the house reader and takes the places from the
+  // currency. `false` is the chargeable flag: a session fee is a RECORD of
+  // what this gym pays, not a charge handed to Stripe, so Stripe's
+  // "the third place must be a nought" rule does not apply to it.
+  const read = readMinorAmount(bare, currency, false);
+  if (!read.ok) return { kind: 'bad', reason: read.reason };
+  // Back to WHOLE units, which is what `tenants.session_fee` stores (it is a
+  // numeric, not a *_cents column) — through the currency, never through 100.
+  const fee = Number(majorFromMinor(read.minorUnits, currency));
   if (!Number.isFinite(fee)) return { kind: 'bad', reason: 'That is not an amount.' };
   // Zero is refused rather than cleared. It is a typed answer, so it is treated
   // as one — and the answer it gives ("every session is free") makes payroll,
@@ -74,9 +97,24 @@ export function parseSessionFee(input: string | null | undefined): FeeInput {
  * '' rather than '0', for the same reason as above: an empty field invites the
  * owner to type the fee, and a pre-filled 0 invites them to accept it.
  */
-export function sessionFeeFieldValue(fee: number | null | undefined): string {
+export function sessionFeeFieldValue(
+  fee: number | null | undefined,
+  /** The gym's currency, for the same reason `parseSessionFee` takes one. */
+  currency: string | null | undefined,
+): string {
   if (fee == null || !Number.isFinite(fee)) return '';
-  return Number.isInteger(fee) ? String(fee) : fee.toFixed(2);
+  // A whole number is offered back whole — "75", not "75.00" — which is what an
+  // owner typed and what they expect to see.
+  if (Number.isInteger(fee)) return String(fee);
+  // This ended `fee.toFixed(2)`, which is two places whatever the money is: a
+  // Kuwaiti gym was offered its own fee back with the third place cut off, and
+  // would then have saved the truncated figure by accepting the field. Rounding
+  // to the currency's own places is `majorFromMinor`'s job, and it needs minor
+  // units, so the whole figure is scaled by the currency's factor first —
+  // never by a hundred.
+  const dp = currencyDecimals(currency);
+  if (dp == null) return String(fee);
+  return majorFromMinor(Math.round(fee * 10 ** dp), currency);
 }
 
 export type NameInput =

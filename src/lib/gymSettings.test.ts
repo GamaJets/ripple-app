@@ -25,52 +25,94 @@ const why = (f: FeeInput | NameInput): string => ('reason' in f ? f.reason : '')
 
 /* ── blank clears, zero does not ────────────────────────────────────────── */
 
-// The distinction the whole file exists for, from both sides.
-eq(parseSessionFee('').kind, 'clear', 'an empty field withdraws the fee rather than storing a number');
-eq(parseSessionFee('   ').kind, 'clear', 'and so does a field holding only spaces');
-eq(parseSessionFee(null).kind, 'clear', 'null in is the same as blank in');
-eq(parseSessionFee(undefined).kind, 'clear', 'so is undefined');
+// Every call now carries the gym's currency. It used to carry none, and the
+// two decimal places it assumed instead are what part 2400 is about: an owner
+// of a Kuwaiti gym could not type their own fee. GBP here so the assertions
+// below read as they always did.
+const GBP = 'GBP';
 
-eq(parseSessionFee('0').kind, 'bad', 'a typed zero is refused, not quietly treated as "not set"');
-ok(/nothing/i.test(why(parseSessionFee('0'))), 'and the refusal says what a zero fee would do to every delivered session');
-eq(parseSessionFee('0.00').kind, 'bad', 'however it is spelled');
+// The distinction the whole file exists for, from both sides.
+eq(parseSessionFee('', GBP).kind, 'clear', 'an empty field withdraws the fee rather than storing a number');
+eq(parseSessionFee('   ', GBP).kind, 'clear', 'and so does a field holding only spaces');
+eq(parseSessionFee(null, GBP).kind, 'clear', 'null in is the same as blank in');
+eq(parseSessionFee(undefined, GBP).kind, 'clear', 'so is undefined');
+
+eq(parseSessionFee('0', GBP).kind, 'bad', 'a typed zero is refused, not quietly treated as "not set"');
+ok(/nothing/i.test(why(parseSessionFee('0', GBP))), 'and the refusal says what a zero fee would do to every delivered session');
+eq(parseSessionFee('0.00', GBP).kind, 'bad', 'however it is spelled');
 
 /* ── what an owner actually types ───────────────────────────────────────── */
 
-eq(feeOf(parseSessionFee('75')), 75, 'a whole fee');
-eq(feeOf(parseSessionFee('82.50')), 82.5, 'and one with minor units');
-eq(feeOf(parseSessionFee(' 82.5 ')), 82.5, 'surrounding space is not the owner changing their mind');
-eq(feeOf(parseSessionFee('1,250')), 1250, 'a thousands separator is how people write a four-figure fee');
-eq(feeOf(parseSessionFee('AED 300')), 300, 'a currency the gym is already denominated in is dropped, not refused');
-eq(feeOf(parseSessionFee('£45')), 45, 'and so is a symbol — the currency is tenants.currency, not this field');
+eq(feeOf(parseSessionFee('75', GBP)), 75, 'a whole fee');
+eq(feeOf(parseSessionFee('82.50', GBP)), 82.5, 'and one with minor units');
+eq(feeOf(parseSessionFee(' 82.5 ', GBP)), 82.5, 'surrounding space is not the owner changing their mind');
+eq(feeOf(parseSessionFee('1,250', GBP)), 1250, 'a thousands separator is how people write a four-figure fee');
+eq(feeOf(parseSessionFee('AED 300', 'AED')), 300, 'a currency the gym is already denominated in is dropped, not refused');
+eq(feeOf(parseSessionFee('£45', GBP)), 45, 'and so is a symbol — the currency is tenants.currency, not this field');
 
-eq(parseSessionFee('-5').kind, 'bad', 'a negative fee is refused');
-ok(/negative/i.test(why(parseSessionFee('-5'))), 'and named as such rather than as a typo');
-eq(parseSessionFee('AED -5').kind, 'bad', 'including behind a currency symbol, where the regex would otherwise strip the minus');
-eq(parseSessionFee('lots').kind, 'bad', 'a word is not a fee');
-eq(parseSessionFee('75.999').kind, 'bad', 'three decimal places do not fit numeric(8,2) and are refused here, not by Postgres');
-eq(parseSessionFee('7.5.0').kind, 'bad', 'nor does a version number');
+eq(parseSessionFee('-5', GBP).kind, 'bad', 'a negative fee is refused');
+ok(/negative/i.test(why(parseSessionFee('-5', GBP))), 'and named as such rather than as a typo');
+eq(parseSessionFee('AED -5', 'AED').kind, 'bad', 'including behind a currency symbol, where the regex would otherwise strip the minus');
+eq(parseSessionFee('lots', GBP).kind, 'bad', 'a word is not a fee');
+eq(parseSessionFee('7.5.0', GBP).kind, 'bad', 'nor does a version number');
+
+/* ── the places are the CURRENCY's, which is the whole of part 2400 ─────── */
+
+// The refusal that was wrong. This said "three decimal places do not fit
+// numeric(8,2) and are refused here, not by Postgres" — true of the old column
+// and of no currency. `tenants.session_fee` is numeric(11,3) now.
+eq(parseSessionFee('75.999', GBP).kind, 'bad', 'a third place is still refused in a two-place currency');
+eq(feeOf(parseSessionFee('82.505', 'KWD')), 82.505,
+  'but a Kuwaiti gym can state its own fee, which is the defect part 2400 was written for');
+eq(feeOf(parseSessionFee('12.345', 'BHD')), 12.345, 'and so can a Bahraini one');
+eq(parseSessionFee('82.5055', 'KWD').kind, 'bad', 'a FOURTH place is not an amount in any currency');
+eq(feeOf(parseSessionFee('6000', 'JPY')), 6000, 'a zero-decimal currency takes a whole fee');
+eq(parseSessionFee('6000.50', 'JPY').kind, 'bad', 'and refuses a fractional yen, which does not exist');
+eq(parseSessionFee('75', null).kind, 'bad',
+  'and with no currency recorded there is no such thing as an amount — the fee is refused rather than assumed to be two places');
+
+/* ── what the field offers back ─────────────────────────────────────────── */
+
+// `sessionFeeFieldValue` ended `fee.toFixed(2)`, so a Kuwaiti gym was shown its
+// own fee with the third place cut off — and saved the truncated figure by
+// accepting the field.
+eq(sessionFeeFieldValue(75, GBP), '75', 'a whole fee is offered back whole, not as 75.00');
+eq(sessionFeeFieldValue(82.5, GBP), '82.50', 'and a part one at the currency\u2019s own places');
+eq(sessionFeeFieldValue(82.505, 'KWD'), '82.505', 'all three of them, for a currency that has three');
+eq(sessionFeeFieldValue(6000, 'JPY'), '6000', 'and none for a currency that has none');
+eq(sessionFeeFieldValue(null, GBP), '', 'a gym that has not set one is offered an empty field, never a 0');
 
 /* ── the column's own ceiling ───────────────────────────────────────────── */
 
-// numeric(8,2). Anything past this raises 22003 at the database — AFTER the
-// sheet has closed and the owner has been told it saved.
-eq(MAX_SESSION_FEE, 999999.99, 'the ceiling is what numeric(8,2) actually holds');
-eq(feeOf(parseSessionFee('999999.99')), 999999.99, 'the largest fee the column can take is accepted');
-eq(parseSessionFee('1000000').kind, 'bad', 'and the first one it cannot is refused');
-ok(/zeros/i.test(why(parseSessionFee('100000000'))), 'a run of zeros is described as a run of zeros');
+// MAX_SESSION_FEE is six digits before the point, which is why part 2400 chose
+// numeric(11,3) rather than numeric(8,3) — the latter holds only five, and the
+// ALTER would have failed on a gym charging 250000 in a currency where that is
+// an ordinary rate.
+eq(MAX_SESSION_FEE, 999999.99, 'the ceiling is six figures and two places');
+eq(feeOf(parseSessionFee('999999.99', GBP)), 999999.99, 'the largest fee the column can take is accepted');
+eq(parseSessionFee('1000000', GBP).kind, 'bad', 'and the first one it cannot is refused');
+ok(/zeros/i.test(why(parseSessionFee('100000000', GBP))), 'a run of zeros is described as a run of zeros');
 
 /* ── what the field opens with ──────────────────────────────────────────── */
 
-eq(sessionFeeFieldValue(null), '', 'a gym with no fee opens with an empty field, never a zero to accept');
-eq(sessionFeeFieldValue(undefined), '', 'and so does one whose tenant has not loaded');
-eq(sessionFeeFieldValue(75), '75', 'a round fee comes back round');
-eq(sessionFeeFieldValue(82.5), '82.50', 'and a minor-units fee comes back whole');
-eq(sessionFeeFieldValue(0), '0', 'a stored zero is shown, so an owner can see the thing they need to correct');
+eq(sessionFeeFieldValue(null, GBP), '', 'a gym with no fee opens with an empty field, never a zero to accept');
+eq(sessionFeeFieldValue(undefined, GBP), '', 'and so does one whose tenant has not loaded');
+eq(sessionFeeFieldValue(75, GBP), '75', 'a round fee comes back round');
+eq(sessionFeeFieldValue(82.5, GBP), '82.50', 'and a minor-units fee comes back whole');
+eq(sessionFeeFieldValue(0, GBP), '0', 'a stored zero is shown, so an owner can see the thing they need to correct');
 
 // Round trip: whatever the field shows must parse back to what it came from.
-for (const fee of [75, 82.5, 1250, 999999.99]) {
-  eq(feeOf(parseSessionFee(sessionFeeFieldValue(fee))), fee, `the field round-trips ${fee} unchanged`);
+// Run per currency, because the whole defect was one currency's places being
+// applied to another's money.
+for (const [ccy, fees] of [
+  ['GBP', [75, 82.5, 1250, 999999.99]],
+  ['KWD', [75, 82.505, 12.345]],
+  ['JPY', [6000, 250000]],
+] as const) {
+  for (const fee of fees) {
+    eq(feeOf(parseSessionFee(sessionFeeFieldValue(fee, ccy), ccy)), fee,
+      `the field round-trips ${fee} ${ccy} unchanged`);
+  }
 }
 
 /* ── the gym's name ─────────────────────────────────────────────────────── */

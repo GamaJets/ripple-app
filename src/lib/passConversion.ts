@@ -193,8 +193,37 @@ export interface PassHolder {
    *  joined. Measured from the issue date because every pass has one; the date
    *  it was first used is on `firstUsedOn` and is often missing. */
   daysToJoin: number | null;
-  /** What they paid for their passes, or null when no price was recorded. */
+  /** What they paid for their passes, or null when no price was recorded.
+   *
+   *  A BLIND SUM across whatever currencies their passes were priced in —
+   *  `passRevenueCents` adds every priced row and only afterwards asks whether
+   *  they agreed. It may only be printed when `paidCurrency` is non-null, which
+   *  is the same rule the "Taken for passes" tile on /passes already follows. */
   paidCents: number | null;
+  /**
+   * The one currency those passes agree on, or null when they do not.
+   *
+   * ── Why this had to be carried and not re-derived ─────────────────────
+   *
+   * `passHolders` computed the sum with `const { cents } = passRevenueCents(…)`
+   * and threw the currency half away, so /passes rendered it as `amount(paidCents,
+   * ccy)` — the gym's currency TODAY, over a total that may be two currencies
+   * added together. A gym that has ever changed `tenants.currency` had every
+   * holder's figure relabelled; a holder with a GBP pass and an AED pass had
+   * them summed into a number that is not an amount of anything. Three inches
+   * away on the same screen, "Taken for passes" refuses exactly that.
+   *
+   * Null has two causes and the screen tells them apart with `paidMixed`:
+   * nobody recorded a currency on the priced passes, or they recorded more
+   * than one.
+   */
+  paidCurrency: string | null;
+  /** True when the priced passes state more than one currency — including
+   *  "some state one and some state none", which is also two answers. */
+  paidMixed: boolean;
+  /** The codes those passes actually state, sorted, for the sentence under the
+   *  dash. Empty when none of them states one. */
+  paidCurrencies: string[];
 }
 
 /* ── the whole picture ─────────────────────────────────────────────────────── */
@@ -486,7 +515,10 @@ export function buildHolders(
       if (at && (firstUsedOn == null || at < firstUsedOn)) firstUsedOn = at;
     }
 
-    const { cents } = passRevenueCents(theirs);
+    // Every field, not just `cents`. This was `const { cents } = …`, and the
+    // half it dropped is the half that says whether the sum is an amount of
+    // money at all — see `paidCurrency` on PassHolder.
+    const { cents, currency, currencies, mixedCurrency } = passRevenueCents(theirs);
 
     out.push({
       holderId,
@@ -503,6 +535,9 @@ export function buildHolders(
       statusNow: outcome === 'joined-after' ? after!.status : covering?.status ?? null,
       daysToJoin: joinedOn && firstPassOn ? daysBetween(firstPassOn, joinedOn) : null,
       paidCents: cents,
+      paidCurrency: currency,
+      paidMixed: mixedCurrency,
+      paidCurrencies: currencies,
     });
   }
 

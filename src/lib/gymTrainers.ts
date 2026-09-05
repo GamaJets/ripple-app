@@ -195,13 +195,34 @@ export async function fetchGymTrainers(sb: Queryable, tenantId: string): Promise
  * behind a variable named `cents`, and the payroll screen showed AED 63.00
  * where the gym owed AED 6,300.
  *
- * If you need it formatted like every other figure, multiply by 100 first.
+ * If you need it in minor units, `minorFromWhole(figure, currency)` in
+ * src/lib/coachMoney.ts is the door — NOT `* 100`. The factor is a property of
+ * the currency: there are no sen in a yen and a thousand fils in a dinar, and
+ * every caller of this already goes through it (src/lib/exportShare.ts,
+ * studio-web/app/page.tsx). The line this replaced said "multiply by 100 first",
+ * which was the instruction that put the hundreds there in the first place.
+ *
+ * ── AND IT IS NOT ROUNDED TO A WHOLE UNIT ─────────────────────────────────
+ *
+ * This ended `Math.round(delivered * sessionFee)`. `Math.round` on an amount of
+ * money is "to zero decimal places", which is the right number of places for
+ * exactly sixteen currencies and the wrong one for every other. At a gym whose
+ * fee is 62.50, twenty-one delivered sessions are 1,312.50 and this returned
+ * 1,313 — which studio-web/app/page.tsx then scaled through `minorFromWhole`
+ * and printed as "GBP 1,313.00", to two decimal places, as though it were
+ * exact. The owner dashboard, the trainers screen, the console home tile and
+ * the shared export all read this one figure, so all four were fifty pence over
+ * and none of them could tell.
+ *
+ * Nothing rounds here now. The formatters take the number of places from the
+ * currency — `wholeMoney`/`gymMoney` on the phone, `amount()` in the console —
+ * so a yen figure still renders with none and a dinar figure with three.
  */
 export function payroll30For(trainers: GymTrainer[], sessionFee: number | null): number | null {
   if (sessionFee == null) return null;
   if (trainers.some((t) => t.unmarked30 > 0)) return null;
   const delivered = trainers.reduce((a, t) => a + t.delivered30, 0);
-  return Math.round(delivered * sessionFee);
+  return delivered * sessionFee;
 }
 
 /** Why payroll cannot be priced yet, or null when it can. */

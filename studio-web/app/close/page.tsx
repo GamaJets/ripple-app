@@ -655,7 +655,7 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, sessionFee,
         c={c} currency={currency} monthKey={monthKey} zone={zone} tenantId={tenantId} me={me}
         closes={closes} closesErr={closesErr} costs={costs} onChange={onChange}
       />
-      <Handoff c={c} rec={rec} currency={currency} gymName={gymName} monthKey={monthKey} />
+      <Handoff c={c} rec={rec} currency={currency} owedCcy={owedCcy} gymCcy={gymCcy} gymName={gymName} monthKey={monthKey} />
 
       {c.warning ? <Banner tone="crit">{c.warning}</Banner> : null}
       {feeRead === 'failed' ? (
@@ -682,32 +682,51 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, sessionFee,
               : `${c.income.count} payment${c.income.count === 1 ? '' : 's'}`
           }
         />
+        {/* ── the three tiles that wore the payments' currency ─────────────
+            `m()` is `money(cents, currency)` and `currency` is what the month's
+            PAYMENTS agree on — its own prop doc, twenty lines up, says "only
+            figures the payments produced may wear it". These three are not
+            figures the payments produced. Billed and Still owed come off
+            `gym_invoices`; Payroll comes off `sessions.rate_cents` and
+            `tenants.session_fee`.
+
+            So a gym whose August card takings happened to be all AED printed
+            its GBP invoices and its GBP payroll as dirhams — three inches above
+            the Owed and Payroll sections below, which the very next comment
+            block says were repaired for exactly this and which render the same
+            numbers correctly. One screen, one month, two answers, and the wrong
+            one is the one at the top in bold. */}
         <Kpi
           label="Billed this month"
-          text={c.owed ? m(sumOrNull(c.owed.settledCents, c.owed.outstandingCents)) : null}
+          text={c.owed ? money(sumOrNull(c.owed.settledCents, c.owed.outstandingCents), owedCcy) : null}
           note={
             !c.owed ? stateNote(rec.invoices, 'invoices')
               : c.owed.issued === 0 ? 'no invoice issued'
+              // A dash for want of a currency needs its own sentence, or the
+              // invoice count reads as an explanation of a missing figure.
+              : !owedCcy ? `${c.owed.issued} invoice${c.owed.issued === 1 ? '' : 's'}, and they do not all state the same currency — so there is no one total`
               : `${c.owed.issued} invoice${c.owed.issued === 1 ? '' : 's'}${c.owed.dropped ? `, ${c.owed.dropped} void or written off` : ''}`
           }
         />
         <Kpi
           label="Still owed"
-          text={c.arrears ? m(c.arrears.outstandingCents) : null}
+          text={c.arrears ? money(c.arrears.outstandingCents, owedCcy) : null}
           note={
             !c.arrears ? stateNote(rec.invoices, 'invoices')
               : c.arrears.outstanding === 0 ? 'nothing outstanding'
+              : !owedCcy ? `${c.arrears.outstanding} open, and they do not all state the same currency — so there is no one total`
               : `${c.arrears.outstanding} open, ${c.arrears.overdue} past due`
           }
         />
         <Kpi
           label="Payroll"
-          text={c.payroll ? m(c.payroll.total.cents) : null}
+          text={c.payroll ? money(c.payroll.total.cents, gymCcy) : null}
           note={
             !c.payroll ? stateNote(rec.sessions, 'one-to-ones')
               : c.payroll.total.unmarked > 0
                 ? `NOT final — ${c.payroll.total.unmarked} unmarked`
                 : c.payroll.total.payable === 0 ? 'no payable sessions'
+                : !gymCcy ? `${c.payroll.total.delivered} delivered, and ${NO_CURRENCY_NOTE}`
                 : `${c.payroll.total.delivered} delivered`
           }
         />
@@ -1073,15 +1092,24 @@ function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr,
  * they see, and a file that opened with the takings would be a file whose
  * refusals are below the fold.
  */
-function Handoff({ c, rec, currency, gymName, monthKey }: {
+function Handoff({ c, rec, currency, owedCcy, gymCcy, gymName, monthKey }: {
   c: MonthClose; rec: CloseRecord; currency: TenantCurrency;
+  /** What the month's INVOICES agree on. "Still owed" is denominated in this,
+   *  not in what the card takings happened to be in. */
+  owedCcy: TenantCurrency;
+  /** `tenants.currency`. Payroll comes off the session fee and the snapshotted
+   *  rates, so this is its unit. */
+  gymCcy: TenantCurrency;
   gymName: string | null; monthKey: string;
 }) {
   const download = () => {
     const parts: string[] = [];
 
     parts.push(toCsv(
-      ['Report', 'Gym', 'Month', 'From', 'To', 'Verdict', 'Currency', 'Generated'],
+      // "Takings currency", not "Currency". `currencyOf` derives it from the
+      // month's PAYMENTS; the invoice and payroll figures below have their own
+      // and a single header field cannot speak for all three.
+      ['Report', 'Gym', 'Month', 'From', 'To', 'Verdict', 'Takings currency', 'Generated'],
       [[
         'Month-end close', gymName ?? '(gym name unread)', c.window.label,
         c.window.firstDay, c.window.lastDay,
@@ -1096,15 +1124,25 @@ function Handoff({ c, rec, currency, gymName, monthKey }: {
       ? toCsv(['Kind', 'What is in the way'], c.blockers.map((b) => [b.kind, b.text]), false)
       : 'Nothing is in the way.\n');
 
-    parts.push('\nHEADLINE FIGURES — minor units, in the currency above\n');
+    /* ── each headline figure carries its OWN currency ───────────────────
+       This block said "minor units, in the currency above" and the currency
+       above is `currencyOf`, which is what the month's PAYMENTS agree on. Only
+       Taken is a figure the payments produced: Still owed comes off
+       `gym_invoices` and Payroll off `sessions.rate_cents` and
+       `tenants.session_fee`. So the sheet an accountant reconciles against a
+       bank statement declared one code at the top and put three figures under
+       it, two of which were not in it. The table below this one already carries
+       a currency per line, "and not the one in the front matter above", for
+       precisely this reason. */
+    parts.push('\nHEADLINE FIGURES — minor units, each in the currency on its own row\n');
     parts.push(toCsv(
-      ['Figure', 'Amount (minor units)', 'Note'],
+      ['Figure', 'Amount (minor units)', 'Currency', 'Note'],
       [
-        ['Taken', c.income?.takenCents ?? null,
+        ['Taken', c.income?.takenCents ?? null, currency ?? '(not stated)',
           c.income ? `${c.income.count} payment(s)${c.income.currencies.length > 1 ? ', more than one currency so no total' : ''}` : 'the payments were not read'],
-        ['Still owed', c.arrears?.outstandingCents ?? null,
-          c.arrears ? `${c.arrears.outstanding} open, ${c.arrears.overdue} past due` : 'the invoices were not read'],
-        ['Payroll', c.payroll?.total.cents ?? null,
+        ['Still owed', c.arrears?.outstandingCents ?? null, owedCcy ?? '(not stated)',
+          c.arrears ? `${c.arrears.outstanding} open, ${c.arrears.overdue} past due${owedCcy ? '' : ' — the invoices do not all state one currency, so this is not one total'}` : 'the invoices were not read'],
+        ['Payroll', c.payroll?.total.cents ?? null, gymCcy ?? '(not stated)',
           c.payroll ? (c.payroll.total.unmarked > 0 ? `NOT FINAL — ${c.payroll.total.unmarked} unmarked` : `${c.payroll.total.delivered} delivered`) : 'the sessions were not read'],
       ],
       false,

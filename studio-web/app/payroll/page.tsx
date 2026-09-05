@@ -504,8 +504,15 @@ export default function Payroll() {
    * 1,500 owed while the button handed over 900 and stamped the sessions paid.
    */
   const priced = useMemo(
-    () => (sessions ? withResolvedRates(sessions, pay ?? new Map(), fallbackCents) : null),
-    [sessions, pay, fallbackCents],
+    // …and the gym's currency, so the unit is resolved with the number. A
+    // resolved row used to carry an amount and no unit, which
+    // `settleCurrencyBlocker` reads as 'unrecorded' and deliberately waves
+    // through at a gym that has a currency — so a coach whose own rate row
+    // states the code this gym charged in BEFORE it changed would have been
+    // settled with the new code stamped on the old money. See the note on
+    // `withResolvedRates`.
+    () => (sessions ? withResolvedRates(sessions, pay ?? new Map(), fallbackCents, ccy) : null),
+    [sessions, pay, fallbackCents, ccy],
   );
 
   // Stays null while `sessions` is null rather than collapsing to []. Handing
@@ -726,6 +733,14 @@ export default function Payroll() {
         // the database refuse it; this is the refusal with the run still on
         // screen, which is a much better place to learn it.
         : closedSide ? closedSide
+        // The per-coach rates could not be read, so `withResolvedRates` above
+        // had an empty map and priced every session at the gym's standard fee —
+        // which for anybody on their own rate is silently smaller. The Rates
+        // section further down says "do not settle a run until this reads", and
+        // a sentence in a panel somebody has to scroll to is not a guard: this
+        // run writes a permanent payment row and stamps the sessions paid, so it
+        // never comes round again to be corrected.
+        : payErr ? `${payErr} Until it does, this run would pay every coach the gym's standard fee, which is the wrong figure for anyone on their own rate.`
         : !ccy ? 'This gym has not set its currency, so a settlement cannot say what money it is in.'
         // Two currencies on one run is not a smaller run, it is one nobody can
         // hand over. A coach whose class rate is in EUR and whose gym pays in

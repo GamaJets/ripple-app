@@ -707,10 +707,30 @@ export default function ClientPackages() {
                           </Text>
                           {/* Was money(r.amount_cents), which rendered an unknown
                               amount as $0.00 and stamped a dollar sign on a price
-                              paid in dirhams. The unit comes from the package;
-                              with no unit there is no figure. */}
+                              paid in dirhams. With no unit there is no figure.
+
+                              ── the SALE's currency first, the package's second ──
+                              And it was `cur.get(r.package_id)` alone: the
+                              package row's currency as it stands TODAY, over an
+                              amount that moved months ago. `client_purchases.
+                              currency` (part 132) is what Stripe actually
+                              charged in, it is on the row this line is
+                              rendering, and src/lib/connect.ts says in as many
+                              words that the two are "not to be confused" —
+                              "the package's currency is a lookup that can
+                              change underneath a sale that already happened".
+
+                              Two consequences, both on the client's own record
+                              of what they paid: a coach who moved country and
+                              re-priced a package had every past purchase of it
+                              relabelled with the new code; and a purchase whose
+                              package row has since been DELETED showed a dash
+                              for a price the row beside it records perfectly
+                              well. The subscription line above already reads
+                              `s.currency || (lookup)` — this was the one that
+                              never got the same fix. */}
                           <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>
-                            {fig(pkgMoney(r.amount_cents, r.package_id ? cur.get(r.package_id) : null))}
+                            {fig(pkgMoney(r.amount_cents, r.currency || (r.package_id ? cur.get(r.package_id) : null)))}
                           </Text>
                         </View>
                         {line ? (

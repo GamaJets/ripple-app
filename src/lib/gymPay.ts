@@ -144,13 +144,61 @@ export function rateForSession(
  * The objects are copies. Mutating the caller's rows would leave a screen
  * showing a rate the record does not hold, which is exactly the confusion
  * `sessions.rate_cents` exists to prevent.
+ *
+ * ── The CURRENCY is resolved with the number, not left behind ─────────────
+ *
+ * `gymCurrency` is `tenants.currency`, and it is what makes the resolved rows
+ * answerable to `runCurrency`/`settleCurrencyBlocker` in src/lib/gymRateCurrency.ts
+ * — the pair that decides whether a run may be paid as one payment and what a
+ * total may be LABELLED. Without it a resolved row carried an amount and no
+ * unit, which had two costs, in opposite directions:
+ *
+ *   · A run priced entirely off the gym's fee came back `kind: 'unrecorded'`,
+ *     so /coach/earnings could not put a currency on the coach's outstanding
+ *     figure at all and printed a dash — for a figure whose unit is simply the
+ *     gym's, known, one column away.
+ *
+ *   · Worse the other way. A coach's own rate carries its OWN currency
+ *     (`gym_trainer_pay.currency`, written from the gym's currency at the
+ *     moment it was set). A gym that has since changed `tenants.currency`
+ *     leaves that row stating the old code, and a resolved row with no unit is
+ *     'unrecorded', which `settleCurrencyBlocker` deliberately WAVES THROUGH at
+ *     a gym that has a currency. So the run would have been settled — EUR minor
+ *     units stamped GBP on a permanent payment row an accountant reconciles.
+ *     With the unit carried, that run is 'mixed' or a disagreement and is
+ *     refused with a sentence naming both codes.
+ *
+ * The order matches the rate's own three layers exactly, because a unit that
+ * came from a different layer than the number is the defect this closes:
+ *
+ *   1. a snapshotted rate keeps its snapshotted currency — the row is returned
+ *      untouched, so nothing here can relabel history;
+ *   2. the coach's own rate is in the coach's own rate currency, falling back
+ *      to the gym's only where that row states none;
+ *   3. the gym's standard fee is in the gym's currency.
+ *
+ * `gymCurrency` defaults to null, which is the behaviour before it existed: a
+ * gym that has named no currency resolves amounts with no unit, and every
+ * screen already withholds a figure it cannot name.
  */
 export function withResolvedRates(
   sessions: PtSession[], pay: PayIndex, gymFeeCents: number | null,
+  gymCurrency: string | null = null,
 ): PtSession[] {
+  const gym = (gymCurrency || '').trim().toUpperCase() || null;
   return sessions.map((s) => {
+    // Layer 1, and it is a `return` rather than a branch below: a session that
+    // carries its own rate carries its own unit and must not be touched at all.
+    if (s.rateCents != null) return s;
     const rate = rateForSession(s, pay, gymFeeCents);
-    return rate === s.rateCents ? s : { ...s, rateCents: rate };
+    if (rate == null) return s;
+    const own = s.trainerId ? pay.get(s.trainerId) : undefined;
+    // Layer 2 or layer 3 — decided by which one `rateForSession` just used, not
+    // guessed at. `sessionRateCents` non-null is exactly its second layer.
+    const currency = own?.sessionRateCents != null
+      ? ((own.currency || '').trim().toUpperCase() || gym)
+      : gym;
+    return { ...s, rateCents: rate, rateCurrency: currency };
   });
 }
 
