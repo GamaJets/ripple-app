@@ -52,7 +52,7 @@ import { mergeFoodResults } from '../../src/lib/foodSearch';
 // The member's own exclusions, on the search they open four times a day. The
 // setting governed the meal planner and nothing else — this list offered every
 // result unmarked, with a plus button beside it.
-import { dishAllergens, dishAllergenMark, SEARCH_MARK_CAVEAT } from '../../src/lib/foodAllergens';
+import { dishAllergens, dishAllergenMark, dishMarkNotice, SEARCH_MARK_CAVEAT } from '../../src/lib/foodAllergens';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 // One sheet asks how much of it you ate, for every way in. Until now a search
 // row logged straight through and the barcode sheet logged whatever basis Open
@@ -210,6 +210,34 @@ export default function FoodLog() {
    () => mergeFoodResults(q, { common: localCommon, restaurant: localDishes, branded: remote }),
    [q, localCommon, localDishes, remote],
  );
+
+ /**
+  * Whether this screen knows the member's exclusions, and what it must say
+  * when it does not.
+  *
+  * It asked `cd.avoid.length` and nothing else. That list starts `[]` under a
+  * read still in flight and STAYS `[]` when the read fails — clientData deletes
+  * the local cache at launch under USE_SUPABASE, so the server row is the only
+  * source — which made "excludes nothing" and "we were never told what this
+  * member excludes" the same value, drawn the same way.
+  *
+  * Both safeguards came off together, exactly as they did on Eating Out: the
+  * caveat above the rows is rendered on that length, so it vanished, and every
+  * row rendered unmarked because `dishAllergens` returns `[]` for an empty
+  * `avoid`. A member who excluded nuts, searching on a fresh install or on bad
+  * signal, saw peanut butter and satay unmarked with no sentence above them —
+  * a picture identical to a search checked against their exclusions and come
+  * back clear, on the screen they open four times a day.
+  *
+  * `app/(client)/restaurant.tsx` was fixed for this and `dishMarkNotice` is the
+  * shared answer; it is tested for 'error' and 'partial' in
+  * src/lib/foodAllergens.test.ts. The one thing not taken from it is the wording
+  * of the 'marks' arm: these rows come off labels and off other members' own
+  * entries rather than off a menu, which is what SEARCH_MARK_CAVEAT says and
+  * DISH_MARK_CAVEAT — with its sentence about restaurant kitchens — does not.
+  */
+ const marks = dishMarkNotice(cd.profileStatus, cd.avoid.length);
+ const marksText = marks.state === 'marks' ? SEARCH_MARK_CAVEAT : marks.text;
 
  // ── the one review sheet ────────────────────────────────────────────────
  //
@@ -869,14 +897,20 @@ export default function FoodLog() {
  Nothing found. Try the brand name, scan the barcode, or describe it below.
  </Text>
  ) : null}
- {/* Above the rows, and only when the member has excluded something. A mark
-     with no caveat reads the wrong way round: an unmarked result is one
-     nothing has checked, not one that has been cleared. */}
- {cd.avoid.length && results.length ? (
- <Text style={{ ...ty.caption, color: t.ink3, paddingTop: sp.sm }}>{SEARCH_MARK_CAVEAT}</Text>
+ {/* Above the rows. A mark with no caveat reads the wrong way round: an
+     unmarked result is one nothing has checked, not one that has been
+     cleared — and under an unread exclusion list NOTHING has been checked,
+     which is the loudest of the four sentences rather than the absence of
+     one. Tone follows the state, as on Eating Out. */}
+ {marksText && results.length ? (
+ <Flag tone={marks.state === 'unknown' ? t.crit : marks.state === 'checking' ? t.ink3 : t.warn}
+   style={{ paddingTop: sp.sm }}>{marksText}</Flag>
  ) : null}
  {results.map((r, i) => {
- const mark = dishAllergenMark(dishAllergens(r.name, cd.avoid));
+ // Only when the exclusions were actually read. Marking against a list that
+ // is empty because nothing came back puts a mark on nothing and leaves
+ // every other row looking cleared.
+ const mark = marks.marked ? dishAllergenMark(dishAllergens(r.name, cd.avoid)) : null;
  return (
  <View key={r.key}>
  {i > 0 ? <Rule /> : null}

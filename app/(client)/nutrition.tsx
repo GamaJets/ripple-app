@@ -239,6 +239,52 @@ export default function Nutrition() {
   const w = c.weightKg ?? 0;
   const bf = c.bodyFatPct ?? 0;
   const diet = c.diet;
+  /**
+   * Whether the two fields that decide WHICH FOOD this screen puts in front of
+   * somebody — their diet style and the things they asked to avoid — were
+   * actually read.
+   *
+   * ── The defect ──────────────────────────────────────────────────────────
+   *
+   * `c.avoid` starts `[]` and `c.diet` starts 'meat'. Both come from exactly
+   * one place, the `clients` row, and under USE_SUPABASE the local cache is
+   * deleted at launch so there is no second source. A failed read therefore
+   * leaves this screen holding "excludes nothing, eats meat" — which is a
+   * perfectly ordinary member, indistinguishable from a real one.
+   *
+   * And the door above did not stop it. `hasBody` is weight and body fat, and
+   * both of those fall back to the LATEST SCAN — a different read, on a
+   * different table, which is usually fine when the profile read is not. So a
+   * failed profile read with healthy scans walked straight through and built a
+   * full seven-day plan, a grocery list and a shareable plan document with
+   * `avoid: []` and `diet: 'meat'` in them. A member with a nut allergy was
+   * shown peanut components with no "Contains nuts" beside them, because
+   * `mealAllergens(m, c.avoid)` is empty for an empty `avoid`; the gap warning
+   * above the week is rendered on the same empty list, so that went too. A
+   * vegan got a meat week under their own name.
+   *
+   * ── Why this refuses the plan rather than captioning it ─────────────────
+   *
+   * `app/(client)/restaurant.tsx` and the food search can caption theirs: their
+   * rows exist independently of the exclusions and the marks are laid over the
+   * top, so an unmarked row plus `DISH_MARK_UNKNOWN` is an honest screen. This
+   * one is not like that. The exclusions and the diet are INPUTS to
+   * `buildPlan` — they filter the pools, and filtering renumbers every index
+   * after the removal — so the week, the targets, the grocery list and the
+   * shared document are all composed FROM them. There is no unfiltered week
+   * that can be marked up afterwards into the right week; there is only the
+   * wrong food, with a sentence over it. That is the same argument
+   * `adjustUnknown` below is already made on, and it is stronger here: the
+   * worst `adjustUnknown` costs is the wrong calorie figure.
+   *
+   * So it goes through the same door, which says what could not be read and
+   * offers the pull that retries it.
+   *
+   * 'partial' counts as unread with 'error'. A truncated profile read may be
+   * missing the one exclusion that matters, and half an allergen list is not a
+   * basis for composing the other half as safe.
+   */
+  const foodRulesUnknown = !isWhole(c.profileStatus);
   const [override, setOverride] = useState<Record<number, number>>({});
   const [ovHydrated, setOvHydrated] = useState(false);
   const [recipe, setRecipe] = useState<PlannedMeal | null>(null);
@@ -686,7 +732,13 @@ export default function Nutrition() {
   // all one arithmetic, and there is nowhere to show that arithmetic with the
   // coach's correction missing from it without the member reading the result as
   // their plan. So the screen says what it does not know instead.
-  if (!hasBody || adjustUnknown) {
+  //
+  // `foodRulesUnknown` joins it for the same reason and a worse consequence —
+  // see the long note on it above. `hasBody` cannot stand in for it: weight and
+  // body fat fall back to the latest scan, so a failed profile read with
+  // healthy scans passes this door with `avoid` empty and `diet` at its default
+  // unless it is asked about directly.
+  if (!hasBody || adjustUnknown || foodRulesUnknown) {
     // 'loading' is the ONLY status that means "still reading". Written as
     // `!bodyKnown` this was also true under 'error', and 'error' is where this
     // screen sat: clientData clears the local cache at launch under
@@ -704,13 +756,20 @@ export default function Nutrition() {
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Meals</Text>
+              {/* The measurements arms are asked first and only of the case
+                  they are about, so the food-rules arms below cannot answer
+                  over the top of "you have never been scanned". */}
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{adjustUnknown
                 ? 'We couldn’t read your coach’s adjustment to your targets, so the plan below it can’t be worked out. The generic figures are not your coach’s plan and are not shown as though they were — check back in a moment.'
-                : looking
-                ? 'Reading your latest measurements…'
-                : c.status === 'error'
-                  ? 'Your measurements could not be read just now, so the targets below them cannot be worked out. This is a connection problem, not a missing scan.'
-                  : 'Your targets and meal plan are scaled to your body, so they need a weight and body fat to work from.'}</Text>
+                : !hasBody
+                ? (looking
+                  ? 'Reading your latest measurements…'
+                  : c.status === 'error'
+                    ? 'Your measurements could not be read just now, so the targets below them cannot be worked out. This is a connection problem, not a missing scan.'
+                    : 'Your targets and meal plan are scaled to your body, so they need a weight and body fat to work from.')
+                : c.profileStatus === 'loading'
+                ? 'Reading your diet and the foods you asked to avoid…'
+                : 'Your diet and the foods you asked to avoid could not be read, so there is no plan to build from them. A week of meals put together without your exclusions is not a caveat on your plan — it is the wrong food — so it is not shown. Pull down to try again.'}</Text>
             </View>
             <Ghost icon="back" onPress={() => router.back()} />
           </View>
@@ -723,10 +782,17 @@ export default function Nutrition() {
             {/* No button on the adjustment path either, and for the same
                 reason: there is nothing for the member to add. The read has to
                 land, and it is retried by the provider rather than by them. */}
+            {/* Nor on the exclusions path: the member has already told the app
+                what they avoid, and offering to take it again here would ask
+                them to re-enter an allergy the server is holding — into a
+                provider whose write is disarmed while the read is failing. */}
             {adjustUnknown ? null
-              : looking ? <ActivityIndicator color={t.brand} />
-              : c.status === 'error' ? null
-              : <Cta label="Add Your Measurements" wide onPress={() => router.push('/(client)/scans')} />}
+              : !hasBody
+                ? (looking ? <ActivityIndicator color={t.brand} />
+                  : c.status === 'error' ? null
+                  : <Cta label="Add Your Measurements" wide onPress={() => router.push('/(client)/scans')} />)
+              : c.profileStatus === 'loading' ? <ActivityIndicator color={t.brand} />
+              : null}
           </Section>
         </ScrollView>
       </SafeAreaView>

@@ -94,7 +94,11 @@ import { unsentNote, type WriteOutcome } from '../../src/lib/offlineQueue';
 import { importSources, withHr, useImportedIds, isLogged, fetchRecent } from '../../src/ui/watchImport';
 import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { useExerciseVideos, type VideoItem, type LibraryStatus } from '../../src/ui/exerciseVideos';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+// `isWhole`, not `cd.injuries.length`. An empty injury list that was READ and
+// one that could not be read are the same value on clientData, and every guard
+// on this screen — the severe auto-swap, the hidden movement, the per-exercise
+// caution line — is driven off that value alone. See `injRead` below.
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 // The same catalogue lookup and the same renderers the standalone exercise
 // screen uses. Imported rather than reimplemented: a second copy of the
@@ -856,6 +860,47 @@ export default function Train() {
    * strip says which week they are looking at, and nothing is written from it.
    */
   const uid = (e: ProgramExercise) => `${dayIdx}:${e.key}`;
+  /**
+   * Whether the injuries every guard below is computed from were actually read.
+   *
+   * ── The defect ──────────────────────────────────────────────────────────
+   *
+   * `cd.injuries` starts `[]` (src/ui/clientData.tsx) and is filled from
+   * exactly one place, the `clients` row. Under USE_SUPABASE the local cache is
+   * DELETED at launch, so there is no second source; the read is tried three
+   * times and then `profileStatus` goes to 'error' and stays there for the
+   * session. The list is `[]` either way, and everything on this screen that
+   * protects an injured member is a function of that list: the severe-injury
+   * auto-swap below, `injHidden`, the "on hold" gate, and the caution line
+   * under each movement in the session runner.
+   *
+   * So a failed read did not make this screen cautious, it made it silent. A
+   * member with a severe knee on record, opening Lifting in a basement gym with
+   * no signal — which is exactly where this screen is used — was shown squats,
+   * unswapped, with no caution under them and nothing anywhere saying their
+   * disclosure had not been read. That is the same picture as "checked, and you
+   * are clear", drawn for the one case with the least basis for it.
+   *
+   * `app/(client)/injuries.tsx` already draws the three arms apart and says
+   * why; this follows it.
+   *
+   * ── Why a caveat here rather than withholding the session ───────────────
+   *
+   * The meals screen answers this differently — it refuses to build a plan at
+   * all — and the difference is real. A meal week is COMPOSED from the
+   * exclusions: filtering renumbers the catalogue, so a week built without them
+   * cannot be marked up after the fact, and an unfiltered week is simply the
+   * wrong food. A workout is the coach's programme, and injuries only ever
+   * SUBTRACT from it. The plan on screen is still the plan; what is missing is
+   * the subtraction. That can be stated honestly, and stating it is better than
+   * taking training away from every member in a gym with no signal — which is
+   * most of them, most of the time.
+   *
+   * 'partial' counts as unread and is not a softer thing: half an injury list
+   * is not a basis for drawing the other half as clear.
+   */
+  const injRead = isWhole(cd.profileStatus);
+  const injLoading = cd.profileStatus === 'loading';
   // Severe active injuries auto-manage the plan: swap to a safe alternative, or
   // hide the movement entirely when no alternative avoids the injured area.
   const injAutoMap: Record<string, string> = {};
@@ -1588,6 +1633,19 @@ export default function Train() {
           <Flag tone={t.warn} style={{ marginTop: sp.md }}>
             {unsentNote(unsentWorkouts, 'exercise')} Until then your streak, your records and your coach's dashboard are short of them.
           </Flag>
+        ) : null}
+        {/* Above the Start button, because it is a fact about the plan behind
+            that button. Two arms, and neither of them is silence: a read still
+            in flight is not the same answer as one that failed, and neither is
+            the same as "we checked and there is nothing to avoid" — which is
+            what this screen used to draw for all three. See `injRead`. */}
+        {injLoading ? (
+          <Flag tone={t.ink3} style={{ marginTop: sp.md }}>
+            Reading what you have disclosed — nothing below has been checked against your injuries yet.
+          </Flag>
+        ) : !injRead ? (
+          <Notice tone={t.crit} kicker="Injury" title="Your injuries could not be read"
+            note="So nothing in today's plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet — if something is hurt, take it easy on it or skip it, and pull down to try again." />
         ) : null}
         {start.canStart ? (
           <Cta label="Start Workout" wide onPress={() => setSession(true)} />
@@ -2628,7 +2686,7 @@ export default function Train() {
             a shared handset can belong to whoever used it last, and a coach
             congratulating the wrong person by name is worse than one told "a
             client". */}
-        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -3228,7 +3286,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   );
 }
 
-function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; /** Replace one movement for the rest of the plan, through the same `swaps` map the plan screen writes. Optional so a caller with no plan to write to still gets a runner. */ onSwap?: (e: ProgramExercise, alt: string) => void; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
+function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, injuryStatus, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; /** Replace one movement for the rest of the plan, through the same `swaps` map the plan screen writes. Optional so a caller with no plan to write to still gets a runner. */ onSwap?: (e: ProgramExercise, alt: string) => void; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; /** How the read that produced `injuries` went. An empty list under anything but 'ready' means UNKNOWN, and the caution line below is drawn off that list — so without this the runner draws "no injury applies here" for a member whose disclosure never arrived. */ injuryStatus: LoadStatus; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   // The day the recap below dates its outing against.
@@ -4292,7 +4350,24 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
             })}
           </View>
         ) : null}
-        {(() => { const f = injuryFlag(nameOf(ex), ex.group, injuries); return f ? (
+        {/* The caution under the movement the member is about to perform, and
+            the sentence that has to stand in for it when there is nothing to
+            compute it from. `injuries` is `[]` under a failed read as well as
+            under a member who has disclosed nothing, so no caution here means
+            two different things and only one of them is "this movement is fine
+            for you". The absent line was the whole of the safety information in
+            the session, so drawing them the same way is the picture of a
+            checked, clear session. */}
+        {!isWhole(injuryStatus) ? (
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: sp.md }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: injuryStatus === 'loading' ? t.ink3 : t.crit, marginTop: 5 }} />
+            <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+              {injuryStatus === 'loading'
+                ? 'Still reading what you have disclosed — this movement has not been checked against your injuries yet.'
+                : 'Your injuries could not be read, so this movement has not been checked against them. Nothing here has been swapped or held back — go easy if something is hurt.'}
+            </Text>
+          </View>
+        ) : (() => { const f = injuryFlag(nameOf(ex), ex.group, injuries); return f ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: sp.md }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.s3 }} />
             <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{f.reason}. Ease off, keep it pain-free, or swap this move.</Text>
