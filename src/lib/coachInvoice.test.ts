@@ -247,7 +247,14 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
   eq(draftMinorUnits('12.500', 'kwd'), 12500, 'and the code is read case-insensitively');
   eq(draftMinorUnits('12.5', 'KWD'), 12500, 'a short fraction is padded to the currency’s own places, not read as hundredths');
   eq(draftMinorUnits('12', 'BHD'), 12000, 'and a whole dinar is a thousand fils');
-  eq(draftMinorUnits('12.345', 'KWD'), null, 'Stripe charges thousandths in tens, so a fils in the last place is refused rather than rounded');
+  // Stripe's whole-ten rule for the thousandth-unit currencies is deliberately
+  // NOT applied here: a coach invoice is a figure they state and settle against
+  // their own ledger, and Stripe never sees it. `draftAmount` passes
+  // `chargeable: false` — see coachMoney.ts's header for the count of which
+  // boxes are charges and which are a record of money that already moved.
+  // Refusing this used to leave a Kuwaiti coach unable to bill the amount they
+  // had actually agreed.
+  eq(draftMinorUnits('12.345', 'KWD'), 12345, 'a fils in the last place is a real amount on an invoice Stripe never sees');
   eq(draftMinorUnits('12.5000', 'KWD'), null, 'four places is not an amount in a three-place currency');
   eq(draftMinorUnits('40.00', 'OMR'), 40000, 'and the same holds for every one of the five');
   eq(draftMinorUnits('0.000', 'KWD'), null, 'a nought is still not an amount to invoice, whatever the currency');
@@ -259,12 +266,17 @@ const withInv = (over: Partial<CoachInvoice>): CoachInvoiceInput =>
    typed. The blocker quotes the reader rather than a sentence written here. */
 
 {
-  const kw: InvoiceDraft = { billTo: 'Nasser', description: 'Ten pack', amountText: '12.345', currency: 'KWD', kind: 'requested', issuedOn: '2026-08-31' };
+  // Four places, not three — a figure that is not an amount in KWD at all.
+  // The whole-ten rule is off on this box (see above), so the refusal being
+  // tested here is the one about the SHAPE of the number, which is the one a
+  // coach in Kuwait was being told about in the wrong currency's language.
+  const kw: InvoiceDraft = { billTo: 'Nasser', description: 'Ten pack', amountText: '12.5000', currency: 'KWD', kind: 'requested', issuedOn: '2026-08-31' };
   const b = invoiceBlockers(kw);
   eq(b.length, 1, 'one blocker, about the amount');
   ok(/KWD/.test(b[0]), 'and it names the currency it is talking about');
   ok(!/two decimal/i.test(b[0]), 'and never says "two decimal places" about a three-place currency');
   eq(invoiceBlockers({ ...kw, amountText: '12.500' }).length, 0, 'a real dinar amount is not blocked');
+  eq(invoiceBlockers({ ...kw, amountText: '12.345' }).length, 0, 'and neither is one whose last fils is not a nought — this invoice is not a Stripe charge');
 
   const jp = invoiceBlockers({ ...kw, currency: 'JPY', amountText: '500.50' });
   eq(jp.length, 1, 'a decimal in yen is one blocker');

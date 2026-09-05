@@ -6,6 +6,7 @@ import type { WorkoutEntry } from './mockData';
 import { rowToEntry, entryToRow, PERSISTED_FIELDS } from './workoutRow';
 import { summarise, money, type MembershipPlan, type Membership, type GymPayment } from './gymRecord';
 import { localDay } from './attendance';
+import { isoDay as isoDayOf } from './weekStart';
 import { weeklyOccurrences, summariseAttendance, weeklyAttendance, pct, type GymClass, type NewClass, classFillState } from './gymSchedule';
 import { summariseClassRows, type ClassSummaryRow } from './classRates';
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, riskLabel } from './status';
@@ -4052,7 +4053,11 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
     'fin left in 2025 and came back through a drop-in — a membership that ENDED before the pass does not make him an existing member');
   ok(coversDate(pcMems[6], '2026-02-01') === false && coversDate(pcMems[1], '2026-05-01') === true,
     'coversDate reads the end date rather than the status');
-  ok(pcBy.get('ann')!.firstUsedOn === '2026-01-12' && pcBy.get('ben')!.firstUsedOn === null,
+  // `gym_visits.entered_at` is a timestamptz served in UTC, so the day this
+  // reports is the READER's, derived from the instant rather than written out —
+  // the visit at 10:00Z is 11 January in Midway and 13 January in Kiritimati,
+  // and the old literal '2026-01-12' was Greenwich's answer for all of them.
+  ok(pcBy.get('ann')!.firstUsedOn === isoDayOf(new Date('2026-01-12T10:00:00Z')) && pcBy.get('ben')!.firstUsedOn === null,
     'when the pass was actually used comes from the door log, and is null rather than back-filled from the issue date');
   ok(pcBy.get('cara')!.name === null && pcBy.get('ann')!.name === 'Ann Wright',
     'a holder with no name recorded gets null — never the account id dressed up as a name');

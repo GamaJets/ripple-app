@@ -92,6 +92,8 @@ import { LOGO_CSS, logoImgHtml } from './coachLogo';
 // imported rather than rewritten: an invoice is the last place in this app that
 // may have a second opinion about how a date is written.
 import { fmtPointDay } from './format';
+import { localDate } from './localDate';
+import { isoDay } from './weekStart';
 
 /* ── what the caller hands over ───────────────────────────────────────────── */
 
@@ -949,8 +951,18 @@ export function chaseFromDayBlocker(inv: CoachInvoice, from: string): string | n
 export function chaseHistoryLine(inv: CoachInvoice): string | null {
   const n = Number(inv.reminderCount ?? 0);
   if (!Number.isFinite(n) || n < 1) return null;
-  const when = String(inv.remindedAt ?? '').slice(0, 10);
-  const day = /^\d{4}-\d{2}-\d{2}$/.test(when) ? invoiceDayLabel(when) : null;
+  // `coach_invoices.reminded_at` is a `timestamptz` — the instant the chase was
+  // sent — and PostgREST serialises it in UTC. Slicing the first ten characters
+  // off it printed GREENWICH's calendar day, so a coach who chased at 18:00 on
+  // 31 March in California was told "last on 1 Apr": a date in the future, on
+  // the one line that exists to tell them when they last chased. Every OTHER
+  // slice in this file is on a `date` column — `issued_on`, `due_on`,
+  // `chase_from`, `settled_on` — where it is a no-op and correct.
+  //
+  // `localDate()` keeps the instant, `isoDay()` reads its LOCAL parts, and
+  // `invoiceDayLabel` then formats the day in the reader's own language.
+  const remindedOn = localDate(inv.remindedAt);
+  const day = remindedOn ? invoiceDayLabel(isoDay(remindedOn)) : null;
   return `Chased ${n} ${n === 1 ? 'time' : 'times'}${day ? `, last on ${day}` : ''}.`;
 }
 
@@ -1063,8 +1075,10 @@ export function statesTax(i: CoachInvoice): boolean {
  * three families — no minor unit, hundredths, thousandths — and does the
  * conversion on the DIGITS rather than by multiplying a float, so nothing is
  * rounded into an amount nobody typed. It also carries Stripe's own rule that a
- * thousandth-unit amount must end in a nought. There is one place in this app
- * that decides how many decimal places a currency has, and this is not it.
+ * thousandth-unit amount must end in a nought — which is turned OFF here, see
+ * the call below: an invoice a coach writes and settles themselves is not a
+ * Stripe charge. There is one place in this app that decides how many decimal
+ * places a currency has, and this is not it.
  *
  * A comma decimal separator is still accepted: half the world types "45,50",
  * and `Number('45,50')` is NaN, which would refuse a perfectly ordinary amount
@@ -1073,7 +1087,14 @@ export function statesTax(i: CoachInvoice): boolean {
  * and an invoice is not the place to pick one.
  */
 export function draftAmount(amountText: string, currency: string | null): TypedAmount {
-  const read = readMinorAmount(amountText, currency);
+  // NOT a charge, so Stripe's whole-ten rule for the thousandth-unit
+  // currencies does not apply to it. A coach invoice is a figure the coach
+  // states and settles against their own ledger — Stripe never sees it — and
+  // `readMinorAmount`'s default of `chargeable = true` was refusing an amount
+  // like KWD 12.345 with "the last place must be a nought" on a bill nobody
+  // was ever going to put through a card. coachMoney.ts's header lists this
+  // file as one of the three call sites it could not reach; this is that site.
+  const read = readMinorAmount(amountText, currency, false);
   if (!read.ok) return read;
   // Zero is a valid minor-unit figure and is not a valid invoice. An invoice
   // for nothing is not an invoice, and a receipt for nothing is not a payment —

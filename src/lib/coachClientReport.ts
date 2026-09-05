@@ -81,6 +81,8 @@
 import { isWhole, type LoadStatus } from '../ui/loadStatus';
 import { weightIn, lengthIn, volumeIn, convertedNote, type WeightUnit, type LengthUnit } from './units';
 import { progressChangeLines, progressSpanLabel, figure, dayLabel } from './progressExport';
+import { localDate } from './localDate';
+import { isoDay } from './weekStart';
 // The coach's own mark, on the coach's own document. `logoImgHtml` returns the
 // empty string for anything it cannot validate, so a logo that could not be
 // read produces the report this module produced before logos existed.
@@ -150,7 +152,23 @@ export interface SessionTally {
   lastDay: string | null;
 }
 
-const dayOf = (iso: string): string => String(iso ?? '').slice(0, 10);
+/**
+ * The LOCAL calendar day a session falls on.
+ *
+ * `sessions.starts_at` is a `timestamptz`, and PostgREST serialises it in UTC,
+ * so `String(iso).slice(0, 10)` read GREENWICH's calendar day and not the
+ * reader's. A session run at 18:00 on 4 March in California came back as
+ * `2026-03-05T02:00:00Z`, and the period line on a document a coach hands to
+ * the next coach said "From 5 Mar" — a day that client was never in the gym.
+ *
+ * `localDate()` keeps the instant, `isoDay()` reads its LOCAL parts. A bare
+ * `YYYY-MM-DD` — a `date` column, if one is ever passed here — still comes
+ * back unchanged, because `localDate()` builds it at local midnight.
+ */
+const dayOf = (iso: string): string => {
+  const d = localDate(iso);
+  return d ? isoDay(d) : '';
+};
 
 /**
  * How many rows there are, or null because that is not a thing this read can
@@ -697,10 +715,10 @@ export function coachClientReportDoc(input: CoachClientReportInput): CoachClient
       const body = items.map((i) => `<tr><td>${escapeHtml(i.label)}</td>`
         + `<td>${escapeHtml(i.severity)}</td>`
         + `<td>${escapeHtml(i.status)}</td>`
-        + `<td>${escapeHtml(dayLabel(String(i.at).slice(0, 10)))}</td>`
+        + `<td>${escapeHtml(dayLabel(i.at))}</td>`
         + `<td>${escapeHtml(i.note || '—')}</td></tr>`).join('');
       H.push(`<table><tr><th>Area</th><th>Severity as recorded</th><th>State</th><th>Recorded on</th><th>Their note</th></tr>${body}</table>`);
-      for (const i of items) T.push(`  ${i.label} — ${i.severity}, ${i.status}, recorded ${dayLabel(String(i.at).slice(0, 10))}${i.note ? ' — "' + i.note + '"' : ''}`);
+      for (const i of items) T.push(`  ${i.label} — ${i.severity}, ${i.status}, recorded ${dayLabel(i.at)}${i.note ? ' — "' + i.note + '"' : ''}`);
       const grading = 'Severity and state are as the person themselves recorded them, in the app’s own three-step wording. They are not a clinical grading and the coach did not assign them.';
       H.push(`<p class="lede">${escapeHtml(grading)}</p>`);
       T.push(grading);

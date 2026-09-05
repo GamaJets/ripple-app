@@ -13,7 +13,7 @@
 import { assertWhole, capLimit, readAll } from './rowCap';
 import { assertWrote } from './wroteRows';
 import type { MembershipStatus } from './gymRecord';
-import { WEEK_DAYS, weekIndexOf } from './weekStart';
+import { WEEK_DAYS, weekIndexOf, isoDay } from './weekStart';
 
 type Queryable = { from: (table: string) => any };
 
@@ -393,8 +393,6 @@ export const OPEN_VISIT_HOURS = 12;
  */
 export const RESCAN_MINUTES = 2;
 
-const dayOfIso = (iso: string): string => iso.slice(0, 10);
-
 /**
  * Whether this person may be admitted, and what to say if not.
  *
@@ -486,9 +484,18 @@ export function admissionCheck(input: {
   );
   if (live.length > 0) {
     if (stalestOpen != null) {
+      // `gym_visits.entered_at` is a `timestamptz` and this is a millisecond
+      // parsed from it, so `new Date(ms).toISOString().slice(0, 10)` — which is
+      // what the old `dayOfIso` did, with the slice hidden inside it where the
+      // check-utc-day gate could not see the shape — named GREENWICH's day. A
+      // visit opened at 18:00 on 4 March was reported to the desk as a stale
+      // visit "from 2026-03-05", a day that had not happened yet. `isoDay()`
+      // reads the local parts, which on a desk terminal standing in the gym is
+      // the gym's own day; there is no tenant zone in this function's input to
+      // ask `gymDay()` with.
       return {
         verdict: 'warn', code: 'stale-open',
-        reason: `Their membership is live. They also have a visit from ${dayOfIso(new Date(stalestOpen).toISOString())} that nobody closed — it is not a person in the building and it is counted nowhere.`,
+        reason: `Their membership is live. They also have a visit from ${isoDay(new Date(stalestOpen))} that nobody closed — it is not a person in the building and it is counted nowhere.`,
       };
     }
     return { verdict: 'ok', code: 'active', reason: null };

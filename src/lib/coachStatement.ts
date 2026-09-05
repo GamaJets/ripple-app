@@ -126,6 +126,8 @@ import { COST_IS_YOUR_WORD, COSTS_ARE_NEVER_NETTED, COSTS_ARE_NOT_TAX_ADVICE } f
 // in the app writes one with. A statement is read by the coach and handed to
 // their accountant; neither of them is guaranteed to read English months.
 import { fmtPointDay, fmtPointMonth } from './format';
+import { localDate } from './localDate';
+import { isoDay } from './weekStart';
 
 /* ── the period ───────────────────────────────────────────────────────────── */
 
@@ -1878,6 +1880,31 @@ export interface StatementItems {
 const NO_CURRENCY_CELL =
   'No currency is recorded on this one, so no amount is written. Do not read the empty cell as nothing charged.';
 
+/**
+ * The date cell for a line item that is stored as an INSTANT.
+ *
+ * `charges.created_at`, `client_disputes.opened_at` and the two `refunded_at`
+ * columns are all `timestamptz`, and PostgREST serialises them in UTC. So
+ * `String(iso).slice(0, 10)` printed Greenwich's calendar day while the
+ * FILTERING above it — `splitByPeriod` against `periodRange`, whose bounds are
+ * local midnights — placed the row on the coach's own. The two disagreed for
+ * every reader west of Greenwich in the last hours of a day: a late-cancellation
+ * fee taken at 18:00 on 31 March in California is correctly inside the March
+ * statement and printed `2026-04-01` in it, so the accountant holding a file
+ * headed "1–31 March" read a row dated outside the period it names.
+ *
+ * The filter is right and is not touched. This is the print. `localDate()`
+ * keeps the instant and `isoDay()` reads its LOCAL parts, which is the same
+ * calendar the bounds were built in — so the cell and the file's own heading
+ * are now answering in one zone. An unparseable instant gives an empty cell
+ * rather than an invented day; `splitByPeriod` has already counted it as
+ * undated and it cannot reach this loop.
+ */
+const itemDay = (iso: string | null | undefined): string => {
+  const d = localDate(iso);
+  return d ? isoDay(d) : '';
+};
+
 export function statementItemsCsv(s: Statement, items: StatementItems): string {
   const rows: (string | number | null)[][] = [];
   rows.push(['about', '', '', 'What this is NOT', '', '', '', STATEMENT_NOT]);
@@ -1919,7 +1946,7 @@ export function statementItemsCsv(s: Statement, items: StatementItems): string {
   for (const f of inPeriodFees) {
     rows.push([
       'late cancellation',
-      String(f.createdAt ?? '').slice(0, 10),
+      itemDay(f.createdAt),
       '',
       'Late-cancellation fee',
       f.currency ?? '',
@@ -1935,7 +1962,7 @@ export function statementItemsCsv(s: Statement, items: StatementItems): string {
   for (const r of inPeriodRefunds) {
     rows.push([
       'refund',
-      String(r.refundedAt ?? '').slice(0, 10),
+      itemDay(r.refundedAt),
       '',
       r.on === 'renewal' ? 'Refunded on a subscription renewal' : 'Refunded on a pack or membership sale',
       r.currency ?? '',
@@ -1947,7 +1974,7 @@ export function statementItemsCsv(s: Statement, items: StatementItems): string {
   for (const d of inPeriodDisputes) {
     rows.push([
       'chargeback',
-      String(d.openedAt ?? '').slice(0, 10),
+      itemDay(d.openedAt),
       '',
       d.reason ? `Chargeback — reason given: ${d.reason}` : 'Chargeback — no reason was given',
       d.currency ?? '',

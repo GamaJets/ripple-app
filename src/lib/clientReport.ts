@@ -622,10 +622,10 @@ export function clientReportDoc(input: ClientReportInput): ClientReportDoc {
       const body = items.map((i) => `<tr><td>${escapeHtml(i.label)}</td>`
         + `<td>${escapeHtml(i.severity)}</td>`
         + `<td>${escapeHtml(i.status)}</td>`
-        + `<td>${escapeHtml(dayLabel(String(i.at).slice(0, 10)))}</td>`
+        + `<td>${escapeHtml(dayLabel(i.at))}</td>`
         + `<td>${escapeHtml(i.note || '—')}</td></tr>`).join('');
       H.push(`<table><tr><th>Area</th><th>Severity as recorded</th><th>State</th><th>Recorded on</th><th>Their note</th></tr>${body}</table>`);
-      for (const i of items) T.push(`  ${i.label} — ${i.severity}, ${i.status}, recorded ${dayLabel(String(i.at).slice(0, 10))}${i.note ? ' — "' + i.note + '"' : ''}`);
+      for (const i of items) T.push(`  ${i.label} — ${i.severity}, ${i.status}, recorded ${dayLabel(i.at)}${i.note ? ' — "' + i.note + '"' : ''}`);
       H.push('<p class="lede">Severity and state are as the person recorded them, in the app’s own three-step wording. They are not a clinical grading.</p>');
       T.push('Severity and state are as the person recorded them; they are not a clinical grading.');
     }
