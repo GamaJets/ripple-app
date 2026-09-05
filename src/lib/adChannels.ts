@@ -366,17 +366,26 @@ export function coverageNote(channels: readonly AdChannel[]): string {
  * What a human has to obtain before a channel can read anything at all.
  *
  * Kept in the source rather than only in a README because the screen shows it:
- * a coach who taps Connect on a channel the owner has not set up gets this
- * sentence instead of a browser that opens onto an error page, and the owner
- * gets a list of exactly what is missing rather than "not configured".
+ * app/(trainer)/ad-spend.tsx draws this in place of the channel's Connect
+ * button, so a coach reads what is missing BEFORE tapping rather than after,
+ * and the owner gets a list of exactly what to obtain rather than "not
+ * configured". `connectAdChannel` still returns it as a refusal, for the case
+ * where an id is present and the sign-in is refused anyway.
+ *
+ * It says "here", not "in this build", and no sentence in it mentions a
+ * version. Nothing is missing from any binary: an app id and a Supabase secret
+ * are, and neither arrives in an update. That distinction is the whole subject
+ * of scripts/check-inlined-env.mjs — a coach told to wait for a build that
+ * could never carry the thing they were waiting for checks for updates, twice,
+ * and then asks support.
  */
 export function channelSetupNote(c: AdChannel): string {
   switch (c) {
     case 'meta':
-      return 'Connecting a Meta ad account is not set up in this build — the owner sets EXPO_PUBLIC_META_ADS_CLIENT_ID (the Meta app id) and the META_ADS_CLIENT_SECRET Supabase secret.';
+      return 'Connecting a Meta ad account is not set up here — the owner sets EXPO_PUBLIC_META_ADS_CLIENT_ID (the Meta app id) and the META_ADS_CLIENT_SECRET Supabase secret.';
     case 'google':
-      return 'Connecting a Google Ads account is not set up in this build — the owner sets EXPO_PUBLIC_GOOGLE_ADS_CLIENT_ID (the Google Cloud OAuth client id) and, as Supabase secrets, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN. The developer token is issued by Google against a Google Ads manager account and has to be approved before it reads a live account.';
+      return 'Connecting a Google Ads account is not set up here — the owner sets EXPO_PUBLIC_GOOGLE_ADS_CLIENT_ID (the Google Cloud OAuth client id) and, as Supabase secrets, GOOGLE_ADS_CLIENT_SECRET and GOOGLE_ADS_DEVELOPER_TOKEN. The developer token is issued by Google against a Google Ads manager account and has to be approved before it reads a live account.';
     case 'tiktok':
-      return 'Connecting a TikTok ad account is not set up in this build — the owner sets EXPO_PUBLIC_TIKTOK_ADS_APP_ID (the TikTok for Business app id) and the TIKTOK_ADS_APP_SECRET Supabase secret.';
+      return 'Connecting a TikTok ad account is not set up here — the owner sets EXPO_PUBLIC_TIKTOK_ADS_APP_ID (the TikTok for Business app id) and the TIKTOK_ADS_APP_SECRET Supabase secret.';
   }
 }

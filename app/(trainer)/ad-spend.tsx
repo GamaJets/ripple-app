@@ -63,11 +63,11 @@ import { num } from '../../src/lib/format';
 import { money } from '../../src/lib/gymRecord';
 import { UNMATCHED_NOTE, unmatchedReasonNote } from '../../src/lib/adMatch';
 import {
-  AD_CHANNELS, NO_TOTAL_NOTE, channelLabel, channelPlaces, channelStateNote,
+  AD_CHANNELS, NO_TOTAL_NOTE, channelLabel, channelPlaces, channelSetupNote, channelStateNote,
   combineRefusalNote, coverageNote, type AdChannel,
 } from '../../src/lib/adChannels';
 import {
-  APP_REVIEW_NOTE, READ_ONLY_NOTE, chooseAdAccount, connectAdChannel, disconnectAdChannel,
+  APP_REVIEW_NOTE, READ_ONLY_NOTE, channelClientId, chooseAdAccount, connectAdChannel, disconnectAdChannel,
   fetchAdSpend, runAdSync, useSyncedSpend, asChannelRun,
   type AdAccountChoice, type AdSpendRead, type ChannelState,
 } from '../../src/ui/adSpend';
@@ -203,6 +203,11 @@ export default function TrainerAdSpend() {
   const revenueFor = (codeId: string | null) => returns.rows.find((r) => (r.id ?? null) === (codeId ?? null))?.revenue ?? null;
 
   const connected = read.channels.filter((c) => !!c.account);
+  /* Whether ANY of the three can be signed in to on this build at all. Not a
+     fact about the coach — a fact about what the owner has supplied — and the
+     header of this screen has to stop promising a connection when it is
+     false. See the ChannelCard note below. */
+  const anyChannelSetUp = AD_CHANNELS.some((c) => !!channelClientId(c));
   const combined = read.combined;
   const settled = read.status === 'ready';
 
@@ -223,9 +228,17 @@ export default function TrainerAdSpend() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Ad Spend</Text>
           </View>
         </View>
+        {/* The opening sentence is an offer, and it is only made where the
+            offer exists. With no app id supplied for any of the three, the
+            original line invited a coach to connect an account that nothing on
+            this build can sign in to, and the cards below then said "Not
+            connected" — which reads as something the coach has not got round
+            to. Neither half is a promise about a future version, because none
+            is owed: what is missing is configuration, not code. */}
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
-          Connect Meta, Google Ads or TikTok and Repple reads what each campaign cost, matching ads to your join codes by
-          the link they point at. Set a join link as the ad’s destination and there is nothing else to set up.
+          {anyChannelSetUp
+            ? 'Connect Meta, Google Ads or TikTok and Repple reads what each campaign cost, matching ads to your join codes by the link they point at. Set a join link as the ad’s destination and there is nothing else to set up.'
+            : 'Collecting ad spend automatically needs an ad account to sign in to, and none of Meta, Google Ads or TikTok is set up here — each card below says what is missing and who has to supply it. Typing what you spent into a code’s spend field works exactly as it always has, and every figure on this screen is built from those.'}
         </Text>
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{READ_ONLY_NOTE}</Text>
 
@@ -245,7 +258,11 @@ export default function TrainerAdSpend() {
         <Section>
           <SectionHead
             title="Your ad accounts"
-            note={settled ? `${num(connected.length)} of ${num(AD_CHANNELS.length)} connected` : undefined}
+            note={!settled
+              ? undefined
+              : anyChannelSetUp
+                ? `${num(connected.length)} of ${num(AD_CHANNELS.length)} connected`
+                : 'None of the three is set up here'}
           />
           {status === 'loading' ? (
             <ActivityIndicator color={t.brand} style={{ marginVertical: 24 }} />
@@ -627,6 +644,37 @@ function ChannelCard({ state, busy, onConnect, onSync, onDisconnect }: {
   const run = state.run;
   const chosen = !!account?.externalAccountId;
   const label = channelLabel(c);
+
+  /* ── a channel this build has no app id for ────────────────────────────
+     "Not connected." with a Connect button under it is the coach's own state:
+     an account they have not linked yet, and a button that links it. Where the
+     owner has supplied no app id there is no account to link and the button
+     opens nothing — `connectAdChannel` refuses immediately with
+     `channelSetupNote`, so the only true sentence on the screen was behind a
+     tap, and everything a coach could see before that tap said they simply had
+     not connected.
+
+     That is the shape app/(trainer)/calendar.tsx withdrew the Google Calendar
+     row over: a live-looking control leading nowhere teaches a coach that the
+     screen is broken. The row is not withdrawn here, because unlike that one it
+     has something to say — which of the three is unavailable, and that this
+     screen's typed figures are unaffected — and because ONE channel can be set
+     up while the others are not, so the list is where the difference shows.
+     app/(trainer)/share-kit.tsx takes exactly this decision for Instagram's
+     'unconfigured' state: the sentence, and no dead button.
+
+     Nothing here mentions a version or an update. No build fixes this; an app
+     id and a Supabase secret do, and `channelSetupNote` names both. */
+  if (!account && !channelClientId(c)) {
+    return (
+      <View>
+        <Text style={{ ...ty.head, color: t.ink3 }}>{label}</Text>
+        <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>
+          {channelSetupNote(c)}
+        </Text>
+      </View>
+    );
+  }
 
   if (!account) {
     return (
