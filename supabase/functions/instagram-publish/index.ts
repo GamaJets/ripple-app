@@ -326,7 +326,49 @@ Deno.serve(async (req) => {
     // client's gym Page would otherwise have a card posted to the wrong
     // business's feed, silently, and there is no undoing a post.
     const withIg = pages.filter((p) => p.igUserId);
-    const chosen = withIg.length === 1 ? withIg[0] : null;
+    let chosen = withIg.length === 1 ? withIg[0] : null;
+
+    /* ── a reconnect may not destroy a working connection ────────────────
+     *
+     * The upsert below replaces every column of the row, and it used to write
+     * `ig_user_id: chosen?.igUserId ?? null` unconditionally. `chosen` is null
+     * whenever the login reaches anything other than exactly one Instagram
+     * account — so a coach who was posting yesterday, and who tapped Connect
+     * because the app told them their token expires within the week, had their
+     * account UNSET by the act of renewing it. Renewing a credential is the
+     * commonest reason to be here and it was the destructive path.
+     *
+     * Two rules, in order:
+     *
+     *   · If this login still reaches the Page the row already names, that
+     *     Page is kept and its token refreshed. That IS the renewal, and it
+     *     needs no decision from the coach because they made it already.
+     *
+     *   · If it does not, and the row was working, NOTHING IS WRITTEN. A
+     *     sign-in that cannot replace a connection does not get to end it.
+     *     Switching accounts stays available and stays explicit: disconnect,
+     *     then connect.
+     *
+     * A row that was half-made — authorised, no account chosen — has nothing
+     * to protect and falls through to the write as before, which is what puts
+     * a fresh list in front of the coach.
+     */
+    // no-error-ok: a row that cannot be read is treated as no row, which sends
+    // this down the same path as a first connection — a fresh write. The only
+    // thing lost is the protection below, and asserting a connection exists on
+    // the strength of a failed read would be worse.
+    const { data: existing } = await service
+      .from('instagram_accounts').select('page_id, ig_user_id, ig_username').eq('trainer_id', trainerId).maybeSingle();
+    const hadPage = String(existing?.page_id || '');
+    const wasReady = !!existing?.ig_user_id;
+    if (!chosen && hadPage) chosen = withIg.find((p) => p.id === hadPage) ?? null;
+    if (!chosen && wasReady) {
+      const had = existing?.ig_username ? `@${existing.ig_username}` : 'the Instagram account';
+      return fail(
+        `That Meta login does not reach ${had} that Repple posts to, so nothing has been changed and your existing connection still works. `
+        + 'To post from a different account, disconnect first and then connect.',
+      );
+    }
 
     const { error } = await service.from('instagram_accounts').upsert({
       trainer_id: trainerId,

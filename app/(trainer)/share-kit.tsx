@@ -203,10 +203,23 @@ export default function ShareKit() {
   // was written on.
   const ig = useMyInstagram();
   const [igBusy, setIgBusy] = useState(false);
-  /** The Pages a fresh connection turned up, when there was more than one with
-   *  an Instagram account on it. Null when there is nothing to choose. A coach
-   *  who also runs a client's gym Page must not have a card posted to the wrong
-   *  business's feed, and there is no undoing a post. */
+  /**
+   * The Pages a fresh connection turned up, when there was more than one with
+   * an Instagram account on it. Null when there is nothing to choose. A coach
+   * who also runs a client's gym Page must not have a card posted to the wrong
+   * business's feed, and there is no undoing a post.
+   *
+   * THIS ALONE DECIDES WHETHER THE PICKER IS DRAWN, and it did not used to.
+   * The list was gated on `pages?.length` AND `ig.state === 'connected'`, and
+   * those two are mutually exclusive: 'connected' is `account.ready`, which is
+   * `ig_user_id is not null` in `my_instagram_account()`, and the edge function
+   * leaves `ig_user_id` null in exactly the case that produces a list —
+   * `chosen` is settled server-side only when precisely one Page has an
+   * Instagram account on it. So the picker was gated on the one state in which
+   * there is nothing to pick, `chooseInstagramPage` was called from nowhere,
+   * and a coach whose Meta login reached two accounts read "Choose the account"
+   * over a screen offering them nothing to choose from.
+   */
   const [pages, setPages] = useState<PageChoice[] | null>(null);
 
   // The client-result inputs. Nothing here is remembered between shares: a
@@ -529,30 +542,95 @@ export default function ShareKit() {
   photoOnCardRef.current = !!(build.ok && build.card.photo) || (mode === 'result' && !!pickedId);
 
   const connect = async () => {
+    // Read BEFORE the sign-in, because the reload below is what replaces it.
+    //
+    // The handle of the account this coach was already posting to is the ONLY
+    // thing the app holds that can identify that account in the list Meta comes
+    // back with. `instagram_accounts` is unreadable from a device by design
+    // (part 401) and `my_instagram_account()` returns names and flags — there
+    // is no Page id on this side, and there is no need to invent one: the
+    // handle is the same string on both, `ig_username` on the row and
+    // `igUsername` on a `PageChoice`, both taken from Meta's
+    // `instagram_business_account.username`.
+    const wasPostingTo = ig.account?.ready ? ig.account.username : null;
     setIgBusy(true);
     const r = await connectInstagram();
-    setIgBusy(false);
-    if (!r.ok) { Alert.alert('Not connected', r.reason); return; }
-    ig.reload();
+    if (!r.ok) { setIgBusy(false); Alert.alert('Not connected', r.reason); return; }
+
     if (r.chosen) {
+      setIgBusy(false);
       setPages(null);
+      ig.reload();
       Alert.alert(
         'Instagram connected',
         `Cards will post to ${r.chosen.igUsername ? `@${r.chosen.igUsername}` : r.chosen.name}.${r.warning ? `\n\n${r.warning}` : ''}`,
       );
       return;
     }
+
     // Nothing was chosen for them. Either there are several Pages with an
     // Instagram account on them, or there are none — and those are different
     // sentences, because only one of them is a decision the coach can make.
     const withIg = r.pages.filter((p) => p.hasInstagram);
-    setPages(withIg.length ? withIg : null);
-    Alert.alert(
-      withIg.length ? 'Choose the account' : 'Nothing to post to',
-      withIg.length
-        ? 'Your Meta login reaches more than one Instagram account. Pick the one you post from.'
-        : 'None of the Pages this login can see has an Instagram Business or Creator account linked to it, so there is nowhere for a post to go. Link one in Meta Business Suite and connect again.',
-    );
+    if (!withIg.length) {
+      setIgBusy(false);
+      setPages(null);
+      ig.reload();
+      // The one case this screen cannot repair by itself, and it is said as
+      // plainly as it can be. The deployed function has already written
+      // `ig_user_id: null` over whatever was there, and there is nothing in
+      // this list to put back — see the note on the restore below.
+      Alert.alert(
+        'Nothing to post to',
+        'None of the Pages this login can see has an Instagram Business or Creator account linked to it, so there is nowhere for a post to go. Link one in Meta Business Suite and connect again.'
+        + (wasPostingTo ? `\n\nThat sign-in has also cleared the account Repple was posting to. Connect again with the Meta login that reaches @${wasPostingTo}.` : ''),
+      );
+      return;
+    }
+
+    // ── putting back what the reconnect just took away ───────────────────
+    //
+    // The deployed edge function writes `ig_user_id: chosen?.igUserId ?? null`
+    // on EVERY connect, and `chosen` is null whenever the login reaches
+    // anything other than exactly one Instagram account. So a coach who was
+    // posting perfectly well, and who tapped Connect because the banner on this
+    // screen told them their connection expires within the week, has just had
+    // their account unset by the act of renewing it.
+    //
+    // The account they were posting to is named in the list that came back, and
+    // they were posting to exactly one of them a moment ago. Putting that one
+    // back is not a choice being made for them: it is the state they were
+    // already in, restored, and it is the only reading of "connect again and
+    // posting keeps working" that is true. Anything else — a handle that was
+    // renamed at Meta, a genuinely first connection — still shows the list.
+    //
+    // This is a REPAIR, not a prevention. The null is written before the app
+    // hears anything back, so only the function can stop it being written at
+    // all; see the note in supabase/functions/instagram-publish/index.ts.
+    const same = wasPostingTo ? withIg.filter((p) => p.igUsername === wasPostingTo) : [];
+    if (same.length === 1) {
+      const back = await chooseInstagramPage(same[0].id);
+      setIgBusy(false);
+      ig.reload();
+      if (back.ok) {
+        setPages(null);
+        Alert.alert(
+          'Instagram reconnected',
+          `Cards still post to @${wasPostingTo}. To post from one of the other accounts this login reaches, disconnect below and connect again.`,
+        );
+        return;
+      }
+      // The restore was refused. The list is the way back, and it is now on
+      // the screen rather than nowhere.
+      setPages(withIg);
+      Alert.alert('Pick your account again', `${back.reason}\n\nPick the account you post from.`);
+      return;
+    }
+
+    setIgBusy(false);
+    setPages(withIg);
+    ig.reload();
+    Alert.alert('Choose the account', 'Your Meta login reaches more than one Instagram account. Pick the one you post from — nothing posts anywhere until you do.');
   };
 
   const choose = async (p: PageChoice) => {
@@ -913,10 +991,17 @@ export default function ShareKit() {
         <Section>
           <SectionHead title="Post to Instagram" note={ig.account?.username ? `@${ig.account.username}` : undefined} />
 
-          {ig.state === 'connected' && pages?.length ? (
+          {/* The list, and it is FIRST and unconditional on the connection
+              state. A list exists only when a sign-in came back without an
+              account settled on, which is precisely the state the connection
+              reads as not-connected in — so anding this with
+              `ig.state === 'connected'` was asking for the one state in which
+              there is nothing to choose, and drew the not-connected branch
+              underneath an alert saying "Choose the account". */}
+          {pages?.length ? (
             <>
               <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
-                Your Meta login reaches more than one Instagram account. Pick the one you post from.
+                Your Meta login reaches more than one Instagram account. Pick the one you post from. Nothing posts anywhere until you do.
               </Text>
               {pages.map((p) => (
                 <Pressable key={p.id} onPress={() => { void choose(p); }} disabled={igBusy}
