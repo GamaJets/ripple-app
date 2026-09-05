@@ -392,9 +392,11 @@ export default function ClientPackages() {
     // waiting for a checkout that had not started. `buyPackage` now answers on
     // the open itself.
     //
-    // The subscription arm still answers the old way: `subscribeToPackage`
-    // lives in src/lib/subscriptions.ts, which another lane owns today. The
-    // same two lines there would close it.
+    // And so does the subscription arm. `subscribeToPackage` in
+    // src/lib/subscriptions.ts kept the old answer for a while after this
+    // comment was written; it now returns the same `false` on the same
+    // failure, so BOTH branches of the line above mean "a browser opened" and
+    // the code below this is cleared only when one did.
     setCodeFor(null);
     setCode('');
   };

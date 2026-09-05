@@ -94,23 +94,29 @@ export default function Records() {
   * which is the same rule the visible figures on this screen already follow.
   */
  /** The record's load in the reader's own unit, or null when it could not be
-  *  read. The unit is appended only for the SPOKEN sentence: on screen the
-  *  column beside it already says "est 1RM · kg", and the row has been read
-  *  without a repeated unit since it was built. */
- const setLoad = (pr: { weight: number }, voice: 'screen' | 'spoken' = 'screen'): string | null => {
-  const l = liftLabel(pr.weight, wu);
-  return l == null ? null : voice === 'spoken' ? `${l} ${wu}` : String(l);
- };
+  *  read.
+  *
+  *  It took a `voice: 'screen' | 'spoken'` and appended the unit on the spoken
+  *  arm, on the reading that the screen has its own "est 1RM · kg" caption and
+  *  a sentence read aloud does not. Both true, and both already handled:
+  *  `liftLabel` returns "104 kg", not "104" (src/lib/units.ts), so the spoken
+  *  arm was appending a SECOND unit and VoiceOver announced "104 kg kg by 12
+  *  reps". With the unit where it always was, the two voices want the same
+  *  string and there is no arm left to choose between. */
+ const setLoad = (pr: { weight: number }): string | null => liftLabel(pr.weight, wu);
  /** What was hung, belted or held on top, in the reader's unit — null when
   *  nothing was, or when the figure itself could not be read. Null rather than
   *  a dash: "at bodyweight +— kg" is worse than "at bodyweight". */
  const setAdded = (pr: { addedKg?: number }): string | null => {
   if (!pr.addedKg) return null;
-  const a = liftLabel(pr.addedKg, wu);
-  return a == null ? null : `${a} ${wu}`;
+  // The unit comes from `liftLabel` and is not added again. This one string
+  // feeds the hero, every row and the spoken label, so the doubled unit read
+  // "Best set 12 reps at bodyweight +20 kg kg" in three places at once for
+  // anyone with a belted pull-up, a weighted dip or a loaded plank.
+  return liftLabel(pr.addedKg, wu);
  };
  const prSpoken = (pr: ReturnType<typeof personalRecords>[number], rank: number): string => {
-  const best = bestSetLabel(pr, setLoad(pr, 'spoken'), setAdded(pr), 'spoken');
+  const best = bestSetLabel(pr, setLoad(pr), setAdded(pr), 'spoken');
   const one = est1RMIn(pr.est1RM, wu);
   const parts = [`${rank}. ${pr.exercise}`];
   if (one != null) parts.push(`estimated one rep max ${one} ${wu}`);
@@ -121,13 +127,13 @@ export default function Records() {
   *  was held on top and is never presented as the whole of it. */
  const holdSpoken = (h: { exercise: string; secs: number; loadKg: number; bodyweight: boolean; at: string }): string => {
   const added = h.loadKg > 0 ? liftLabel(h.loadKg, wu) : null;
-  return `${h.exercise}, ${timedSetLabel(h.secs, added != null ? `${added} ${wu}` : null, h.bodyweight)}, on ${dstr(h.at)}`;
+  return `${h.exercise}, ${timedSetLabel(h.secs, added, h.bodyweight)}, on ${dstr(h.at)}`;
  };
  /** The same, for the reps board. Reps are always known there, so the only
   *  withholdable clause is the belt. */
  const repSpoken = (r: { exercise: string; reps: number; addedKg: number; at: string }): string => {
   const added = r.addedKg ? liftLabel(r.addedKg, wu) : null;
-  return `${r.exercise}, ${bodyweightSetLabel(r.reps, r.addedKg, added != null ? `${added} ${wu}` : null)}, on ${dstr(r.at)}`;
+  return `${r.exercise}, ${bodyweightSetLabel(r.reps, r.addedKg, added)}, on ${dstr(r.at)}`;
  };
  const G = layout.gutter;
 
@@ -294,7 +300,7 @@ export default function Records() {
         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{r.exercise}</Text>
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
          {/* delta-ok: the plus is not a movement, it is the weight hung off a belt. Nothing here changed from anything. */}
-         {r.addedKg > 0 ? `+${fig(liftLabel(r.addedKg, wu))} ${wu} added · ` : 'At bodyweight · '}{dstr(r.at)}
+         {r.addedKg > 0 ? `+${fig(liftLabel(r.addedKg, wu))} added · ` : 'At bodyweight · '}{dstr(r.at)}
         </Text>
        </View>
        <View style={{ alignItems: 'flex-end' }}>
@@ -332,7 +338,7 @@ export default function Records() {
         <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>
          {/* delta-ok: the plus is a plate on a belt, not a change in anything. */}
          {h.loadKg > 0
-          ? `${h.bodyweight ? 'At bodyweight +' : '+'}${fig(liftLabel(h.loadKg, wu))} ${wu} · `
+          ? `${h.bodyweight ? 'At bodyweight +' : '+'}${fig(liftLabel(h.loadKg, wu))} · `
           : h.bodyweight ? 'At bodyweight · ' : ''}{dstr(h.at)}
         </Text>
        </View>

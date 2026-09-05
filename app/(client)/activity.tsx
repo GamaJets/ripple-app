@@ -28,7 +28,7 @@ import { useSessions } from '../../src/ui/sessions';
 import { shownStreak, isNewPR, streakMilestone } from '../../src/lib/streaks';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel } from '../../src/lib/units';
+import { liftIn, weightLabel } from '../../src/lib/units';
 import { setChipLabel } from '../../src/lib/timedSets';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
@@ -135,8 +135,20 @@ export default function Activity() {
   // second of them is a bar with a missing weight. A hold was worse still —
   // "45×—", forty-five repetitions of nothing, on a plank the app itself
   // prescribed in seconds.
+  // `liftIn`, not `weightIn`. Both convert a stored kilogram figure and they
+  // round it at different grains, because they are about different things:
+  // `weightIn` is the BODY weight reader and gives whole pounds, `liftIn` is
+  // the LIFTED load reader and gives the 0.5 lb step that plates come in.
+  // src/lib/units.ts argues the half-pound at length — 2.5 kg, the commonest
+  // progression step in this app, is 5.51 lb, and whole pounds cannot say it.
+  //
+  // A load is what goes through here, and it was going through the body
+  // reader. So a pounds reader who logged a 227.5 lb set (stored 103.19 kg)
+  // read it back as 8×227.5 lb on Train and on the calendar, which both go
+  // through `fig(liftIn(kg, wu))`, and as 8×227 lb on this screen — the same
+  // set, disagreeing with itself across two tabs of the same app.
   const setText = (e: WorkoutEntry, i: number): string =>
-    setChipLabel(e, i, (kg) => (kg == null ? fig(null) : String(weightIn(kg, wu))), wu);
+    setChipLabel(e, i, (kg) => fig(liftIn(kg, wu)), wu);
 
   // Workouts + PR flags
   for (const e of log) {

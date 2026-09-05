@@ -98,7 +98,38 @@ export function pkgPriceLine(minorUnits: number | null | undefined, currency: st
   return i ? `${m} / ${i}` : m;
 }
 
-const openUrl = async (url?: string | null) => { if (url) { try { await Linking.openURL(url); } catch { /* ignore */ } } };
+/**
+ * Open a Stripe-issued URL, and SAY whether it opened.
+ *
+ * It used to swallow the failure — an empty catch and no return value — so
+ * every caller here could only ever learn that a URL had come back,
+ * never that a browser had taken it. `Linking.openURL` rejects when nothing on
+ * the device can handle the URL, and on some platforms it resolves `false`
+ * instead of throwing; both are the same failure and both come back false.
+ *
+ * This is `openUrl` in src/lib/connect.ts, verbatim, for the reason that file
+ * gives at length: the member is left staring at a screen that says their
+ * purchase will appear once Stripe confirms it, waiting on a checkout that was
+ * never reached. The one-off arm has answered honestly since; the subscription
+ * arm in this file did not, and app/(client)/packages.tsx says so in a comment
+ * naming this module.
+ */
+const openUrl = async (url?: string | null): Promise<boolean> => {
+  if (!url) return false;
+  try {
+    const r = await Linking.openURL(url);
+    return r !== false;
+  } catch { return false; }
+};
+
+/** What a member is told when the URL was issued and nothing opened. Their
+ *  money has not moved: the checkout was never reached. */
+const BROWSER_DID_NOT_OPEN = 'Your browser did not open, so nothing has been started and nothing has been charged. Try again in a moment.';
+
+/** The same, for the billing portal — where there was nothing to charge in the
+ *  first place, so saying "nothing has been charged" would answer a question
+ *  nobody asked and imply one had been in prospect. */
+const PORTAL_DID_NOT_OPEN = 'Your browser did not open, so your billing page could not be shown. Nothing about your subscription has changed. Try again in a moment.';
 
 /**
  * The currency the signed-in user's gym charges in — ISO 4217, uppercase, from
@@ -399,7 +430,12 @@ export async function subscribeToPackage(packageId: string, code?: string): Prom
       },
     });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    // `ok` means a browser opened, not that a URL came back. It used to mean
+    // the second, and app/(client)/packages.tsx clears the typed discount code
+    // on `ok` — so a member whose browser refused the URL was shown no alert,
+    // watched the button stop saying "Opening…", saw nothing open, and lost
+    // the code they had typed. src/lib/connect.ts `buyPackage` is this line.
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: BROWSER_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not start checkout.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
@@ -507,7 +543,11 @@ export async function openSubscriptionPortal(subscriptionId: string): Promise<{ 
       body: { action: 'portal', subscription_id: subscriptionId, return_url: appLink('packages') },
     });
     if (error) return { ok: false, error: error.message };
-    if (data?.url) { await openUrl(data.url); return { ok: true }; }
+    // The same as `subscribeToPackage` above and for the same reason: a portal
+    // URL that no browser took is not an opened portal, and a screen told `ok`
+    // shows nothing at all while the member waits for a page that is not
+    // coming.
+    if (data?.url) return (await openUrl(data.url)) ? { ok: true } : { ok: false, error: PORTAL_DID_NOT_OPEN };
     return { ok: false, error: data?.error || 'Could not open billing.' };
   } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
