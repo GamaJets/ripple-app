@@ -356,12 +356,16 @@ export default function Calendar() {
   useEffect(() => {
     let cancelled = false;
     setPlanStatus('loading');
-    fetchPlannedDays().then((rows) => {
+    fetchPlannedDays().then((read) => {
       if (cancelled) return;
       // null is "could not read", [] is "genuinely none". fetchPlannedDays
       // keeps them apart precisely so this line can.
-      if (rows == null) { setPlanStatus('error'); return; }
-      setPlans(rows); setPlanStatus('ready');
+      if (read.days == null) { setPlanStatus('error'); return; }
+      // And 'partial' is the third answer, which this line used to flatten into
+      // 'ready': a plan read that came back at its row limit is a PREFIX, and
+      // every gate below that reads "no mark on this day" would have been
+      // reading "no mark in the part that came back".
+      setPlans(read.days); setPlanStatus(read.truncated ? 'partial' : 'ready');
     }).catch(() => { if (!cancelled) setPlanStatus('error'); });
     return () => { cancelled = true; };
   }, [planReload]);
@@ -419,6 +423,19 @@ export default function Calendar() {
   // a session on this very day may be one of the rows past the cap. Both were
   // being read as an empty day. See src/ui/loadStatus.ts.
   const logWhole = isWhole(logStatus);
+  /**
+   * The same gate for the plan read, which the day panel never had.
+   *
+   * `planStatus === 'error'` draws its own Notice above — "nothing here should
+   * be read as an unplanned day" — and then, ninety lines further down, the
+   * emptiness gate said "Nothing on this day" over that very day, because
+   * `!selPlan` was in the conjunction and `planStatus` was not. Under a failed
+   * plan read `plans` is `[]`, so `selPlan` is null for every date on the grid
+   * and the two sentences contradicted each other on one screen. It is not a
+   * race that a bigger read wins: under 'error' the plan never lands at all.
+   * 'partial' fails it too — a marked day may be one of the rows past the cap.
+   */
+  const planWhole = isWhole(planStatus);
   const logByDay = new Map<string, WorkoutEntry[]>();
   for (const e of log) { const k = dayKey(e.t); (logByDay.get(k) ?? logByDay.set(k, []).get(k)!).push(e); }
 
@@ -1182,8 +1199,16 @@ export default function Calendar() {
               conclude they were never booked in, and they do not turn up. The
               loading line below stands in its place; `isWhole` also excludes
               'partial', where the session or the workout on this day may be
-              one of the rows that did not come back. */}
-          {logWhole && sessionsCountable && takenWhole && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
+              one of the rows that did not come back.
+
+              `planWhole` is the fourth read and was the one left out. `!selPlan`
+              was already a term of this conjunction, so the plan was consulted
+              — but only ever through an empty list, which is what a failed or
+              truncated plan read leaves behind. A member whose plan read failed
+              was shown the "we couldn't read what you've planned" notice at the
+              top of this panel and "Nothing on this day" underneath it, over a
+              day they had marked as rest. */}
+          {logWhole && sessionsCountable && takenWhole && planWhole && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Icon name="calendar" size={24} color={t.ink3} />
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center', marginTop: sp.md }}>Nothing on this day. Days with a grey dot have open slots you can book; a coloured dot is a workout you logged, and a hollow ring is a day you planned.</Text>
@@ -1206,12 +1231,27 @@ export default function Calendar() {
               and that this is a connection problem. Two contradictory sentences
               about one read on one screen; the flag is the true one, and it
               renders whether or not the day is empty. */}
-          {!(logWhole && sessionsCountable && takenWhole) && logStatus !== 'error' && sessionsStatus !== 'error' && waitStatus !== 'error'
+          {/* `planStatus` joins the other three here for the same reason it
+              joined the gate above: with the plan read now able to answer
+              'partial', a day held back from "Nothing on this day" needs a line
+              saying WHY it is being held back, and without this it would have
+              been held back in silence. 'error' is excluded because the plan
+              read has its own Notice at the top of this panel, exactly as the
+              other three do. */}
+          {!(logWhole && sessionsCountable && takenWhole && planWhole) && logStatus !== 'error' && sessionsStatus !== 'error' && waitStatus !== 'error' && planStatus !== 'error'
             && selDaySessions.length === 0 && selDayTaken.length === 0 && selDayLog.length === 0 && !selPlan ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.lg }}>
               <Text style={{ ...ty.label, color: t.ink3, textAlign: 'center' }}>
-                {logStatus === 'loading' || sessionsStatus === 'loading' || waitStatus === 'loading'
+                {logStatus === 'loading' || sessionsStatus === 'loading' || waitStatus === 'loading' || planStatus === 'loading'
                   ? 'Reading this day…'
+                  // The plan is named first among the truncated reads because it
+                  // is the only one of the four that can put a mark on THIS day
+                  // and nothing else: a session or a workout that fell off the
+                  // end would still leave the day looking empty for a reason the
+                  // member can act on, and a plan that fell off the end is a
+                  // decision they already made and cannot see.
+                  : planStatus === 'partial'
+                  ? 'You have more days marked than we can read in one go, so this day can’t be called empty. Anything you planned on it is still planned.'
                   // Named as the one that was actually cut short, not as both.
                   // Telling a member their calendar is truncated when it is
                   // their training log points them at the wrong read.
@@ -1380,7 +1420,7 @@ export default function Calendar() {
             than making it. Days already gone are not here: they are history,
             and history belongs to the log. */}
         <Section>
-          <SectionHead title="Planned Ahead" note={planStatus === 'error' ? 'Not read' : undefined} />
+          <SectionHead title="Planned Ahead" note={planStatus === 'error' ? 'Not read' : planStatus === 'partial' ? 'Part of the list' : undefined} />
           {planStatus === 'error' ? (
             // No count, no list, no reassurance. Under a failed read the honest
             // statement is that we do not know. That used to be said with a
@@ -1392,6 +1432,14 @@ export default function Calendar() {
             <Text style={{ ...ty.label, color: t.ink3 }}>We couldn’t read your planned days. Try again from the day panel above.</Text>
           ) : planStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your planned days…</Text>
+          ) : coming.length === 0 && planStatus === 'partial' ? (
+            // "Nothing planned from today onwards" is the one sentence a
+            // truncated plan read must never be allowed to say, and it is the
+            // one it would say most often. The read is ordered `on_date`
+            // ascending, so what a cut set loses is the FAR END — the future,
+            // which is the entire subject of this section. An empty list here
+            // under 'partial' is therefore evidence of nothing at all.
+            <Text style={{ ...ty.label, color: t.ink3 }}>You have more days marked than we can read in one go, so what is coming up can’t be listed here. Nothing you planned has been lost — tap a day above to see what is on it.</Text>
           ) : coming.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Nothing planned from today onwards. Tap a day above and mark it — a training day, a rest day, a deload — and it appears here and on the grid as a hollow ring.</Text>
           ) : (

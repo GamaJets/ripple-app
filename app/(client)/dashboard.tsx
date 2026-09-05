@@ -476,6 +476,13 @@ export default function Home() {
     : { headline: 'On Track', tip: 'Session done and your macros are on point. Nice work.', cta: 'View Plan', route: '/(client)/nutrition', tone: t.brand };
 
   const ws = c.weightSeries.map((x) => x.v);
+  // Whether the scan history behind `ws` is all of it. `c.status` — which this
+  // screen already reads for `facts.bodyStatus` — is the profile AND the scans
+  // taken together and is not this question; `scansStatus` is, and the weight
+  // trend heading below counted the series without asking it. Every other
+  // screen that prints a scan count asks it first: my-progress.tsx, records.tsx,
+  // social.tsx, cards.tsx and achievements.tsx all gate on `isWhole`.
+  const scansWhole = isWhole(c.scansStatus);
   // The same series in the unit this client reads in, converted point by point
   // because each point is a value rather than a change. The filter is only
   // there to satisfy the null contract of `weightIn` — a series entry is always
@@ -802,12 +809,33 @@ export default function Home() {
         {ws.length > 1 ? (<>
           <Rule />
           <Section>
-            <SectionHead title={`Weight · ${ws.length} check-ins`}
+            {/* The count is dropped when the scan read is not whole, and only
+                the count. `cd.scansStatus` answers 'partial' when the scan read
+                came back at PostgREST's ceiling (src/ui/clientData.tsx reads
+                `taken_at desc` at `capLimit()`), and "1,000 check-ins" is then
+                a count over an unknown fraction of somebody's own history,
+                rendered as fact — the one thing src/ui/loadStatus.ts says a
+                screen may never do with a 'partial' set. The delta beside it
+                survives because it names the day it is measured from and is
+                therefore a true statement about a real interval, whatever else
+                is missing; the count names no interval and cannot be read as
+                anything but a total. The line under the chart says what is
+                missing rather than leaving the heading quietly shorter. */}
+            <SectionHead title={scansWhole ? `Weight · ${ws.length} check-ins` : 'Weight'}
               // Named from the day the series starts. A bare "1.2 kg" over a
               // heading counting check-ins is a figure with no interval on it.
               note={deltaLabel(wDeltaShown, { since: wSince, unit: wu })}
               onPress={() => router.push('/(client)/scans')} />
             <Spark data={wsShown} labels={c.weightSeries.map((x) => x.t)} unit={` ${wu}`} />
+            {!scansWhole ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {c.scansStatus === 'loading'
+                  ? 'Still reading your check-ins, so they aren’t counted here yet.'
+                  : c.scansStatus === 'partial'
+                    ? 'You have more check-ins on record than we can read at once, so this is the most recent part of them and they aren’t counted here. Nothing has been lost.'
+                    : 'Your check-ins couldn’t all be read, so they aren’t counted here. This is not a shorter history — it is one we couldn’t open in full.'}
+              </Text>
+            ) : null}
           </Section>
         </>) : null}
 

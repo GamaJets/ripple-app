@@ -655,7 +655,25 @@ export async function sessionPacks(trainerId?: string): Promise<PackBalance | nu
     const { data, error } = await q;
     if (error) { reportError('connect.sessionsRemaining', error); return null; }
     if (!data) return null;
-    return packBalance(data as PackPurchase[]);
+    // `capLimit()` above asks for one row more than may be accepted, and until
+    // now nothing looked at the answer — so the probe row was being summed into
+    // the balance as though it were a purchase, and a set that had actually
+    // been cut was totalled as if it were whole. Both halves of the mistake
+    // src/lib/rowCap.ts names: no flag and no slice.
+    //
+    // `null` rather than the prefix, because null already means "we could not
+    // count them" here and that is precisely what a truncated read leaves us
+    // with. The two screens this feeds are built for it: the credits row shows
+    // a dash and says the balance could not be read, and `hadCredits` stays
+    // unknown so the "this booking was not drawn from your pack" warning is
+    // still offered. A prefix would instead hand somebody a smaller balance
+    // than they paid for, stated as a number.
+    const page = capped(data as PackPurchase[]);
+    if (page.truncated) {
+      reportError('connect.sessionsRemaining', new TruncatedRead('your session packs', ROW_CAP));
+      return null;
+    }
+    return packBalance(page.rows);
   } catch (e) { reportError('connect.sessionsRemaining', e); return null; }
 }
 

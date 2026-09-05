@@ -1659,8 +1659,20 @@ export default function Scans() {
           {wsv.length > 1 ? (<>
             {/* "N check-ins" was wrong in both directions — most of these points
                 are InBody scans, and the ones that are not are weigh-ins.
-                `readingsLabel` counts each kind and names it. */}
-            <SectionHead title={`Weight · ${readingsLabel(wReads)}`}
+                `readingsLabel` counts each kind and names it.
+
+                And it is only named at all when the scan read was whole. This
+                screen asks `scansWhole` in nine places — the Scans KPI two
+                sections up is `scansWhole ? fig(scans.length) : fig(null)`, and
+                the scan-history line at the foot of the screen is
+                `scansWhole ? "N scans" : "not all read"` — and this
+                heading was the one count that did not ask. Under 'partial'
+                (cd.scansStatus, from a read that came back at PostgREST's
+                ceiling) it printed "1,000 scans" over a chart of the most recent
+                thousand, which is a count over an unknown fraction stated as a
+                total. The caption under the chart says so rather than leaving
+                the heading quietly shorter. */}
+            <SectionHead title={scansWhole ? `Weight · ${readingsLabel(wReads)}` : 'Weight'}
               note={wDeltaShown !== null ? `${wDeltaShown > 0 ? '+' : wDeltaShown < 0 ? '−' : ''}${Math.abs(wDeltaShown)} ${wu}` : undefined}
               onPress={() => router.push('/(client)/body-trends')} />
             {/* `labels` is what puts a DATE on the readout when the client
@@ -1668,9 +1680,24 @@ export default function Scans() {
                 weigh" and refused to answer "when", which is exactly what the
                 third report asked for. Spark reads a bare date safely. */}
             <Spark data={wsvShown} unit={` ${wu}`} labels={wReads.map((r) => r.at)} />
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
-              First {bodyDayLabel(wReads[0].at)} · latest {measuredNote(wNow, today)}
-            </Text>
+            {/* "First 3 Mar" is a claim about the member's whole record and was
+                made from the first point in the ARRAY. The scan read is ordered
+                `taken_at desc` and capped, so under 'partial' the earliest point
+                on this chart is the earliest of the most recent thousand — not
+                the member's first reading, and there is no way to tell from
+                inside the page. So the sentence says what the chart actually
+                starts at instead of calling it a first. */}
+            {scansWhole ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                First {bodyDayLabel(wReads[0].at)} · latest {measuredNote(wNow, today)}
+              </Text>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {cd.scansStatus === 'partial'
+                  ? `You have more readings on record than we can read at once, so they aren’t counted above. This chart starts at ${bodyDayLabel(wReads[0].at)}, which isn’t necessarily your first — latest ${measuredNote(wNow, today)}`
+                  : `Not all of your readings could be read, so they aren’t counted above. This chart starts at ${bodyDayLabel(wReads[0].at)}, which isn’t necessarily your first — latest ${measuredNote(wNow, today)}`}
+              </Text>
+            )}
           </>) : (<>
             <SectionHead title="Weight" note="Measurements" onPress={() => router.push('/(client)/measurements')} />
             <Text style={{ ...ty.label, color: t.ink3 }}>

@@ -10,8 +10,8 @@
 //
 // ── null is not an empty week ──────────────────────────────────────────────
 //
-// `fetchPlannedDays` returns null when the read failed and `[]` when the client
-// genuinely has nothing marked. The screen must keep those apart: "nothing
+// `fetchPlannedDays` returns `days: null` when the read failed and `[]` when the
+// client genuinely has nothing marked. The screen must keep those apart: "nothing
 // planned yet — tap a day" put in front of somebody who planned their whole
 // month is the same class of lie as "0 sessions left" to a client holding ten.
 // See src/ui/loadStatus.ts.
@@ -34,28 +34,62 @@ async function myId(): Promise<string | null> {
   } catch { return null; }
 }
 
+/** What a client's read of their OWN plans came back with.
+ *
+ *  `days` null means the read failed, on the rule in this file's header. The
+ *  flag beside it is the second thing a screen has to know and used not to be
+ *  carried at all — see `fetchPlannedDays`. */
+export interface MyPlanRead {
+  days: PlannedDay[] | null;
+  /** True when the read came back at its row limit, so `days` is a PREFIX of
+   *  the set. Feeds the 'partial' member of LoadStatus. */
+  truncated: boolean;
+}
+
 /**
  * Every day this client has marked.
  *
  * The whole set rather than a month's window: a client's plans are a handful of
  * rows, and paging them by the month on screen would mean a read on every
  * arrow-tap and a blank grid whenever one of those failed.
+ *
+ * ── why this one is capped, when the window it reads is unbounded ──────────
+ *
+ * `fetchClientPlannedDays` below has carried `.order()`, `.limit(capLimit())`
+ * and `capped()` since it was written, and its own comment says the guard
+ * cannot fire today because three weeks of one client is not a thousand rows.
+ * This read had none of the three, and it is the one with no window on it at
+ * all — the read with MORE exposure to the ceiling had LESS protection than the
+ * read with less. A member who has marked every day for three years crosses it,
+ * and everything downstream then states the prefix as the whole plan: the grid
+ * loses rings, the day panel says "Nothing on this day" over a day they marked
+ * as rest, and "Planned Ahead" says "Nothing planned from today onwards".
+ *
+ * The `.order()` is not decoration either. Without it PostgREST cuts an
+ * unordered set, so which thousand days come back is whatever the plan happened
+ * to hand over — most likely the OLDEST, which is precisely the half of the
+ * calendar nobody is looking at. Ordered ascending, a cut set at least loses the
+ * far future rather than an arbitrary scatter, and the screen is told it was
+ * cut. See src/lib/rowCap.ts.
  */
-export async function fetchPlannedDays(): Promise<PlannedDay[] | null> {
+export async function fetchPlannedDays(): Promise<MyPlanRead> {
   const uid = await myId();
-  if (!uid) return null;
+  if (!uid) return { days: null, truncated: false };
   const { data, error } = await supabase
     .from('planned_days')
     .select('on_date, day_type, note')
-    .eq('client_id', uid);
-  if (error) { reportError('plannedDays.fetch', error); return null; }
-  const rows = (data ?? []) as unknown as Row[];
+    .eq('client_id', uid)
+    .order('on_date', { ascending: true })
+    .limit(capLimit());
+  if (error) { reportError('plannedDays.fetch', error); return { days: null, truncated: false }; }
+  const page = capped((data ?? []) as unknown as Row[]);
   // A row whose type this build does not recognise is dropped, not defaulted.
   // Coercing it to 'off' would show the client a Standard day where they had
   // marked something else — the app inventing an answer about their own plan.
-  return rows
+  const days = page.rows
     .filter((r) => isPlannedDayType(r.day_type))
     .map((r) => ({ dateISO: String(r.on_date).slice(0, 10), type: r.day_type as PlannedDayType, note: r.note ?? null }));
+  return { days, truncated: page.truncated };
 }
 
 /** What a coach's read of somebody else's plans came back with.

@@ -78,8 +78,21 @@ export default function Referral() {
    * counts above the list come from `my_referral_summary()`, which part 128
    * computes over every row, so they stay exact under a cut list and this must
    * not drag them down to 'partial' with it.
+   *
+   * Held as the RAW row count rather than as a boolean, because the boolean was
+   * only half of the gate and the other half was asked of the wrong number.
+   * `invitesCutLine(shown, cap)` returns null when `shown < cap`, and it was
+   * being handed `rows.length` — the count AFTER `shapeReferrals`, which drops
+   * any row whose `joined_at` will not parse. So one malformed row turned a
+   * cut list of 200 into 199 shaped rows, the sentence returned null, and a
+   * member with two hundred and fifty invites scrolled to the bottom of 199
+   * names with nothing anywhere saying the list ended before their friends did
+   * — the exact sentence `invitesCutLine` was written to prevent, silenced by
+   * the bad row rather than by the good ones. What the server returned is the
+   * only number that answers "did the list get cut", so it is the only number
+   * the gate now sees.
    */
-  const [listCut, setListCut] = useState(false);
+  const [listRows, setListRows] = useState(0);
 
   const load = useCallback(async () => {
     setStatus('loading');
@@ -91,7 +104,7 @@ export default function Referral() {
     const [list, sum] = await Promise.all([myReferrals(), myReferralSummary()]);
     if (!c || !sum) { setStatus('error'); return; }
     setRows(shapeReferrals(list));
-    setListCut((list?.length ?? 0) >= REFERRAL_ROW_CAP);
+    setListRows(list?.length ?? 0);
     setJoined(sum.joined);
     setConverted(sum.converted);
     // A null list with a good summary is still a failed read of the list, and
@@ -278,9 +291,9 @@ export default function Referral() {
               card above are untouched by it and stay exact, which is why this
               is a sentence under the list rather than a 'partial' over the
               screen. */}
-          {status === 'ready' && listCut && invitesCutLine(rows.length, REFERRAL_ROW_CAP) ? (
+          {status === 'ready' && invitesCutLine(listRows, REFERRAL_ROW_CAP) ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-              {invitesCutLine(rows.length, REFERRAL_ROW_CAP)}
+              {invitesCutLine(listRows, REFERRAL_ROW_CAP)}
             </Text>
           ) : null}
         </Section>
