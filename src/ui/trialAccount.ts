@@ -13,6 +13,7 @@
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
 import { reportError } from '../lib/reportError';
+import { isMissingFunction } from '../lib/coachCurrency';
 import type { LoadStatus } from './loadStatus';
 
 export interface AccountTrial {
@@ -40,6 +41,33 @@ export async function fetchAccountTrial(): Promise<AccountTrial> {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth?.user?.id;
     if (!uid) return { startedAt: null, status: 'error' };
+
+    // The RPC first, and the column read only where the RPC is not there.
+    //
+    // `trainers_public_directory_r` is `for select to authenticated using
+    // (listed = true)`, and this table is granted COLUMN BY COLUMN (part 131)
+    // for exactly that reason: a column grant here is a publication to every
+    // account on the platform, rival coaches included. Part 2200 granted
+    // `trial_started_at` to fix a coach who could not read their own, and
+    // published every listed coach's along with it. Part 2471 revokes the
+    // column and `my_trial_started_at()` answers about `auth.uid()` alone.
+    //
+    // The fallback is what makes the two changes orderable either way round: an
+    // app shipped before 2471 is applied finds no function and reads the column
+    // it can still read; once 2471 is applied the RPC answers and the column
+    // read is never reached. It is NOT a general error fallback — anything
+    // other than a missing function is a failed read and is reported as one,
+    // because "we could not tell" must never render as a trial that has run out.
+    const rpc = await supabase.rpc('my_trial_started_at');
+    if (!rpc.error) {
+      const v = rpc.data;
+      return { startedAt: typeof v === 'string' ? v : null, status: 'ready' };
+    }
+    if (!isMissingFunction(rpc.error)) {
+      reportError('trialAccount.read', rpc.error);
+      return { startedAt: null, status: 'error' };
+    }
+
     const { data, error } = await supabase
       .from('trainers')
       .select('trial_started_at')

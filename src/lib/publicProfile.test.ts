@@ -509,6 +509,99 @@ ok(/href="styles\.css(\?v=[a-f0-9]+)?"/.test(page),
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Held against supabase/parts/2470 — the definition that actually runs
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Everything above reads part 340, and part 340 is no longer the last word on
+// `public_coach_page()`. Part 2470 supersedes it, because 340 denominated a
+// coach's session fee by joining `trainers.tenant_id` to `tenants.currency` —
+// the column part 711 deliberately leaves pointing at a gym the coach has LEFT,
+// and the one part 941 already corrected in `issue_coach_invoice()`. A coach who
+// went independent had their fee published in their old gym's money; a coach who
+// set a currency of their own through part 940 had it published in none at all.
+//
+// A guard aimed at a superseded definition is not a guard. So every refusal this
+// file exists to enforce is re-asserted here against the SQL that replaced it,
+// and the currency chain is asserted too, so the fix cannot be undone by the
+// next person who edits this function for some other reason.
+{
+  const CANDIDATES = [
+    process.cwd() + '/supabase/parts/2470-the-public-page-priced-a-coach-in-a-gym-they-had-left.sql',
+    process.cwd() + '/../supabase/parts/2470-the-public-page-priced-a-coach-in-a-gym-they-had-left.sql',
+  ];
+  const p2470 = CANDIDATES.find((p) => fs.existsSync(p));
+  ok(!!p2470, `part 2470 not found — looked in ${CANDIDATES.join(' and ')}`);
+  const raw = p2470 ? fs.readFileSync(p2470, 'utf8') : '';
+  // Comments stripped for the same reason as `sqlCode` above: this file's header
+  // discusses `trainers.tenant_id` and `tenants.currency` at length, on purpose.
+  const code = raw.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+
+  const pageM = /create or replace function public\.public_coach_page\(p_handle text\)([\s\S]*?)\$function\$;/.exec(code);
+  ok(!!pageM, 'part 2470 does not redefine public_coach_page() in the shape this test reads');
+  const pageBody = pageM ? pageM[1] : '';
+
+  // ── the refusals part 340 made, made again ────────────────────────────────
+  ok(/t\.listed\s*=\s*true/.test(pageBody),
+    'part 2470 dropped `listed = true`, so a coach who left the directory would still have a page');
+  ok(/t\.public_page\s*=\s*true/.test(pageBody),
+    'part 2470 dropped `public_page = true`, so the directory opt-in alone would publish somebody to the open web');
+  ok(/k\.verification = 'self_declared'/.test(pageBody),
+    'part 2470 dropped the self-declared filter, so a credential could be published as though Repple had checked it');
+  ok(/k\.expires_on is null or k\.expires_on >= current_date/.test(pageBody),
+    'part 2470 dropped the expiry filter, so a lapsed certificate could be published as current');
+  ok(/withdrawn_at is null/.test(pageBody),
+    'part 2470 counts withdrawn reviews');
+
+  const rt = /returns table \(([\s\S]*?)\)\s*language sql/.exec(pageBody);
+  ok(!!rt, 'part 2470 has no readable returns-table declaration for public_coach_page()');
+  const returned = rt
+    ? rt[1].split(',').map((s) => s.trim().split(/\s+/)[0]).filter(Boolean)
+    : [];
+  ok(returned.length > 0, 'the return type parsed to nothing, which would make the next check vacuous');
+  const FORBIDDEN_2470 = [
+    'client_id', 'reviewer', 'reviewer_name', 'review_id', 'review_body',
+    'body', 'coach_reply', 'coach_replied_at', 'other_gym', 'tenant_name',
+    'tenant_id', 'verified_by', 'verified_at', 'verification', 'avatar',
+    'email', 'phone',
+  ];
+  for (const f of FORBIDDEN_2470) {
+    ok(!returned.includes(f),
+      `part 2470's public_coach_page() returns ${f} to an unauthenticated caller.`);
+  }
+  ok(returned.includes('rating_count') && returned.includes('rating_sum'),
+    'the review aggregate is still a count and a sum, so src/lib/reviews.ts decides what it may be made to say');
+  ok(returned.includes('currency'),
+    'public_coach_page() must still return a currency — web/coach.html prints no fee without one');
+
+  // ── the currency chain, in both functions ─────────────────────────────────
+  const listM = /create or replace function public\.listed_trainer_currencies\(p_ids uuid\[\]\)([\s\S]*?)\$function\$;/.exec(code);
+  ok(!!listM, 'part 2470 does not redefine listed_trainer_currencies() in the shape this test reads');
+  const listBody = listM ? listM[1] : '';
+
+  for (const [name, body] of [['public_coach_page', pageBody], ['listed_trainer_currencies', listBody]] as const) {
+    if (!body) continue;
+    // The defect itself: the fee denominated from the roster row's gym rather
+    // than the coach's. `revoke_staff_role()` leaves that column stale for life.
+    ok(!/tenants\s+\w+\s+on\s+\w+\.id\s*=\s*t\.tenant_id/.test(body),
+      `${name}() joins tenants on trainers.tenant_id again. Part 711 leaves that column pointing at a gym the coach has LEFT, so it prices them in the wrong money — see parts 940, 941 and 2470.`);
+    ok(/pr\.tenant_id is not null/.test(body),
+      `${name}() no longer reads the gym from profiles.tenant_id, which is the column that says which gym somebody is in`);
+    ok(/else t\.currency/.test(body),
+      `${name}() no longer falls back to trainers.currency, so a coach with no gym — the case part 940 exists for — has no currency and their fee is withheld`);
+  }
+
+  // ── the anon surface is unchanged ─────────────────────────────────────────
+  ok(/\[anon entry point\]/.test(raw),
+    'part 2470 has no [anon entry point] marker, so part 141\'s sweep would revoke anon and switch the page off silently');
+  ok(/grant execute on function public\.public_coach_page\(text\) to anon, authenticated;/.test(code),
+    'part 2470 does not restate the anon grant, so the page could stop being readable');
+  ok(/revoke execute on function public\.listed_trainer_currencies\(uuid\[\]\) from public, anon;/.test(code),
+    'listed_trainer_currencies() must not be reachable by anon: it is the directory, which is behind a sign-in');
+  ok(!/grant execute on function public\.listed_trainer_currencies\(uuid\[\]\) to [^;]*anon/.test(code),
+    'part 2470 grants listed_trainer_currencies() to anon, which would widen the anon surface past its two entry points');
+}
+
 if (errors.length) {
   console.error(`publicProfile: ${errors.length} failure(s)`);
   for (const e of errors) console.error('  · ' + e);
