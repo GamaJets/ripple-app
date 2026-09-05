@@ -56,7 +56,7 @@ import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, Flag, Field, fig, ChipGrid, ListRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, Flag, Field, fig, ListRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -2329,10 +2329,6 @@ export default function Train() {
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
           <SectionHead title="Go To" />
-          {/* Wrapped, not scrolled sideways — see ChipGrid in src/ui/kit,
-              which now carries this and the reasoning behind it. The coach
-              dashboard had the identical row with the identical fault, which
-              is why it is a component rather than a second copy. */}
           {/* Ordered by what somebody is DOING, not alphabetically and not by
               when each screen happened to be built. Four groups, in the order
               a session actually runs:
@@ -2369,7 +2365,19 @@ export default function Train() {
               "This Week" with "Scan machine" and "Watch & Devices", and that
               last one contradicted the screen's OWN title, which has always
               been "Watch & Devices". */}
-          <ChipGrid items={([
+          {/* Rows, not chips. Fourteen destinations in a wrapping pill grid ran
+              off the right edge on a phone — the last one read "Targe" — and a
+              label cut in half is a destination somebody cannot identify, let
+              alone decide to tap. Chips earn their place when there are a few
+              and they are short; at fourteen they are a wall of pills where
+              nothing is findable and the widest ones lose their names.
+
+              The same list as rows is scannable top to bottom, gives every
+              label its full width whatever the label is, and matches how the
+              coach app already presents the equivalent list — one pattern for
+              "here is everywhere else you can go" across both apps rather than
+              two that have to be learned separately. */}
+          {([
             ['people', 'My Coach', '/(client)/my-coach'],
             ['grid', "Coach's Documents", '/(client)/coach-documents'],
             ['play', 'Playlists', '/(client)/music'],
@@ -2384,9 +2392,10 @@ export default function Train() {
             ['water', 'Recovery', '/(client)/recovery'],
             ['heart', 'Watch & Devices', '/(client)/devices'],
             ['settings', 'Tools', '/(client)/tools'],
-          ] as const).map(([icon, label, route]) => ({
-            icon, label, key: route, onPress: () => router.push(route as any),
-          }))} />
+          ] as const).map(([icon, label, route]) => (
+            <ListRow key={route} icon={icon} title={label}
+              onPress={() => router.push(route as any)} />
+          ))}
         </Section>
 
       </ScrollView>
