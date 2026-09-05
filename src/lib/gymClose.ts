@@ -43,7 +43,7 @@
 // somebody took, with the reasons they took it over printed beside it.
 
 import { assertWrote } from './wroteRows';
-import { capLimit } from './rowCap';
+import { assertWhole, capLimit } from './rowCap';
 import { readByIds } from './idLookup';
 import type { MonthClose } from './monthEnd';
 
@@ -206,6 +206,36 @@ export function reopenBlocker(reason: string): string | null {
  * Not filtered to the live ones. A month closed, reopened and closed again is
  * three rows and a true history, and the history is the half an auditor wants —
  * the current state is one boolean they can see on the screen anyway.
+ *
+ * ── why this refuses a truncated read, on a set that will never truncate ────
+ *
+ * The `.limit(capLimit())` here had neither `capped()` nor `assertWhole` behind
+ * it — the only read in this slice that did not — so at the ceiling the probe
+ * row `capLimit()` asks for, which is requested to be COUNTED and not read,
+ * would have gone into the history table as a real close, and the oldest months
+ * would have fallen off the far end in silence. `closedMonthBlocker` looks a
+ * named month up in this list, and the rows it drops are the oldest ones, so
+ * the visible failure would be a recording accepted into a month that was
+ * signed off years ago.
+ *
+ * It cannot happen. A close is one row a month plus one more per reopen, so a
+ * thousand and one of them is the better part of a century of month-ends, and
+ * no gym in this database is eighty-three years old. That is exactly why the
+ * guard belongs here rather than in a note: it costs one line, it will never
+ * fire, and the reason it will never fire is an assumption about a customer's
+ * age that nothing enforces and nobody would think to re-check.
+ *
+ * `assertWhole` and not `capped`, for the same reason gymCosts.ts gives: this
+ * hands back a plain array, a prefix of a gym's sign-off history presented as
+ * the history is the one thing the record must never be, and both callers are
+ * already built for the throw. studio-web/app/close/page.tsx catches it, says
+ * the record of closed months could not be read and leaves the Close button
+ * unusable — which is right, because a close pressed over a list that cannot
+ * say whether the month is already closed is the mistake that table exists to
+ * prevent. studio-web/app/payroll/page.tsx reads it inside `Promise.allSettled`,
+ * so the rejection lands as one settled failure, `closedMonthBlocker` is handed
+ * null and declines to block, and payroll is not taken away from a gym over it
+ * — the trade `closedMonthBlocker` argues for in as many words.
  */
 export async function fetchCloses(sb: Queryable, tenantId: string): Promise<MonthCloseRow[]> {
   const { data, error } = await sb
@@ -217,7 +247,7 @@ export async function fetchCloses(sb: Queryable, tenantId: string): Promise<Mont
     .limit(capLimit());
   if (error) throw error;
 
-  const rows = (data ?? []) as any[];
+  const rows = assertWhole<any>(data, "this gym's record of closed months");
   const names = await namesFor(sb, rows.flatMap((r) => [r.closed_by, r.reopened_by]));
   return rows.map((r) => ({
     id: r.id,

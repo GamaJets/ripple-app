@@ -202,10 +202,30 @@ export function sumSpend(rows: readonly SpendRow[]): SpendSum {
  * except by trying again. A screen that says "ask your owner to set a currency"
  * when the read simply failed sends a coach to a settings page where the value
  * is already correct, and they conclude the app is lying to them.
+ *
+ * ── the third silence, and why it is not `unset` ───────────────────────────
+ *
+ * This used to check `status === 'error'` and nothing else, so 'loading' and
+ * 'partial' both fell through to `unset` — the arm that names the gym settings
+ * and tells the coach nobody has set a currency for them. Under 'loading' that
+ * sentence is said about a value nothing has looked at yet, which is the same
+ * substitution the paragraph above refuses for 'error', arriving through the
+ * other end of `LoadStatus`. Under 'partial' the currency is missing from a
+ * page that was cut off at the row ceiling, and a currency absent from a prefix
+ * is not a currency that was never set.
+ *
+ * It was harmless only because the one caller — app/(trainer)/money.tsx —
+ * happens to draw `note` inside a branch that has already split 'loading',
+ * 'partial' and 'error' out above it. That is a fact about a screen, not about
+ * this function, and it would survive nobody rearranging that branch.
+ *
+ * A currency that IS stated still denominates under any status but 'error':
+ * three letters read off a real row are three letters, whether or not more rows
+ * were coming. Only the ABSENCE of one needs a whole read behind it.
  */
 export type Denom =
   | { ok: true; currency: string }
-  | { ok: false; why: 'unread' | 'unset'; note: string };
+  | { ok: false; why: 'unread' | 'unset' | 'unlanded'; note: string };
 
 export function denominate(currency: string | null | undefined, status: LoadStatus): Denom {
   if (status === 'error') {
@@ -216,14 +236,23 @@ export function denominate(currency: string | null | undefined, status: LoadStat
     };
   }
   const code = (currency || '').trim().toUpperCase();
-  if (code.length < 3) {
+  if (code.length >= 3) return { ok: true, currency: code };
+  // No currency in hand. Whether that is a fact about the settings or a fact
+  // about the read is the whole question, and only 'ready' answers it.
+  if (status !== 'ready') {
     return {
       ok: false,
-      why: 'unset',
-      note: 'Nobody has set a currency for you yet. Repple is white-labelled, so there is no default that would be right for every gym, and a figure with the wrong three letters on it is a different amount of money. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.',
+      why: 'unlanded',
+      note: status === 'partial'
+        ? 'More rows are on record than could be read in one request, and none of the ones that came back states a currency. That is not a statement that no currency is set, so amounts that depend on one are withheld until the whole set has been read.'
+        : 'We haven’t finished reading what currency you charge in, so nothing is denominated yet. This is not a statement that nobody has set one.',
     };
   }
-  return { ok: true, currency: code };
+  return {
+    ok: false,
+    why: 'unset',
+    note: 'Nobody has set a currency for you yet. Repple is white-labelled, so there is no default that would be right for every gym, and a figure with the wrong three letters on it is a different amount of money. Your gym owner sets one in the gym settings, or it comes from the currency you price a package in.',
+  };
 }
 
 /* ── what an empty ledger means, which depends entirely on the read ───────── */

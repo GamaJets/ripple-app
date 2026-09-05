@@ -32,6 +32,28 @@ const row = (amountCents: number | null, currency: string | null): PaidRow => ({
   eq(paidNote(paidTotal('failed', null)), 'payments not read', 'and a failure says which read failed');
 }
 
+/* ── a truncated read is not a refused one ─────────────────────────────────── */
+{
+  // This used to arrive as 'failed', because `rowsOf` hands back null for a
+  // partial slice and the null-rows line caught it one branch later. The
+  // sentence that reached the tile was "payments not read", under payments that
+  // had been read perfectly well — an owner sent looking for a broken query
+  // when what they had was a member with more than a thousand payments.
+  eq(paidTotal('partial', null).kind, 'partial', 'a read that came back at the ceiling says so');
+  eq(paidNote(paidTotal('partial', null)),
+    'only part of the payments were read, so a total is withheld',
+    'and says it as truncation rather than as failure');
+
+  // The half that had no protection at all: rows DO arrive under 'partial' the
+  // moment a caller reaches for `rowsToShow` instead of `rowsOf`, and adding
+  // them up would print a subtotal as a lifetime total. The state decides.
+  const withRows = paidTotal('partial', [row(1000, 'GBP'), row(2500, 'GBP')]);
+  eq(withRows.kind, 'partial',
+    'rows under a partial state are a prefix — they are not summed, whichever accessor the caller used');
+  eq(paidNote(withRows, 'last 3 March'), 'only part of the payments were read, so a total is withheld',
+    'and the recency caption is withheld too, as it is for every other refusing arm');
+}
+
 /* ── nothing on record ─────────────────────────────────────────────────────── */
 {
   const t = paidTotal('ready', []);

@@ -43,7 +43,7 @@
 // instance — it scored a trainer on bookings nobody had marked. Three places,
 // one mistake: absence of evidence read as evidence of health.
 import { STATUS_LABEL, STATUS_RANK, statusFromRisk, type StatusLevel } from './status';
-import { capLimit, capped } from './rowCap';
+import { capLimit, capped, ROW_CAP, TruncatedRead } from './rowCap';
 import { readCappedByIds } from './cappedByIds';
 
 type Queryable = { from: (table: string) => any };
@@ -508,12 +508,53 @@ export function isQueryableId(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
 }
 
+/**
+ * The map alone, for a caller that only wants "when was each of these last
+ * active" and has no use for the shape of the read.
+ *
+ * ── Why this refuses a truncated read rather than returning a short map ────
+ *
+ * It used to be `(await readClientActivity(…)).byClient` and nothing else,
+ * which threw `truncated` away at the door. That is not the same defect as
+ * losing `notAsked`, and the two have to be separated:
+ *
+ *   notAsked  is a fact ABOUT NAMED IDS and it survives in the map. Those ids
+ *             are still keys, their entry is `[]`, and any caller can recover
+ *             the list exactly by filtering on `isQueryableId`, which is
+ *             exported beside this for that purpose. Nothing is lost that
+ *             cannot be got back, and refusing the whole read over a coach's
+ *             one hand-added client would take a working screen away — the
+ *             failure `isQueryableId` was written to end in the first place.
+ *
+ *   truncated is a fact ABOUT THE SET and it does not survive in the map at
+ *             all. There is no key to look at, no residue, nothing a caller
+ *             could inspect afterwards to discover it: a client whose rows fell
+ *             off the far side of the ceiling comes back with `[]`, which is
+ *             the same array as a client who has not trained since March. And
+ *             the four reads behind it carry no `.order()`, so WHICH clients
+ *             land on the wrong side is not even stable between two calls.
+ *
+ * The rule in src/lib/rowCap.ts is to throw, and this is the shape it was
+ * written for: the caller cannot act on a flag it never receives, and the map's
+ * emptiness reads downstream as a statement about a person. studio-web's staff
+ * page is the standing example — its own comment says an understated client
+ * count "waves through the removal of a coach whose clients are all past row
+ * 1000". Its `slice()` wrapper turns this throw into a named failed read, which
+ * is the honest outcome: the screen says the training record could not be read,
+ * instead of quietly reporting a book full of silent clients.
+ *
+ * A caller that genuinely wants the rows anyway — to LIST them rather than to
+ * infer silence from their absence — should call `readClientActivity` and carry
+ * `truncated` itself, which is what every caller in this tree does.
+ */
 export async function fetchClientActivity(
   sb: Queryable,
   clientIds: string[],
   opts: ActivityQuery = {},
 ): Promise<Record<string, ActivityEvent[]>> {
-  return (await readClientActivity(sb, clientIds, opts)).byClient;
+  const read = await readClientActivity(sb, clientIds, opts);
+  if (read.truncated) throw new TruncatedRead("these clients' training record", ROW_CAP);
+  return read.byClient;
 }
 
 /**

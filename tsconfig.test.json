@@ -324,6 +324,8 @@
     "src/lib/gymLink.test.ts",
     "src/lib/gymWindow.test.ts",
     "src/lib/passUndo.test.ts",
+    "src/lib/clientDrift.ts",
+    "src/lib/clientDrift.test.ts",
     "src/lib/gymPaidTotal.test.ts",
     "src/lib/gymPaperwork.test.ts",
     "src/lib/gymSigning.test.ts",

@@ -353,11 +353,50 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(silent.state, 'unread',
     'a connected strap with no figure today IS unread — that is the one the member can act on');
   ok(silent.detail !== noStrap.detail, 'the two absences must never share a sentence');
+  ok(/has not reported/.test(silent.detail),
+    'and it is a statement about the device, which is only sayable because the device walk came back');
+
+  // ── the fourth absence: we did not manage to ask ────────────────────────
+  //
+  // This row took the input alone and never looked at the device walk, so a
+  // failed walk fell into the sentence above and told a member their strap had
+  // stayed quiet when the truth was that we never reached it. That sends them
+  // into the WHOOP app after a sync that is sitting there perfectly fine.
+  const walkFailed = lineFor(
+    br({ recoveryPct: null, recoveryDeviceConnected: true, deviceStatus: 'error' }),
+    'recovery',
+  );
+  eq(walkFailed.state, 'unread', 'a walk that failed leaves the signal out of the scale');
+  ok(!/has not reported/.test(walkFailed.detail),
+    'and says nothing about what the device did, because we did not manage to ask it');
+  ok(/could not read your devices/.test(walkFailed.detail), 'it says whose failure it was');
+
+  // A walk where SOME provider failed is no better placed to speak for the
+  // strap: `ReadinessSource` carries a name and no id, so there is no telling
+  // whether the one that failed was the one that scores recovery.
+  const walkShort = lineFor(br({
+    recoveryPct: null, recoveryDeviceConnected: true,
+    sources: [
+      { name: 'Oura Ring', status: 'error', nights: 0 },
+      { name: 'Apple Health', status: 'ready', nights: 3 },
+    ],
+  }), 'recovery');
+  ok(!/has not reported/.test(walkShort.detail),
+    'a partial walk does not get to state that a device stayed quiet either');
+
+  const walkLoading = lineFor(
+    br({ recoveryPct: null, recoveryDeviceConnected: true, deviceStatus: 'loading' }),
+    'recovery',
+  );
+  ok(/still reading/i.test(walkLoading.detail),
+    'and a walk still in flight says so rather than reporting a silence it has not established');
 
   // Neither absence is a deduction, and both say so, for the same reason the
   // hydration row does: a member reading "no recovery score" under a lower
   // number will assume they were marked down for it.
-  for (const l of [noStrap, silent]) ok(/not in the scale/.test(l.detail), 'an absent signal says it left the scale rather than scoring zero');
+  for (const l of [noStrap, silent, walkFailed, walkShort, walkLoading]) {
+    ok(/not in the scale/.test(l.detail), 'an absent signal says it left the scale rather than scoring zero');
+  }
 }
 
 // ── the breakdown never contradicts the score ─────────────────────────────

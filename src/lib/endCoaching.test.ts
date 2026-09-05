@@ -19,11 +19,14 @@ import {
   departureTally, departureLine, END_REASON_LABEL,
   END_REASONS, CLIENT_END_REASONS, CLIENT_END_REASON_LABEL, CLIENT_END_REASON_NOTE,
   CLIENT_END_EXPLAINER, clientEndConfirmBody, clientEndOutcomeLine,
-  type EndCoachingResult, type EndedRelationship,
+  endReasonPrompt, END_RECORD_UNREADABLE, END_REASON_NOTE,
+  type EndCoachingResult, type EndedRelationship, type EndRecord,
 } from './endCoaching';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
+const eq = (a: unknown, b: unknown, msg: string) =>
+  ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
 // ── the coach's name is never invented, and never rendered as a bug ──
 //
@@ -246,6 +249,41 @@ ok(!/passed on to them/i.test(lost), 'and never claims the coach was told');
   const anon = replaceCoachNote(null, '   ');
   ok(!/null|undefined/.test(anon), 'an unread name leaves no hole');
   ok((anon.match(/your coach/g) || []).length >= 2, 'both fall back to a description rather than a blank');
+}
+
+/* ── "we could not read it" is not "there is nothing to read" ────────────────
+ *
+ * `fetchEndRecord` answered `null` for both — a refused read, a database with
+ * no `end_reason` column, an empty id, AND `maybeSingle()` finding no ended
+ * relationship because the coaching is still running. `endReasonPrompt` is the
+ * only thing that consumes that value, and it read every one of them as a
+ * failure. Harmless while nothing calls it; wrong the first time something
+ * does, and wrong in the direction that sends a coach looking for a fault in a
+ * relationship that is perfectly intact.
+ */
+{
+  const unread = endReasonPrompt(END_RECORD_UNREADABLE);
+  ok(/could not be read/.test(unread), 'a read that failed says so');
+  ok(/not "nothing was recorded"/.test(unread),
+    'and says out loud that it is not the same claim as an empty record');
+
+  const noEnding = endReasonPrompt(null);
+  ok(!/could not be read/.test(noEnding),
+    'a read that worked and found no ended relationship is not reported as a failure');
+  ok(/has ended/.test(noEnding), 'it says what it actually found');
+  ok(noEnding !== unread, 'the two nulls that used to share a sentence no longer do');
+
+  const rec: EndRecord = {
+    reason: null, note: null, recordedByMe: null, endedByMe: null, endedAt: null,
+  };
+  const unrecorded = endReasonPrompt(rec);
+  ok(/Nothing was recorded about why/.test(unrecorded),
+    'an ending nobody explained is the one the coach can still go and ask about');
+  ok(unrecorded !== noEnding && unrecorded !== unread,
+    'and is a third sentence, because it is a third fact');
+
+  eq(endReasonPrompt({ ...rec, reason: 'cost' }), END_REASON_NOTE.cost,
+    'a recorded reason gets its own line and none of the three silences');
 }
 
 if (errors.length) {

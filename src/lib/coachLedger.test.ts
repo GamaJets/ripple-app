@@ -238,9 +238,34 @@ eq(joinLabels(['sales', 'renewals', 'fees']), 'sales, renewals and fees', 'three
   eq(denominate('', 'ready').ok, false, 'an empty string is the same silence as a null');
   eq(denominate('  ', 'ready').ok, false, 'and so is whitespace');
   eq(denominate('A', 'ready').ok, false, 'a code too short to be ISO 4217 is not a currency');
-  // A read still in flight has not established anything, but it is not a
-  // failure either — it falls to unset, and the screen shows it while loading.
-  eq(denominate(null, 'loading').ok, false, 'nothing is denominated while the read is in flight');
+
+  // ── the third silence ──────────────────────────────────────────────────
+  //
+  // A read still in flight has established nothing, and it used to fall to
+  // `unset` — the arm that tells a coach nobody has set a currency for them
+  // and names the gym settings. Said, on mount, about a value nothing had
+  // looked at. It is the same substitution `unread` exists to refuse, coming
+  // in through the other end of `LoadStatus`.
+  const inFlight = denominate(null, 'loading');
+  eq(inFlight.ok, false, 'nothing is denominated while the read is in flight');
+  eq(inFlight.ok === false ? inFlight.why : null, 'unlanded',
+    'and the reason is that the read has not landed, not that nobody has set one');
+  ok(inFlight.ok === false && !/gym owner/.test(inFlight.note),
+    'so it does not send a coach to a settings page over a read that has not come back');
+  ok(inFlight.ok === false && !/failed/.test(inFlight.note),
+    'and does not call it a failure either, because nothing has failed');
+
+  // A currency absent from a page that was CUT OFF is not a currency that was
+  // never set. Same why, and a note that says which of the two silences it is.
+  const cut = denominate(null, 'partial');
+  eq(cut.ok === false ? cut.why : null, 'unlanded', 'a truncated read has not established an absence');
+  ok(cut.ok === false && !/gym owner/.test(cut.note), 'and does not name the settings either');
+  ok(cut.ok === false && cut.note !== (inFlight.ok === false ? inFlight.note : ''),
+    'the two say different things, because "not yet" and "not all of it" ask for different patience');
+
+  // A code that WAS read is a code, whether or not more rows were coming.
+  eq(denominate('gbp', 'partial').ok, true, 'three letters off a real row denominate under a truncated read');
+  eq(denominate('gbp', 'loading').ok, true, 'and under one still in flight');
 }
 
 /* ── 7. an empty ledger says different things under different reads ───────── */

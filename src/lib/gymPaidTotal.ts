@@ -19,12 +19,13 @@
 //
 // ── Why a verdict rather than a number ─────────────────────────────────────
 //
-// Because there are six answers and only one of them is a number, and every
-// screen that tried to express this in a ternary picked three of the six. The
-// read may not have finished; it may have failed; the member may have paid
-// nothing; the rows may exist and state no amount or no currency, which is not
-// nothing; there may be one currency, which prints; or there may be two, which
-// does not and must say why.
+// Because there are seven answers and only one of them is a number, and every
+// screen that tried to express this in a ternary picked three of the seven. The
+// read may not have finished; it may have failed; it may have come back at the
+// row ceiling, whole rows and a partial set; the member may have paid nothing;
+// the rows may exist and state no amount or no currency, which is not nothing;
+// there may be one currency, which prints; or there may be two, which does not
+// and must say why.
 //
 // The grouping itself is `sumTaken` in src/lib/coachMoney.ts — the same
 // function /analytics and /revenue total with — so there is one implementation
@@ -45,6 +46,12 @@ export type PaidTotal =
   | { kind: 'loading' }
   /** The read was refused. Emphatically not a zero. */
   | { kind: 'failed' }
+  /** The read came back at PostgREST's row ceiling: the rows are real, and
+   *  there are more of them than arrived. No total over a prefix is a total,
+   *  and — this is the part that has to stay separate from 'failed' — nothing
+   *  went wrong with the read. Saying "payments not read" here would be a false
+   *  statement about a working query. */
+  | { kind: 'partial' }
   /** Read, and there is nothing on record. */
   | { kind: 'none' }
   /** Rows exist and cannot be added: no amount, or no currency on them. */
@@ -62,10 +69,23 @@ export type PaidTotal =
  * from the rows for the reason the rest of this codebase keeps them apart: an
  * empty array from a refused read and an empty array from a gym that has never
  * billed this person are the same array.
+ *
+ * 'partial' is answered from the STATE and never reaches `sumTaken`. It used to
+ * fall through to the null-rows line below, which was correct only because
+ * `rowsOf` (src/lib/memberView.ts) hands back null for a partial slice, so the
+ * rows were always null by the time they got here. Two things were wrong with
+ * that. The protection lived in another module and nothing here said so, so a
+ * caller that switched to `rowsToShow` — the function whose whole job is to
+ * hand over the rows of a partial slice — would have had this function add a
+ * prefix up and print it as a lifetime total. And when it did fire, it fired as
+ * 'failed', which put "payments not read" under a tile whose payments had been
+ * read: a truncated read is not a refused one, and the owner reading that line
+ * would go looking for a broken query instead of a longer page.
  */
 export function paidTotal(state: LoadStatus | 'ready' | 'loading' | 'failed', rows: readonly PaidRow[] | null): PaidTotal {
   if (state === 'failed' || state === 'error') return { kind: 'failed' };
-  if (state !== 'ready' && state !== 'partial') return { kind: 'loading' };
+  if (state === 'partial') return { kind: 'partial' };
+  if (state !== 'ready') return { kind: 'loading' };
   if (rows == null) return { kind: 'failed' };
 
   const t = sumTaken(rows.map((r) => ({ amount_cents: r.amountCents, currency: r.currency, created_at: '' })));
@@ -91,6 +111,11 @@ export function paidNote(t: PaidTotal, last?: string): string | undefined {
   switch (t.kind) {
     case 'loading': return undefined;
     case 'failed': return 'payments not read';
+    // Deliberately not 'payments not read'. They were read; there are more of
+    // them than came back, which is a different thing for the owner to do
+    // something about. Worded off `sliceNote`'s 'partial' arm in
+    // src/lib/memberView.ts so the tile and the table beside it agree.
+    case 'partial': return 'only part of the payments were read, so a total is withheld';
     case 'none': return 'nothing recorded';
     case 'unstated':
       return `${t.count} payment${t.count === 1 ? '' : 's'} on record ${t.count === 1 ? 'states' : 'state'} no amount or no currency, so a total cannot be written`;

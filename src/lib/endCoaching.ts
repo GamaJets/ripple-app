@@ -432,15 +432,42 @@ export function reasonAttribution(rec: EndRecord): string | null {
 }
 
 /**
+ * "We could not tell." The fourth answer, and the one that was missing.
+ *
+ * `fetchEndRecord` used to return `null` for two opposite events: the read was
+ * refused, and the read succeeded and there is no ended relationship between
+ * these two people. `endReasonPrompt` — the only thing that consumes that
+ * value — printed "How this ended could not be read" over both, so a clean
+ * answer about a coaching relationship that is still running was reported to
+ * the coach as a broken query.
+ *
+ * Kept apart for the reason `ME_UNREADABLE` is kept apart from a signed-out
+ * null in studio-web/lib/supabase.ts: one is a statement about the record, the
+ * other a statement about the connection, and they send a person to two
+ * different places.
+ */
+export const END_RECORD_UNREADABLE = 'unreadable' as const;
+
+/** What `fetchEndRecord` can answer: a record, no ended relationship, or "we
+ *  could not tell". */
+export type EndRecordRead = EndRecord | null | typeof END_RECORD_UNREADABLE;
+
+/**
  * What to say where a reason could be recorded and is not.
  *
- * Three states and they are not interchangeable. The middle one is the point:
- * an ending nobody explained is an answer the coach can still go and get, and
+ * Four states and they are not interchangeable. The third one is the point: an
+ * ending nobody explained is an answer the coach can still go and get, and
  * telling them that is the whole value of the feature.
  */
-export function endReasonPrompt(rec: EndRecord | null): string {
-  if (rec == null) {
+export function endReasonPrompt(rec: EndRecordRead): string {
+  if (rec === END_RECORD_UNREADABLE) {
     return 'How this ended could not be read, so this is not "nothing was recorded".';
+  }
+  if (rec == null) {
+    // Read, and there is no ended relationship on record between these two.
+    // Deliberately not the sentence above: that one sends a coach looking for a
+    // fault, and there is none — there is simply nothing that has ended.
+    return 'Nothing on record says this coaching relationship has ended.';
   }
   if (rec.reason == null) {
     return 'Nothing was recorded about why this ended. It is the cheapest thing you will ever learn about your own business, and this is the only moment it exists — write down what you know, even if all you know is that they did not say.';
@@ -576,16 +603,29 @@ export async function recordEndReason(
 }
 
 /**
- * How one relationship ended, or null when it could not be read.
+ * How one relationship ended: the record, `null` when there is no ended
+ * relationship between these two, or `END_RECORD_UNREADABLE` when the question
+ * could not be answered.
  *
- * Null and not an empty record. `cr_self` admits both parties, so a refused
- * read here is a wire failure rather than a policy one — and an empty record
- * would render as "nothing was recorded about why they left", which is the one
- * sentence that would make a coach type over an answer the client gave.
+ * Not an empty record. `cr_self` admits both parties, so a refused read here is
+ * a wire failure rather than a policy one — and an empty record would render as
+ * "nothing was recorded about why they left", which is the one sentence that
+ * would make a coach type over an answer the client gave.
+ *
+ * Three answers rather than two, and the third is the fix. Every failure arm
+ * below used to return the same `null` that `maybeSingle()` returns for a
+ * relationship that has not ended, and the only consumer of that value —
+ * `endReasonPrompt` — read every one of them as "could not be read". That is
+ * harmless for exactly as long as this function has no caller, which is the
+ * state the note under `departureTally` records; it stops being harmless the
+ * first time a screen shows the sentence, and at that point the wrong one is
+ * shown to the coach whose client is still with them.
  */
-export async function fetchEndRecord(otherId: string, meId: string): Promise<EndRecord | null> {
+export async function fetchEndRecord(otherId: string, meId: string): Promise<EndRecordRead> {
   const id = (otherId || '').trim();
-  if (!id || !meId) return null;
+  // Nobody to ask about. Not "no ending on record" — no question was put, and
+  // saying otherwise is a claim about a relationship this call never named.
+  if (!id || !meId) return END_RECORD_UNREADABLE;
   try {
     const { data, error } = await db()
       .from('coaching_relationships')
@@ -598,12 +638,14 @@ export async function fetchEndRecord(otherId: string, meId: string): Promise<End
       // Reported and then treated as unreadable, which is the honest reading:
       // this app cannot say what was recorded.
       report('endCoaching.readReason', error, { otherId: id });
-      return null;
+      return END_RECORD_UNREADABLE;
     }
     const row = (data ?? null) as {
       ended_at?: unknown; ended_by?: unknown;
       end_reason?: unknown; end_note?: unknown; end_reason_by?: unknown;
     } | null;
+    // The only null that means what null says: the read worked and there is no
+    // ended relationship between these two.
     if (!row) return null;
     const by = typeof row.end_reason_by === 'string' ? row.end_reason_by : null;
     const endedBy = typeof row.ended_by === 'string' ? row.ended_by : null;
@@ -618,7 +660,7 @@ export async function fetchEndRecord(otherId: string, meId: string): Promise<End
     };
   } catch (e) {
     report('endCoaching.readReason', e, { otherId: id });
-    return null;
+    return END_RECORD_UNREADABLE;
   }
 }
 

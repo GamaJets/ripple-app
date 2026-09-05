@@ -279,14 +279,34 @@ function sleepLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessInpu
 /**
  * The device's own verdict, or the reason there isn't one.
  *
- * Four outcomes and they are not interchangeable, which is the same discipline
- * `sleepLine` applies one function up. The one that matters most is the last:
+ * Five outcomes and they are not interchangeable, which is the same discipline
+ * `sleepLine` applies one function up. The two that matter most are the last:
  * a member with a WHOOP whose sync has not landed is told their device did not
  * report today, because that is something they can go and fix in the WHOOP app
  * — and the member with no device at all is told nothing of the kind, because
  * for them nothing is wrong.
+ *
+ * ── the fourth silence, added here ─────────────────────────────────────────
+ *
+ * `trust` is the one this function used to be written without. It took `i`
+ * alone, so every connected-and-null case fell to "your device has not reported
+ * a recovery score today" — a statement about what the DEVICE did, made when
+ * the device walk had failed and we had not managed to ask it anything. It is
+ * the same substitution `sleepLine` and `absenceFor` refuse three functions
+ * away, and it sends a member into the WHOOP app to look for a sync that is
+ * probably sitting there fine.
+ *
+ * `readinessBreakdown` already computed `trust` and handed it to `sleepLine`
+ * and `caveatsFor` and not to this. Nothing kept it out; it was simply not
+ * passed.
+ *
+ * Any status but 'ready' takes the new arm, 'partial' included: a walk that
+ * came back short may be short of exactly the provider that scores recovery,
+ * `ReadinessSource` carries a display name and no id, so there is no way to
+ * tell which — and a maybe is not a basis for telling somebody their strap
+ * stayed quiet.
  */
-function recoveryLine(i: ReadinessBreakdownInput): ReadinessInputLine {
+function recoveryLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessInputLine {
   // Title Case, and "Device Recovery" rather than "Recovery": this screen is
   // reached from a hero labelled Readiness and sits on a screen called
   // Recovery, so a bare "Recovery" row would be the third use of the word on
@@ -305,6 +325,14 @@ function recoveryLine(i: ReadinessBreakdownInput): ReadinessInputLine {
     return {
       key: 'recovery', title, state: 'not-tracked',
       detail: 'not in the scale — no connected device scores recovery',
+    };
+  }
+  if (trust !== 'ready') {
+    return {
+      key: 'recovery', title, state: 'unread',
+      detail: trust === 'loading'
+        ? 'not in the scale — still reading your devices'
+        : 'not in the scale — we could not read your devices, so we cannot say whether one scored your recovery today',
     };
   }
   return {
@@ -407,7 +435,7 @@ function caveatsFor(i: ReadinessBreakdownInput, trust: LoadStatus): string[] {
  */
 export function readinessBreakdown(i: ReadinessBreakdownInput): ReadinessBreakdown {
   const trust = deviceSleepTrust(i.deviceStatus, i.sources);
-  const lines = [sleepLine(i, trust), recoveryLine(i), hydrationLine(i), loadLine(i)];
+  const lines = [sleepLine(i, trust), recoveryLine(i, trust), hydrationLine(i), loadLine(i)];
   const caveats = caveatsFor(i, trust);
 
   // With no score, the status is about the READ that failed to produce one —

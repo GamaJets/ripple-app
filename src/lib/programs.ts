@@ -357,11 +357,29 @@ export function buildProgram(goal: Goal, bodyFatPct: number | null | undefined):
   };
 }
 
-/** Today's day from the program based on weekday (Mon/Wed/Fri → nearest). */
-export function todayIndex(days: ProgramDay[], weekday: number): number {
-  // weekday: 0 Sun..6 Sat. Map program days to their weekday.
-  const map: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 0 };
-  let best = 0, bestDiff = 99;
-  days.forEach((d, i) => { const diff = Math.abs(map[d.day] - weekday); if (diff < bestDiff) { bestDiff = diff; best = i; } });
-  return best;
-}
+/* ── `todayIndex` was here, and is deleted ─────────────────────────────────
+ *
+ * `export function todayIndex(days: ProgramDay[], weekday: number): number`.
+ * "Today's day from the program based on weekday (Mon/Wed/Fri → nearest)."
+ *
+ * Nothing imported it. Not a screen, not a provider, not a test — the only
+ * mention of the name anywhere in the tree was a comment in src/lib/checklist.
+ * ts arguing that `scheduledFocus` is an EXACT match because this picks the
+ * nearest day and so "always returns something". That argument is sound and
+ * the behaviour it warns about is real, but it was never this function's: the
+ * home screen does its own `days[todayIdx % days.length]` with `weekIndexOf`,
+ * and this one sat beside it doing nothing.
+ *
+ * Deleted rather than repaired, and the repair it would have needed is why.
+ * `best` started at 0 and only moved when a day's name was in the weekday map,
+ * so an EMPTY `days` — which is what a program that could not be read looks
+ * like — returned index 0, and a plan whose day names this did not recognise
+ * returned index 0 too. In both cases the answer is a valid-looking index into
+ * a day that is not there, handed to a caller with nothing to distinguish it
+ * from a real one. That is the family this sweep is about, and the honest fix
+ * for a function nobody calls is not a third return type: it is the delete.
+ *
+ * Written down rather than silently removed because the checklist comment still
+ * names it, and the next person to read that sentence should find out here what
+ * happened rather than conclude the search index is broken.
+ */
