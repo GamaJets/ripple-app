@@ -512,28 +512,38 @@ export default function Devices() {
  source: { ico: 'clock', title: 'Connected Sources', value: `${connected.length} ${connected.length === 1 ? 'device' : 'devices'}`, blurb: connected.map((p) => `• ${p.meta.name}`).join('\n') || 'No devices connected yet.' },
  };
 
- // Whether a length field currently has the keyboard up.
+ // ── pull-to-refresh here was reported dead, and the keyboard props are NOT why ──
  //
- // `automaticallyAdjustKeyboardInsets` below is conditional on this, and the
- // reason is a bug report: pull-to-refresh worked on the coach's Watch &
- // Devices and did nothing on this one. Same hook, same providers, same
- // machine — the only structural difference between the two screens was that
- // prop, which this screen needs and the coach's does not because the coach's
- // has no text field.
+ // The report was precise: pulling this screen down did nothing, while the
+ // coach's Watch & Devices refreshed. The two screens share the hook
+ // (src/ui/pullToRefresh.tsx), the machine (src/lib/pullRefresh.ts), the store
+ // (`useWearables`) and an equivalent reload callback, so the only structural
+ // difference is the three keyboard props on the ScrollView below — which made
+ // `automaticallyAdjustKeyboardInsets` the obvious culprit.
  //
- // On iOS the prop works by moving the scroll view's contentInset, and
- // RefreshControl lives in exactly that inset. With a standing top inset the
- // pull never travels far enough to reach the refresh threshold, so the
- // gesture is inert — no spinner, no error, nothing to notice except that the
- // screen does not update. The two symptoms reported together, a dead pull and
- // figures that never move, are one fault.
+ // It is not, and this is written down because the theory is convincing enough
+ // to be re-derived by the next person. React Native's own implementation
+ // settles it (node_modules/react-native/React/Views/ScrollView/RCTScrollView.m):
  //
- // Conditional rather than removed, because the prop is not decoration: the
- // keyboard sat on the field being typed into, and the comment on the
- // ScrollView records what was tried before it. And conditional costs nothing,
- // because the two behaviours cannot be wanted at the same moment — nobody
- // pulls a list down to refresh it while they are typing into it.
- const [typing, setTyping] = useState(false);
+ //   · `_registerKeyboardListener` is called UNCONDITIONALLY in
+ //     `initWithEventDispatcher`, for every ScrollView in the app. The prop is
+ //     read nowhere at mount — only inside `_keyboardWillChangeFrame:`, as an
+ //     early return. With no keyboard on screen the prop has never run a line.
+ //
+ //   · That handler, for a non-inverted list, writes `newEdgeInsets.bottom`
+ //     and nothing else. It never touches `.top`, which is where the
+ //     RefreshControl lives. The "standing top inset swallows the pull" story
+ //     describes something the code does not do.
+ //
+ //   · And it self-heals: on dismissal `endFrame` is off the bottom of the
+ //     screen, so the inset computes back to zero.
+ //
+ // So the props are inert until a keyboard appears and harmless after it goes.
+ // They are left exactly as the other sixty-seven screens have them. The real
+ // cause of the reported symptom is NOT yet known — and it may not be the
+ // gesture at all: it was reported alongside "Apple Watch and WHOOP are
+ // connected but not updating", and a pull whose reload returns no new figures
+ // is indistinguishable, from the member's side, from a pull that never fired.
 
  const G = layout.gutter;
 
@@ -547,7 +557,7 @@ export default function Devices() {
      inset iOS adds already gives the focused row the room it needs to rise. Padding it
      out to a keyboard's height here would only scroll into empty space. */}
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }}
-   keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets={typing}
+   keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
    keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
   {/* ── header ──────────────────────────────────────────────────────── */}
@@ -858,8 +868,6 @@ export default function Devices() {
            placeholder="—"
            placeholderTextColor={t.ink3}
            accessibilityLabel={`Minutes this session ran, ${sessionWhen(sk.t)}`}
-           onFocus={() => setTyping(true)}
-           onBlur={() => setTyping(false)}
            style={{
             width: 76, paddingHorizontal: sp.md, paddingVertical: 7, borderRadius: radius.sm,
             backgroundColor: t.surface2, color: t.ink, ...ty.body, ...numeric,
