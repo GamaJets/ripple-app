@@ -94,6 +94,18 @@ export default function Close() {
    *  spinner that never resolves. */
   const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   // `tenants.currency`. A month-end close is the document an owner reconciles
   // against a bank statement, so the one thing it must not do is name a
   // currency nobody chose — see currencyOf() at the foot of this file.
@@ -332,6 +344,7 @@ export default function Close() {
       // every unrated session at nothing and quietly shrink payroll; the two
       // are told apart so the screen can say "the fee could not be read".
       setGymName(tErr ? null : t?.name ?? null);
+      setGymNameUnread(!!tErr);
       setGymCcy(tErr ? null : (((t?.currency ?? '') as string).trim().toUpperCase() || null));
       // The gym's own wall clock, for the one date this screen computes rather
       // than reads: what counts as overdue TODAY. See `Owed` below.
@@ -455,7 +468,7 @@ export default function Close() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/close">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/close">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -468,7 +481,7 @@ export default function Close() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/close">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/close">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           A month-end close carries every payment and every payroll figure the
@@ -483,7 +496,7 @@ export default function Close() {
   // must not turn into a clean bill of health.
   if (!me.tenantId) {
     return (
-      <Shell me={me} gymName={gymName} current="/close">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/close">
         <h1>Month-End Close</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
           {noGymNote('payments, invoices or one-to-ones')}
@@ -493,7 +506,7 @@ export default function Close() {
   }
 
   return (
-    <Shell me={me} gymName={gymName} current="/close">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/close">
       <h1>Month-End Close</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         What came in, what it was for, what is still owed, what does not

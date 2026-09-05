@@ -94,6 +94,18 @@ export default function Staff() {
    *  spinner that never resolves. */
   const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
   // `tenants.currency`. Every figure on this page is priced from the gym's own
   // session fee and carries no currency of its own, so a null here means the
@@ -209,6 +221,7 @@ export default function Staff() {
       // null fee from a failed read would price every unrated session at nothing
       // and quietly shrink what the gym owes its staff.
       setGymName(tErr ? null : t?.name ?? null);
+      setGymNameUnread(!!tErr);
       setSessionFee(tErr ? null : t?.session_fee ?? null);
       setPolicyCode(tErr ? null : (((t as any)?.session_pay_policy ?? null) as string | null));
       setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
@@ -270,7 +283,7 @@ export default function Staff() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/staff">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/staff">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -283,7 +296,7 @@ export default function Staff() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/staff">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/staff">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           This page carries every colleague&rsquo;s pay and delivery record, so it
@@ -296,7 +309,7 @@ export default function Staff() {
   const chosen = sel && view.members ? view.members.find((m) => m.trainerId === sel) ?? null : null;
 
   return (
-    <Shell me={me} gymName={gymName} current="/staff">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/staff">
       <h1>Staff</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         Who works here, what they delivered in the last {WINDOW_DAYS} days, what

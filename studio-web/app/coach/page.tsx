@@ -523,7 +523,7 @@ export default function Coach() {
   // out of a query that failed.
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/coach">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymErr} current="/coach">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -536,7 +536,7 @@ export default function Coach() {
 
   if (me.role !== 'trainer' && me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/coach">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymErr} current="/coach">
         <h1>This screen is for coaches</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           It shows one trainer&apos;s own sessions, clients and requests. Your account is not a
@@ -567,7 +567,7 @@ export default function Coach() {
   };
 
   return (
-    <Shell me={me} gymName={gymName} current="/coach">
+    <Shell me={me} gymName={gymName} gymNameUnread={!!gymErr} current="/coach">
       <h1>Your Day</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         Your sessions, your clients and your requests — nobody else&apos;s.

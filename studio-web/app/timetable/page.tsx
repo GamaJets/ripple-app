@@ -232,7 +232,7 @@ export default function Timetable() {
   if (!me) return <ConsoleGate me={me} failed={authUnread} />;
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/timetable">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/timetable">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -274,7 +274,7 @@ export default function Timetable() {
   const staff = me.role === 'owner' || me.role === 'trainer';
   if (!staff) {
     return (
-      <Shell me={me} gymName={gymName} current="/timetable">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/timetable">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>The timetable is for gym staff.</p>
       </Shell>
@@ -453,7 +453,7 @@ export default function Timetable() {
   ];
 
   return (
-    <Shell me={me} gymName={gymName} current="/timetable">
+    <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/timetable">
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <h1>Timetable</h1>

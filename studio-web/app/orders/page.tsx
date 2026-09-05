@@ -165,6 +165,25 @@ export default function Orders() {
   const nowMs = readAt ?? Date.now();
 
   useEffect(() => {
+    // The rows on screen belong to the OLD period, and a period change is a
+    // different question rather than a re-ask of this one.
+    //
+    // `load` deliberately keeps the previous rows when a read fails, and that is
+    // right for a REFRESH — the poll below, the return to the tab, the Read
+    // again button — because the orders still drawn are the ones the last
+    // successful read returned and the stamp says which moment that was. It is
+    // wrong the moment the question changes underneath them. Switching from
+    // Everything to Last 30 days and having that read fail left four hundred
+    // orders on screen with every label around them saying "last 30 days": the
+    // tile note, the search sentence, the table's empty copy and the count line.
+    // A period this gym never sold four hundred orders in, stated as fact, with
+    // nothing on the figure to doubt — which is the filter-shaped version of the
+    // defect this console is written against.
+    //
+    // Cleared here rather than in `load`, because this effect is the only thing
+    // that runs on a period change; the poll and the refresh button call
+    // `refresh` directly and so keep the behaviour above untouched.
+    setRows(null);
     let live = true;
     (async () => {
       const who = await loadMe();
@@ -310,11 +329,30 @@ export default function Orders() {
         job for today, not a payment that failed.
       </p>
 
+      {/* Two failures, and they leave the screen in two different states.
+          `load` does not blank the rows when a REFRESH fails, so this banner's
+          only wording — "this screen is showing an empty list" — was a claim
+          about the page that the table underneath it contradicted: the desk read
+          a red banner saying there were no orders while eleven of them sat in
+          view. With a sixty-second poll, one dropped request was enough. The
+          list is empty only when nothing has been read at all; when it is not,
+          the honest thing to say is which moment the rows are from and what is
+          therefore missing from them. */}
       {why ? (
         <Banner tone="crit">
-          The order book could not be read: {why} Nothing below is a count of your orders —
-          this screen is showing an empty list because a query did not answer, not because
-          nobody has bought anything.
+          {rows ? (
+            <>
+              The order book could not be re-read: {why} The orders below are still the ones the
+              last successful read returned &mdash; the line under the tiles says when that was —
+              so anything bought since then is not on this screen.
+            </>
+          ) : (
+            <>
+              The order book could not be read: {why} Nothing below is a count of your orders —
+              this screen is showing an empty list because a query did not answer, not because
+              nobody has bought anything.
+            </>
+          )}
         </Banner>
       ) : null}
 

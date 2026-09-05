@@ -146,6 +146,16 @@ export default function Door() {
    *  spinner that never resolves. */
   const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's row could not be READ, as distinct from there being no
+   * gym.
+   *
+   * `gymName: null` was carrying both facts, and the rail prints "No gym
+   * linked" for a null it is given no other word for — a sentence about the
+   * OWNER'S ACCOUNT, produced by a query that failed, on the screen a front
+   * desk leaves open all day. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   const [visits, setVisits] = useState<Visit[] | null>(null);
   const [passes, setPasses] = useState<GymPass[] | null>(null);
   const [types, setTypes] = useState<PassType[] | null>(null);
@@ -243,11 +253,26 @@ export default function Door() {
         setRecords(new Map());
         return;
       }
-      // no-error-ok: the gym's name is a header label; without it the header is blank and every figure below is unaffected
-      const { data: t } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
+      // The error is read off the result rather than dropped.
+      //
+      // This carried a `no-error-ok:` whose stated reason was "the gym's name is
+      // a header label; without it the header is blank and every figure below is
+      // unaffected". Both halves of that had stopped being true. The select
+      // gained `timezone`, and the zone is what `today`, `todays` and
+      // `openBefore` are cut on — the three figures a desk reads out during an
+      // evacuation — so the figures below are affected. And a null name reaches
+      // the rail as "No gym linked", which is a claim about the owner's account
+      // made out of a query that failed.
+      //
+      // The zone still falls back to the reader's day when the read fails,
+      // because that is what a gym which has set no zone already gets and the
+      // screen says so in as many words. What changes is that the failure is now
+      // distinguishable from the setting being absent.
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
       if (live) {
-        setGymName(t?.name ?? null);
-        const z = parseGymZone((t as any)?.timezone);
+        setGymName(tErr ? null : t?.name ?? null);
+        setGymNameUnread(!!tErr);
+        const z = tErr ? { kind: 'clear' as const } : parseGymZone((t as any)?.timezone);
         setZone(z.kind === 'zone' ? z.zone : null);
       }
     })();
@@ -375,7 +400,7 @@ export default function Door() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/door">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/door">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -388,7 +413,7 @@ export default function Door() {
 
   if (me.role !== 'owner' && me.role !== 'trainer') {
     return (
-      <Shell me={me} gymName={gymName} current="/door">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/door">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>The door log is for gym staff.</p>
       </Shell>
@@ -447,7 +472,7 @@ export default function Door() {
   const recordsUnread: Unread = records !== null ? null : err ? 'failed' : 'loading';
 
   return (
-    <Shell me={me} gymName={gymName} current="/door">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/door">
       <h1>Door</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         Every visit, not just the booked ones. A member who trains on the floor

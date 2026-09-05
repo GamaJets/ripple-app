@@ -144,6 +144,18 @@ export default function RetentionPage() {
    *  spinner that never resolves. */
   const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   /** `tenants.timezone`, or null when the gym has not set one. */
   const [zone, setZone] = useState<string | null>(null);
   /** The 150-day reads. Narrowed to WINDOW_DAYS before anything reads them as
@@ -211,6 +223,7 @@ export default function RetentionPage() {
       // than assumed: a null name here means "not read", not "unnamed gym".
       if (live) {
         setGymName(tErr ? null : t?.name ?? null);
+        setGymNameUnread(!!tErr);
         // The gym's own wall clock. The contact log is how a gym decides
         // whether calling lapsed members works, and the interval between the
         // call and the visit is the measurement — two members of staff in two
@@ -257,7 +270,7 @@ export default function RetentionPage() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/retention">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/retention">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -270,7 +283,7 @@ export default function RetentionPage() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/retention">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/retention">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           Retention reads the whole roster and every member&rsquo;s attendance, so it is owner-only.
@@ -290,7 +303,7 @@ export default function RetentionPage() {
     : surfaced.filter((s) => s.row.drift?.status === 'at_risk' && s.contactCount === 0).length;
 
   return (
-    <Shell me={me} gymName={gymName} current="/retention">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/retention">
       <h1>Retention</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         How many members the gym is keeping, how many are breaking their own

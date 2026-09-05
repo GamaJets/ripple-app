@@ -221,7 +221,7 @@ export default function Money() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/money">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/money">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -234,7 +234,7 @@ export default function Money() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/money">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/money">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>Money is owner-only.</p>
       </Shell>
@@ -267,7 +267,7 @@ export default function Money() {
   const unread = failed.length ? `could not read ${failed.join(', ')}` : undefined;
 
   return (
-    <Shell me={me} gymName={gymName} current="/money">
+    <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/money">
       <h1>Money</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         What the gym sells, who holds a membership, and what has actually been paid.

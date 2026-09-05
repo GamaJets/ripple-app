@@ -123,6 +123,24 @@ export default function Activity() {
   );
 
   useEffect(() => {
+    // The rows on screen are the OLD window's, and a window change is a
+    // different question rather than a re-ask of this one.
+    //
+    // `load` keeps the previous rows when a read fails, and that is right for a
+    // refresh — the two-minute poll, the return to the tab, the button — because
+    // the entries still drawn are the last successful read's and the stamp says
+    // which moment that was. It stops being right the moment the question moves
+    // underneath them. Switching from a year to 7 days and having that read fail
+    // left a year of entries on screen with every label around them saying 7
+    // days: the Recorded tile's note, the kind filter's counts, the People who
+    // did them figure, and the empty copy that tells an owner their triggers
+    // were never applied. None of those is a smaller number than the truth —
+    // they are a different window's numbers under this window's heading.
+    //
+    // Cleared here rather than in `load`, because this effect is the only thing
+    // that runs on a window change; the poll and the button call `refresh`
+    // directly and keep the behaviour above untouched.
+    setRows(null);
     let live = true;
     (async () => {
       const who = await loadMe();

@@ -460,7 +460,7 @@ export default function Accounting() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/accounting">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/accounting">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -473,7 +473,7 @@ export default function Accounting() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/accounting">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/accounting">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           This is the gym&rsquo;s books — every payment, every invoice and every
@@ -487,7 +487,7 @@ export default function Accounting() {
   // the gym's trading built out of a fact about the reader's profile.
   if (!me.tenantId) {
     return (
-      <Shell me={me} gymName={gymName} current="/accounting">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/accounting">
         <h1>Accounting</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
           {noGymNote('payments, invoices or settlements')}
@@ -497,7 +497,7 @@ export default function Accounting() {
   }
 
   return (
-    <Shell me={me} gymName={gymName} current="/accounting">
+    <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/accounting">
       <h1>Accounting</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         One month, cash basis, in the form you hand to whoever files it: what was

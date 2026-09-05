@@ -121,7 +121,27 @@ export function useFetched(
   /** A refresh was asked for while one was in flight. At most one is held. */
   const queued = useRef(false);
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  // Set on the way IN as well as cleared on the way out, and the way in is the
+  // half that was missing.
+  //
+  // A cleanup-only effect is correct exactly once. React 18's StrictMode mounts
+  // every component, runs its effects, runs the cleanups, and mounts it again —
+  // and `next.config.mjs` sets `reactStrictMode: true`, so in development that
+  // is every route in this console. The first cleanup set this false and
+  // nothing ever set it back, so `alive.current` was false for the whole life
+  // of the page and the `finally` below skipped BOTH of its statements on every
+  // read: `setAt` never ran, so the line under the tiles said "…has not been
+  // read yet" over figures that were plainly on screen, and `setBusy(false)`
+  // never ran, so "Read again" said "Reading…" and stayed disabled for good.
+  //
+  // That is precisely the condition studio-web/lib/supabase.ts describes as the
+  // reason the request timeout exists — "the one control on the page for getting
+  // out of this is the one the condition takes away" — arriving from the other
+  // side, without a hung socket and on every developer's machine.
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   // `refresh` calls itself when a run was queued, and a `useCallback` cannot
   // name itself in its own body. The ref is the same trick `readRef` uses two

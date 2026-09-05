@@ -131,6 +131,18 @@ export default function CoachChecklists() {
    *  spinner that never resolves. */
   const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
 
   const [clients, setClients] = useState<Client[] | null>(null);
   const [clientsErr, setClientsErr] = useState<string | null>(null);
@@ -181,6 +193,7 @@ export default function CoachChecklists() {
       // than discarded, and an unread name stays null instead of being asserted
       // as absent.
       if (live) setGymName(error ? null : (data as { name?: string } | null)?.name ?? null);
+      if (live) setGymNameUnread(!!error);
     })();
     return () => { live = false; };
   }, []);
@@ -455,7 +468,7 @@ export default function CoachChecklists() {
 
   if (me.role !== 'trainer' && me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/coach/checklists">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/checklists">
         <h1>This screen is for coaches</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: 560 }}>
           Checklists sets the daily lines a coach puts on one client&rsquo;s list. Your account is
@@ -472,7 +485,7 @@ export default function CoachChecklists() {
   };
 
   return (
-    <Shell me={me} gymName={gymName} current="/coach/checklists">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/checklists">
       <h1>Checklists</h1>
       <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: 620 }}>
         Lines you add here appear on that client&rsquo;s daily list, marked as set by you, beside

@@ -77,6 +77,18 @@ export default function ImportPage() {
    *  spinner that never resolves. */
   const [authUnread, setAuthUnread] = useState(false);
   const [gymName, setGymName] = useState<string | null>(null);
+  /**
+   * True when the gym's NAME could not be READ, as distinct from there being no
+   * gym.
+   *
+   * The read below already discards its error deliberately — no figure on this
+   * page depends on the name — but `gymName: null` was carrying both facts, and
+   * the rail prints "No gym linked" for a null it is given no other word for.
+   * That is a sentence about the OWNER'S ACCOUNT produced by a query that
+   * failed, on every screen in the console at once. Carrying this one bit is
+   * what lets the rail say which of the two it is. See components/Shell.tsx.
+   */
+  const [gymNameUnread, setGymNameUnread] = useState(false);
   const [tenantId, setTenantId] = useState<string | null>(null);
   // `tenants.currency`, and the reason this read exists at all.
   //
@@ -206,6 +218,7 @@ export default function ImportPage() {
         const { data, error } = await supabase
           .from('tenants').select('name, currency, timezone').eq('id', who.tenantId).single();
         setGymName(error ? null : ((data as any)?.name ?? null));
+        setGymNameUnread(!!error);
         setCcy(error ? null : ((((data as any)?.currency ?? '') as string).trim().toUpperCase() || null));
         const z = error ? { kind: 'clear' as const } : parseGymZone((data as any)?.timezone);
         setZone(z.kind === 'zone' ? z.zone : null);
@@ -623,7 +636,7 @@ export default function ImportPage() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/import">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/import">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -640,7 +653,7 @@ export default function ImportPage() {
   // refused run still leaves the half that landed. Said here, before the form.
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/import">
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/import">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           Importing writes the gym&rsquo;s price book and its payment record, so it
@@ -651,7 +664,7 @@ export default function ImportPage() {
   }
 
   return (
-    <Shell me={me} gymName={gymName} current="/import">
+    <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/import">
       <h1 style={{ margin: '0 0 4px', fontSize: 20 }}>Import</h1>
       <p style={{ margin: '0 0 20px', color: 'var(--ink3)', fontSize: 13, maxWidth: '78ch' }}>
         Paste a spreadsheet exported from whatever you used before. Nothing is written until you

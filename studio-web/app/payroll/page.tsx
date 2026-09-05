@@ -535,7 +535,7 @@ export default function Payroll() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/payroll">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/payroll">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -548,7 +548,7 @@ export default function Payroll() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/payroll">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/payroll">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           The payroll run carries every colleague&rsquo;s pay on one screen, so it is owner-only.
@@ -877,7 +877,7 @@ export default function Payroll() {
   const clockNote = whoseClockNote(zone);
 
   return (
-    <Shell me={me} gymName={gymName} current="/payroll">
+    <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/payroll">
       <h1>Payroll</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         What each trainer is owed for {period.label}, counted from sessions with

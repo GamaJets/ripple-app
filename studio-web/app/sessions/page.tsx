@@ -407,7 +407,7 @@ export default function Sessions() {
 
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/sessions">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/sessions">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -420,7 +420,7 @@ export default function Sessions() {
 
   if (me.role !== 'owner') {
     return (
-      <Shell me={me} gymName={gymName} current="/sessions">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/sessions">
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>Session records and payroll are owner-only.</p>
       </Shell>
@@ -437,7 +437,7 @@ export default function Sessions() {
   // page had the same state and none of the sentence.
   if (!me.tenantId) {
     return (
-      <Shell me={me} gymName={gymName} current="/sessions">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/sessions">
         <h1>Sessions</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
           Your account is not linked to a gym, so there are no one-to-ones to
@@ -552,7 +552,7 @@ export default function Sessions() {
   };
 
   return (
-    <Shell me={me} gymName={gymName} current="/sessions">
+    <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/sessions">
       <h1>Sessions</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13 }}>
         One-to-ones delivered on your floor in the last 30 days, and what they are worth.

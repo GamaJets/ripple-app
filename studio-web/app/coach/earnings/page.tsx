@@ -607,7 +607,7 @@ export default function CoachEarnings() {
   // out of a query that failed.
   if (me.roleUnknown) {
     return (
-      <Shell me={me} gymName={gymName} current="/coach/earnings">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/coach/earnings">
         <h1>We could not read your account</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
           Your profile did not load, so this console does not know what you are —
@@ -622,7 +622,7 @@ export default function CoachEarnings() {
     // A plain sentence, not empty tables. Empty tables read as "you have earned
     // nothing", which is a far worse thing to tell somebody than "wrong screen".
     return (
-      <Shell me={me} gymName={gymName} current="/coach/earnings">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/coach/earnings">
         <h1>This screen is for coaches</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: 560 }}>
           Earnings shows one coach&rsquo;s delivered sessions and what they are owed for them.
@@ -643,7 +643,7 @@ export default function CoachEarnings() {
   // a query that was never run.
   if (!me.tenantId) {
     return (
-      <Shell me={me} gymName={gymName} current="/coach/earnings">
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/coach/earnings">
         <h1>My earnings</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
           Your account is not linked to a gym, so there are no sessions to price
@@ -764,7 +764,7 @@ export default function CoachEarnings() {
   // month change could land last and paint the other month's sessions.
 
   return (
-    <Shell me={me} gymName={gymName} current="/coach/earnings">
+    <Shell me={me} gymName={gymName} gymNameUnread={!!gymError} current="/coach/earnings">
       <h1>Earnings</h1>
       <p style={{ color: 'var(--ink3)', marginTop: 6, fontSize: 13, maxWidth: 640 }}>
         Your {period.label}: what you delivered, what has been paid, and what is
