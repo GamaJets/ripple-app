@@ -3309,7 +3309,18 @@ export default function Builder() {
             const held = plan.blocked.find((b) => b.clientId === c.id);
             return (
               <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
-                accessibilityRole="button" accessibilityLabel={`${on ? 'Do not assign to' : 'Assign to'} ${c.name}`}
+                accessibilityRole="button"
+                // The dot-and-ink argument below is about a coach who can SEE
+                // the row. A Pressable is one accessibility element, so a label
+                // on it replaces every line under it — and the two lines it was
+                // replacing are the warning that this assignment overwrites a
+                // live programme and the reason a client is being held back.
+                accessibilityLabel={[
+                  `${on ? 'Do not assign to' : 'Assign to'} ${c.name}`,
+                  c.goal,
+                  replaces ? 'This replaces the programme they are on' : null,
+                  held ? held.reason : null,
+                ].filter(Boolean).join('. ')}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                   {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}

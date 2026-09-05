@@ -1223,7 +1223,8 @@ function Segmented({ options, value, onChange }: {
       {options.map((o) => {
         const on = o.key === value;
         return (
-          <Pressable key={o.key} onPress={() => onChange(o.key)} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={o.label}
+          <Pressable key={o.key} onPress={() => onChange(o.key)} accessibilityRole="radio" accessibilityState={{ selected: on }}
+            accessibilityLabel={o.note ? `${o.label}. ${o.note}` : o.label}
             style={{ flex: 1, paddingVertical: sp.md, paddingHorizontal: sp.sm, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2, borderWidth: hairline, borderColor: on ? t.brand : t.ring }}>
             <Text style={{ ...ty.label, fontWeight: '600', color: on ? t.brandInk : t.ink }}>{o.label}</Text>
             {o.note ? <Text style={{ ...ty.caption, color: on ? t.brandInk : t.ink3, marginTop: 2, opacity: on ? 0.8 : 1 }}>{o.note}</Text> : null}

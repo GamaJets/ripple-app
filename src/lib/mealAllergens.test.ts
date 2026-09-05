@@ -12,7 +12,7 @@
 // NOT dairy, and everything that genuinely is dairy still is. A matcher that
 // stopped flagging butter would be a far worse bug than the one being fixed.
 import {
-  ALLERGENS, allergenGapNote, mealAllergens, planGaps, poolGaps,
+  ALLERGENS, allergenGapNote, mealAllergens, mealRowSpoken, planGaps, poolGaps,
   catalogSize, mealAt,
   type Allergen, type Slot,
 } from './meals';
@@ -192,6 +192,55 @@ ok(!!note && /check every dish/i.test(note), 'and still tells them to check');
     ok(typeof meal.n === 'string', 'a meal is still produced');
   } catch { threw = true; }
   ok(!threw, 'and nothing throws out of the meal builder for a diet with no components');
+}
+
+/* ── and what the row says out loud ────────────────────────────────────── */
+
+// The mark on the row is worth nothing to the member who cannot see it. All
+// three meal lists in app/(client)/nutrition.tsx are `<Pressable>`s, which
+// React Native renders `accessible={true}` — one element, whose
+// `accessibilityLabel` REPLACES its children rather than adding to them. All
+// three carried `accessibilityLabel={m.n}`, so the dish name was the whole of
+// what a screen reader was told and the "Contains dairy" line beneath it was
+// silent. These assertions are about the sentence, not about the matcher.
+
+eq(mealRowSpoken({ slot: 'Lunch', name: 'Harissa halloumi', allergens: ['dairy'], kcal: '520' }),
+  "Lunch. Harissa halloumi. Contains dairy. 520 kcal",
+  'the warning is in the sentence, after the dish and before the figure');
+
+eq(mealRowSpoken({ slot: 'Lunch', name: 'Grilled chicken and rice', allergens: [], kcal: '520' }),
+  'Lunch. Grilled chicken and rice. 520 kcal',
+  'and a dish with nothing in it says nothing — no empty clause, no "contains none"');
+
+eq(mealRowSpoken({ slot: 'Breakfast', coachPick: true, name: 'Oats', allergens: ['dairy', 'gluten'], kcal: '410' }),
+  "Breakfast. Coach's pick. Oats. Contains dairy and gluten. 410 kcal",
+  'two exclusions are joined with "and", and the coach kicker keeps its place');
+
+// The snack list has no slot and the week grid has no kicker; both drop the
+// clause rather than leaving a gap in the sentence.
+eq(mealRowSpoken({ name: 'Trail mix', allergens: ['nuts'], kcal: '150' }),
+  'Trail mix. Contains nuts. 150 kcal', 'a row with no slot is still a sentence');
+eq(mealRowSpoken({ name: 'Trail mix' }), 'Trail mix', 'and a bare name survives being the only thing there is');
+
+// The figure is the CALLER's — the three lists format it differently (`num()`
+// on two of them, raw on the other) and the rule is that the ear hears what the
+// eye reads. A blank one is dropped rather than voiced as a bare unit.
+eq(mealRowSpoken({ name: 'Trail mix', kcal: '1,150' }), 'Trail mix. 1,150 kcal',
+  'the caller’s own formatting is what gets said');
+eq(mealRowSpoken({ name: 'Trail mix', kcal: '' }), 'Trail mix', 'an empty figure is not "kcal" on its own');
+eq(mealRowSpoken({ name: 'Trail mix', kcal: null }), 'Trail mix', 'and neither is a null one');
+
+// Straight off the engine, so the sentence is tested against a dish that
+// really does carry the thing rather than against a hand-written array.
+{
+  const meal = mealAt('meat', 'Breakfast', 0, []);
+  const inIt = mealAllergens(meal, EVERY);
+  const said = mealRowSpoken({ slot: meal.slot, name: meal.n, allergens: inIt, kcal: String(meal.k) });
+  ok(said.startsWith(`${meal.slot}. ${meal.n}`), 'a real meal leads with its slot and its name');
+  for (const a of inIt) {
+    ok(said.includes(a === 'nuts' ? 'nuts' : a) || said.toLowerCase().includes('contains'),
+      `and every allergen the engine found on ${meal.n} reaches the sentence`);
+  }
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

@@ -429,7 +429,10 @@ export default function Library() {
          <Pressable
           onPress={() => router.push({ pathname: '/(client)/exercise', params: { name: e.name, from: 'clientLibrary' } })}
           accessibilityRole="button"
-          accessibilityLabel={e.display.text}
+          // The row's second line as well as its first. In a list of six
+          // hundred movements the muscle group and the equipment are how one
+          // is told from another, and the label was replacing both.
+          accessibilityLabel={[e.display.text, [e.group, e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' \u00b7 ')].filter(Boolean).join('. ')}
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
          >
           <View style={{ width: 52, height: 52, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>

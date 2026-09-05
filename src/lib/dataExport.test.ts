@@ -7,6 +7,7 @@
 // everything, so a confident sentence over a short read is not a cosmetic bug.
 import {
   fileSizeLabel, filesRowNote, saveFileFailure, incompleteExportLine,
+  EXPORT_FILE_STORES, exportFileStores,
   coachDataFilename, COACH_DELETION_FILES_NOTE, DELETION_FILES_NOTE, EXPORT_ROW_NOTE,
 } from './dataExport';
 
@@ -182,6 +183,68 @@ for (const note of [DELETION_FILES_NOTE, COACH_DELETION_FILES_NOTE]) {
   ok(/not the same claim/.test(note),
     `and both say which of the two they are making — ${note.slice(0, 60)}`);
 }
+
+/* ── the stores the export actually walks ────────────────────────────────
+ *
+ * The two notes above tell somebody to take a copy before they erase the
+ * account. The walk in src/lib/gdpr.ts is what produces that copy, and for as
+ * long as its list lived inside that file nothing under `npm test` could see
+ * that the coach note named three kinds of file the walk never looked for.
+ * These are the assertions that make that impossible again: the sentence and
+ * the list are checked against each other, in both directions.
+ */
+
+// The member's walk. Four stores, and none of them a coach's.
+const memberStores = exportFileStores(false).map((s) => s.bucket);
+eq(memberStores.length, 4, 'a member has four file stores');
+for (const b of ['photos', 'injury-docs', 'message-media', 'avatars']) {
+  ok(memberStores.includes(b), `a member's export walks ${b}`);
+}
+for (const b of ['coach-logos', 'coach-docs', 'exercise-videos']) {
+  ok(!memberStores.includes(b),
+    `and does not ask after ${b}, which a member's account cannot hold — three refusals would mark every member's export incomplete`);
+}
+
+// The coach's walk is a superset, never a different set.
+const coachStores = exportFileStores(true).map((s) => s.bucket);
+for (const b of memberStores) ok(coachStores.includes(b), `a coach's export still walks ${b}`);
+
+// THE ONE THAT WOULD HAVE CAUGHT IT. COACH_DELETION_FILES_NOTE names five kinds
+// of file and ends "Export and save your files first if you want a copy."
+// Three of the five — the logo, the published document and the exercise clip —
+// were in buckets the walk did not visit, so a coach who did exactly what the
+// sentence says got a manifest without them, marked complete, and then erased
+// the account.
+for (const [phrase, bucket] of [
+  ['your logo', 'coach-logos'],
+  ['any document you published', 'coach-docs'],
+  ['any exercise clip you recorded', 'exercise-videos'],
+  ['your profile photo', 'avatars'],
+  ['in messages', 'message-media'],
+  ['Progress photographs', 'photos'],
+] as [string, string][]) {
+  ok(COACH_DELETION_FILES_NOTE.includes(phrase),
+    `the coach's deletion note still names ${bucket} in words ("${phrase}")`);
+  ok(coachStores.includes(bucket),
+    `and a coach's export walks ${bucket}, because the note tells them to save it first`);
+}
+
+// `gym-docs` is in NEITHER walk, and that is the same decision part 1152 § 6
+// makes about the purge: it is the gym's filing cabinet, not one person's file.
+// Asserted so that adding it becomes a deliberate act rather than a tidy-up.
+ok(!coachStores.includes('gym-docs') && !memberStores.includes('gym-docs'),
+  'gym-docs is nobody\'s personal store and is in neither walk');
+
+// Every store says what it is, in the member's own words. "photo_1724.jpg"
+// tells nobody which of these is their physiotherapy report, and `what` is the
+// only thing the files sheet renders.
+for (const s of EXPORT_FILE_STORES) {
+  ok(s.what.trim().length > 0, `${s.bucket} has a description`);
+  ok(s.depth === 1 || s.depth === 2, `${s.bucket} has a walkable depth`);
+}
+eq(new Set(EXPORT_FILE_STORES.map((s) => s.bucket)).size, EXPORT_FILE_STORES.length,
+  'no bucket is walked twice, which would list every file in it twice');
+
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('dataExport.test.ts — ok');

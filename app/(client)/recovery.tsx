@@ -750,7 +750,13 @@ export default function Recovery() {
     const open = openRoutine === i;
     return (
      <View key={r.name} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
-      <Pressable onPress={() => setOpenRoutine(open ? null : i)} accessibilityRole="button" accessibilityLabel={r.name}
+      <Pressable onPress={() => setOpenRoutine(open ? null : i)} accessibilityRole="button"
+       // The length of the routine, and whether tapping opens or closes it.
+       // Both were drawn — the duration as a caption, the state as a rotated
+       // chevron — and a label on a Pressable replaces the first while the
+       // second was never in the tree at all.
+       accessibilityLabel={`${r.name}, ${r.dur}`}
+       accessibilityState={{ expanded: open }}
        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
        <View style={{ flex: 1 }}>
         <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.name}</Text>

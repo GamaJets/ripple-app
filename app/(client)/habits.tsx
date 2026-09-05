@@ -290,7 +290,10 @@ export default function Habits() {
                 onPress={() => h.toggleHabit(hb.id)}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: hb.done }}
-                accessibilityLabel={hb.label}
+                // The attribution is a second line on the row, and a label on
+                // a Pressable replaces it. "Your coach asked for this" is the
+                // reason the line exists.
+                accessibilityLabel={hb.source === 'coach' ? `${hb.label}. Set by your coach` : hb.label}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
               >
                 <View style={{ width: 24, height: 24, borderRadius: radius.pill, borderWidth: hb.done ? 0 : hairline, borderColor: t.ring, backgroundColor: hb.done ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>

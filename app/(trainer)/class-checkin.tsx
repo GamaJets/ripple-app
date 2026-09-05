@@ -513,7 +513,13 @@ export default function ClassCheckin() {
             <Text style={{ ...ty.label, color: t.ink3 }}>No one has booked this class yet — members appear here as they book.</Text>
           ) : (
             roster.map((m, i) => (
-              <Pressable key={m.userId} onPress={() => toggle(m)} accessibilityRole="button" accessibilityLabel={m.name}
+              // The state carries "present"; the WAITLIST was carried by an
+              // amber dot and a caption, and a Pressable's label replaces both.
+              // So a coach taking the register with VoiceOver heard a
+              // waitlisted member exactly as they heard a booked one — and the
+              // tap that tells them apart is the one that marks somebody in.
+              <Pressable key={m.userId} onPress={() => toggle(m)} accessibilityRole="button"
+                accessibilityLabel={m.status === 'waitlist' ? `${m.name}, on the waiting list` : m.name}
                 accessibilityState={{ checked: m.attended, selected: m.attended }}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ width: 28, height: 28, borderRadius: radius.pill, backgroundColor: m.attended ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>

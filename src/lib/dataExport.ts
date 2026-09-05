@@ -268,3 +268,90 @@ export function incompleteExportLine(parts: string[], supportEmail: string): str
     + 'The file has been saved and says so inside, but do not treat it as a full copy, and do not delete your '
     + `account on the strength of it. Try again in a moment, or email ${supportEmail}.`;
 }
+
+/* ── which buckets the export actually walks ──────────────────────────────
+ *
+ * This list used to live inside src/lib/gdpr.ts, where nothing under `npm test`
+ * could reach it — gdpr.ts imports the Supabase client — and it held FOUR
+ * buckets: `photos`, `injury-docs`, `message-media`, `avatars`.
+ *
+ * `COACH_DELETION_FILES_NOTE` above names five kinds of file and ends "Export
+ * and save your files first if you want a copy." Three of the five were in
+ * buckets the export did not look in. A coach who did exactly what that
+ * sentence told them to got a manifest with no logo, no published document and
+ * no exercise clip in it, marked `complete: true` — and then erased the account,
+ * at which point `trg_profiles_queue_file_purge` and `trg_exercise_video_deleted`
+ * (supabase/parts/1120 and 1152) destroyed all three. The one screen in the app
+ * that exists to hand somebody the last copy of their own record was silently
+ * short by the three stores that are only ever a coach's.
+ *
+ * So the list lives here, where dataExport.test.ts asserts it against the very
+ * sentence that promises it, and gdpr.ts imports it.
+ *
+ * `coachOnly` rather than one flat list: `coach-logos`, `coach-docs` and
+ * `exercise-videos` can only ever hold objects for somebody who has used the
+ * coach app (app/(trainer)/brand.tsx, documents.tsx and videos.tsx are the only
+ * writers, and every key in all three is `<coach uid>/…`). Walking them for a
+ * member would be three more round trips, on the screen where a slow export is
+ * least welcome, to list three folders that cannot exist — and a bucket that
+ * refuses the listing lands in `failed` and marks the whole export INCOMPLETE,
+ * which is a false alarm nobody could act on. `gym-docs` is deliberately absent
+ * from BOTH lists for the reason supabase/parts/1152 § 6 gives at length: it is
+ * the gym's filing cabinet and not any one person's file.
+ */
+export interface ExportFileStore {
+  bucket: string;
+  /** What to call it in the member's own words. "photo_1724.jpg" tells nobody
+   *  which of these is their physiotherapy report. */
+  what: string;
+  /** How deep the objects sit under the person's own uid. */
+  depth: 1 | 2;
+  /** Only walked for an export the caller opted into as a coach's. */
+  coachOnly?: true;
+}
+
+export const EXPORT_FILE_STORES: readonly ExportFileStore[] = [
+  { bucket: 'photos', what: 'A progress photograph you took', depth: 1 },
+  // ── The removed sentence, still standing in the one document that is ABOUT
+  //    where a person's data has been ────────────────────────────────────────
+  //
+  // This said "An injury document you uploaded. Only you can see this one."
+  //
+  // That is the exact sentence app/(client)/injury-doc.tsx was rewritten to
+  // remove, and src/lib/injuryDocConsent.ts spends its header explaining why:
+  // the bucket really is private to its owner (supabase/parts/91, own-folder
+  // policies with no trainer branch), and READING a document means sending a
+  // copy of it to OCR.space. A member who says yes to that has a document that
+  // more than one party has seen, and "only you can see this one" is then a
+  // false statement about it.
+  //
+  // It matters more here than it did on the screen, not less. This line is the
+  // label in a SUBJECT ACCESS EXPORT — the file a person asks for precisely
+  // because they want to know who holds what about them, and the one they keep
+  // after deleting the account. A manifest that answers that question wrongly
+  // is worse than one that does not answer it.
+  //
+  // The manifest cannot state the per-document answer: the consent rows are a
+  // separate read (`ocr_consents`), the walk is over storage objects, and
+  // matching them up there would make an export fail for a reason that has
+  // nothing to do with the export. So it says the part that is unconditionally
+  // true of every one of these files and points at where the per-document
+  // answer lives, which the member can open and read for themselves.
+  { bucket: 'injury-docs', what: 'An injury document you uploaded. It is stored where only you can open it, and your coach never sees the file. If you agreed to have one read, a copy of that document also went to OCR.space — the Injuries screen in the app says, against each document, which of yours those were.', depth: 1 },
+  { bucket: 'message-media', what: 'A photo or video in your conversation with your coach', depth: 2 },
+  // Added with supabase/parts/961, which is where a profile photo started
+  // being a file at all. Before that the column held a path inside the
+  // member's own handset and there was nothing in any bucket to export.
+  { bucket: 'avatars', what: 'Your profile photo, as your coach and your gym see it', depth: 1 },
+  // ── the three the coach note promises and the walk did not visit ────────
+  { bucket: 'coach-logos', what: 'Your logo, as it appears on your invoices and on your clients’ app', depth: 1, coachOnly: true },
+  { bucket: 'coach-docs', what: 'A document you published to your clients — a waiver, a par-form, your terms', depth: 1, coachOnly: true },
+  { bucket: 'exercise-videos', what: 'An exercise clip you recorded', depth: 1, coachOnly: true },
+];
+
+/** The stores an export of this kind walks. A coach's account holds everything
+ *  a member's does and three stores besides; a member's holds none of the
+ *  three, so asking after them would be three refusals to explain. */
+export function exportFileStores(coach: boolean): ExportFileStore[] {
+  return EXPORT_FILE_STORES.filter((s) => coach || !s.coachOnly);
+}

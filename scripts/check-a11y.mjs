@@ -47,10 +47,55 @@
 // accessibility-extra-large that is 28pt glyphs laid out in an 18pt line.
 // `grown()` is the fix and it is one word.
 //
+// ── Rule 3: a label that is one FIELD of a row swallows the rest of it ────
+//
+// React Native merges an `accessible` element's children into a single
+// accessibility element, and an `accessibilityLabel` on it does not ADD to what
+// they say — it REPLACES it. `Pressable` renders `accessible={accessible !==
+// false}`, so every touchable row in this app is one element, and its label is
+// the whole of what a screen reader is told about it.
+//
+// That is fine when the label is a sentence assembled for the ear — `spoken` in
+// src/ui/kit.tsx, `prSpoken` in app/(client)/records.tsx, `mealRowSpoken` in
+// src/lib/meals.ts. It is a defect when the label is one FIELD of the row's own
+// data and the row draws several lines:
+//
+//     <Pressable accessibilityLabel={m.n}>       ← the dish's name
+//       <Text>{m.slot} · Coach's pick</Text>
+//       <Text>{m.n}</Text>
+//       <Text>Contains {…}</Text>                ← the allergen mark
+//       <Text>{m.K}</Text><Text>kcal</Text>
+//
+// That is app/(client)/nutrition.tsx as it stood, on all three of its meal
+// lists. The per-row allergen mark exists because a warning at the top of a
+// screen does not tell you WHICH DISH — and the member who cannot see the mark
+// was told "Harissa halloumi, button" and nothing else. The same shape on
+// app/(client)/trainers.tsx dropped the price, the credentials and "Request
+// pending" from every row of the coach directory; on app/(trainer)/templates.tsx
+// and builder.tsx it dropped "replaces the programme they are on" from the
+// control that overwrites somebody's training.
+//
+// So: an `accessibilityLabel` whose whole expression is a PROPERTY ACCESS —
+// `c.name`, `m.n`, `e.display.text` — on an element with two or more `<Text>`
+// descendants. A property access is a value the row happened to carry; a
+// sentence for the ear is a value somebody wrote. The rule cannot tell a good
+// sentence from a bad one, and does not try: it asks only whether anybody
+// composed one at all.
+//
+// A bare identifier (`spoken`, `shown`, `label`) is NOT flagged, deliberately.
+// It is the shape a composed sentence takes, and flagging it would put every
+// correct call site on the standing list beside the defects, which is how a
+// list stops being read.
+//
 // ── What this deliberately CANNOT see ─────────────────────────────────────
 //
 // It is a lint over source text. It does not render, does not resolve a
 // variable, and measures nothing.
+//
+//  · Rule 3 counts `<Text>` tags, not facts. A row that draws its second line
+//    through a component rather than a <Text> is invisible to it, and a row
+//    whose two Texts are a label and its own trailing chevron is flagged for
+//    nothing. The standing list carries the second kind.
 //
 //  · A touchable with children is never flagged, however unnamed. `<Pressable>`
 //    around a bare `<Icon>` is a real defect and is invisible here, because the
@@ -68,6 +113,10 @@
 //    accessibility label passes this and helps nobody.
 //
 // ── The standing list, and why it does not have to count down ─────────────
+//
+// Rule 3 carries NOTHING on this list, and that is the point of it: all fifteen
+// it found on its first run were fixed in the same change that added it, so a
+// hit is a regression rather than a backlog and there is no list to argue with.
 //
 // The offences below were all present when this file was written and every one of
 // them is in a screen under app/. The list may not GROW: a new one fails the
@@ -194,6 +243,52 @@ const TOUCHABLE = /<(Pressable|TouchableOpacity|TouchableHighlight|TouchableWith
 /** A literal `lineHeight: 18`. `lineHeight: grown(18)` and `lineHeight: h` pass. */
 const PINNED_LINE_HEIGHT = /\blineHeight\s*:\s*\d+(\.\d+)?\s*[,}]/g;
 
+/* ── rule 3 ──────────────────────────────────────────────────────────────── */
+
+/** Any element that could carry a label. Components too — a row is as often a
+ *  <Pressable> as it is somebody's <Card>. */
+const ELEMENT = /<([A-Z][A-Za-z0-9]*)\b/g;
+
+/**
+ * A whole expression that is nothing but a property access: `c.name`,
+ * `e.display.text`, `LABEL[k]`. Anchored at both ends, so a template literal, a
+ * call, a ternary, an array `.join()` — anything somebody composed — is not
+ * this. A BARE identifier is not this either; see the header.
+ */
+const FIELD_ONLY = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*|\[[^\]]*\])+$/;
+
+/** How many `<Text>`s under this row make it more than a name. Two: a row that
+ *  draws a second line is a row saying a second thing. */
+const ROW_TEXTS = 2;
+
+/**
+ * The source between an opening tag and its matching close, or null if the tag
+ * never closes in this file.
+ *
+ * Nesting is counted by NAME rather than assumed: a <View> inside a <View> is
+ * the ordinary shape of every row in this app, and a scanner that stopped at
+ * the first `</View>` would read one line of a five-line row.
+ */
+function childrenOf(src, name, tagEndIdx) {
+  let depth = 1;
+  let i = tagEndIdx + 1;
+  while (i < src.length && depth > 0) {
+    const open = src.indexOf('<' + name, i);
+    const close = src.indexOf('</' + name + '>', i);
+    if (close < 0) return null;
+    if (open >= 0 && open < close) {
+      const e = tagEnd(src, open);
+      if (e >= 0 && src[e - 1] !== '/') depth++;
+      i = e < 0 ? open + 1 : e + 1;
+    } else {
+      depth--;
+      if (depth === 0) return src.slice(tagEndIdx + 1, close);
+      i = close + name.length + 3;
+    }
+  }
+  return null;
+}
+
 const found = [];   // { key, file, line, rule, text }
 
 for (const file of ROOTS.flatMap((r) => walk(join(ROOT, r)))) {
@@ -215,6 +310,35 @@ for (const file of ROOTS.flatMap((r) => walk(join(ROOT, r)))) {
     found.push({
       key: `${rel}|scrim`, file: rel, line: lineOf(m.index), rule: 'unnamed',
       text: tag.replace(/\s+/g, ' ').slice(0, 96),
+    });
+  }
+
+  // Rule 3
+  ELEMENT.lastIndex = 0;
+  while ((m = ELEMENT.exec(src))) {
+    const end = tagEnd(src, m.index);
+    if (end < 0) continue;
+    if (src[end - 1] === '/') continue;               // no children to swallow
+    const tag = src.slice(m.index, end + 1);
+    // `[^{}]*` and not `.*`: a label holding a nested brace expression is not a
+    // bare field by definition, and matching greedily past it would read the
+    // end of some later prop as the end of this one.
+    const lbl = tag.match(/accessibilityLabel=\{([^{}]*)\}/);
+    if (!lbl) continue;
+    const expr = lbl[1].trim();
+    if (!FIELD_ONLY.test(expr)) continue;
+    // A hint is the second channel and VoiceOver reads it after the label, so a
+    // row that names itself and hints the rest has said both things. The option
+    // sheets in app/(client)/pt-sessions.tsx and messages.tsx are that shape:
+    // `accessibilityLabel={o.label} accessibilityHint={o.note}` beside a <Text>
+    // of each. Not a defect, and not something to argue about on a list.
+    if (/accessibilityHint/.test(tag)) continue;
+    const body = childrenOf(src, m[1], end);
+    if (body == null) continue;
+    if ((body.match(/<Text\b/g) || []).length < ROW_TEXTS) continue;
+    found.push({
+      key: `${rel}|field:${expr}`, file: rel, line: lineOf(m.index), rule: 'field',
+      text: `<${m[1]} … accessibilityLabel={${expr}}>`,
     });
   }
 
@@ -242,7 +366,13 @@ if (process.argv.includes('--prune')) {
 if (fresh.length) {
   console.error('New accessibility offences — see the header of scripts/check-a11y.mjs.\n');
   for (const f of fresh) {
-    if (f.rule === 'unnamed') {
+    if (f.rule === 'field') {
+      console.error(`  ${f.file}:${f.line}  an accessibility label that is one field of the row`);
+      console.error(`    ${f.text}`);
+      console.error('    → React Native merges the children into one element and this label');
+      console.error('      REPLACES them, so every other line on this row goes silent. Compose the');
+      console.error('      sentence — see mealRowSpoken in src/lib/meals.ts, or the header here.\n');
+    } else if (f.rule === 'unnamed') {
       console.error(`  ${f.file}:${f.line}  a touchable with no children and no name`);
       console.error(`    ${f.text}`);
       console.error('    → React Native makes it focusable anyway, so VoiceOver finds an unnamed');
@@ -263,6 +393,6 @@ if (stale.length) {
   console.log(`a11y: ${stale.length} standing offence${stale.length === 1 ? '' : 's'} on the list no longer present — run with --prune to reprint the list.`);
 }
 console.log(
-  `a11y: ok — no new unnamed touchables or pinned line heights`
+  `a11y: ok — no new unnamed touchables, pinned line heights or field-only labels`
   + (standing.length ? `, ${standing.length} standing (in ${new Set(standing.map((s) => s.file)).size} files, all listed in the gate)` : ''),
 );

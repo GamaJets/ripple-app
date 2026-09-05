@@ -38,6 +38,7 @@ import { BRAND } from './brands';
 // PostgREST stops at a thousand rows and says nothing. This file's whole
 // subject is a record that is short without saying so.
 import { capLimit, capped } from './rowCap';
+import { exportFileStores, type ExportFileStore } from './dataExport';
 
 /**
  * What the export is called on the member's phone.
@@ -275,10 +276,15 @@ export interface ExportFile {
   at: string | null;
 }
 
-/**
- * Where a member's own files live, and what to call each kind.
+/* Where a member's own files live, and what to call each kind, now lives in
+ * src/lib/dataExport.ts as `EXPORT_FILE_STORES` — a pure module, so the list is
+ * assertable under `npm test` against `COACH_DELETION_FILES_NOTE`, the sentence
+ * that promises it. It was four buckets here and is seven there; the three that
+ * were missing are the three only a coach ever has, and the note telling coaches
+ * to "export and save your files first" named all three. See the block above
+ * `EXPORT_FILE_STORES` for the whole account.
  *
- * INJURY DOCUMENTS ARE THE ONE THAT MATTERS MOST HERE. They are private to the
+ * INJURY DOCUMENTS ARE THE ONE THAT MATTERS MOST. They are private to the
  * client by design — own-folder policies with no trainer branch
  * (supabase/parts/91), a note kept out of the model (src/lib/coachShare.ts), a
  * viewer that never hands the file to another app (src/lib/injuryDocView.ts) —
@@ -286,46 +292,12 @@ export interface ExportFile {
  * rule. A file nobody else may see is still theirs, and a subject access
  * request is the one place it must appear.
  *
- * Every prefix below is the member's own uid. For `message-media` that is the
- * THREAD key, which for a client is their own id (part 124), and the objects
- * sit one level deeper under the uid of whoever sent them — so both halves of
- * the conversation's files are theirs to have, and neither is anybody else's
+ * Every prefix is the person's own uid. For `message-media` that is the THREAD
+ * key, which for a client is their own id (part 124), and the objects sit one
+ * level deeper under the uid of whoever sent them — so both halves of the
+ * conversation's files are theirs to have, and neither is anybody else's
  * folder.
  */
-const FILE_STORES: { bucket: string; what: string; depth: 1 | 2 }[] = [
-  { bucket: 'photos', what: 'A progress photograph you took', depth: 1 },
-  // ── The removed sentence, still standing in the one document that is ABOUT
-  //    where a person's data has been ────────────────────────────────────────
-  //
-  // This said "An injury document you uploaded. Only you can see this one."
-  //
-  // That is the exact sentence app/(client)/injury-doc.tsx was rewritten to
-  // remove, and src/lib/injuryDocConsent.ts spends its header explaining why:
-  // the bucket really is private to its owner (supabase/parts/91, own-folder
-  // policies with no trainer branch), and READING a document means sending a
-  // copy of it to OCR.space. A member who says yes to that has a document that
-  // more than one party has seen, and "only you can see this one" is then a
-  // false statement about it.
-  //
-  // It matters more here than it did on the screen, not less. This line is the
-  // label in a SUBJECT ACCESS EXPORT — the file a person asks for precisely
-  // because they want to know who holds what about them, and the one they keep
-  // after deleting the account. A manifest that answers that question wrongly
-  // is worse than one that does not answer it.
-  //
-  // The manifest cannot state the per-document answer: the consent rows are a
-  // separate read (`ocr_consents`), this walk is over storage objects, and
-  // matching them up here would make an export fail for a reason that has
-  // nothing to do with the export. So it says the part that is unconditionally
-  // true of every one of these files and points at where the per-document
-  // answer lives, which the member can open and read for themselves.
-  { bucket: 'injury-docs', what: 'An injury document you uploaded. It is stored where only you can open it, and your coach never sees the file. If you agreed to have one read, a copy of that document also went to OCR.space — the Injuries screen in the app says, against each document, which of yours those were.', depth: 1 },
-  { bucket: 'message-media', what: 'A photo or video in your conversation with your coach', depth: 2 },
-  // Added with supabase/parts/961, which is where a profile photo started
-  // being a file at all. Before that the column held a path inside the
-  // member's own handset and there was nothing in any bucket to export.
-  { bucket: 'avatars', what: 'Your profile photo, as your coach and your gym see it', depth: 1 },
-];
 
 /** How many objects to ask for per folder. Storage's own default is 100, which
  *  would silently truncate a year of progress photographs — and a manifest that
@@ -339,13 +311,21 @@ const FILE_PAGE = 1000;
  * from a failed read looks identical to a member who has never uploaded
  * anything, and this is the file they will use to decide whether it is safe to
  * delete their account.
+ *
+ * `coach` adds the three stores only a coach's account can hold — their logo,
+ * their published documents and their exercise clips. It is the caller's
+ * existing `{ coach: true }`, not a guess made here, for the same reason
+ * `COACH_TABLES` is opted into rather than sniffed.
  */
-export async function listMyFiles(uid: string): Promise<{ files: ExportFile[]; failed: { table: string; reason: string }[] }> {
+export async function listMyFiles(
+  uid: string,
+  coach = false,
+): Promise<{ files: ExportFile[]; failed: { table: string; reason: string }[] }> {
   const files: ExportFile[] = [];
   const failed: { table: string; reason: string }[] = [];
   if (!USE_SUPABASE || !uid) return { files, failed };
 
-  for (const store of FILE_STORES) {
+  for (const store of exportFileStores(coach)) {
     try {
       const { data: top, error: topErr } = await supabase.storage.from(store.bucket)
         .list(uid, { limit: FILE_PAGE });
@@ -382,7 +362,7 @@ export async function listMyFiles(uid: string): Promise<{ files: ExportFile[]; f
   return { files, failed };
 }
 
-function toExportFile(store: { bucket: string; what: string }, path: string, entry: any): ExportFile {
+function toExportFile(store: ExportFileStore, path: string, entry: any): ExportFile {
   const size = entry?.metadata?.size;
   return {
     bucket: store.bucket,
@@ -542,7 +522,7 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
   // nothing, and this is the file somebody uses to decide whether it is safe to
   // delete their account.
   const uid = auth?.user?.id ?? '';
-  const fileRead = await listMyFiles(uid);
+  const fileRead = await listMyFiles(uid, !!opts.coach);
   failed.push(...fileRead.failed);
   out.files = fileRead.files;
   out.filesNote =
@@ -555,7 +535,7 @@ export async function exportMyDataDetailed(opts: ExportOptions = {}): Promise<Ex
   out.complete = complete;
   if (!complete) {
     out.warning =
-      'THIS EXPORT IS INCOMPLETE. ' + failed.length + ' of ' + (TABLES.length + coachTables.length + FILE_STORES.length) +
+      'THIS EXPORT IS INCOMPLETE. ' + failed.length + ' of ' + (TABLES.length + coachTables.length + exportFileStores(!!opts.coach).length) +
       ' parts of your record could not be read. Tables are marked with an "error" object rather than data; ' +
       'a file store that could not be listed means the list of your files above is short and you cannot ' +
       'tell by how much. ' +

@@ -378,7 +378,11 @@ export default function Groups() {
             const isOpen = g.id === openId;
             return (
               <Pressable key={g.id} onPress={() => { setOpenId(isOpen ? null : g.id); setWriteNote(null); }}
-                accessibilityRole="button" accessibilityLabel={g.name}
+                accessibilityRole="button"
+                // Including whether the membership was READ. "3 clients" and
+                // "membership not read" are different answers and the label was
+                // saying neither.
+                accessibilityLabel={`${g.name}. ${groupStatus === 'ready' ? `${g.memberIds.length} ${g.memberIds.length === 1 ? 'client' : 'clients'}` : 'membership not read'}${g.program ? `, ${g.program.title}` : ', no programme yet'}`}
                 style={{ paddingVertical: sp.lg, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                   <View style={{ width: 38, height: 38, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -598,7 +602,8 @@ export default function Groups() {
                 setPickTpl(false);
                 const saved = await setGroupProgram(open.id, tpl.program);
                 if (!saved) Alert.alert('Not saved', `“${tpl.name}” is showing as this group's programme on this screen but did not reach the server, so it will be gone when you reopen the app. Try again once you have signal.`);
-              }} accessibilityRole="button" accessibilityLabel={tpl.name}
+              }} accessibilityRole="button"
+                accessibilityLabel={`${tpl.name}. ${tpl.program.days.length} days, ${tpl.program.days.reduce((a, d) => a + d.exercises.length, 0)} exercises`}
                 style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{tpl.name}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
@@ -631,7 +636,7 @@ export default function Groups() {
               const on = !!picked[c.id];
               return (
                 <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
-                  accessibilityRole="button" accessibilityLabel={c.name}
+                  accessibilityRole="button" accessibilityLabel={`${c.name}. ${c.goal}`}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                     {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}

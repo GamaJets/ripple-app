@@ -777,7 +777,10 @@ export default function ClientNutrition() {
             </Text>
             <ScrollView style={{ marginTop: sp.md }} showsVerticalScrollIndicator={false}>
               {results.map((g) => (
-                <Pressable key={`${g.slot}-${g.idx}`} accessibilityRole="button" accessibilityLabel={g.n}
+                <Pressable key={`${g.slot}-${g.idx}`} accessibilityRole="button"
+                  // The macros are the whole reason a coach picks one of these
+                  // over another, and the label was replacing them.
+                  accessibilityLabel={`${g.n}. ${num(g.k)} kcal, ${num(g.p)} protein, ${num(g.c)} carbs, ${num(g.f)} fat per serving, before their day is scaled to target`}
                   onPress={() => {
                     if (!draft || !pick) return;
                     setDraft(setPlanMeal(draft, dayIdx, pick.pos, g.idx));

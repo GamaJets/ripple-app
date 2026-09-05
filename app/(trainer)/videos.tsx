@@ -569,9 +569,16 @@ export default function TrainerVideos() {
     const chosen = upVis;
     const where = await addVideo({ name: upName.trim() || 'Exercise clip', group: upGroup.trim() || 'Uncategorised', path: path || undefined, visibility: chosen });
     setUpBusy(false); setPendUri(null);
-    Alert.alert('Clip added', where === 'remote'
+    // The local outcome is no longer "saved on this phone". The video itself is
+    // NOT kept: the row is what makes an uploaded clip readable at all — the
+    // bucket's read policy asks `exercise_videos` for the path — so a file with
+    // no row is one nobody, including this coach, could ever play. It is
+    // discarded rather than left in the bucket under their name for ever (see
+    // `orphanedVideoObject` in src/lib/exerciseVideoUpload.ts), and the coach is
+    // told that plainly instead of being told it was saved.
+    Alert.alert(where === 'remote' ? 'Clip added' : 'Clip not saved', where === 'remote'
       ? `Uploaded. ${visOf(chosen).note} You can change that any time from the clip's row.`
-      : 'Saved to your library on this device only. It did not reach the server, so nobody else can see it yet — try again when you have a connection.');
+      : 'The name is in your library on this phone, but the clip itself did not reach the server and has not been kept. The video is still on your phone — add it again when you have a connection.');
   };
 
   // Adding by link goes through exactly the same `addVideo` as the upload above,

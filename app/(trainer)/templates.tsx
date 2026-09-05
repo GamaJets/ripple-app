@@ -565,7 +565,18 @@ export default function Templates() {
                   const held = plan.blocked.find((b) => b.clientId === c.id);
                   return (
                     <Pressable key={c.id} onPress={() => setPicked((p) => ({ ...p, [c.id]: !p[c.id] }))}
-                      accessibilityRole="button" accessibilityLabel={c.name}
+                      accessibilityRole="button"
+                      // The same list as the builder's, and the same defect: a
+                      // label on a Pressable replaces the lines beneath it, so
+                      // "replaces the program they are on" and the reason a
+                      // client is held were both silent — on the control that
+                      // overwrites somebody's training.
+                      accessibilityLabel={[
+                        `${on ? 'Do not assign to' : 'Assign to'} ${c.name}`,
+                        c.goal,
+                        replaces ? 'This replaces the program they are on' : null,
+                        held ? held.reason : null,
+                      ].filter(Boolean).join('. ')}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                       <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: on ? t.brand : t.surface2, alignItems: 'center', justifyContent: 'center' }}>
                         {on ? <Icon name="check" size={14} color={t.brandInk} /> : null}

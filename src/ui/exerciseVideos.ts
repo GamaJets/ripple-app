@@ -41,7 +41,7 @@ import { writeFailure } from '../lib/wroteRows';
 import { reportError } from '../lib/reportError';
 import {
   VIDEO_BUCKET, exerciseVideoPath, videoUploadFailureLine, videoUploadRefusal,
-  type VideoUploadRefusal,
+  orphanedVideoObject, type VideoRowOutcome, type VideoUploadRefusal,
 } from '../lib/exerciseVideoUpload';
 
 /** Who the trainer decided may watch a clip. Mirrors the CHECK constraint on
@@ -266,10 +266,18 @@ export function useExerciseVideos() {
     const name = (v.name || '').trim(); if (!name) return 'none';
     const group = (v.group || 'Uncategorised').trim() || 'Uncategorised';
     const visibility: Visibility = v.visibility || 'clients';
+    // Which of the three the write turned out to be. 'unconfirmed' is the
+    // starting value on purpose: every branch that ANSWERS sets it, and the one
+    // that does not — an exception, meaning no reply at all — leaves it, which
+    // is the reading that keeps a possibly-live row's file. See
+    // `orphanedVideoObject` in src/lib/exerciseVideoUpload.ts.
+    let outcome: VideoRowOutcome = 'unconfirmed';
+    let uploader: string | null = null;
     if (USE_SUPABASE) {
       try {
         const { data: auth } = await supabase.auth.getUser();
         const uid = auth?.user?.id;
+        uploader = uid ?? null;
         const exerciseId = uid ? await ensureExercise(name, group) : null;
         if (uid && exerciseId) {
           const { data, error } = await supabase.from('exercise_videos').insert({
@@ -283,16 +291,40 @@ export function useExerciseVideos() {
             visibility,
           }).select().single();
           if (!error && data) { setRemote((p) => [rowToItem(data), ...p]); return 'remote'; }
+          // The server replied and there is no row: `.single()` errors on nought
+          // rows, so `!data` and `error` are the same answer.
+          outcome = 'refused';
+        } else {
+          // Nobody signed in, or the catalogue would not take the movement. No
+          // insert was attempted, so there is certainly no row.
+          outcome = 'refused';
         }
       } catch { /* fall through to local, and say so */ }
     }
+
+    // A file we uploaded seconds ago that no row will ever point at. Removed
+    // here, while the coach's session still can — `exvid_object_r` needs a row,
+    // so from the next launch nobody on the platform can even see it. The
+    // fast path only: supabase/parts/2510 sweeps whatever this misses.
+    const orphan = orphanedVideoObject(outcome, uploader, v.path);
+    if (orphan) {
+      try {
+        const { error } = await supabase.storage.from(VIDEO_BUCKET).remove([orphan]);
+        if (error) reportError('exerciseVideos.discardOrphan', error, { path: orphan });
+      } catch (e) { reportError('exerciseVideos.discardOrphan', e, { path: orphan }); }
+    }
+
+    // `path` goes with the object. A local entry still carrying the key of a
+    // file we have just deleted draws a play button on a clip that cannot be
+    // signed by anybody, which is a worse answer than "not recorded yet".
+    const path = orphan ? undefined : v.path;
     const item: VideoItem = {
       id: 'vx' + Date.now().toString(36) + SEQ++,
       name, group,
-      dur: v.path ? 'clip' : 'link',
-      uploaded: !!(v.path || v.url?.trim()),
+      dur: path ? 'clip' : 'link',
+      uploaded: !!(path || v.url?.trim()),
       url: v.url?.trim() || undefined,
-      path: v.path,
+      path,
       exerciseId: exerciseSlug(name) || null,
       trainerId: null,
       visibility,

@@ -234,6 +234,70 @@ export function allergenLabel(a: Allergen): string {
 }
 
 /**
+ * The whole of one meal-plan row, as a screen reader has to hear it.
+ *
+ * ── The defect this closes ────────────────────────────────────────────────
+ *
+ * The per-row allergen mark exists because a warning at the top of the screen
+ * does not tell you WHICH DISH — that is the argument `mealAllergens` above
+ * makes, and app/(client)/nutrition.tsx draws the mark on all three of its meal
+ * lists accordingly. Every one of those rows is a `<Pressable>`, and a
+ * Pressable in React Native renders `accessible={true}`: it is ONE
+ * accessibility element, and an `accessibilityLabel` on it REPLACES everything
+ * its children say rather than adding to it.
+ *
+ * All three carried `accessibilityLabel={m.n}`. So the row a sighted member
+ * reads as
+ *
+ *     Lunch · Coach's pick
+ *     Harissa halloumi
+ *     ● Contains dairy
+ *     520 kcal
+ *
+ * was announced, to the member who cannot see the mark, as "Harissa halloumi,
+ * button" — the dish name and nothing else. The exclusion they ticked was on
+ * the screen and not in the sentence, and the mark, the dot and the calorie
+ * count went with it. That is the same defect the visible mark was added to
+ * fix, surviving on the one channel where nobody could see it had.
+ *
+ * ── Why the phrase lives here ─────────────────────────────────────────────
+ *
+ * Three call sites draw this row — today's plan, the week grid and the snack
+ * list — and the fix is only worth anything if all three say it. Written out
+ * by hand at each of the three it is one hand away from being wrong again,
+ * which is the argument src/lib/bestSet.ts makes at length about a phrase that
+ * was right in two places out of three.
+ *
+ * The allergens are passed IN rather than read here: the caller already has
+ * them from `mealAllergens(m, avoid)` for the visible mark, and reading them a
+ * second time is how the sentence and the mark come to disagree.
+ */
+export function mealRowSpoken(row: {
+  /** 'Breakfast', 'Lunch' — omitted on the snack list, which has no slot. */
+  slot?: string | null;
+  /** Whether the row wears the "Coach's pick" kicker. */
+  coachPick?: boolean;
+  name: string;
+  /** What `mealAllergens` returned for this meal — the same array the mark on
+   *  the row was drawn from. */
+  allergens?: readonly Allergen[];
+  /** The calorie figure as the row PRINTS it, formatted by the caller. Null
+   *  where the row prints none. */
+  kcal?: string | null;
+}): string {
+  const found = row.allergens ?? [];
+  return [
+    row.slot?.trim() || null,
+    row.coachPick ? "Coach's pick" : null,
+    row.name.trim() || null,
+    // Third, where the eye meets it: after the name of the dish and before the
+    // figure, so it cannot be heard as a fact about some other row.
+    found.length ? `Contains ${found.map(allergenLabel).join(' and ')}` : null,
+    row.kcal?.trim() ? `${row.kcal.trim()} kcal` : null,
+  ].filter(Boolean).join('. ');
+}
+
+/**
  * What to say when an exclusion could not be honoured, or null when they all
  * were.
  *

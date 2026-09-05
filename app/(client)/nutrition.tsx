@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
 import {
   buildPlan, snackIdeas, SNACK_SHARE, swapIndex, groceryFromWeek, planWeek, slotsFor,
-  planGaps, mealAllergens, allergenGapNote, allergenLabel,
+  planGaps, mealAllergens, allergenGapNote, allergenLabel, mealRowSpoken,
   DEPTS, DEPT_ICO, ALLERGENS, type PlannedMeal, type Allergen,
 } from '../../src/lib/meals';
 import { mealPlanDoc, shareDoc } from '../../src/lib/exportShare';
@@ -1144,10 +1144,22 @@ export default function Nutrition() {
                   );
                 })}
               </View>
-              {plan.map((m, i) => (
+              {plan.map((m, i) => {
+                // Read once and used twice — for the mark and for the sentence.
+                // Two reads is how the two come to disagree.
+                const inIt = mealAllergens(m, c.avoid);
+                return (
                 <View key={m.pos}>
                   {i > 0 ? <Rule /> : null}
-                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button" accessibilityLabel={m.n}
+                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button"
+                    // Not `m.n`. A Pressable is one accessibility element, so a
+                    // label on it REPLACES the four lines below rather than
+                    // adding to them — and the line it was replacing hardest is
+                    // the allergen mark. See `mealRowSpoken`.
+                    accessibilityLabel={mealRowSpoken({
+                      slot: m.slot, coachPick: coachPick(m.pos), name: m.n,
+                      allergens: inIt, kcal: String(m.K),
+                    })}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.micro, color: t.ink3 }}>{m.slot}{coachPick(m.pos) ? " · Coach's pick" : ''}</Text>
@@ -1161,11 +1173,11 @@ export default function Nutrition() {
                           crit as text is 3.03–4.05:1 on the ten palettes, and
                           colour is never the only channel — the sentence says
                           it. */}
-                      {mealAllergens(m, c.avoid).length ? (
+                      {inIt.length ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
                           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
                           <Text style={{ ...ty.caption, color: t.ink2 }}>
-                            Contains {mealAllergens(m, c.avoid).map(allergenLabel).join(' and ')}
+                            Contains {inIt.map(allergenLabel).join(' and ')}
                           </Text>
                         </View>
                       ) : null}
@@ -1177,7 +1189,8 @@ export default function Nutrition() {
                     <Icon name={FORWARD_ICON} size={16} color={t.ink3} />
                   </Pressable>
                 </View>
-              ))}
+                );
+              })}
             </>
           ) : (
             weekPlans.map((wp, d) => (
@@ -1193,7 +1206,12 @@ export default function Nutrition() {
                   // plan and shop from.
                   const inIt = mealAllergens(m, c.avoid);
                   return (
-                  <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button" accessibilityLabel={m.n}
+                  <Pressable key={m.pos} onPress={() => setRecipe(m)} accessibilityRole="button"
+                    // The mark this arm was given is on the row and in the
+                    // sentence. See `mealRowSpoken`.
+                    accessibilityLabel={mealRowSpoken({
+                      slot: m.slot, name: m.n, allergens: inIt, kcal: String(m.K),
+                    })}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>{m.slot}</Text>
@@ -1229,14 +1247,31 @@ export default function Nutrition() {
                   ? 'Your plan already builds snacks into the day. These are extras — log one and it counts toward today.'
                   : 'Log one and it counts toward today. Nothing here changes your targets until you do.'}
               </Text>
-              {snacks.map((m: PlannedMeal, i: number) => (
+              {snacks.map((m: PlannedMeal, i: number) => {
+                // The third meal list, and the one that had neither half of the
+                // mark. `snackIdeas` builds out of the FILTERED pools, which is
+                // not the same as a guarantee: `poolGaps` is the case where a
+                // slot has nothing left to build from and the components go
+                // back in, and `mealAllergens` is what reads the dish that
+                // came out. Both channels now, like the two lists above.
+                const inIt = mealAllergens(m, c.avoid);
+                return (
                 <View key={m.pos}>
                   {i > 0 ? <Rule /> : null}
-                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button" accessibilityLabel={m.n}
+                  <Pressable onPress={() => setRecipe(m)} accessibilityRole="button"
+                    // The same sentence the other two meal lists say, so the
+                    // three cannot drift apart again. See `mealRowSpoken`.
+                    accessibilityLabel={mealRowSpoken({ name: m.n, allergens: inIt, kcal: num(m.K) })}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={2}>{m.n}</Text>
                       <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 3 }}>P{m.P} · C{m.C} · F{m.F}</Text>
+                      {inIt.length ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit }} />
+                          <Text style={{ ...ty.caption, color: t.ink2 }}>Contains {inIt.map(allergenLabel).join(' and ')}</Text>
+                        </View>
+                      ) : null}
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={{ ...value(20), color: t.ink }}>{num(m.K)}</Text>
@@ -1249,7 +1284,8 @@ export default function Nutrition() {
                     </Pressable>
                   </Pressable>
                 </View>
-              ))}
+                );
+              })}
             </Section>
 
             <Rule />
@@ -1412,7 +1448,10 @@ export default function Nutrition() {
               <View key={d} style={{ marginBottom: sp.lg }}>
                 <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{DEPT_ICO[d]} {d}</Text>
                 {groc.byDept[d]!.map((it, i) => { const k = d + '|' + it.item; const on = !!checked[k]; return (
-                  <Pressable key={i} onPress={() => toggleGroc(k)} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={it.item}
+                  <Pressable key={i} onPress={() => toggleGroc(k)} accessibilityRole="checkbox" accessibilityState={{ checked: on }}
+                    // With the quantity. A shopping list read out as bare
+                    // nouns is a list you cannot shop from.
+                    accessibilityLabel={`${it.item}, ${it.qty}${it.unit ? ' ' + it.unit : ''}`}
                     style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, flex: 1 }}>
                       <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: on ? 0 : 1, borderColor: t.ring, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>{on ? <Icon name="check" size={13} color={t.brandInk} /> : null}</View>

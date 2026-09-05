@@ -141,3 +141,66 @@ export function videoUploadFailureLine(reason: VideoUploadRefusal): string {
       return 'That clip was not uploaded. The server refused the file and nothing was saved, so nobody has been given a link to it. The video is still on your phone — try again in a moment.';
   }
 }
+
+/* ── the file left behind when the row does not land ──────────────────────
+ *
+ * `uploadExerciseVideo` and the `exercise_videos` insert are two calls and
+ * cannot be one transaction, which is the same shape src/lib/progressPhotos.ts
+ * calls out at the top of its header and answers with `discardOrphan`, and
+ * src/ui/coachLogo.ts and src/ui/avatarUpload.ts answer by removing the object
+ * the moment the row that would have pointed at it is refused. This bucket had
+ * no such answer, and it is the one where the consequence lasts longest:
+ *
+ *   · the object has NO `exercise_videos` row, so `exvid_object_r` —
+ *     `can_watch_exercise_video(name)`, which is `exists (select 1 from
+ *     exercise_videos where video_path = name)` — is false for EVERY signed-in
+ *     person including the coach who uploaded it. It cannot be listed, cannot
+ *     be signed, and cannot be seen in order to be deleted by hand;
+ *   · `trg_exercise_video_deleted` (supabase/parts/1152) queues a path when a
+ *     ROW is deleted. There is no row, so it never fires;
+ *   · `queue_account_object_purges()` — read live on 6 Sep 2026 — enumerates
+ *     `injury-docs`, `avatars`, `coach-logos`, `coach-docs` and
+ *     `message-media`. `exercise-videos` is not in it, because 1152 reasoned it
+ *     did not need to be: the table trigger covers it. It does not cover this.
+ *
+ * So a clip of a named coach performing an exercise outlives the erasure of
+ * their account, in a bucket, under the uid of somebody who no longer exists,
+ * with nothing on the platform able to name it — which is, word for word, the
+ * harm part 1152's own header was written to close.
+ *
+ * The other half of the same file is what the coach sees in the meantime: the
+ * local entry the fallback persists carries `path`, so it draws as a recorded
+ * clip with a play button, and tapping it calls `createSignedUrl`, which the
+ * read policy refuses for the same reason. A clip that will never play, on
+ * every device, for ever.
+ *
+ * ── WHY THE ANSWER IS NOT ALWAYS "DELETE IT" ─────────────────────────────
+ *
+ * Only when the server ANSWERED and said no. A write that got no reply at all
+ * may well have landed — supabase-js rejects on a dead network after the
+ * request has gone — and deleting the object then would leave a live row
+ * pointing at nothing, which src/ui/exerciseVideos.ts already names as the
+ * worst outcome its delete path can produce. An unconfirmed upload is left
+ * where it is, the next read of the library shows whether the row exists, and
+ * supabase/parts/2510 widens the account hook so that even that case is swept
+ * when the coach is erased.
+ */
+export type VideoRowOutcome = 'saved' | 'refused' | 'unconfirmed';
+
+/**
+ * The object to delete now, or null.
+ *
+ * Null for 'saved' (the row owns it), null for 'unconfirmed' (see above), and
+ * null when there is no object of ours to delete — a coach adding a clip by
+ * LINK never uploaded anything, and removing a path we did not write would be
+ * a delete aimed at somebody else's key.
+ */
+export function orphanedVideoObject(
+  outcome: VideoRowOutcome,
+  uid: string | null | undefined,
+  path: string | null | undefined,
+): string | null {
+  if (outcome !== 'refused') return null;
+  if (!path || !isOwnVideoPath(uid, path)) return null;
+  return path;
+}

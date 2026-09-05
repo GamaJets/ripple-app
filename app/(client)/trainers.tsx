@@ -1047,7 +1047,31 @@ export default function FindTrainer() {
           ) : coaches.map((c, i) => (
             <View key={c.id}>
               {i > 0 ? <Rule inset={46} /> : null}
-              <Pressable onPress={() => setSel(c)} accessibilityRole="button" accessibilityLabel={c.name}
+              {/* Everything the row draws, in the order it draws it.
+                  A Pressable is ONE accessibility element — it renders
+                  `accessible={true}` — so an `accessibilityLabel` on it does
+                  not add to the lines below, it REPLACES them. This said
+                  `c.name`, and the whole of what a person picks a coach by
+                  went with it: the tagline, the rating, the credentials, the
+                  specialities, whether a request is already pending, and the
+                  session fee — the figure the long note further down this file
+                  exists to get right. A member using VoiceOver was handed a
+                  directory of names and no way to tell one coach from another,
+                  and no way to know they had already asked. */}
+              <Pressable onPress={() => setSel(c)} accessibilityRole="button"
+                accessibilityLabel={[
+                  c.name,
+                  c.tagline?.trim() || null,
+                  [rateLine(c.id), credentialsSummaryLine(credsFor(c.id), today)].filter(Boolean).join(' · ') || null,
+                  sent[c.id] ? 'Request pending' : null,
+                  c.specialties.slice(0, 3).join(', ') || null,
+                  // The same figure the row prints, said the same way: the
+                  // priced arm never acquires a currency nobody chose, and the
+                  // other three keep the three different nothings apart.
+                  sessionFeeAmount(c.sessionFee) != null
+                    ? `${feeMoney(c.id, sessionFeeAmount(c.sessionFee)!) ?? sessionFeeAmount(c.sessionFee)} per session`
+                    : sessionFeeShort(c.sessionFee),
+                ].filter(Boolean).join('. ')}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                 <CoachFace photo={c.photo} name={c.name} size={34} mono={13} />
                 <View style={{ flex: 1 }}>
