@@ -133,15 +133,66 @@ export default function TrainerAnalytics() {
   // without this the coach could refresh every figure on the screen except the
   // one the at-risk card tells them to act on.
   const [driftNonce, setDriftNonce] = useState(0);
-  const dr = useClientDrift(roster, tenant?.id ?? null, driftNonce);
+  /**
+   * Who is even ASKED about, and why it is not the whole roster.
+   *
+   * `readClientActivity` reports `notAsked` for ids that are not uuids, and
+   * that is a narrower set than "clients with no Repple account behind them":
+   * `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`, so a client the
+   * coach typed in on their phone has a perfectly queryable uuid from the first
+   * round trip onward (src/lib/trainerMock.ts says so at length on
+   * `handAdded`). Every read behind the drift verdict goes through
+   * `is_my_client()`, which looks in `clients` — so those ids are put to the
+   * database, come back with nothing, and `assessDrift` bands every one of them
+   * `idle`. A coach with six cash clients had six extra names in the at-risk
+   * list and six added to the count, on a read where nothing at all had gone
+   * wrong.
+   *
+   * They are excluded rather than counted as "nothing recorded", which is the
+   * rule `unassessed` in src/lib/segments.ts already states for the broadcast
+   * segments — with the same two independent reasons: there is nothing of
+   * theirs to read, and no thread to write into. The sentence under the list
+   * says how many and why, because a list quietly shorter than the coach's book
+   * with nothing explaining the gap is its own small lie.
+   */
+  const driftSubjects = useMemo(() => roster.filter((c) => c.handAdded !== true), [roster]);
+  const handAdded = rosterWhole ? roster.length - driftSubjects.length : 0;
+  const dr = useClientDrift(driftSubjects, tenant?.id ?? null, driftNonce);
+  /**
+   * Whether the record behind the verdict can support a claim about who has
+   * STOPPED, as opposed to an order to put a list in.
+   *
+   * `useClientDrift` exports this and its header names it: "`actionable` is
+   * that gate". This screen took `dr.drift && !dr.error` and stopped there,
+   * which admits the one state that produces a plausible number instead of an
+   * obviously empty screen. `readClientActivity` reads capped per 150-id chunk
+   * with no `.order()`, and 56 days of check-ins, workouts, sessions and door
+   * swipes for a two-dozen-client book runs to roughly a thousand rows — so a
+   * healthy coach hits the ceiling routinely, the clients whose rows fell off
+   * the end come back with no events, and `assessDrift` bands them `at_risk` or
+   * `idle`. The card then reads "~AED 4,200/mo — 5 clients slipping" over a
+   * list of whom three trained this week.
+   *
+   * The whole-book form of the same test is what app/(trainer)/dashboard.tsx
+   * gates `clientsDrifting` on at :1143, and this is that test: a truncated read
+   * disqualifies all of it, because there is no telling which names the missing
+   * rows belonged to.
+   */
+  const driftCovered = !!dr.coverage && !dr.coverage.truncated && !dr.coverage.notAsked.size;
   const atRisk: RosterClient[] | null =
-    rosterWhole && dr.drift && !dr.error
+    rosterWhole && dr.drift && !dr.error && driftCovered
       // 'at_risk' is a break in their own pattern; 'idle' is the UNKNOWN band —
       // nothing on record at all — and it is in here for the reason
       // clientDrift.ts gives: a client nobody has heard from is the client this
       // whole feature is about, and the old signal could not see them.
-      ? roster.filter((c) => { const d = dr.driftFor(c.id); return d?.status === 'at_risk' || d?.status === 'idle'; })
+      ? driftSubjects.filter((c) => { const d = dr.driftFor(c.id); return d?.status === 'at_risk' || d?.status === 'idle'; })
       : null;
+  /** What this screen owes the coach about the people it did not consider, or
+   *  null. Said in full sentences rather than left to a short list, on the
+   *  reasoning `unassessedNote` in src/lib/segments.ts sets out. */
+  const handAddedNote: string | null = handAdded > 0
+    ? `${handAdded} ${handAdded === 1 ? 'client is' : 'clients are'} not in this and could not be: you added them by hand, so there is no account behind them and no training record to judge them by. They are not being counted as having stopped — they were never asked about.`
+    : null;
   const clients = rosterWhole ? roster.length : null;
 
   /* ── what actually happened this month ──────────────────────────────────
@@ -1156,7 +1207,16 @@ export default function TrainerAnalytics() {
             <Text style={{ ...ty.label, color: t.ink3 }}>
               {rosterStatus === 'loading' || dr.drift === null
                 ? 'Reading who has stopped training…'
-                : 'Your roster did not come back whole, so who is drifting cannot be worked out — this is not a clean bill of health for your book.'}
+                : !rosterWhole
+                  ? 'Your roster did not come back whole, so who is drifting cannot be worked out — this is not a clean bill of health for your book.'
+                  /* The truncated read gets its own sentence, and it is the
+                     provider's — `dr.note`. A read that came back at the row
+                     ceiling is not a roster that came back short, and sending a
+                     coach off to their Clients tab would send them after a
+                     problem that is not there. Said second because a short
+                     roster is the more fundamental of the two and is the one
+                     they can do something about. */
+                  : (dr.note ?? 'More activity is on record than one request returns, so who is drifting cannot be worked out from it — this is not a clean bill of health for your book.')}
             </Text>
           ) : atRisk.length === 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Everyone is holding their own pattern.</Text>
@@ -1180,6 +1240,16 @@ export default function TrainerAnalytics() {
               </View>
             </View>
           ))}
+
+          {/* Who this section did not consider, said out loud. Drawn whatever
+              the drift read did — the people it names are outside the list for
+              a reason that has nothing to do with how the read went, and a
+              coach comparing this section against their Clients tab is
+              otherwise looking at two different books with no explanation of
+              which. */}
+          {handAddedNote ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{handAddedNote}</Text>
+          ) : null}
 
           {/* The list above names them and stops. This is the row that does
               something about it, and it sits directly under the names because

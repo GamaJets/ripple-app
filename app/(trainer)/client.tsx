@@ -1562,6 +1562,35 @@ export default function ClientScreen() {
                 Your roster could not be read, so anything {who} has disclosed could not be read
                 either. This is not a statement that they have disclosed nothing.
               </Flag>
+            ) : /* ── the arm the comment three lines up already forbade ──────
+                   Under 'loading' the roster is `[]`, so `client` is null, so
+                   `!client?.injuries` was true and this section said "Nothing
+                   on record for Amy" — the exact sentence the note above calls
+                   how somebody gets programmed into an injury they took the
+                   trouble to disclose. Not a theoretical render: Check In on a
+                   cold launch opens this screen while the roster read is still
+                   in flight, and on a gym network that is seconds, not a
+                   flicker.
+
+                   "How You Coach Them" further down this same file already has
+                   this arm (`r.status === 'loading' ? 'Reading your roster…'`).
+                   This is that arm, in a section where being wrong costs more
+                   than a set of chips. */
+              r.status === 'loading' ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                Reading your roster. Anything {who} has disclosed is on it, so nothing here is a
+                statement about them yet.
+              </Text>
+            ) : !client && r.status === 'partial' ? (
+              // The same defect one step along: under 'partial' the roster is
+              // real and is a PREFIX, so a client past the cap is absent from
+              // it for a reason that has nothing to do with what they have
+              // disclosed. `isWhole` is the rule; this is the branch it needs.
+              <Flag tone={t.warn}>
+                Only part of your roster came back, and {who} is not in the part that did — so
+                anything they have disclosed was not read either. This is not a statement that they
+                have disclosed nothing.
+              </Flag>
             ) : !client?.injuries ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
                 Nothing on record for {who}. Injuries are disclosed by the client in their own app,
@@ -1760,6 +1789,31 @@ export default function ClientScreen() {
               </Flag>
             ) : gl.status === 'loading' ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>Loading.</Text>
+            ) : /* ── the fourth state, which this chain did not have ──────────
+                   `src/ui/glucoseData.ts` reads `.limit(ROW_CAP)` and returns
+                   'partial' at `>= ROW_CAP`, and ROW_CAP is 1000. A CGM writes
+                   every 5-15 minutes, so the fourteen days this section is
+                   headed by are between 1,344 and 4,032 readings — a sensor
+                   sharing at all all but guarantees the ceiling. The chain
+                   above named 'error' and 'loading' with `===` and let
+                   'partial' fall through to the figures, so the coach read
+                   "Average 6.4 · Highest 11.2 · In range 74% · last 14 days.
+                   1000 readings": four figures about a different fortnight than
+                   the label above them, with the ROW CAP printed as a total.
+                   Every one of them is arithmetic over a prefix, and the prefix
+                   is whichever end of the window PostgREST happened to return.
+
+                   The client's own copy of this was fixed and carries the note
+                   — `known` is `status === 'ready'`, app/(client)/glucose.tsx
+                   :132 and :414. This is that gate, and the sentence names what
+                   is withheld rather than leaving four dashes. */
+              gl.status === 'partial' ? (
+              <Text style={{ ...ty.body, color: t.ink2 }}>
+                {who} has more readings on record than one request returns, so an average, a
+                highest, a share in range and a count of them would each be arithmetic over
+                whichever part came back. None of the four is shown. Their readings are real and
+                there are more of them than this — it is not a fortnight that went badly.
+              </Text>
             ) : gl.readings.length === 0 ? (
               <Text style={{ ...ty.body, color: t.ink2 }}>
                 {who} is sharing, and their monitor has recorded nothing in the last 14 days.
@@ -1785,8 +1839,41 @@ export default function ClientScreen() {
 
                 {/* Meals with a reading either side. Shown because it is the
                     only part of this a coach can act on — and shown as
-                    arithmetic, never as a judgement about the meal. */}
-                {gl.paired.filter((x) => x.rise != null).slice(-5).reverse().map((x, i) => (
+                    arithmetic, never as a judgement about the meal.
+
+                    ── why the meal rows now have a state of their own ────────
+                    These are two reads, not one: `glucose_readings` and
+                    `food_logs`. `gl.pairedStatus` is `worstStatus` of the two
+                    (src/ui/glucoseData.ts :263) and is exported for exactly
+                    this — but only app/(client)/glucose.tsx :317 consumed it,
+                    and this screen ignored it. A refused `food_logs` read
+                    leaves `paired` empty, this list mapped over nothing, and
+                    the meal rows simply were not there: no gap, no sentence, no
+                    difference at all from a client who logged no meals. A coach
+                    concludes their client has stopped logging food and says so
+                    to them. Three states here, as on their own copy. */}
+                {gl.pairedStatus === 'error' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+                    What {who} ate could not be read, so nothing can be put beside these readings.
+                    This is not a statement that they have logged no meals.
+                  </Text>
+                ) : gl.pairedStatus === 'loading' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Reading their meals…</Text>
+                ) : gl.pairedStatus === 'partial' ? (
+                  // 'partial' is a read that FINISHED, so "still loading" would
+                  // be this screen misreporting its own state — the same
+                  // distinction their own copy draws in the same place.
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+                    More is on record than one request returns, so what sits around {who}&rsquo;s
+                    meals cannot be shown — a meal missing from below may simply be on the other
+                    side of that limit.
+                  </Text>
+                ) : gl.paired.filter((x) => x.rise != null).length === 0 ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>
+                    No meal in the last 14 days has a reading either side of it.
+                  </Text>
+                ) : null}
+                {gl.pairedStatus !== 'ready' ? null : gl.paired.filter((x) => x.rise != null).slice(-5).reverse().map((x, i) => (
                   <View key={x.meal.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
                     <Text style={{ ...ty.label, color: t.ink2, flex: 1 }} numberOfLines={1}>{x.meal.name}</Text>
                     {/* rtl-ok: before → peak is a reading BEFORE a meal and the

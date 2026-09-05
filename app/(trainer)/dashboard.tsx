@@ -1171,8 +1171,27 @@ export default function TrainerClients() {
   // printed a confident "Unread 0" while the Hero directly above it said the
   // roster could not be read. A coach reads that tile to decide whether anybody
   // is waiting on them, and closes the app.
+  //
+  // ── and the test is over the rows that CAN carry a count ────────────────
+  //
+  // `roster.some((c) => c.unread == null)` was true forever for any coach with
+  // one hand-added client, and it is not a read failing. `coach_unread_counts()`
+  // enumerates `clients` — a manually-added `coach_clients` row is a name the
+  // coach typed with no account behind it, so it is in no thread, has never
+  // been counted, and can NEVER have an unread figure. Nothing about that
+  // changes with a retry.
+  //
+  // So one cash client nulled this tile permanently: "Unread —" for the life of
+  // the account, while the Unanswered chip below it happily listed the three
+  // people actually waiting. The unknown is real for the LINKED rows and only
+  // for them; a hand-added row is not an unknown count, it is the absence of a
+  // thread, and summing them as nought is the truthful reading rather than the
+  // convenient one. `handAdded` is marked in src/ui/roster.tsx at the only
+  // place that knows which table the row came from — `coach_clients.id` is a
+  // real uuid, so nothing downstream can work it out from the id.
+  const threaded = roster.filter((c) => c.handAdded !== true);
   const unread = isWhole(rosterStatus)
-    ? (roster.some((c) => c.unread == null) ? null : roster.reduce((a, c) => a + (c.unread ?? 0), 0))
+    ? (threaded.some((c) => c.unread == null) ? null : threaded.reduce((a, c) => a + (c.unread ?? 0), 0))
     : null;
   /** Clients whose own adherence figure is below target — the one signal on a
    *  roster row that is evidence ABOUT the person rather than the absence of it.
@@ -1241,8 +1260,16 @@ export default function TrainerClients() {
     // saying "Unanswered 0" over a list that is missing them. `null` renders as
     // a dash and the chip still selects, which is the same bargain every other
     // chip on this row makes.
+    //
+    // Over `threaded` for the reason spelled out on the Unread tile above: a
+    // hand-added row can never carry an unread count, because
+    // `coach_unread_counts()` enumerates `clients` and there is no account and
+    // no thread behind one. Testing it here dashed this chip permanently for
+    // any coach with a single cash client — while the chip itself still
+    // selected and listed the three people genuinely waiting, so the caption
+    // said "unknown" over a list the screen could plainly count.
     { key: 'unanswered', label: 'Unanswered',
-      n: roster.some((c) => c.unread == null) ? null : segN(roster.filter((c) => (c.unread ?? 0) > 0).length) },
+      n: threaded.some((c) => c.unread == null) ? null : segN(threaded.filter((c) => (c.unread ?? 0) > 0).length) },
     // One segment per delivery, built from the vocabulary rather than listed by
     // hand — a book with no hybrid clients simply shows a zero, the same as the
     // other two, instead of quietly filing them under Online.
@@ -2657,6 +2684,35 @@ export default function TrainerClients() {
                     no history, and this line asserted the second. The Private
                     Notes section further down already renders these three
                     states; this one now agrees with it. */}
+                {/* ── the fourth state, which this chain admitted silently ────
+                    Both providers read the coach's ENTIRE history in one capped
+                    page — `src/ui/feedback.tsx` :69 and `src/ui/coachNotes.tsx`
+                    :114, both `capLimit()` and both `page.truncated ?
+                    'partial' : 'ready'`. Newest first, so the thousandth row is
+                    the oldest one that survives: a coach two years in, past a
+                    thousand notes and feedback items between them, opens a
+                    client they last wrote to eight months ago and every row
+                    about that client is on the other side of the cap. `timeline`
+                    is then empty and this said "No history yet" about a client
+                    with a year of it.
+
+                    Said above the rows rather than instead of them: the rows
+                    that did come back are real and are worth reading — it is
+                    the ABSENCE that cannot be reported, which is the same
+                    bargain src/ui/loadStatus.ts describes for 'partial'.
+
+                    `=== 'error'` and `=== 'loading'` name two of the three bad
+                    answers and leave the third free, which is why `isWhole` is
+                    a function — and why this never showed up in `check:whole`:
+                    that gate matches `!==` comparisons, so an `=== 'error'`
+                    chain walks straight past it. */}
+                {timelineStatus === 'partial' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+                    You have more notes and feedback on record than one request returns, so this is
+                    not the whole of their history — anything older than the newest thousand is not
+                    in it, and an empty stretch below is that limit rather than a quiet period.
+                  </Text>
+                ) : null}
                 {timelineStatus === 'error' ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>
                     This history could not be read, so we cannot say whether there is any.
@@ -2664,7 +2720,11 @@ export default function TrainerClients() {
                 ) : timelineStatus === 'loading' ? (
                   <Text style={{ ...ty.label, color: t.ink3 }}>Reading their history…</Text>
                 ) : timeline.length === 0 ? (
-                  <Text style={{ ...ty.label, color: t.ink3 }}>No history yet — notes, feedback and check-ins appear here.</Text>
+                  // Only a whole read may say there is none. Under 'partial'
+                  // the line above has already said what the emptiness is.
+                  isWhole(timelineStatus)
+                    ? <Text style={{ ...ty.label, color: t.ink3 }}>No history yet — notes, feedback and check-ins appear here.</Text>
+                    : null
                 ) : timeline.slice(0, 8).map((ev) => (
                   <View key={ev.id} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.md }}>
                     <View style={{ alignItems: 'center' }}>
@@ -2787,6 +2847,21 @@ export default function TrainerClients() {
                   </KitFlag>
                 ) : fbStatus === 'loading' ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>Reading your feedback…</Text>
+                ) : /* The third bad answer, which naming the first two with
+                       `===` left free. `src/ui/feedback.tsx` :69 reads every
+                       note this coach has ever written to ANYBODY in one
+                       `capLimit()` page, newest first — so past a thousand of
+                       them the oldest fall off, and a client last written to
+                       eight months ago has all of theirs on the far side of the
+                       cap. "No feedback yet" was then said to a coach who wrote
+                       them a page, and the coach either writes it again or
+                       decides they never did. */
+                  fbStatus === 'partial' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+                    You have written more feedback than one request returns, so anything older than
+                    your newest thousand notes is not below. Nothing here says you have not written
+                    to {sel.name.split(' ')[0]}.
+                  </Text>
                 ) : getFeedback(sel.id).length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>No feedback yet. Leave {sel.name.split(' ')[0]} a note below.</Text>
                 ) : null}
@@ -2838,6 +2913,19 @@ export default function TrainerClients() {
                   </KitFlag>
                 ) : notesStatus === 'loading' ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>Reading your notes…</Text>
+                ) : /* And the third, for the same reason as the two sections
+                       above it. `src/ui/coachNotes.tsx` :114 is one
+                       `capLimit()` page of every private note this coach has
+                       ever written, newest first. "Nothing here yet" over a
+                       truncated read is the sentence this section's own header
+                       says it exists to prevent — a coach deciding the thing
+                       they are half-remembering did not happen. */
+                  notesStatus === 'partial' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
+                    You have written more notes than one request returns, so anything older than
+                    your newest thousand is not below. This is not &quot;no notes&quot; about{' '}
+                    {sel.name.split(' ')[0]}.
+                  </Text>
                 ) : getNotes(sel.id).length === 0 ? (
                   <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.sm }}>
                     Nothing here yet. Only you can see what you write below.

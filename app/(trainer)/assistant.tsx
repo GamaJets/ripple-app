@@ -133,7 +133,43 @@ export default function TrainerAssistant() {
   // so without this the coach could refresh everything on the screen except the
   // one read the prose is actually about.
   const [driftNonce, setDriftNonce] = useState(0);
-  const drift = useClientDrift(roster, tenant?.id ?? null, driftNonce);
+  /**
+   * Who is asked about, and why it is not the whole roster.
+   *
+   * `readClientActivity` reports `notAsked` for ids that are not uuids, which
+   * is NOT the same set as "clients with no Repple account". `coach_clients.id`
+   * is `uuid DEFAULT gen_random_uuid()`, so a client the coach typed in has a
+   * queryable uuid from the first round trip — the reads behind the verdict all
+   * go through `is_my_client()`, find nothing, and `assessDrift` bands every
+   * one of them `idle`. Six cash clients therefore added six to the figure
+   * below on a read where nothing had gone wrong, and this file's whole subject
+   * is that that figure becomes a paragraph.
+   *
+   * Excluded rather than counted as "nothing recorded", which is what
+   * `unassessed` in src/lib/segments.ts already does for the broadcast
+   * segments, for the same two reasons: nothing of theirs can be read, and
+   * there is no thread to write into either.
+   */
+  const driftSubjects = useMemo(() => roster.filter((c) => c.handAdded !== true), [roster]);
+  const drift = useClientDrift(driftSubjects, tenant?.id ?? null, driftNonce);
+  /**
+   * Whether the record may support a claim about who has STOPPED.
+   *
+   * `useClientDrift` exports `coverage` and `actionable` and its header says
+   * "`actionable` is that gate". This screen checked `drift.drift &&
+   * !drift.error` and stopped there, so it admitted a truncated read —
+   * `readClientActivity` reads capped per 150-id chunk with no `.order()`, and
+   * 56 days of check-ins, workouts, sessions and door swipes across two dozen
+   * clients runs past the ceiling routinely. The clients whose rows fell off
+   * the end come back with no events and band `at_risk` or `idle`.
+   *
+   * On the Analytics screen that is a wrong cell. HERE the number goes into the
+   * MODEL PROMPT, and the model writes the coach a paragraph about clients who
+   * have not stopped — advice about named work to do on people who are
+   * training. Null instead, which the system prompt above already tells the
+   * model to report as a figure it was not given.
+   */
+  const driftCovered = !!drift.coverage && !drift.coverage.truncated && !drift.coverage.notAsked.size;
 
   /**
    * What this coach is priced in, through the one resolver.
@@ -269,9 +305,20 @@ export default function TrainerAssistant() {
       // The system prompt already tells the model to say it was not given a
       // figure rather than guess; a zero here would have it write that nobody
       // is drifting.
-      atRiskClients: figuresWhole && drift.drift && !drift.error
-        ? roster.filter((c) => { const d = drift.driftFor(c.id); return d?.status === 'at_risk' || d?.status === 'idle'; }).length
-        : null,
+      //
+      // The count, or the REASON there is not one, in the same field — the
+      // shape `revenueAtOwnRate` two lines above already uses, and the only
+      // shape available: `COACH_BUSINESS_KEYS` in src/lib/coachShare.ts is an
+      // allowlist, a companion field explaining the gap would be dropped on the
+      // way out, and that file's own header is about a prompt written around
+      // three fields that never arrived. `drift.note` is the provider's
+      // sentence, prefixed so it meets the system prompt's "null or says
+      // unknown" rule word for word.
+      atRiskClients: figuresWhole && drift.drift && !drift.error && driftCovered
+        ? driftSubjects.filter((c) => { const d = drift.driftFor(c.id); return d?.status === 'at_risk' || d?.status === 'idle'; }).length
+        : drift.note
+          ? 'unknown — ' + drift.note
+          : null,
       onTrack: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 85).length : null,
       watch: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence >= 70 && c.adherence < 85).length : null,
       atRiskLow: figuresWhole ? roster.filter((c) => c.adherence != null && c.adherence < 70).length : null,
@@ -328,6 +375,16 @@ export default function TrainerAssistant() {
                 : figureStatus === 'partial'
                   ? 'Your roster or your sessions came back at the row limit, so every count here would be a count of what happened to load. Prose does not show its own gaps the way a dash does, so nothing is asked until the whole set can be read.'
                   : 'Your roster or your sessions did not come back at all. That is unknown rather than zero, and an assistant told zero would write you a paragraph about a business with nobody in it.'} />
+          ) : null}
+
+          {/* One of this screen's own suggestions is "What should I do about
+              the clients who are drifting?", and the answer to it is the one
+              figure that can be missing while every other figure is whole. Said
+              here, in the provider's own words, so a coach reading the reply
+              knows before they read it which question it could not answer —
+              rather than finding out inside a paragraph, or not at all. */}
+          {figuresWhole && drift.note ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{drift.note}</Flag>
           ) : null}
 
           {!coachAvailable() ? (

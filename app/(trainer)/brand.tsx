@@ -260,6 +260,22 @@ export default function CoachBrand() {
                 {logo.dataUri ? (
                   <Image source={{ uri: logo.dataUri }} resizeMode="contain" accessibilityLabel="Your logo"
                     style={{ width: 160, height: 56 }} />
+                ) : logo.pictureStatus === 'loading' ? (
+                  // ── the third state, which this branch was reporting as the
+                  // second ──────────────────────────────────────────────────
+                  // `logo.status` is about the RECORD; the picture is a second
+                  // step that runs after it and has its own status
+                  // (src/ui/coachLogo.ts :301). A null `dataUri` under a 'ready'
+                  // record is therefore two different things — the download is
+                  // in flight, or the download failed — and this said the
+                  // second about both. Every launch showed a coach a failure
+                  // notice for the second or two their own logo was on its way,
+                  // over an empty box, on the screen whose whole job is telling
+                  // them their branding is in order. app/(trainer)/share-kit.tsx
+                  // :870 already reads `pictureStatus` rather than the null.
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>
+                    Your logo is set and the picture of it is still coming down.
+                  </Text>
                 ) : (
                   // The record says there is one and the picture did not
                   // arrive. Those are two different failures and this is the

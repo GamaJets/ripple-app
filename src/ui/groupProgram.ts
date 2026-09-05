@@ -17,12 +17,20 @@
 //
 // ── What the statuses have to carry ────────────────────────────────────────
 //
-// Two reads: the groups, and their membership. A failure in EITHER is 'error'
-// for the whole thing, because a group whose membership could not be read must
-// never render as an empty group. Eight people with a bootcamp programme and a
-// refused membership read look exactly like a group nobody is in, and the
-// screen would then offer to assign the programme to nought of them and report
-// it done. `worstStatus` is what says so.
+// THREE reads: the groups, their version history, and their membership. A
+// failure in ANY of them degrades the whole thing, because a group whose
+// membership could not be read must never render as an empty group. Eight
+// people with a bootcamp programme and a refused membership read look exactly
+// like a group nobody is in, and the screen would then offer to assign the
+// programme to nought of them and report it done. `worstStatus` is what says
+// so.
+//
+// The version read was the one that did not say. Its error was reported and its
+// truncation was computed, and neither reached the status — so a group with
+// eight recorded versions read "not been recorded as a version yet", every
+// member was filed as having edited their own copy, and the re-send that would
+// have put the ones who are behind back on the current version was never
+// offered. Carried now, in the same `worstStatus` call as the other two.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Program } from '../lib/programs';
 import { programSignature, type GroupVersion } from '../lib/groupProgram';
@@ -56,8 +64,10 @@ export interface ProgramGroup {
    * Thursday was rewritten around their shoulder both read 'diverged', which is
    * true and useless because the two need opposite actions.
    *
-   * Empty under a read that did not land. `status` is what says which, and
-   * `versionSpread` refuses to count anything unless both reads were whole.
+   * Empty under a read that did not land — including this list's OWN read,
+   * which is a third request beside the groups and the membership and can fail
+   * or truncate on its own. `status` carries all three, and `versionSpread`
+   * refuses to count anything unless it is 'ready'.
    */
   versions: GroupVersion[];
   createdAt: string | null;
@@ -132,15 +142,50 @@ export function useProgramGroups() {
           .order('group_id', { ascending: true }).order('version', { ascending: true })
           .limit(capLimit());
         if (cancelled) return;
+        /**
+         * ── the read whose answer was thrown away ─────────────────────────
+         *
+         * The comment below used to end "…and `versionSpread` refuses to count
+         * under a status that is not 'ready' — so nobody is offered a re-send
+         * off this". That was true of `versionSpread` and false of this
+         * function: nothing here ever moved the status off 'ready'. `vErr` only
+         * reported; `vPage.truncated` was computed on the next line and then
+         * dropped, never reaching the `worstStatus` call at the bottom. Either
+         * way `versions` stayed `[]` under a 'ready' the membership and group
+         * reads had earned on their own.
+         *
+         * What a coach saw: a group with eight recorded versions read "This
+         * programme has not been recorded as a version yet, so nobody can be
+         * placed against it" — because `currentVersion` is the highest version
+         * whose signature matches, and there were no versions to match. Every
+         * member then fell into the bespoke column and was labelled as having
+         * edited their own copy, and `behindNote` — the sentence offering the
+         * re-send that would actually fix the ones who are behind — returns
+         * null when nothing is countable, so it was never offered.
+         *
+         * This is now carried. It is still not fatal in the sense the comment
+         * meant: `setGroups(list)` below runs either way, so the groups, their
+         * plans and their membership are all still drawn. What the status now
+         * does is make `spread.countable` false, which hides the Versions block
+         * instead of filling it with three wrong numbers, and holds the
+         * re-send. The membership read one branch down already takes exactly
+         * this position for exactly this reason.
+         */
+        let versionsStatus: LoadStatus = 'ready';
         if (vErr) {
-          // Reported and NOT fatal. A group whose version history could not be
-          // read still has a plan and a membership, and both are worth showing;
-          // what the screen loses is the ability to say who is on an older
-          // version, and `versionSpread` refuses to count under a status that
-          // is not 'ready' — so nobody is offered a re-send off this.
+          // Reported and NOT fatal to the groups themselves. A group whose
+          // version history could not be read still has a plan and a
+          // membership, and both are worth showing; what the screen loses is
+          // the ability to say who is on an older version.
           reportError('programGroups.versions', vErr);
+          versionsStatus = 'error';
         } else {
           const vPage = capped(vRows);
+          // The rows are real and the ones that came back are used. What cannot
+          // be said off them is that a group has NO version, or that a member
+          // is on none — the missing rows are exactly the ones that would
+          // disprove both.
+          if (vPage.truncated) versionsStatus = 'partial';
           const byGroup = new Map<string, GroupVersion[]>();
           for (const r of vPage.rows as any[]) {
             const bucket = byGroup.get(r.group_id) ?? [];
@@ -181,6 +226,8 @@ export function useProgramGroups() {
         setStatus(worstStatus(
           gPage.truncated ? 'partial' : 'ready',
           mPage.truncated ? 'partial' : 'ready',
+          // The third read. It was computed and dropped; see the note above it.
+          versionsStatus,
         ));
       } catch (e) {
         if (cancelled) return;

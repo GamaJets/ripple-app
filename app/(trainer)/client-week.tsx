@@ -414,6 +414,30 @@ export default function ClientWeek() {
                   </>
                 )}
 
+                {/* ── whose copy of the programme every clash above was drawn
+                    against ──────────────────────────────────────────────────
+                    `getProgram` consults this device's cache when no read has
+                    landed, and serves it under 'error' — deliberately, and the
+                    header of src/ui/assignedPrograms.tsx argues why. What it
+                    does NOT do is make anything 'ready'. So on a failed read
+                    `programme` is non-null, `programmeCaveat` returns null
+                    because a programme IS known, and every clash on this screen
+                    was computed against whatever was on the phone. The horizon
+                    on that cache is thirty days: a coach who rewrote the block
+                    a fortnight ago reads last month's Thursday against this
+                    week's marks and goes to argue about a session nobody has.
+
+                    `ap.cachedNote` exists for exactly this and carries the age.
+                    It is non-null for precisely as long as the cache is what is
+                    being served — `mayServeCached` decides that — so it needs
+                    no gate of its own and disappears the moment a live read
+                    lands. app/(client)/week.tsx :194 renders it in the same
+                    position over the same programme; this screen is the coach's
+                    view of that week and had nothing. */}
+                {ap.cachedNote ? (
+                  <Section><Flag tone={t.warn}>{ap.cachedNote}</Flag></Section>
+                ) : null}
+
                 {/* Three things the lists above cannot say for themselves. */}
                 {caveat && board.state !== 'unreadable' ? (
                   <Section><Flag tone={t.ink3}>{caveat}</Flag></Section>

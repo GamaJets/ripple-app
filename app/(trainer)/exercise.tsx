@@ -57,7 +57,16 @@ export default function TrainerExercise() {
   const goBack = useBackTo(from);
   const name = (raw || '').trim();
   const { detail, status, signedOut, reload: reloadDetail } = useExerciseDetail(name);
-  const { videos, reload: reloadVideos } = useExerciseVideos();
+  // `status` as well as the clips. It was destructured away, and the negative
+  // this screen prints — "Nobody has filmed this movement" — is a claim about
+  // the WHOLE library, so it needs the whole library. Under 'error' the list is
+  // `[]` because the read was refused, and the screen told a coach nobody had
+  // filmed a movement they had filmed themselves, then offered them the button
+  // to do it again. app/(trainer)/library.tsx :253 gates the same negative on
+  // `clipsKnown` and its comment says why: a POSITIVE needs only the row we
+  // found and survives 'partial', a NEGATIVE needs everything.
+  const { videos, status: vidStatus, reload: reloadVideos } = useExerciseVideos();
+  const clipsKnown = vidStatus === 'ready';
   const { user } = useAuth();
 
   // `trainers.id` references `profiles.id`, so on the coach app the signed-in
@@ -144,10 +153,25 @@ export default function TrainerExercise() {
           // that actually changes it — this reader is the person who can film
           // one — rather than a grey silhouette implying a demonstration we do
           // not have.
-          <Notice tone={t.ink3} kicker="Demonstration"
-            title={detail ? 'No Demonstration Yet' : signedOut ? 'Sign In to See This' : 'Not in the Catalogue'}
+          <Notice tone={detail && !clipsKnown ? t.warn : t.ink3} kicker="Demonstration"
+            title={detail
+              ? clipsKnown ? 'No Demonstration Yet' : 'Your Clips Could Not Be Read'
+              : signedOut ? 'Sign In to See This' : 'Not in the Catalogue'}
             note={detail
-              ? 'Nobody has filmed this movement and the catalogue has no illustration for it, so your client sees its name, its muscles and the written steps. Record a clip from Videos and it appears here for them.'
+              // "Nobody has filmed this" is a statement about the whole clip
+              // library, and under 'error' or 'partial' the library is not what
+              // we hold. The catalogue half of the sentence is still true and
+              // still said — it came off `detail`, which was read — but the
+              // half about the coach's own filming is withheld rather than
+              // guessed at, and the Record button below is not offered as the
+              // fix for a problem that may not exist.
+              ? clipsKnown
+                ? 'Nobody has filmed this movement and the catalogue has no illustration for it, so your client sees its name, its muscles and the written steps. Record a clip from Videos and it appears here for them.'
+                : vidStatus === 'error'
+                  ? 'The catalogue has no illustration for this movement, and your clip library could not be read — so whether you or your gym have already filmed it is unknown rather than no. Try again, and record one only if there is nothing there.'
+                  : vidStatus === 'partial'
+                    ? 'The catalogue has no illustration for this movement, and only part of your clip library came back — so a clip of this may be on the other side of that limit. Nothing here says you have not filmed it.'
+                    : 'The catalogue has no illustration for this movement. Your clip library is still being read, so whether one of yours covers it is not known yet.'
               // See the matching note on the client screen. Saying "no
               // catalogue entry" while signed out told a coach exploring the
               // demo that Back Squat is not in a catalogue that contains it.
@@ -315,7 +339,12 @@ export default function TrainerExercise() {
 
         <Rule />
         <Section>
-          <Ghost label={clip ? 'Your Clip Library' : 'Record a clip for this movement'} icon="video"
+          {/* "Record a clip for this movement" is the same negative in
+              imperative form — it tells the coach there is nothing there. With
+              the library unread it is the library's own screen they want, not a
+              camera, so the button says so instead of sending them to film a
+              second copy of something they may already have. */}
+          <Ghost label={clip || !clipsKnown ? 'Your Clip Library' : 'Record a clip for this movement'} icon="video"
             onPress={() => router.push('/(trainer)/videos')} />
         </Section>
       </ScrollView>
