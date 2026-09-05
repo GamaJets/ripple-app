@@ -58180,9 +58180,16 @@ grant execute on function public.book_class(uuid) to authenticated;
 -- The attendance write that matched no row, and could not say so
 -- ═══════════════════════════════════════════════════════════════════════════
 --
--- UNAPPLIED at the time of writing. Nothing in this part has been run against
--- the live database; it is here to be applied, and the app does not depend on
--- it having been. See "what the app does until this is applied" at the bottom.
+-- APPLIED. Verified after applying: the function returns boolean, counts rows
+-- through GET DIAGNOSTICS, the part 460 guard is intact, anon cannot execute it
+-- and authenticated can. The count of anon-executable SECURITY DEFINER
+-- functions held at 2 — the two deliberate entry points — so the drop and
+-- recreate did not leave EXECUTE with PUBLIC.
+--
+-- The app never depended on this having been applied: it reads the register
+-- back with class_roster and takes the boolean over that read when one exists.
+-- See "what the app does until this is applied" at the bottom, which is still
+-- what runs on any install that has not taken the update.
 --
 -- ── the fault ─────────────────────────────────────────────────────────────
 --
