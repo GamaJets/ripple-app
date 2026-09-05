@@ -29,6 +29,14 @@
 // thing on the sheet, and `client_nudges` is written AFTER the message lands,
 // never before and never instead.
 //
+// "Lands" means one of two things and deliberately not three. The row is on the
+// server, OR the words are in the outbox and this phone has undertaken to send
+// them (src/ui/messaging.ts · `keepForLater`, which answers `queued`). Both are
+// events; a send that simply failed is not one, and records nothing. Writing
+// the record FIRST is what this cannot do — see the note on `onSent` below for
+// why part 2300's ordering does not carry over to two round trips with no
+// transaction around them.
+//
 // ── The three states this screen must keep apart ───────────────────────────
 //
 // Everything here is a prompt to contact a person, so a wrong one costs a phone
@@ -102,6 +110,11 @@ export default function Nudges() {
   const [drafting, setDrafting] = useState<Nudge | null>(null);
   const [explaining, setExplaining] = useState<Nudge | MutedRow | null>(null);
   const [showMuted, setShowMuted] = useState(false);
+  /** Clients whose message is on this phone waiting for signal, this sitting.
+   *  See the ordering note on `onSent` below: it is what keeps this screen's
+   *  "Nobody is suggested twice" true in the window where the server has not
+   *  been told anything yet. */
+  const [queuedFor, setQueuedFor] = useState<string[]>([]);
   // The watch digest opens itself when it is due for the week and is otherwise
   // a section the coach may open. Its own flag: sharing one with `showMuted`
   // would make closing one close the other.
@@ -161,8 +174,22 @@ export default function Nudges() {
           normally. src/lib/interventions.ts owns the sentence. */}
       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{paceNote(item.pace)}</Text>
 
+      {/* A message already written to this person is sitting on this phone. No
+          second draft is offered — not because the app is being careful with
+          the coach, but because the two would both go when the signal comes
+          back and the client would read the same sentence twice. Said in words,
+          not by the button quietly disappearing. */}
+      {queuedFor.includes(item.clientId) ? (
+        <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.lg }}>
+          Your message to {item.name ?? 'them'} is saved on this phone and goes as soon as you are back
+          online. Nothing else is drafted for them until it has gone.
+        </Text>
+      ) : null}
+
       <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.lg, flexWrap: 'wrap' }}>
-        <Cta label="Write a Message" onPress={() => setDrafting(item)} />
+        {queuedFor.includes(item.clientId) ? null : (
+          <Cta label="Write a Message" onPress={() => setDrafting(item)} />
+        )}
         <Ghost label="Why Them?" onPress={() => setExplaining(item)} />
         <Ghost label="Set Aside" onPress={() => setAside(item)} />
       </View>
@@ -424,10 +451,55 @@ export default function Nudges() {
           <DraftSheet
             nudge={drafting}
             onClose={() => setDrafting(null)}
-            onSent={async (body) => {
-              const r = await n.recordSent(drafting.clientId, drafting.drift, drafting.observed);
+            onSent={async (body, queued, queuedReason) => {
+              const clientId = drafting.clientId;
+              /* ── THE ORDER, and why it is not part 2300's ─────────────────
+               *
+               * supabase/parts/2300 writes `coach_invoice_ageing_notices`
+               * BEFORE the notification it records, and argues it: a bookkeeping
+               * row that fails takes the notification down with it, because both
+               * are statements inside one plpgsql function and the whole
+               * iteration rolls back. There is no transaction here. Two
+               * independent round trips from a phone, and reversing them would
+               * buy the one outcome part 140 refuses to let anybody undo — a
+               * 'sent' row for a message the server then DECLINED (a coach who
+               * has been blocked, a thread that no longer exists), permanently
+               * muting a client who was never written to, with no delete policy
+               * to take it back. So the record stays second, which is what this
+               * file's header has always said.
+               *
+               * What changes is what counts as the thing being recorded. It was
+               * "the row is on the server"; it is now "the words are somewhere
+               * they will go from" — which the outbox has genuinely promised by
+               * the time `queued` comes back, because `enqueue` answered
+               * 'queued' and the intent is on disk. That is a real event and it
+               * is the one the never-nag record exists to remember. A send that
+               * merely FAILED still records nothing, because nothing happened.
+               */
+              const r = await n.recordSent(clientId, drafting.drift, drafting.observed);
               setDrafting(null);
-              if (!r.ok) Alert.alert('Sent, but not recorded', r.reason);
+              if (!queued) {
+                if (!r.ok) Alert.alert('Sent, but not recorded', r.reason);
+                return body;
+              }
+              /* Queued. The record write goes over the same connection that
+               * just refused the message, so it usually fails too — and the
+               * hook's own sentence for that opens "Your message was sent",
+               * which is the one thing that is not true here. This screen owns
+               * the wording for its own case.
+               *
+               * `queuedFor` is what actually holds the promise while the record
+               * cannot: a client whose message is on this phone is not offered a
+               * second draft, whatever the server does or does not know yet. It
+               * is device-local and lasts this sitting, which is honest — and it
+               * is said out loud on the card rather than the row simply
+               * vanishing. */
+              setQueuedFor((prev) => (prev.includes(clientId) ? prev : [...prev, clientId]));
+              const waiting = queuedReason
+                ?? 'That message is saved on this phone and has not been sent yet. It goes as soon as you are back online.';
+              Alert.alert('Waiting to send', r.ok
+                ? waiting
+                : `${waiting} It could not be written to your record of who you have contacted, so they may be suggested again on another device — not on this one.`);
               return body;
             }}
           />
@@ -462,11 +534,25 @@ export default function Nudges() {
  * the ROW is on the server, so a refused insert cannot leave this sheet
  * believing a client was contacted — and `client_nudges` is only written after
  * that, so the never-nag record can never mute somebody who was never reached.
+ *
+ * `queued` is the third answer and is neither of those. It is not `ok` — the
+ * client cannot read the message yet — but it is not a failure either: the
+ * words are on this device, counted, and they go on their own. `doSend` below
+ * keeps all three apart, because the coach's next action differs in each and
+ * the wrong heading on the middle one is what makes them send it twice.
  */
 function DraftSheet({ nudge, onClose, onSent }: {
   nudge: Nudge;
   onClose: () => void;
-  onSent: (body: string) => Promise<string>;
+  /**
+   * The send is over, and it either reached the server or is waiting on this
+   * phone. `queued` is the flag and never inferred from the sentence beside it:
+   * `SendResult.reason` is documented as null-able, and reading a null reason as
+   * "delivered" would put the two states back together the wrong way round.
+   * `reason` is the sentence `useThread` wrote about the wait, passed up rather
+   * than alerted here so the coach reads one alert about their message, not two.
+   */
+  onSent: (body: string, queued: boolean, reason: string | null) => Promise<string>;
 }) {
   const t = useTheme();
   const { send } = useThread(nudge.clientId, 'coach');
@@ -480,17 +566,39 @@ function DraftSheet({ nudge, onClose, onSent }: {
   // unasked, and a coach who typed it deserves to be told the app did not.
   const claims = refusalsIn(body);
 
+  /**
+   * Send it, and tell the truth about which of the THREE things happened.
+   *
+   * `SendResult` has three outcomes and this read two. A message the phone kept
+   * because there was no signal comes back `ok: false, queued: true` with a body
+   * saying it is saved and goes when back online — and this headed that body
+   * "Not sent", which is a heading that tells the coach to type it again. They
+   * do, and the client gets the same "haven't seen you in a while" twice, days
+   * later, when the outbox flushes both. app/(trainer)/chat.tsx has said
+   * "Waiting to send" over this exact case since the outbox landed; the wording
+   * is taken from there rather than invented, because it is one app and the
+   * coach meets both screens.
+   *
+   * And `onSent` was skipped on the queued path, so `client_nudges` recorded
+   * nothing — which is the same defect from the other end. This screen's own
+   * heading promises "Nobody is suggested twice", and an unrecorded send breaks
+   * that promise on every offline draft: the client is still on the board the
+   * next time it is opened, with the same draft, ready to go a second time.
+   */
   const doSend = async () => {
     const text = body.trim();
     if (!text || sending) return;
     setSending(true);
     const r = await send(text);
     setSending(false);
-    if (!r.ok) {
+    // Nothing was kept and nothing was sent. The words are still in the box —
+    // this is the one outcome where the sheet stays open, because it is the one
+    // where trying again is the right thing to do.
+    if (!r.ok && !r.queued) {
       Alert.alert('Not sent', r.reason ?? 'That message did not reach the server, so it has not been sent.');
       return;
     }
-    await onSent(text);
+    await onSent(text, !r.ok, r.ok ? null : (r.reason ?? null));
   };
 
   return (

@@ -39,9 +39,12 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, fig, Flag, Ghost, Cta, Notice } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
-// The instant `pastSessions` and `windowStart` are judged against, recomputed
-// at local midnight, on foreground and on focus — never frozen at the moment a
-// read happened to land. See src/ui/today.ts, and the two call sites below.
+// The instant `awaitingOutcome`, `pastSessions` and `windowStart` are ALL judged
+// against, recomputed at local midnight, on foreground and on focus — never
+// frozen at the moment a read happened to land. Read once, in one place, because
+// the marking queue and the record are two views of the same hours and a screen
+// a gym settles payroll against cannot hold two opinions about which of them
+// have finished. See src/ui/today.ts and `nowMs` below.
 import { useNow } from '../../src/ui/today';
 import { useTenant } from '../../src/ui/tenant';
 import { useAuth } from '../../src/ui/auth';
@@ -305,8 +308,31 @@ export default function TrainerSessions() {
   // that "payroll can be settled" names a process he does not have.
   const hasGym = !!tenant?.id;
 
-  const [queue, setQueue] = useState<PtSession[] | null>(null);
-  // Separate from `queue === null`, which only means "not read yet". A refused
+  /* ── the queue is DERIVED, and the reason is a clock ──────────────────────
+   *
+   * This was `useState`, filled once per read with `awaitingOutcome(mine)` —
+   * whose `now` defaults to `Date.now()` and was therefore the instant the READ
+   * landed. The record below is cut on `useNow`, which moves at local midnight,
+   * on foreground and on focus. Two clocks, one screen, and they disagree for
+   * as long as it is open: a 17:00 session read at 16:50 is not in the queue,
+   * and at 18:05 the record has it as "still needs an outcome recorded" while
+   * the Hero says 0 and nothing is holding payroll up. There is no row to mark
+   * it from, because every row that can be marked comes from the queue.
+   *
+   * `useNow` is the clock both halves settle on, and not because it is the one
+   * already here. It is the one the COACH acts on: the queue is a to-do list a
+   * gym settles payroll against, and an hour that has finished has finished
+   * whether or not this screen has re-read since. Freezing it at read time can
+   * only ever hide work; moving it can only ever offer work that is genuinely
+   * due. The record was moved onto `useNow` for this exact argument (see the
+   * `nowMs` note below) and the queue was left behind.
+   *
+   * Deriving it also removes the second copy of one fact. `mark` and `undo`
+   * each wrote to both `queue` and `all`, in the right order, by hand — and a
+   * third writer that forgot one of them is how the two halves of this screen
+   * come to disagree again.
+   */
+  // Separate from `all === null`, which only means "not read yet". A refused
   // or unreachable read used to land here as an empty queue, and an empty queue
   // is the screen's good state — so the coach got a tick and "nothing is
   // holding payroll up" at the exact moment the app had no idea what was
@@ -356,7 +382,6 @@ export default function TrainerSessions() {
       // ask for, and an empty queue would say "nothing outstanding" — which is
       // the one thing it must never say without having looked.
       reportError('sessions.awaiting', new Error('no signed-in coach to read sessions for'));
-      setQueue(null);
       setAll(null);
       haveRows.current = false;
       setFailed(true);
@@ -374,7 +399,6 @@ export default function TrainerSessions() {
       setAll(mine);
       haveRows.current = true;
       setLoadedDays(days);
-      setQueue(awaitingOutcome(mine));
       setFailed(false);
     } catch (e) {
       reportError('sessions.awaiting', e);
@@ -386,8 +410,8 @@ export default function TrainerSessions() {
       } else {
         // Leave the queue unknown rather than empty. [] here would be read as
         // "nothing outstanding", which is a claim about the gym's payroll this
-        // screen is in no position to make.
-        setQueue(null);
+        // screen is in no position to make. The queue is derived from `all`, so
+        // this is the one place that has to say "unknown" and it says it once.
         setAll(null);
         setFailed(true);
       }
@@ -493,7 +517,26 @@ export default function TrainerSessions() {
   }
 
 
-  const loaded = queue !== null;
+  /* ── the one clock ────────────────────────────────────────────────────────
+   *
+   * Read once, here, above BOTH halves of the screen, so the queue that offers
+   * a session to be marked and the record that says one still needs marking
+   * cannot be answering different questions about the same hour.
+   *
+   * `useNow`, not `Date.now()` in a memo body: the default is read when the
+   * memo runs, and both memos below are keyed on `all` — a list that moves when
+   * the server answers and never when time passes. So "has this hour finished
+   * yet" would be decided at whatever moment the read landed and then held.
+   * `check:frozen-day` looks for an EMPTY dependency array and cannot see that
+   * shape; `check:frozen-hook` names it, and this is its entry.
+   */
+  const nowMs = useNow().getTime();
+
+  const loaded = all !== null;
+  /** Everything in the window that has finished and that nobody has said what
+   *  happened to. Derived, not stored — see the note on `failed` above. */
+  const queue = useMemo(
+    () => (all === null ? null : awaitingOutcome(all, nowMs)), [all, nowMs]);
   const rows = queue ?? [];
 
   /* ── narrowing a quarter of sessions down to the one being looked for ────
@@ -526,16 +569,10 @@ export default function TrainerSessions() {
    * the evidence the hour was booked, and supabase/parts/195 is the argument
    * for why removing that evidence quietly improves every figure computed over
    * what is left. */
-  // `nowMs` from `useNow`, not `pastSessions`'s defaulted `Date.now()`. The
-  // default is read when the memo BODY runs, and this memo is keyed on `all` —
-  // a list that moves when the server answers and never when time passes. So
-  // "has this hour finished yet" was decided at whatever moment the read landed
-  // and then held: a session that ended while the screen was open stayed in the
-  // queue above and never appeared in the record below, and the coach's own
-  // count of what they had delivered was short by it. `check:frozen-day` looks
-  // for an EMPTY dependency array and cannot see this shape;
-  // `check:frozen-hook` names it, and this is its entry.
-  const nowMs = useNow().getTime();
+  // The same `nowMs` the queue above is cut on. A session that ends while this
+  // screen is open joins the record and the queue on the same tick, which is
+  // what stops the record saying "still needs an outcome recorded" about an
+  // hour the queue is not offering a button for.
   const history = useMemo(() => pastSessions(all ?? [], nowMs), [all, nowMs]);
 
   /* ── what was actually logged in each of these hours ──────────────────────
@@ -684,12 +721,12 @@ export default function TrainerSessions() {
         Alert.alert('Not recorded', floorFullLine('That outcome'));
         return;
       }
-      setQueue((prev) => (prev ?? []).filter((x) => x.id !== s.id));
-      // The session leaves the queue and JOINS the record, in the same tap. It
-      // is the same row seen two ways, and letting the history keep saying
-      // "still needs an outcome" for one it has just been given would make the
-      // two halves of this screen disagree with each other in front of the
-      // person who resolved it.
+      // The session leaves the queue and JOINS the record, in the same tap and
+      // now in the same write. It is the same row seen two ways: `awaitingOutcome`
+      // drops it the moment it has an outcome, and letting the history keep
+      // saying "still needs an outcome" for one it has just been given would
+      // make the two halves of this screen disagree with each other in front of
+      // the person who resolved it.
       setAll((prev) => (prev ?? []).map((x) => (x.id === s.id
         ? { ...x, outcome, outcomeAt: new Date().toISOString() } : x)));
       setJustMarked((prev) => [{ s, outcome }, ...prev].slice(0, 8));
@@ -755,8 +792,8 @@ export default function TrainerSessions() {
         return;
       }
       setJustMarked((prev) => prev.filter((x) => x.s.id !== entry.s.id));
-      setQueue((prev) => [entry.s, ...(prev ?? [])]);
-      // Back to unmarked in the record too, for the same reason as above.
+      // Back to unmarked in the record, which is also what puts it back on the
+      // queue — one write, for the same reason as above.
       setAll((prev) => (prev ?? []).map((x) => (x.id === entry.s.id
         ? { ...x, outcome: null, outcomeAt: null } : x)));
       tapLight();

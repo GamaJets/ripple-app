@@ -101,6 +101,7 @@ import {
   WAITING_TITLE, hasWaiting, waitedLabel, waitingCountNote, waitingLine, waitingNote, waitingOn,
   type Waiting,
 } from '../../src/lib/awaitingReply';
+import { isWhole } from '../../src/ui/loadStatus';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
@@ -294,6 +295,25 @@ export default function Messages() {
   const unreadKnown = useMemo(() => knownUnread(conversations), [conversations]);
   const unreadUnknown = useMemo(() => unknownUnread(conversations), [conversations]);
   /**
+   * Whether a NUMBER may go on the chip at all.
+   *
+   * `unreadChipLabel` withholds the figure when a row's own unread count did
+   * not come back, and that is the only doubt it can see — it is handed two
+   * numbers and no `LoadStatus`. Under 'partial' every row that loaded has a
+   * real count, so `unreadUnknown` is 0 and the chip reads "Unread · 7" over a
+   * PREFIX of the coach's book: they answer seven and read the inbox as clear,
+   * on a screen whose own `waitingCountNote` already opens with
+   * `if (!isWhole(status)) return null` for exactly this reason.
+   *
+   * So the status is folded in here, at the call site, which is the only place
+   * that knows both halves. `isWhole` and nothing looser: 'loading' would print
+   * "Unread" over a list that has not arrived, and 'error' a count over rows
+   * that are the last thing we had rather than the answer. The chip still works
+   * — it is the FIGURE that is withheld, not the filter — and the doubt is
+   * carried in words by the `PartialRead` notice above and by `filterLine`.
+   */
+  const unreadCountKnowable = isWhole(status) && unreadUnknown === 0;
+  /**
    * People the coach has never written to are matched on their NAME and are not
    * offered under the unread chip at all — an unstarted thread has no messages
    * in it, so it can hold nothing unopened, and listing one there would be a
@@ -436,8 +456,8 @@ export default function Messages() {
                 onPress={() => setFilter((f) => ({ ...f, mode: f.mode === 'unread' ? 'all' : 'unread' }))}
                 accessibilityRole="button"
                 accessibilityState={{ selected: filter.mode === 'unread' }}
-                accessibilityLabel={unreadUnknown > 0
-                  ? 'Show only clients with an unopened message. Some unread counts could not be read, so the number is not shown.'
+                accessibilityLabel={!unreadCountKnowable
+                  ? 'Show only clients with an unopened message. This is not your whole book yet, so the number is not shown.'
                   : unreadKnown > 0
                     ? `Show only clients with an unopened message. ${unreadKnown} of them.`
                     : 'Show only clients with an unopened message'}
@@ -448,7 +468,7 @@ export default function Messages() {
                   borderWidth: filter.mode === 'unread' ? 0 : hairline, borderColor: t.ring,
                 }}>
                 <Text style={{ ...ty.micro, fontWeight: '600', color: filter.mode === 'unread' ? t.brandInk : t.ink2 }}>
-                  {unreadChipLabel(unreadKnown, unreadUnknown > 0)}
+                  {unreadChipLabel(unreadKnown, !unreadCountKnowable)}
                 </Text>
               </Pressable>
               {narrowed ? (
