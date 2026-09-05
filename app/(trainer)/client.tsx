@@ -163,7 +163,8 @@ import {
 // the question they are about to end a relationship on.
 import {
   clientValue, valueEmptyLine, valueSpanLine, valueStatus, paymentsCounted, paymentsFloorLine,
-  VALUE_IS_PAST, VALUE_MAY_DOUBLE_COUNT, VALUE_NEEDS_YOUR_RECORDS,
+  refundedLine,
+  VALUE_IS_PAST, VALUE_MAY_DOUBLE_COUNT, VALUE_NEEDS_YOUR_RECORDS, VALUE_IS_NET_OF_REFUNDS,
   type ClientValue,
 } from '../../src/lib/clientValue';
 import { minorMoney } from '../../src/lib/coachMoney';
@@ -2041,6 +2042,15 @@ export default function ClientScreen() {
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               {value.ledger.total ? (valueSpanLine(value, new Date(nowMs)) ?? '') : valueEmptyLine(value)}
             </Text>
+            {/* What went back, beside the figure it was taken out of. The total
+                above is net of refunds, so without this a coach reads a smaller
+                number over an unchanged payment count and has no way to tell a
+                refund from money that was never taken — which is the reading
+                that makes them doubt the screen rather than the sale.
+                app/(trainer)/money.tsx renders the same pair. */}
+            {refundedLine(value) ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{refundedLine(value)}</Text>
+            ) : null}
             {/* The count the KPI above may not state, said as the floor it is —
                 "we could not total 14 payments" is a more useful sentence to a
                 coach than "we could not total your payments". */}
@@ -2110,6 +2120,7 @@ export default function ClientScreen() {
               <Ghost label="Record a Payment" onPress={() => router.push('/(trainer)/receipts')} />
             </View>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{VALUE_IS_PAST}</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_IS_NET_OF_REFUNDS}</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{VALUE_NEEDS_YOUR_RECORDS}</Text>
             {/* One wording of this warning in the app. `VALUE_MAY_DOUBLE_COUNT`
                 is clientValue.ts's, written for this figure; it points at
