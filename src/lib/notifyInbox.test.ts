@@ -126,6 +126,23 @@ eq(inboxDecision('A nudge from your coach', 'How is your week going?', '/(client
 eq(inboxDecision('Message from your coach', 'Session times move next week.', '/(client)/calendar').record, true,
   'a push about the calendar is recorded whatever its heading says');
 
+/* ── and the two TITLE rules are scoped to their own routes ────────────── */
+
+// The titles the slot-race and read-receipt rules were written about are
+// literals in this repository. The titles they are APPLIED to are not: an owner
+// types the heading on app/(owner)/promotions.tsx, and `noticeNotification`
+// puts the gym's own name inside 'A notice from …'. Unscoped, a gym announcing
+// a new room silently reached every member with no inbox row behind the push.
+eq(inboxDecision('Our new studio just opened', '25% off with code OPEN25.', '/(client)/explore').record, true,
+  'an owner’s offer is recorded however they worded it');
+eq(inboxDecision('A notice from Just Opened Fitness', 'We close at 4pm on Sunday.', '/(client)/notices').record, true,
+  'a gym whose NAME trips the slot rule still gets its notice recorded');
+// The refusals themselves are unchanged, on the routes those pushes carry.
+eq(inboxDecision('A slot just opened', '6:30 PM on Tue is available.', '/(client)/calendar').record, false,
+  'the slot race is still refused on the route it is actually sent with');
+eq(inboxDecision('Your coach has read your injuries', 'They have seen what you disclosed.', '/(client)/injuries').record, false,
+  'the read receipt is still refused on the injuries route');
+
 /* ── a row with nothing to show is not written ─────────────────────────── */
 
 // notifications.body is `not null`; a heading on its own is a row that tells

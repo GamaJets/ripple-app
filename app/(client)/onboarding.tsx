@@ -71,6 +71,7 @@ import { INJURY_AREAS, newInjuryId } from '../../src/lib/injuries';
 import {
   SETUP_QUESTIONS, EMPTY_DRAFT, questionsToAsk, readDraft, resumeAt, type SetupStep,
 } from '../../src/lib/firstRun';
+import { isWhole } from '../../src/ui/loadStatus';
 
 export const ONBOARD_KEY = 'repple.onboarded';
 /** Where setup got to, on this device. See the header. */
@@ -289,7 +290,25 @@ export default function Onboarding() {
     // Trainer is a directory of coaches they do not need.
     let pending: string | null = null;
     try { pending = await peekJoinCode(); } catch { pending = null; }
-    const needsCoach = mode !== 'solo' && c.coachLinked !== true;
+    // ── "you have no coach" is a claim, and it needs a whole read ───────────
+    //
+    // This was `c.coachLinked !== true`. `coachLinked` is `boolean | null`, and
+    // null is what clientData holds when the read did not land — so under
+    // 'error' (and under 'partial') the expression turned "we could not check
+    // whether you have a coach" into "you do not have one", and the last thing
+    // that happened to somebody at the end of their very first setup was being
+    // dropped into a directory of coaches to find the one they already have.
+    // src/ui/loadStatus.ts is explicit that an empty answer under 'error' means
+    // UNKNOWN, and `isWhole` is the gate the house rule asks for.
+    //
+    // Unknown routes HOME, not to the directory: the dashboard carries its own
+    // read-failure warnings and its own route to Find a Trainer, so a member
+    // who really is uncoached loses one tap, while a coached member is no
+    // longer told, by where they land, something untrue about their own coach.
+    // A pending join code is a fact about this device and is unaffected — it
+    // still sends them to the screen that spends it.
+    const knownUncoached = isWhole(c.status) && c.coachLinked !== true;
+    const needsCoach = mode !== 'solo' && knownUncoached;
     router.replace(needsCoach || pending ? '/(client)/trainers' : '/(client)/dashboard');
   };
 

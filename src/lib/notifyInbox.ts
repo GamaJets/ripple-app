@@ -86,11 +86,45 @@ export interface InboxDecision {
  *  else. Matched as a prefix so `/(trainer)/chat?clientId=…` counts. */
 const CHAT_ROUTES = ['/(client)/messages', '/(trainer)/chat'];
 
+/* ── the two title heuristics, and the routes they are allowed to fire on ───
+ *
+ * Rules 2 and 3 in the header are matched on the TITLE because there is no
+ * structural signal for them — and the header's defence of that is "a miss here
+ * adds one extra row to an inbox", which is true of a MISS and was not true of
+ * a false HIT.
+ *
+ * Every title these two regexes were written for is a literal in this
+ * repository. The titles they are actually applied to are not: app/(owner)/
+ * promotions.tsx passes `pushTitle.trim() || 'A new offer'`, which is whatever
+ * the gym owner typed, and `noticeNotification` interpolates the gym's own name
+ * into 'A notice from …'. So a gym announcing "Our new studio just opened — 25%
+ * off" tripped `EXPIRING`, and the offer reached every member's phone with no
+ * inbox row behind it at all — the one kind of push in this product whose
+ * author is not a programmer, silently classified as a race for a PT slot. The
+ * owner was then told "No notifications were recorded", which is true and reads
+ * like a fault rather than like a rule.
+ *
+ * Both regexes are therefore scoped to the routes their own call sites carry,
+ * which costs nothing: the three pushes rule 2 exists for all send
+ * '/(client)/calendar' (app/(trainer)/calendar.tsx twice, src/ui/sessions.tsx),
+ * and the one push rule 3 exists for sends '/(client)/injuries'
+ * (src/ui/injuryAcks.tsx). `KNOWN_PUSHES` below carries those routes and the
+ * test asserts the refusals through them, so a call site that moved to another
+ * screen would have to move its entry too.
+ *
+ * This narrows only the FALSE hits. A refusal that was right is still a
+ * refusal, and the default for anything else is still to record.
+ */
+
 /** A push about something that is over before it can be read. */
 const EXPIRING = /\bjust opened\b/i;
+/** Where such a push is sent from, and the only routes the rule applies to. */
+const EXPIRING_ROUTES = ['/(client)/calendar'];
 
 /** A push confirming something the recipient can already see recorded. */
 const RECEIPT = /\bhas read your\b/i;
+/** The screen that already holds the record this rule defers to. */
+const RECEIPT_ROUTES = ['/(client)/injuries'];
 
 /**
  * Pushes whose inbox row a DATABASE TRIGGER has already written.
@@ -364,10 +398,12 @@ export function inboxDecision(
   if (startsWithAny(r, CHAT_ROUTES)) {
     return { record: false, icon, why: 'a chat message; the messages trigger writes this row already (part 26)' };
   }
-  if (EXPIRING.test(t)) {
+  // Route first in both, so a title somebody typed into a promotion or a gym's
+  // own name cannot trip a rule written about a PT slot or an injuries screen.
+  if (startsWithAny(r, EXPIRING_ROUTES) && EXPIRING.test(t)) {
     return { record: false, icon, why: 'a race for a slot — over by the time an inbox is opened' };
   }
-  if (RECEIPT.test(t)) {
+  if (startsWithAny(r, RECEIPT_ROUTES) && RECEIPT.test(t)) {
     return { record: false, icon, why: 'a read receipt; the acknowledgement itself is already on the injuries screen' };
   }
   if (SERVER_WROTE_THE_ROW.includes(t)) {

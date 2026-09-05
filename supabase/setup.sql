@@ -59111,3 +59111,490 @@ drop policy if exists exercises_admin_d on public.exercises;
 create policy exercises_admin_d on public.exercises for delete
   to authenticated
   using (public.is_platform_admin());
+
+-- ▶ a-profile-could-be-deleted-and-rewritten-as-the-owner-of-any-gym.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A profile could be deleted and written again as the owner of any gym
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- APPLIED. Verified after applying, on the live database: the trigger now fires
+-- on INSERT, DELETE and UPDATE (tgtype & 28 = 28); `handle_new_user()` is still
+-- SECURITY DEFINER so signup is untouched; and the two refusals were proved as
+-- the `authenticated` role inside an aborted transaction —
+--
+--   DELETE=[An account is not deleted by removing its profile. Use Delete My
+--           Account in Settings, ...]
+--   INSERT=[A profile cannot file itself under a gym. Joining a gym happens by
+--           invitation.]
+--
+-- The count of anon-executable SECURITY DEFINER functions held at 2.
+--
+-- ── THE HOLE ──────────────────────────────────────────────────────────────
+--
+-- `guard_profile_identity()` is the rule that says a profile cannot re-role
+-- itself and cannot move itself between gyms. It says so in as many words:
+--
+--     'A profile cannot change its own role. Ask the gym owner to change it
+--      for you.'
+--     'A profile cannot move itself between gyms. Joining a gym happens by
+--      invitation.'
+--
+-- It is attached like this, and this is the whole of the defect:
+--
+--     CREATE TRIGGER guard_profile_identity_t
+--       BEFORE UPDATE ON public.profiles   -- ← UPDATE. Only UPDATE.
+--
+-- `profiles_self` is `for all using (id = auth.uid()) with check (id =
+-- auth.uid())`, and `authenticated` holds table-level SELECT, INSERT, UPDATE
+-- and DELETE on `profiles` with no column ACL narrowing any of them (checked
+-- against pg_class.relacl and pg_attribute.attacl on the live database — there
+-- are zero column grants on this table). So the two columns the guard exists to
+-- protect are unprotected on the two commands it is not attached to.
+--
+-- Three statements, from any account that can sign in to any of the three apps:
+--
+--     delete from profiles where id = auth.uid();
+--     insert into profiles (id, role, tenant_id, full_name)
+--     values (auth.uid(), 'owner', '<the victim gym>', 'x');
+--
+-- The DELETE passes `profiles_self`'s USING clause. Every foreign key that
+-- references `profiles(id)` is ON DELETE CASCADE, SET NULL or SET DEFAULT —
+-- there is not one RESTRICT or NO ACTION among them, so nothing refuses the
+-- delete (`confdeltype` sweep over pg_constraint, live). The INSERT passes
+-- `profiles_self`'s WITH CHECK, because that clause asks one question — "is
+-- this row's id your own id?" — and the answer is yes. `role` and `tenant_id`
+-- are not looked at by anything: the guard is not on INSERT, and
+-- `provision_profile()` (the AFTER INSERT trigger) reads `new.tenant_id`, finds
+-- it already set, and skips making a tenant. It validates nothing.
+--
+-- `is_owner_of(t)` is then satisfied:
+--
+--     select exists (select 1 from profiles p
+--                     where p.id = auth.uid() and p.role = 'owner'
+--                       and p.tenant_id = t)
+--
+-- ── THE TENANT UUID IS NOT A SECRET ───────────────────────────────────────
+--
+-- The same argument part 2360 made about coach ids. `trainers_public_directory_r`
+-- is `for select to authenticated using (listed = true)`, and `tenant_id` is one
+-- of the columns `authenticated` holds a column-level SELECT grant on. So:
+--
+--     select id, tenant_id from trainers where listed = true;
+--
+-- hands any signed-in account the tenant id of every listed coach's gym. Two
+-- coaches are listed on production today, in two distinct tenants.
+--
+-- ── WHAT THE CALLER GETS ──────────────────────────────────────────────────
+--
+-- Owner, not staff. Every one of these is a live policy that becomes satisfiable
+-- the instant that row exists:
+--
+--   · `tenants_owner_rw`      — FOR ALL. Read, rewrite and DELETE the gym row:
+--                               name, brand, currency, plan, session fee, pay
+--                               policy, tax registration, retention years.
+--   · `memberships_owner`     — FOR ALL over every membership in the gym.
+--   · `mi_owner`              — FOR ALL over `member_invites`: invite anyone,
+--                               onto any plan, in that gym's name.
+--   · `profiles_owner_tenant_r` and `profiles_owner_r` — every member's and
+--                               every coach's profile row.
+--   · `clients_owner_r`, `coach_clients_owner_r`, `sessions_owner_r` — the
+--                               whole book.
+--   · `billing_owner_*`, `cust_read`, `conn_read`, `purch_read`,
+--     `client_sub_pay_read`, `sub_read` — the gym's money, and its Stripe
+--                               Connect accounts.
+--   · `grant_staff_role()` / `revoke_staff_role()` — hire and fire.
+--   · `app_errors_owner`      — `is_owner_of(staff_tenant_of(user_id))`.
+--
+-- ── THE FIX, AND WHY IT IS SHAPED THIS WAY ────────────────────────────────
+--
+-- The guard gains the two arms it was missing, in the same file and with the
+-- same `current_user in ('authenticated','anon')` idiom it already uses — so
+-- `handle_new_user()` and every invite-acceptance definer, which run as the
+-- function owner, are waved through exactly as they are today. This is the same
+-- shape `guard_client_tenant()` already has for `clients`, which DOES cover
+-- INSERT; `profiles` is the table it was never copied onto.
+--
+-- INSERT is refused only when the row arrives carrying a role or a gym. A
+-- self-insert of a plain client profile with no tenant is left alone: it is
+-- harmless, and refusing it would be a wider rule than the defect needs.
+--
+-- DELETE is refused outright from the app roles, because that is the half that
+-- makes the re-insert reachable at all — a primary key cannot be written twice.
+-- Nothing in this repository deletes a profile row: the three settings screens
+-- go through `request_account_deletion()`, and the erasure that follows runs as
+-- service_role, which this arm does not touch. Verified by grep across app/,
+-- src/, studio-web/ and supabase/functions/ — there is no `.from('profiles')`
+-- `.delete()` anywhere.
+--
+-- Callers were enumerated rather than assumed:
+--
+--   · App: no `.from('profiles').insert(` and no `.from('profiles').delete(`
+--     exists in the repository. Every profile write in the app is an UPDATE,
+--     and every one of those already passes today's guard.
+--   · SQL: the only INSERT into `public.profiles` in any function on the live
+--     database is `handle_new_user()`, which is SECURITY DEFINER.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create or replace function public.guard_profile_identity()
+returns trigger
+ language plpgsql
+ set search_path = public, pg_temp
+as $fn$
+begin
+  -- A SECURITY DEFINER function runs as its owner, so provisioning and invite
+  -- acceptance (the legitimate ways a role or a gym is set) pass. A direct
+  -- write from the app does not.
+  if current_user in ('authenticated', 'anon') then
+
+    if tg_op = 'INSERT' then
+      -- The row that was never checked. `profiles_self`'s WITH CHECK asks only
+      -- whether the id is your own, and a profile arriving with a role and a
+      -- gym already on it is how an account made itself the owner of somebody
+      -- else's gym. Neither column may be chosen here; both are set by
+      -- provisioning or by an invitation, and both run as definers.
+      if new.tenant_id is not null then
+        raise exception 'A profile cannot file itself under a gym. Joining a gym happens by invitation.'
+          using errcode = '42501';
+      end if;
+      if coalesce(new.role, 'client') <> 'client' then
+        raise exception 'A profile cannot choose its own role. A coach or an owner account is made by the app it is created in, or by an invitation.'
+          using errcode = '42501';
+      end if;
+      return new;
+    end if;
+
+    if tg_op = 'DELETE' then
+      -- Deleting your own profile row and writing a new one is the only way to
+      -- get past the INSERT arm above, because the id is a primary key. It is
+      -- also not how this product deletes an account: request_account_deletion()
+      -- is, and the erasure behind it does not run as these roles.
+      raise exception 'An account is not deleted by removing its profile. Use Delete My Account in Settings, which schedules the erasure and keeps the records the gym is required to keep.'
+        using errcode = '42501';
+    end if;
+
+    -- UPDATE. Unchanged from the live definition, transcribed rather than
+    -- retyped so the two new arms are provably the only thing this part adds.
+    if new.role is distinct from old.role then
+      raise exception 'A profile cannot change its own role. Ask the gym owner to change it for you.'
+        using errcode = '42501';
+    end if;
+    if new.tenant_id is distinct from old.tenant_id then
+      raise exception 'A profile cannot move itself between gyms. Joining a gym happens by invitation.'
+        using errcode = '42501';
+    end if;
+  end if;
+
+  -- `old` on DELETE, `new` otherwise. A BEFORE DELETE trigger that returns
+  -- `new` returns NULL, which silently CANCELS the delete for every role —
+  -- including the service_role path that is supposed to be able to make it.
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end $fn$;
+
+-- The trigger has to be recreated: it is BEFORE UPDATE today, and the two new
+-- arms are unreachable until it also fires on INSERT and DELETE.
+--
+-- The name is kept. `guard_profile_identity_t` sorts before `trg_profiles_queue_
+-- file_purge`, `trg_profiles_release_coach_documents` and `trg_profiles_retain_
+-- financial_record` — the three other BEFORE DELETE triggers on this table —
+-- and Postgres fires BEFORE triggers in name order, so the refusal happens
+-- before any of them starts moving rows about.
+drop trigger if exists guard_profile_identity_t on public.profiles;
+create trigger guard_profile_identity_t
+  before insert or update or delete on public.profiles
+  for each row execute function public.guard_profile_identity();
+
+-- Restated because `create or replace` on a function that did not previously
+-- exist leaves EXECUTE with PUBLIC, which in a Supabase project includes anon.
+-- A trigger function needs no caller at all.
+revoke all on function public.guard_profile_identity() from public, anon, authenticated;
+
+-- ── VERIFY AFTER APPLYING ─────────────────────────────────────────────────
+--
+-- 1. The trigger covers all three commands:
+--      select tgtype::int & 28 from pg_trigger where tgname = 'guard_profile_identity_t';
+--      -- 28 = INSERT(4) | DELETE(8) | UPDATE(16)
+--
+-- 2. As a signed-in NON-owner account, each of these must fail with 42501:
+--      delete from profiles where id = auth.uid();
+--      insert into profiles (id, role) values (auth.uid(), 'owner');
+--      insert into profiles (id, tenant_id) values (auth.uid(), '<any tenant>');
+--
+-- 3. Signing up still works in all three apps — that is `handle_new_user()`
+--    running as a definer, and it must still land a profile row with a role.
+--
+-- 4. `select public.get_advisors('security')` is clean.
+
+-- ▶ you-could-invite-yourself-onto-any-gyms-staff.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- You could invite yourself onto any gym's staff
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- APPLIED. Verified after applying: `ti_owner`'s WITH CHECK now reads
+-- ((owner_id = auth.uid()) AND ((tenant_id IS NULL) OR is_owner_of(tenant_id))),
+-- both not-blank constraints exist, anon cannot execute the function and
+-- authenticated can, and the count of anon-executable SECURITY DEFINER
+-- functions held at 2.
+--
+-- Read the note on the single live `trainer_invites` row at the foot: this part
+-- refuses it, and refusing it is the point.
+--
+-- ── THE HOLE ──────────────────────────────────────────────────────────────
+--
+-- `trainer_invites` is the owner→coach invitation. Its write policy, unchanged
+-- since part 12, is:
+--
+--     create policy ti_owner on trainer_invites for all
+--       using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+--
+-- `owner_id = auth.uid()` is not evidence of anything. It is the same sentence
+-- part 2360 took apart in `link_coaching`: it says "I am the person I say I
+-- am", which every caller can say about themselves. The column that decides
+-- WHICH GYM the invitation staffs — `tenant_id` — is not mentioned by that
+-- policy, is not mentioned by any constraint, and there is no trigger on this
+-- table at all (checked against pg_trigger on the live database).
+--
+-- `authenticated` holds table-level INSERT on `trainer_invites` with no column
+-- ACL narrowing it. So, from any account that can sign in to any of the three
+-- apps:
+--
+--     insert into trainer_invites (owner_id, tenant_id, email, status)
+--     values (auth.uid(), '<the victim gym>', '<my own email address>', 'pending')
+--     returning id;
+--
+--     select accept_trainer_invite('<that id>');
+--
+-- `accept_trainer_invite` then checks the two things it checks — that the
+-- invite's email matches the caller's address on `auth.users`, and that the
+-- status is `pending` (part 1080 added the second) — and both are satisfied,
+-- because the caller wrote both values a moment ago. It never asks the one
+-- question that matters: whether the person who sent the invitation had any
+-- standing in the gym it names.
+--
+--     ten := coalesce(inv.tenant_id, (select tenant_id from profiles where id = inv.owner_id));
+--     update profiles set role = 'trainer', tenant_id = coalesce(ten, tenant_id) where id = auth.uid();
+--     insert into trainers (id, tenant_id) values (auth.uid(), ten) on conflict ...
+--     insert into trainer_billing (trainer_id, tenant_id, plan, mrr, status)
+--       values (auth.uid(), ten, 'Pro', 0, 'trial') on conflict do nothing;
+--
+-- It is SECURITY DEFINER, so `guard_profile_identity` and `guard_trainer_tenant`
+-- — the two triggers whose entire job is to stop an account moving itself
+-- between gyms — both wave it through. They are the rule; this function is the
+-- way around it, exactly as part 2360 described for `link_coaching`.
+--
+-- ── THE TENANT UUID IS NOT A SECRET ───────────────────────────────────────
+--
+-- `trainers_public_directory_r` is `for select to authenticated using (listed =
+-- true)`, and `tenant_id` is one of the columns `authenticated` holds a
+-- column-level SELECT grant on. `select id, tenant_id from trainers where
+-- listed = true` hands any signed-in account the gym id of every listed coach.
+-- Two coaches are listed on production today.
+--
+-- ── WHAT THE CALLER GETS ──────────────────────────────────────────────────
+--
+-- `my_tenant()` becomes the victim's gym and `my_role()` becomes 'trainer'.
+-- Every staff policy in this schema is written on those two facts. Live, today:
+--
+--   · `gym_member_records` / `gym_member_notes` — the gym's own record of every
+--     member, and the staff notes written about them.
+--   · `gym_visits` — SELECT, INSERT and UPDATE. Attendance, rewritten.
+--   · `gym_passes`, `gym_pass_types`, and `gym_pass_redemptions` on INSERT —
+--     a stranger can spend a member's pass.
+--   · `class_bookings_staff_r` / `_staff_u` — read and alter other people's
+--     class bookings.
+--   · `gym_shifts` (the rota), `gym_equipment` + its log (read and write),
+--     `member_interventions` (read and write), `gym_documents` on INSERT.
+--   · `tenants_trainer_r` — the gym row: currency, plan, session fee, pay
+--     policy, tax registration, retention years.
+--   · `profiles_trainer_r_peers` and `trainers_peer_r` — every coach in the gym.
+--   · `availability_templates_trainer_peer_r` — every peer coach's whole
+--     template.
+--   · `membership_plans_tenant_r`, `gym_agreements_tenant_r`, `announcements`,
+--     `challenges`.
+--
+-- And two things the owner sees rather than merely loses: a `trainer_billing`
+-- row on the 'Pro' plan in trial, against their tenant, which the owner's
+-- billing screen reads under `billing_read` — a coach on the books that nobody
+-- hired; and `gym_event_trainer_joined` writing "<name> joined as a coach" into
+-- the gym's event feed.
+--
+-- ── WHY `member_invites` IS NOT AFFECTED, AND WHAT THAT PROVES ────────────
+--
+-- The sibling table has the check this one is missing:
+--
+--     create policy mi_owner on member_invites for all
+--       using (is_owner_of(tenant_id)) with check (is_owner_of(tenant_id));
+--
+-- Same product, same screen family, same shape of row — and it asks about the
+-- TENANT rather than about the caller's own id. This part gives
+-- `trainer_invites` the same requirement. `coach_invites` needs nothing: its
+-- `coach_id` is the caller's own id and the only thing it can name is the
+-- caller, so `ci_coach` says all there is to say.
+--
+-- ── THE FIX, AND WHY IT IS IN TWO PLACES ──────────────────────────────────
+--
+-- The policy stops the row being written. The function stops a row already
+-- written from being spent — including the one already on the live database
+-- (see below), and including the case where the sender was a legitimate owner
+-- when they sent it and has since been removed by `revoke_staff_role()`. Part
+-- 1080 made the same argument about the status column: the invitation is a
+-- claim, and it has to be re-checked at the moment it is redeemed, not only at
+-- the moment it is made.
+--
+-- Callers were enumerated rather than assumed, from both ends:
+--
+--   · App: the only insert into `trainer_invites` is `sendTrainerInvite` in
+--     src/ui/trainerInvites.tsx, reached from exactly one screen —
+--     app/(owner)/trainers.tsx. It sends `tenant_id` read from the signed-in
+--     owner's own `profiles` row, so `is_owner_of(tenant_id)` is true for it by
+--     construction. `revokeTrainerInvite` is an UPDATE that does not touch
+--     `tenant_id`, so the tightened WITH CHECK passes for it too.
+--   · SQL: `pg_get_functiondef` across every function in `public` names
+--     `trainer_invites` in one function only — `accept_trainer_invite`.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+drop policy if exists ti_owner on public.trainer_invites;
+create policy ti_owner on public.trainer_invites for all
+  using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    -- The column the old policy never looked at. `is_owner_of` is the same
+    -- function `mi_owner` uses on the sibling table, and it asks the question
+    -- that matters: is this caller the OWNER of the gym this invitation staffs?
+    and (tenant_id is null or public.is_owner_of(tenant_id))
+  );
+
+create or replace function public.accept_trainer_invite(p_invite uuid)
+returns void
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $fn$
+declare inv trainer_invites; my_email text; ten uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+
+  select email into my_email from auth.users where id = auth.uid();
+  select * into inv from trainer_invites where id = p_invite;
+  if inv.id is null then raise exception 'invite not found'; end if;
+  if lower(inv.email) <> lower(coalesce(my_email, '')) then
+    raise exception 'invite not addressed to you';
+  end if;
+
+  -- Part 1080's arms, unchanged.
+  if inv.status = 'accepted' then
+    return;
+  elsif inv.status <> 'pending' then
+    raise exception 'invite was withdrawn';
+  end if;
+
+  ten := coalesce(inv.tenant_id, (select tenant_id from profiles where id = inv.owner_id));
+
+  -- ── The question this function never asked ─────────────────────────────
+  --
+  -- Re-checked here and not only in the policy, because a row can outlive the
+  -- standing of the person who wrote it: `revoke_staff_role()` clears an
+  -- owner's tenant, and every invitation they had sent would otherwise still
+  -- be a live key to the gym. Asked of the INVITER, not of the caller — the
+  -- caller is the invitee and is not supposed to have any standing yet, which
+  -- is the whole point of being invited.
+  if ten is not null and not exists (
+    select 1 from public.profiles p
+     where p.id = inv.owner_id
+       and p.role = 'owner'
+       and p.tenant_id = ten
+  ) then
+    raise exception 'that invitation does not come from the gym it names'
+      using errcode = '42501',
+            hint = 'ask the gym owner to send it again from their own account';
+  end if;
+
+  update profiles set role = 'trainer', tenant_id = coalesce(ten, tenant_id) where id = auth.uid();
+  if ten is not null then
+    insert into trainers (id, tenant_id) values (auth.uid(), ten)
+      on conflict (id) do update set tenant_id = excluded.tenant_id;
+    insert into trainer_billing (trainer_id, tenant_id, plan, mrr, status)
+      values (auth.uid(), ten, 'Pro', 0, 'trial')
+      on conflict (trainer_id) do nothing;
+  end if;
+  update trainer_invites
+     set status = 'accepted', accepted_at = now(), accepted_by = auth.uid()
+   where id = p_invite;
+end $fn$;
+
+-- Restated because `create or replace` on a function that did not previously
+-- exist leaves EXECUTE with PUBLIC, which in a Supabase project includes anon.
+revoke all on function public.accept_trainer_invite(uuid) from public, anon;
+grant execute on function public.accept_trainer_invite(uuid) to authenticated;
+
+-- ── AND WHILE WE ARE HERE: THE BLANK ADDRESS ──────────────────────────────
+--
+-- The same asymmetry, one column along. `member_invites` carries
+--
+--     CHECK (btrim(email) <> '')          -- member_invites_email_not_blank
+--
+-- and reads itself with `lower(NULLIF(auth.jwt() ->> 'email', ''))`. Its two
+-- siblings carry neither: no not-blank constraint, and `lower(COALESCE(auth.jwt()
+-- ->> 'email', ''))` in `ci_invitee_read` and `ti_invitee_read`.
+--
+-- COALESCE-to-empty is the difference. A phone signup has no email address —
+-- `auth.users.email` is null and the claim is absent from the JWT — so for
+-- every phone-created account both of those policies evaluate to
+-- `lower(email) = ''`, and an invitation whose `email` column is the empty
+-- string is addressed to ALL OF THEM. The accept functions agree with the
+-- policy: `lower(inv.email) <> lower(coalesce(my_email, ''))` is `'' <> ''`,
+-- which is false, so the guard does not fire and the invitation is taken.
+--
+-- Nothing in the app writes a blank address (`sendTrainerInvite` returns early
+-- on an empty string, and the coach sheet screens the same way), and there are
+-- no blank rows on production today — zero of one on `trainer_invites`, zero of
+-- zero on `coach_invites`. But `authenticated` can INSERT into both tables
+-- directly, and the column that decides who an invitation is FOR should not
+-- depend on the client having been polite about it. The constraint is what
+-- makes it not depend on that, and it is the one the sibling table has had all
+-- along.
+alter table public.coach_invites
+  drop constraint if exists coach_invites_email_not_blank;
+alter table public.coach_invites
+  add constraint coach_invites_email_not_blank check (btrim(email) <> '');
+
+alter table public.trainer_invites
+  drop constraint if exists trainer_invites_email_not_blank;
+alter table public.trainer_invites
+  add constraint trainer_invites_email_not_blank check (btrim(email) <> '');
+
+-- ── THE ONE LIVE ROW, AND WHAT THIS PART DOES TO IT ───────────────────────
+--
+-- `trainer_invites` holds exactly one row on production and it is pending:
+--
+--   id        70850639-4f67-4a85-84db-7c1f876eb664
+--   owner_id  759c8d25-4d50-4a5c-bdb5-806bcad18ac1  — whose profile role is
+--                                                     'client', not 'owner'
+--   tenant_id 4a718f6f-2265-47f1-81aa-865904bf0167  — that client account's own
+--                                                     one-person tenant
+--
+-- After this part it can no longer be accepted, and it should not be: a client
+-- account sent an invitation that would attach a coach to a personal tenant.
+-- Whether it is a leftover test or not, it is the defect with a row attached.
+-- Delete it, or have the real gym owner send the invitation from their own
+-- account.
+--
+-- ── VERIFY AFTER APPLYING ─────────────────────────────────────────────────
+--
+-- 1. As a signed-in non-owner, this must be refused by RLS:
+--      insert into trainer_invites (owner_id, tenant_id, email)
+--      values (auth.uid(), '<a gym you do not own>', '<your address>');
+--
+-- 2. As a gym owner, sending a coach invitation from app/(owner)/trainers.tsx
+--    still works, and revoking one still works.
+--
+-- 3. `select accept_trainer_invite('70850639-4f67-4a85-84db-7c1f876eb664')`
+--    raises 42501 rather than attaching anybody.
+--
+-- 4. The count of anon-executable SECURITY DEFINER functions still holds at 2
+--    — `leave_my_details` and `public_coach_page`, the two deliberate entry
+--    points — and `select public.get_advisors('security')` is clean.

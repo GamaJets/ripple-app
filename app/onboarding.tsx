@@ -35,7 +35,7 @@ import { readNumber } from '../src/lib/units';
 export default function Onboarding() {
   const t = useTheme();
   const router = useRouter();
-  const { tenant, updateTenant } = useTenant();
+  const { tenant, status: tenantStatus, updateTenant } = useTenant();
   // Not a question any more: the app the user installed decides this, the same
   // way it does on the sign-up screen. Asking again could only contradict it.
   const role = VARIANT;
@@ -71,6 +71,29 @@ export default function Onboarding() {
     // just typed, on the screen where they type it for the first time.
     if (Number.isFinite(f) && f > 0) patch.sessionFee = Math.round(f * 100) / 100;
     if (!Object.keys(patch).length) { router.replace('/(owner)/dashboard'); return; }
+    // ── a save that was never attempted must not be reported as one that failed
+    //
+    // `updateTenant` opens with `if (!USE_SUPABASE || !tenant) return false`, so
+    // on the ONE screen where an owner names their gym — reached by `replace`
+    // the instant the account is created, while TenantProvider's first read is
+    // still in flight — a false here could mean "the server refused" or "we had
+    // not read your gym yet and sent nothing". Both printed "Your gym details
+    // were not saved", and then this screen replaced itself with the dashboard,
+    // taking the typed name with it. The gym keeps the provisioning
+    // placeholder — "Tim's space" — which is the exact string the header of
+    // this file says is nobody's gym.
+    //
+    // The two are now told apart before anything is claimed, and the read that
+    // has not landed keeps the owner here with their typing intact.
+    if (!tenant) {
+      if (tenantStatus === 'loading') {
+        Alert.alert('One moment', 'Your gym is still being set up. Nothing has been lost — tap Open Studio again in a second.');
+        return;
+      }
+      Alert.alert('Not saved', 'We could not reach your gym record, so nothing was saved and nothing was lost. The name and colour are under Brand; the session fee is under Ops.');
+      router.replace('/(owner)/dashboard');
+      return;
+    }
     setSaving(true);
     const okWrite = await updateTenant(patch);
     setSaving(false);

@@ -125,6 +125,19 @@ const PAGE = 1000;
  * `partial` says a chunk failed or ran off the page ceiling, so a caller that
  * is COUNTING rather than filtering can tell a complete answer from an
  * incomplete one instead of publishing a floor as a total.
+ *
+ * ── every `build` here must ORDER ──────────────────────────────────────────
+ *
+ * `.range()` is OFFSET/LIMIT, and an OFFSET over a query with no ORDER BY has
+ * no defined relationship to the page before it. Postgres is free to return a
+ * row on page 0 and again on page 1, or on neither — which on the token read is
+ * one member's handset buzzing twice and another member's never buzzing, from
+ * one send, with `sent` counting both as delivered and `partial` staying false
+ * because nothing failed. It is not the ceiling this helper was written for; it
+ * is the paging itself being unsound, and it only shows up on the gym big
+ * enough to need a second page, which is the gym least able to notice.
+ *
+ * Ordered on the primary key of each read, which is stable and already indexed.
  */
 async function readAllFor<T>(
   ids: string[],
@@ -255,6 +268,7 @@ Deno.serve(async (req: Request) => {
         .in('user_id', batch)
         .eq('channel', channel)
         .eq('enabled', false)
+        .order('user_id')
         .range(from, to));
       const off = new Set(prefs.map((r) => r.user_id));
       if (off.size) {
@@ -284,7 +298,7 @@ Deno.serve(async (req: Request) => {
     // nothing anywhere to discover that from afterwards.
     if (recipients.length) {
       const { rows: quiet } = await readAllFor<{ user_id: string }>(recipients, (batch, from, to) => supa
-        .from('notify_quiet_now').select('user_id').in('user_id', batch).range(from, to));
+        .from('notify_quiet_now').select('user_id').in('user_id', batch).order('user_id').range(from, to));
       const asleep = new Set(quiet.map((r) => r.user_id));
       if (asleep.size) {
         const before = recipients.length;
@@ -300,7 +314,7 @@ Deno.serve(async (req: Request) => {
     // gone out" needs to know when it only partly did, and `sent` alone cannot
     // say so — a short list and a truncated one are the same number.
     const { rows: tokenRows, partial } = await readAllFor<{ token: string }>(recipients, (batch, from, to) =>
-      supa.from('push_tokens').select('token').in('user_id', batch).range(from, to));
+      supa.from('push_tokens').select('token').in('user_id', batch).order('token').range(from, to));
     const tokens: string[] = tokenRows.map((r) => r.token).filter(Boolean);
     if (!tokens.length) return json({ sent: 0, muted, ...(partial ? { partial: true } : {}) });
     const messages = tokens.map((to) => ({ to, title, body, sound: 'default', data }));
