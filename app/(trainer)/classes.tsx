@@ -28,7 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
-import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Field } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead, Field } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme/scale';
 import { useClasses } from '../../src/ui/classes';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -539,6 +539,36 @@ export default function TrainerClasses() {
   // been told it is up. What is reported now is what the server actually took.
   const submit = async () => {
     if (!canAdd || busy) return;
+    // ── the same refusal the Manage sheet makes, on the form that needs it
+    //    first ────────────────────────────────────────────────────────────
+    //
+    // `startIso` builds the start from a Day chip that defaults to TODAY and
+    // an hour that defaults to 18:00, so a coach adding tomorrow's class at
+    // eight in the evening and leaving the chip where it sits writes one two
+    // hours behind them. `addClass` takes the row and resolves true, so the
+    // alert says "Class added" — and the read this screen and every member's
+    // timetable run is `.gte('starts_at', now - 1 hour)` (src/ui/classes.tsx),
+    // so a class two hours past is outside the grace window and invisible to
+    // everyone, permanently. The coach is told it is up and nobody can ever
+    // book it. `saveEdits` below refuses this exact instant for this exact
+    // reason; "Same Again" skips these dates; only the create form took them.
+    //
+    // The WHOLE batch is refused rather than the past occurrences skipped,
+    // which is the opposite of what duplicatePlan does with the same problem,
+    // and deliberately. Over there the dates in the past fall out of a run
+    // length applied to a series that already exists — the coach never named
+    // them, so dropping them and saying how many is a correction to an
+    // estimate. Here the start IS the input: one chip and one hour, printed
+    // back as a sentence under the picker. A start in the past is that input
+    // typed wrong, and skipping it would silently move a twelve-week term to
+    // begin a week later than the line the coach just read, at an hour they
+    // had got wrong, and report it as added. One chip fixes it.
+    const first = startIso();
+    if (Date.parse(first) <= Date.now()) {
+      Alert.alert('That time has already passed',
+        `${title.trim()} would start ${dayShort(first)} at ${timeLabel(first)}, which is behind you. Members cannot book a class in the past, so it would be on nobody's timetable however many weeks it repeated for. Pick a time that is still ahead.`);
+      return;
+    }
     setBusy(true);
     try {
       const base = new Date(startIso());
@@ -728,7 +758,13 @@ export default function TrainerClasses() {
               and the late shift. */}
           <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
             {stepper('Start hour', fmtClock(hour, 0), () => setHour((h) => (h + 23) % 24), () => setHour((h) => (h + 1) % 24))}
-            {stepper('Minutes', String(dur), () => setDur((d) => (d > 15 ? d - 15 : d)), () => setDur((d) => (d < 90 ? d + 15 : d)))}
+            {/* "Minutes" — directly under "Start hour", and setting the class
+                LENGTH. A coach reads "Start hour: 6:00 PM · Minutes: 45" as a
+                quarter to seven, and the control that actually sets the minutes
+                is the "Start time" row below. Named for what it does, and shown
+                with its unit, the way the sister screen's Duration pills and
+                the member's own class row already read (45m). */}
+            {stepper('Duration', `${dur}m`, () => setDur((d) => (d > 15 ? d - 15 : d)), () => setDur((d) => (d < 90 ? d + 15 : d)))}
             {stepper('Capacity', String(cap), () => setCap((c) => (c > 4 ? c - 1 : c)), () => setCap((c) => c + 1))}
           </View>
 
@@ -750,9 +786,19 @@ export default function TrainerClasses() {
               </View>
             ))}
           </View>
+          {/* Said here as well as refused on Add, the way the Manage sheet says
+              its capacity rule under the stepper it applies to: an Add Class
+              that will not commit reads as a broken button, and this line —
+              "Starts Today at 6:00 PM" under a Day chip that defaults to today
+              — is the sentence that made the wrong time look right. */}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
             Starts {dayShort(startIso())} at {timeLabel(startIso())}.
           </Text>
+          {Date.parse(startIso()) <= Date.now() ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+              That is behind you. Members cannot book a class in the past, so it would be on nobody's timetable — pick a later day or hour.
+            </Flag>
+          ) : null}
 
           <Text style={[lbl, { marginTop: sp.md }]}>Repeat</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
@@ -951,7 +997,11 @@ export default function TrainerClasses() {
                     </View>
 
                     <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                      {stepper('Minutes', String(mDur), () => setMDur((d) => (d > 15 ? d - 15 : d)), () => setMDur((d) => (d < 90 ? d + 15 : d)))}
+                      {/* Named and united like the create form's, for the same
+                          reason: this sheet carries a "Start hour" control too,
+                          and a stepper called "Minutes" beside it reads as the
+                          minutes past that hour. */}
+                      {stepper('Duration', `${mDur}m`, () => setMDur((d) => (d > 15 ? d - 15 : d)), () => setMDur((d) => (d < 90 ? d + 15 : d)))}
                       {stepper('Capacity', String(mCap), () => setMCap((c) => (c > 1 ? c - 1 : c)), () => setMCap((c) => c + 1))}
                     </View>
                     {/* The one figure a coach can set below what is already sold.

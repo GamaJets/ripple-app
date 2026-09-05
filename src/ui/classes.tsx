@@ -354,7 +354,28 @@ export function ClassesProvider({ children }: { children: React.ReactNode }) {
           if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
           return null;
         }
-        const st = (data === 'waitlist' ? 'waitlist' : 'booked') as ClassBookingStatus;
+        // A seat that was taken looks like exactly two answers: 'booked' and
+        // 'waitlist'. `book_class` has a third — it returns 'notfound' with NO
+        // error when the class is gone, and again when it belongs to another
+        // gym, because a class outside your tenant is deliberately
+        // indistinguishable from one that is not there (supabase/parts/2320).
+        // This line read anything that was not 'waitlist' as 'booked', so that
+        // refusal reached the member as "Booked — you're in", with an
+        // hour-before reminder armed for a seat that does not exist. They
+        // arrange their evening around it and turn up to a class with no place
+        // for them: the same harm the missing `error` at the top of this file
+        // caused, arriving by the one door that fix left open.
+        //
+        // `bookOnto` in src/lib/gymSchedule.ts already states the rule for the
+        // sibling RPC — 'notfound' and any unrecognised shape are refusals and
+        // neither may be reported as a booking. This is that rule on the
+        // member's own path, and the rollback is the `error` branch's.
+        if (data !== 'booked' && data !== 'waitlist') {
+          setMyStatus((p) => { const n = { ...p }; delete n[id]; return n; });
+          if (!willWait) setClasses((p) => p.map((x) => (x.id === id ? { ...x, booked: Math.max(0, x.booked - 1) } : x)));
+          return null;
+        }
+        const st = data as ClassBookingStatus;
         setMyStatus((p) => ({ ...p, [id]: st }));
         return st;
       } catch {
