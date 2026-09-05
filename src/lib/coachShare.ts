@@ -349,8 +349,46 @@ export function weeklyFacts(
 ): string[] | null {
   if (consent !== 'yes' && consent !== 'no') return null;
   const lines = consent === 'yes' ? [...fitness, ...health] : [...fitness];
-  return lines.map((l) => String(l ?? '').trim()).filter(Boolean);
+  const out = lines.map((l) => String(l ?? '').trim()).filter(Boolean);
+  // The withholding is SAID, not left to be inferred. See the constant below.
+  //
+  // Only when there is something to summarise. `askAboutMyWeek` refuses to ask
+  // for a paragraph written from no facts at all, and it decides that by asking
+  // whether this list is empty — a list holding nothing but an instruction is
+  // not empty, and would turn that refusal into a request for prose about a
+  // week the model has been told nothing about.
+  if (consent === 'no' && out.length) out.push(WITHHELD_FACTS_INSTRUCTION);
+  return out;
 }
+
+/**
+ * What the model is told when the health half did not come.
+ *
+ * WEEKLY_SUMMARY_PROMPT ends "Do not invent anything the facts do not state",
+ * and on its own that is not enough, because it describes the failure without
+ * naming the shape of it. A summariser handed a short list and asked for warm
+ * prose in the second person writes the sentence it expects to be there — the
+ * weigh-in, the check-in, the line about sleep — because that is what a weekly
+ * summary looks like in every text it has read. The generic rule is a rule
+ * about honesty; this is a list of the specific sentences that were about to be
+ * written.
+ *
+ * Silence is not an instruction. A member who declined does not appear to the
+ * model as somebody who declined — the withheld lines are simply absent, and
+ * absence has no author. So the withholding is stated: what is missing, that it
+ * must not be reconstructed, and that it must not be pointed at either.
+ *
+ * The last clause is the one that is easy to leave out and matters as much as
+ * the rest. "I don't have your weigh-ins this week" is a sentence about the
+ * member's privacy setting written into a paragraph they opened to read about
+ * their training, and it makes the decision they made feel like a fault in the
+ * report. `REPORT_WITHHELD_NOTE` is where that is explained, in the app's own
+ * voice, next to the switch that changes it.
+ */
+export const WITHHELD_FACTS_INSTRUCTION =
+  'Their body figures, their sleep, their tape measurements and their scans were withheld and are not among the facts above. '
+  + 'Do not mention their weight, their body fat, their muscle, their measurements, their sleep, their recovery or a check-in. '
+  + 'Do not guess at any of them, and do not remark on their absence — write only from the training facts you were given.';
 
 /** What the member is told the weekly summary loses when the answer is no.
  *  Specific, like `WITHHELD_NOTE`: the report is still written, from the

@@ -250,6 +250,34 @@ export default function WeeklyReport() {
   const { consent, answer } = useCoachShare();
 
   const [narrative, setNarrative] = useState(fallbackNarrative);
+  // Who wrote the paragraph that is on the screen right now.
+  //
+  // ── the disclaimer was under the wrong paragraph ─────────────────────
+  //
+  // `NOT_MEDICAL_ADVICE` was rendered in one place: the 'unasked' branch, under
+  // the consent question. So the member who said NO thanks got it, and the
+  // member who said YES — the one whose weight, body fat, sleep and recovery
+  // had just been posted to a language model, and who is reading a paragraph
+  // that model wrote about their body — got nothing under it at all. The
+  // disclaimer appeared only before anybody had agreed to anything, which is
+  // exactly the wrong way round.
+  //
+  // ── and why it is not simply always on ───────────────────────────────
+  //
+  // Because `narrative` is TWO different things wearing the same style.
+  // `fallbackNarrative` a few lines up is composed here, on the device, out of
+  // counts this screen already prints — no model, no network, nothing asked of
+  // anybody. It is what a member sees while the reads are in flight, when the
+  // AI build flag is off, before they answer, and whenever the call fails.
+  //
+  // A medical disclaimer under that paragraph is decoration: it is on the
+  // screen at times when nothing on the screen could have been invented,
+  // including every single render for every member of a build with the coach
+  // turned off. Warnings that are always there are read once and then never
+  // again, and the one render where this sentence has to be read is the one
+  // where a third party has just written about somebody's body. So it is
+  // gated on provenance, and this is the flag that carries it.
+  const [fromModel, setFromModel] = useState(false);
   // The deps used to be `[wk.workouts, wk.days, streak, wDelta, range]`, and
   // `narrative` is seeded from the FIRST render's `fallbackNarrative` — which,
   // while the training log is loading, is the literal string "Reading your
@@ -268,6 +296,11 @@ export default function WeeklyReport() {
   useEffect(() => {
     let alive = true;
     setNarrative(fallbackNarrative);
+    // Back to locally composed, on every run of this effect. The facts changed,
+    // so whatever the model last said is now about a different week — and the
+    // paragraph reverting without the flag reverting with it would leave the
+    // disclaimer under a sentence this device wrote.
+    setFromModel(false);
     // Nothing is asked of the model while a read is still in flight: it would
     // be answering about a week it has only been told half of, and the reply
     // is written back to the member in the second person as fact.
@@ -279,7 +312,10 @@ export default function WeeklyReport() {
     if (consent !== 'yes' && consent !== 'no') return;
     (async () => {
       const res = await askAboutMyWeek({ fitness: fitnessFacts, health: healthFacts }, consent);
-      if (alive && res.ok && res.reply.trim()) setNarrative(res.reply.trim());
+      // The two setters move together and only here. This is the one branch in
+      // the file where the words on the screen came from somewhere other than
+      // this file, and it is the only one that raises the flag.
+      if (alive && res.ok && res.reply.trim()) { setNarrative(res.reply.trim()); setFromModel(true); }
     })();
     return () => { alive = false; };
     // `fitnessText` and `healthText` rather than the arrays: an array literal
@@ -299,6 +335,32 @@ export default function WeeklyReport() {
     { label: 'Muscle', value: fig(weightIn(c.muscleKg, wu)), unit: c.muscleKg != null ? wu : undefined },
     ...(waistDShown != null && mLatest ? [{ label: 'Waist', value: fig(lengthIn(mLatest.waist, lu)), unit: lu, delta: deltaMoved(waistDShown) ? deltaLabel(waistDShown, { since: null, unit: lu }) : 'no change', good: movementIsProgress(waistDShown, c.goal, 'girth') }] : []),
   ];
+
+  /**
+   * The paragraph, and the disclaimer that belongs to it.
+   *
+   * One function rather than the same JSX in the two branches below, because
+   * the pairing is the whole fix: the two branches render the same `narrative`
+   * and it would take one edit to either of them for a model-written paragraph
+   * to lose its disclaimer again. Written as a plain call and not a component
+   * so it does not remount the text — and therefore does not interrupt a screen
+   * reader — every time this screen redraws.
+   *
+   * `top` because the consent branch has the question above it and needs the
+   * paragraph pushed clear of the buttons; the answered branch starts here.
+   */
+  const narrativeBlock = (top: number) => (narrative ? (
+    <View style={{ marginTop: top }}>
+      <Text style={{ ...ty.body, color: t.ink2 }}>{narrative}</Text>
+      {/* Only under prose a language model wrote. See `fromModel` above for
+          why an always-on warning under a paragraph this device composed is
+          worse than none: it is on screen at the moments nothing could have
+          been invented, and a warning that is always there is not read. */}
+      {fromModel ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{NOT_MEDICAL_ADVICE}</Text>
+      ) : null}
+    </View>
+  ) : null);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -422,12 +484,16 @@ export default function WeeklyReport() {
                       up as hierarchy. */}
                   <Cta label="No, Keep Them Private" onPress={() => answer('no')} tone={t.surface2} wide />
                 </View>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{NOT_MEDICAL_ADVICE}</Text>
-                {narrative ? <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>{narrative}</Text> : null}
+                {/* The disclaimer used to be printed here, unconditionally,
+                    and ONLY here — above a paragraph that in this branch is
+                    always the locally composed fallback, because nobody has
+                    answered yet and `askAboutMyWeek` refuses on 'unasked'. It
+                    now travels with the paragraph it is about. */}
+                {narrativeBlock(sp.lg)}
               </View>
             ) : (
               <>
-                {narrative ? <Text style={{ ...ty.body, color: t.ink2 }}>{narrative}</Text> : null}
+                {narrativeBlock(0)}
                 {/* An answer given once and then buried is how a consent stops
                     being one. It is changeable here, on the screen it governs. */}
                 {coachAvailable() && (consent === 'yes' || consent === 'no') ? (

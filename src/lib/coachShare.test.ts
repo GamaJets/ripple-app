@@ -21,9 +21,16 @@ import {
   ALWAYS_SENT, SENT_WITH_PERMISSION, NEVER_SENT,
   WITHHELD_NOTE, NOT_MEDICAL_ADVICE, WHERE_IT_GOES,
   weeklyFacts, REPORT_WITHHELD_NOTE, REPORT_CONSENT_TITLE, REPORT_CONSENT_BODY,
+  WITHHELD_FACTS_INSTRUCTION,
   type ShareConsent,
 } from './coachShare';
 import type { Injury } from './injuries';
+
+// A run that dies partway through — an import that throws, a top-level await
+// that rejects — exits 0 with most of the file never reached, and a suite that
+// passes by not running is worse than one that fails. So the failing exit code
+// is the starting state and the last line of the file is what clears it.
+process.exitCode = 1;
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -195,13 +202,69 @@ eq(weeklyFacts(FITNESS, HEALTH, 'unasked'), null,
 const noWeek = weeklyFacts(FITNESS, HEALTH, 'no')!;
 const yesWeek = weeklyFacts(FITNESS, HEALTH, 'yes')!;
 
-ok(noWeek.length === FITNESS.length, 'a declined answer sends the training half and only that');
+// The fact lines only. The instruction line asserted below is the one thing in
+// this list that is not a fact about the week, and every claim about what was
+// WITHHELD has to be made against the facts rather than against a sentence
+// whose whole job is to name the withheld things.
+const noWeekFacts = noWeek.filter((l) => l !== WITHHELD_FACTS_INSTRUCTION);
+
+ok(noWeekFacts.length === FITNESS.length, 'a declined answer sends the training half and only that');
 for (const h of HEALTH) {
   ok(!noWeek.includes(h), `no health line survives a declined answer — ${h}`);
 }
-ok(!noWeek.join(' ').includes('82.4'), 'no weight reaches a model that was told not to have it');
-ok(!noWeek.join(' ').includes('19%'), 'nor a body fat percentage');
-ok(!noWeek.join(' ').includes('sleep'), 'nor how they slept');
+ok(!noWeekFacts.join(' ').includes('82.4'), 'no weight reaches a model that was told not to have it');
+ok(!noWeekFacts.join(' ').includes('19%'), 'nor a body fat percentage');
+ok(!noWeekFacts.join(' ').includes('sleep'), 'nor how they slept');
+ok(!noWeekFacts.join(' ').includes('4/5'), 'nor a check-in score');
+ok(!/\d/.test(WITHHELD_FACTS_INSTRUCTION),
+  'and the instruction that names those things carries no figure of its own — it says what is missing, not what it was');
+
+/* ── the withheld half is SAID, not left as a silence ───────────────────────
+ *
+ * `WEEKLY_SUMMARY_PROMPT` ends "Do not invent anything the facts do not state",
+ * and on a list with the body half removed that was the model's only guidance.
+ * It describes the failure without naming its shape: a summariser handed three
+ * training lines and asked for warm prose in the second person writes the
+ * weigh-in sentence, because that is what a weekly summary looks like. Nothing
+ * in the payload distinguishes "this member has never been weighed" from "this
+ * member said no", and absence has no author.
+ */
+
+ok(noWeek.includes(WITHHELD_FACTS_INSTRUCTION),
+  'a declined answer tells the model the body half was withheld, in as many words');
+ok(noWeek[noWeek.length - 1] === WITHHELD_FACTS_INSTRUCTION,
+  'and it comes after the facts, as a constraint on them rather than as one of them');
+
+for (const forbidden of ['weight', 'body fat', 'muscle', 'measurements', 'sleep', 'recovery', 'check-in']) {
+  ok(WITHHELD_FACTS_INSTRUCTION.toLowerCase().includes(forbidden),
+    `the instruction names ${forbidden} — a list that omits one is a sentence the model may still write`);
+}
+ok(/do not guess/i.test(WITHHELD_FACTS_INSTRUCTION),
+  'it forbids guessing, not only stating — an estimate offered as encouragement is the same sentence');
+ok(/absence/i.test(WITHHELD_FACTS_INSTRUCTION),
+  'and it forbids remarking on the gap: "I don’t have your weigh-ins" turns the member’s own choice into a fault in their report');
+ok(/withheld|not among the facts|were not (sent|given)/i.test(WITHHELD_FACTS_INSTRUCTION),
+  'and it says the figures were withheld rather than leaving the model to read absence as absence of the thing itself');
+
+// The permissive answer gets the facts and nothing else. An instruction about
+// missing body figures, printed over a list that contains them, is an
+// invitation to write about a contradiction.
+ok(!yesWeek.includes(WITHHELD_FACTS_INSTRUCTION),
+  'a member who shared their numbers is not described to the model as having withheld them');
+ok(!yesWeek.join(' ').toLowerCase().includes('withheld'),
+  'and nothing in the shared payload says anything was held back');
+eq(yesWeek.length, FITNESS.length + HEALTH.length,
+  'the shared payload is exactly the two lists the screen offered — no line added on the way through');
+
+// A week with nothing in either pile. `askAboutMyWeek` refuses to ask for a
+// summary written from no facts, and it decides that by asking whether this
+// list is empty — so the instruction must not be what makes it non-empty, or
+// the model is asked for warm prose about a week it was told nothing about
+// except what it may not say.
+eq(weeklyFacts([], HEALTH, 'no')!.length, 0,
+  'no facts is no facts: the instruction does not stand in for a week');
+eq(weeklyFacts(['', '   '], HEALTH, 'no')!.length, 0,
+  'and blank lines do not make a week either');
 
 for (const line of [...FITNESS, ...HEALTH]) {
   ok(yesWeek.includes(line), `a yes sends everything the screen offered — ${line}`);
@@ -236,4 +299,6 @@ if (errors.length) {
   console.error(`coachShare: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);
   process.exit(1);
 }
-console.log('coachShare: ok (no name, no injury note, nothing at all until the member has answered, and the answer can be no)');
+// Cleared only here, at the bottom, with every assertion above it having run.
+process.exitCode = 0;
+console.log('coachShare: ok (no name, no injury note, nothing at all until the member has answered, the answer can be no, and a no is said out loud to the model)');
