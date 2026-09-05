@@ -539,11 +539,27 @@ export default function Devices() {
  //     screen, so the inset computes back to zero.
  //
  // So the props are inert until a keyboard appears and harmless after it goes.
- // They are left exactly as the other sixty-seven screens have them. The real
- // cause of the reported symptom is NOT yet known — and it may not be the
- // gesture at all: it was reported alongside "Apple Watch and WHOOP are
- // connected but not updating", and a pull whose reload returns no new figures
- // is indistinguishable, from the member's side, from a pull that never fired.
+ // They are left exactly as the other sixty-seven screens have them.
+ //
+ // ── What it actually was: the difference is not on this screen ─────────────
+ //
+ // It was never in this file. app/(client)/_layout.tsx set `headerShown: false`
+ // on the five bar tabs and nowhere else, so this screen — and every other
+ // `href: null` screen in the client app — took the navigator's default and got
+ // a bottom-tabs header on top of the one it draws itself. That header is
+ // `44 + statusBarHeight` tall, and `elements/Screen` does not reset the safe
+ // area under it, so the `<SafeAreaView edges={['top']}>` below then added the
+ // top inset again: about 160 points between the top of the screen and the top
+ // of the ScrollView, none of it belonging to the ScrollView.
+ //
+ // A RefreshControl belongs to its scroller. A pull started in that strip is not
+ // a pull at all — no spinner, no error, nothing — while the coach's Watch &
+ // Devices, in a group whose layout has always carried `headerShown: false`,
+ // starts its list at the top of the screen and refreshes on the same code.
+ // "Connected but not updating" is the same fault from the data side: the pull
+ // never fired, so `syncAll` never ran.
+ //
+ // Fixed in the layout, for all sixty-six of those screens at once.
 
  const G = layout.gutter;
 

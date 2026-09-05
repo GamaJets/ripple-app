@@ -67,9 +67,42 @@ export default function ClientLayout() {
     <Tabs
       backBehavior="history"
       screenOptions={{
-        headerStyle: { backgroundColor: t.surface },
-        headerTintColor: t.ink,
-        headerShadowVisible: false,
+        // No navigator header, anywhere in this group — the same line
+        // app/(trainer)/_layout.tsx and app/(owner)/_layout.tsx have always
+        // carried, and the one this file did not.
+        //
+        // It was set per-screen on the five bar tabs and nowhere else, so the
+        // sixty-six `href: null` detail screens below took the navigator's
+        // default, which is `true`
+        // (expo-router/build/react-navigation/elements/Screen.js: `headerShown
+        // = true` in the destructuring). Every one of them drew its own title
+        // and its own back control INSIDE a header the navigator had already
+        // drawn above it — two titles, and a back arrow that only one of them
+        // had, because a bottom-tabs header renders no back button at all
+        // (BottomTabView passes `header({ layout, options })` with no `back`).
+        //
+        // The cost was not only the doubled title. That header is a plain
+        // sibling View above the content, `44 + statusBarHeight` tall on a
+        // phone (elements/Header/getDefaultHeaderHeight.js), and
+        // `elements/Screen` does not reset SafeAreaInsetsContext underneath it
+        // — so the `<SafeAreaView edges={['top']}>` every one of these screens
+        // opens with then added the top inset a SECOND time. On an iPhone that
+        // put roughly 160 points between the top of the screen and the top of
+        // the ScrollView.
+        //
+        // Which is what the pull-to-refresh report was about. A RefreshControl
+        // belongs to its ScrollView, and a downward drag started in that strip
+        // is not in the ScrollView: no spinner, no error, nothing. The coach's
+        // Watch & Devices has no header, its list starts at the top of the
+        // screen, and the same gesture on the same code works — reported as
+        // "pull to refresh is working on the coach but not on the client app",
+        // and alongside it "connected but not updating", which is the same
+        // fault seen from the data side: the pull never fired, so `syncAll`
+        // never ran.
+        //
+        // The three header* style options that used to be here went with it.
+        // They only ever described a header this group does not draw.
+        headerShown: false,
         // The bar grows with the reader's text. 56 was drawn around a 23pt icon
         // and an 11pt name, and on Larger Text the name is 22 or 33 — which the
         // safe-area padding then pushes off the bottom of a bar that never
