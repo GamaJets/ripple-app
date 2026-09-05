@@ -39,12 +39,22 @@ eq(updateCheckLine({ state: 'disabled' }, at), 'off in this build', 'a dev build
 const all: UpdateCheck[] = [
   { state: 'idle' }, { state: 'disabled' }, { state: 'checking', at: 1 },
   { state: 'current', at: 1 }, { state: 'downloading', at: 1 },
-  { state: 'applying', at: 1 }, { state: 'failed', at: 1, why: 'x' },
+  { state: 'applying', at: 1 }, { state: 'ready', at: 1 },
+  { state: 'failed', at: 1, why: 'x' },
 ];
 for (const c of all) {
   const line = updateCheckLine(c, at);
   ok(typeof line === 'string' && line.length > 0, `${c.state} has a sentence`);
 }
+
+// 'ready' and 'current' are the pair this module exists for, so they must not
+// read alike: one means there is nothing to get, the other that there is and it
+// is already on the phone. A tester reading "up to date" on a handset holding
+// an unapplied bundle is the confusion the whole file is about.
+ok(updateCheckLine({ state: 'ready', at: 1 }, at) !== updateCheckLine({ state: 'current', at: 1 }, at),
+  'a downloaded-but-not-applied update does not read as already up to date');
+ok(/next time you open/i.test(updateCheckLine({ state: 'ready', at: 1 }, at)),
+  'and it says what will make it run');
 
 // ── watchers ─────────────────────────────────────────────────────────────
 forgetUpdateCheck();

@@ -47,6 +47,20 @@ export type UpdateCheck =
   | { state: 'downloading'; at: number }
   /** Downloaded; the reload is next, so this is rarely seen. */
   | { state: 'applying'; at: number }
+  /**
+   * Downloaded, and deliberately not applied yet.
+   *
+   * `reloadAsync()` tears the tree down, and app/_layout.tsx now refuses to do
+   * that while the app is in the background — a slow download outlasts the
+   * launch, and the reload then landed on top of a half-written message or a
+   * set being logged. The bundle is on the phone and runs at the next launch.
+   *
+   * Its own state rather than folded into 'current', because this whole module
+   * exists so that two situations a person would act on differently are not
+   * printed with one sentence: "already up to date" means there is nothing to
+   * get, and this means there is, and it is here.
+   */
+  | { state: 'ready'; at: number }
   /** Asked and it went wrong. `why` is for a person, not a log. */
   | { state: 'failed'; at: number; why: string };
 
@@ -90,6 +104,7 @@ export function updateCheckLine(c: UpdateCheck, at: (t: number) => string): stri
     case 'current':     return `already up to date (${at(c.at)})`;
     case 'downloading': return `downloading an update (${at(c.at)})`;
     case 'applying':    return `applying an update (${at(c.at)})`;
+    case 'ready':       return `an update is downloaded and runs next time you open the app (${at(c.at)})`;
     case 'failed':      return `check failed: ${c.why} (${at(c.at)})`;
   }
 }
