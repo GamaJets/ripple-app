@@ -191,15 +191,35 @@ export function offlineBanner(reach: Reach): string | null {
   return 'No connection. You are seeing what was on this phone the last time it could reach us.';
 }
 
-/**
- * Whether a screen may state, as a fact, that a read came back empty.
+/* ── `canAssertEmpty`, and why it is not here ──────────────────────────────
  *
- * The house rule is that an empty list under 'error' means UNKNOWN. This is the
- * same rule reaching one step further back: when the app cannot reach the
- * server at all, even a cached list that looks complete is a list from some
- * earlier moment, and "there are none" is not available as a sentence.
+ * There was a `canAssertEmpty(reach)` at this point in the file — "whether a
+ * screen may state, as a fact, that a read came back empty" — exported, tested,
+ * and called by NOTHING. Four comments in this tree stated the protection it
+ * gave as a fact about the running app: this file's own note on `observedFetch`
+ * below, src/lib/readDeadline.ts, src/lib/requestTimeout.ts and
+ * src/ui/reachability.tsx all said some version of "the banner appears,
+ * `canAssertEmpty` goes false, and every screen switches to the sentences it
+ * has for a phone that cannot reach us". No screen ever asked it anything.
+ *
+ * app/(client)/dashboard.tsx records the same defect one house down —
+ * "`offlineBanner` and `lapsedNote` were both written, both tested and both
+ * read by nothing" — and fixed one of the three. This was the third.
+ *
+ * It was deleted rather than wired, and the reason is that the ground it
+ * covered is already held. src/ui/loadStatus.ts refuses an empty list under
+ * 'error', src/lib/readCache.ts's rule 2 refuses to serve a cached list as
+ * 'ready', and `Fetched` puts the age of the read on screen through
+ * `useReachability()`. So the honest options were to wire it or to delete it,
+ * and wiring it would have meant editing screens on the strength of a
+ * protection whose remaining ground is a sliver. A comment asserting a
+ * safeguard that is not there is worse than no safeguard, and it is worse than
+ * the sliver.
+ *
+ * If a screen ever does need this, the sentence it wants is one line:
+ * `reach !== 'offline'`. What it must not have again is four files describing
+ * it as though somebody had already written it down.
  */
-export const canAssertEmpty = (reach: Reach): boolean => reach !== 'offline';
 
 /* ── the store ────────────────────────────────────────────────────────────
  *
@@ -297,9 +317,13 @@ export function resetReach(): void {
  *
  * `noteThrown` runs on EVERY attempt, as it fails, not once at the end. So on a
  * dead network the first timeout marks the app unreachable at its ceiling — the
- * banner appears, `canAssertEmpty` goes false, every screen switches to the
- * sentences it has for this — whether or not a retry is still in flight behind
- * it. A retry therefore extends how long one READ takes to give up. It never
+ * home screen's `offlineBanner` appears and `retryLine` stops sending people to
+ * their router over a refusal — whether or not a retry is still in flight
+ * behind it. Those two are what the state actually reaches today; see the note
+ * where `canAssertEmpty` used to be, above, for the third sentence this comment
+ * claimed and no screen ever read.
+ *
+ * A retry therefore extends how long one READ takes to give up. It never
  * extends how long the APP takes to stop claiming it is online, which is the
  * number a person is actually standing in front of.
  *

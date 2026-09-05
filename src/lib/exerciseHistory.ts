@@ -305,6 +305,69 @@ export function exerciseOutings(
   return [...dated, ...loose];
 }
 
+/* ── what a read ASKED for, which is not what came back ───────────────────
+ *
+ * `LoadStatus` answers one question about a read — did it come back CUT — and
+ * it answers it well. It cannot answer the other one, and for as long as this
+ * file had only `whole` the two were being read as the same question.
+ *
+ * app/(trainer)/client-training.tsx is the worked example, and it is the screen
+ * that makes the confusion inevitable rather than unlucky. Its range control
+ * exists PRECISELY to bring a long record under PostgREST's ceiling: tapping
+ * 12 Weeks re-asks the query with a `.gte('performed_at', …)` bound, the answer
+ * comes back short of the cap, and the screen sets 'ready'. That is the truth
+ * about the read — nothing was truncated, so there is nothing to flag. It is
+ * not the truth about the person. Over a three-year history the panel then
+ * printed "Best Est. 1RM 150 kg", "Since the First Day on Record" and "20 of
+ * the 34 movements on record", with no truncation warning anywhere, to a coach
+ * whose client had benched 165 kg in March. The read was complete. It simply
+ * was not the record.
+ *
+ * So a read has two independent properties:
+ *
+ *   WHOLE   nothing fell off the end of it. `LoadStatus 'ready'`, and what it
+ *           licenses is counting the rows that came back.
+ *   COVERS  the query was asked over the whole record rather than a window.
+ *           This is what licenses the words "on record", "the first day" and
+ *           any figure offered as a lifetime best.
+ *
+ * A windowed read is whole AND does not cover, simultaneously, which is why
+ * neither flag can be derived from the other.
+ */
+
+/** How a log was read: what came back, and what was asked for. */
+export interface ExerciseRead {
+  status: LoadStatus;
+  /**
+   * How many days back the query asked for, or null when it asked for the
+   * whole record.
+   *
+   * Omitting it means the caller has not said, and that is read as NOT
+   * covering the record. Silence fails closed on purpose: defaulting to
+   * "everything" is exactly the assumption that put a twelve-week window under
+   * the words "on record", and a coverage claim nobody made is not a coverage
+   * claim. A caller that genuinely reads the lot says so, with `null`.
+   */
+  windowDays?: number | null;
+}
+
+/**
+ * May a screen speak of this read as the person's RECORD?
+ *
+ * Only when both halves hold: the read came back uncut, and it was asked over
+ * everything. A bare `LoadStatus` — a caller that has said nothing about its
+ * window — is never enough, however healthy that status is.
+ */
+export function readCoversRecord(read: ExerciseRead | LoadStatus | undefined): boolean {
+  if (read == null || typeof read === 'string') return false;
+  return read.status === 'ready' && read.windowDays === null;
+}
+
+/** The `LoadStatus` half of either shape. */
+function readStatus(read: ExerciseRead | LoadStatus): LoadStatus {
+  return typeof read === 'string' ? read : read.status;
+}
+
 /* ── finding a movement ───────────────────────────────────────────────────── */
 
 /** One movement in somebody's record, as a search result reads it. */
@@ -312,8 +375,26 @@ export interface ExerciseSummary {
   slug: string;
   /** The most recent spelling on record. */
   name: string;
-  /** Days it was logged at all, within whatever was read — sets or no sets. */
+  /** Days it was logged at all, within whatever was read — sets or no sets.
+   *
+   *  A count over the READ and never over the record. It is a true figure for
+   *  every read that landed, including a windowed one and a truncated one, and
+   *  that is exactly why it may not be printed on its own: a screen that reads
+   *  84 days out of a 12-week window and writes "34 days" beside a movement
+   *  somebody has done for three years has stated a number about a person that
+   *  is not about them. `recordDays` is the same figure with the claim
+   *  attached. */
   days: number;
+  /**
+   * `days` as a statement about the RECORD: the same number when the read was
+   * neither cut nor windowed, and null otherwise.
+   *
+   * Carried rather than left to each screen's own comparison for the reason
+   * `outingCount` is: the check that has to be right is "may I say this about
+   * this person", the two ways it fails are different, and a null cannot be
+   * printed by accident where a number can.
+   */
+  recordDays: number | null;
   /**
    * Of those, the days that carried at least one set, and therefore the length
    * of the trail `exerciseOutings` returns.
@@ -353,7 +434,14 @@ export interface ExerciseSummary {
  * it out of the index altogether would make the search box deny that a client
  * who has cycled fifteen times has ever cycled.
  */
-export function exerciseIndex(log: readonly WorkoutEntry[], history: BodyweightHistory = []): ExerciseSummary[] {
+export function exerciseIndex(
+  log: readonly WorkoutEntry[],
+  history: BodyweightHistory = [],
+  /** How this log was read. Omitted means the caller has not said, and every
+   *  record-shaped figure below is withheld — see `ExerciseRead`. */
+  read?: ExerciseRead | LoadStatus,
+): ExerciseSummary[] {
+  const covers = readCoversRecord(read);
   const bySlug = new Map<string, WorkoutEntry[]>();
   for (const e of log) {
     if (!e || typeof e.exercise !== 'string' || typeof e.t !== 'string' || !e.t) continue;
@@ -389,8 +477,9 @@ export function exerciseIndex(log: readonly WorkoutEntry[], history: BodyweightH
       if (lastAt == null || e.t.localeCompare(lastAt) > 0) { lastAt = e.t; name = e.exercise; }
     }
 
+    const days = dayKeys.size + undated;
     out.push({
-      slug, name, days: dayKeys.size + undated, daysWithSets: outings.length,
+      slug, name, days, recordDays: covers ? days : null, daysWithSets: outings.length,
       lastDay, lastAt, best1RMKg: best1RM, topLoadKg: topLoad,
     });
   }
@@ -476,7 +565,11 @@ function movementBetween(from: ExerciseOuting | null, to: ExerciseOuting | null)
  *                 A null `outings` is what produces it, and callers pass null
  *                 on 'error' precisely so an empty array can never arrive
  *                 meaning two things at once.
- *   'none'        the read landed and this movement is not in the record.
+ *   'none'        the read landed and this movement is not in it. Not "not in
+ *                 the record" unless `coversRecord` — under a twelve-week
+ *                 window it means the client has not done this SINCE JUNE, and
+ *                 a screen that says "never" about a lift somebody has been
+ *                 doing for three years has told their coach something false.
  *   'some'        there are outings.
  *
  * Same discipline as `TrainingBoard`: any figure that is a COUNT or a claim
@@ -489,13 +582,31 @@ export interface ExerciseTrend {
   state: 'unreadable' | 'none' | 'some';
   /** Newest first. Empty under 'unreadable' and 'none'. */
   outings: ExerciseOuting[];
-  /** True only when the read was whole. Screens word `best` and `sinceFirst`
-   *  off this: under a truncated read they are the best and the earliest ON
-   *  THIS PAGE, which is a different and much smaller claim. */
+  /** True when the read was not CUT — nothing fell off the end, so `outings`
+   *  is every outing the query returned. NOT a claim that the query asked for
+   *  everything: a twelve-week window comes back whole every time. See
+   *  `ExerciseRead`. */
   whole: boolean;
-  /** How many days this movement was done, or null when the read cannot
-   *  support a count. */
+  /**
+   * True when the read was whole AND was asked over the whole record — the one
+   * condition under which "on record", "the first day" and a lifetime best are
+   * true sentences.
+   *
+   * Screens word `best` and `sinceFirst` off THIS and not off `whole`. Under a
+   * windowed read they are the best and the earliest IN THE WINDOW, which is a
+   * different and much smaller claim, and the one the coach's screen was making
+   * in the record's name.
+   */
+  coversRecord: boolean;
+  /** How many days this movement was done WITHIN THE READ, or null when the
+   *  read was cut and even that is a fraction of an unknown set. A true figure
+   *  about the window, and not a figure about the person — for that, and for
+   *  anything a screen prints as "N days" beside a movement's name, see
+   *  `recordOutingCount`. */
   outingCount: number | null;
+  /** The same count offered as a fact about the person: null unless
+   *  `coversRecord`. */
+  recordOutingCount: number | null;
   /** The newest outing. Safe under a truncated read: the read is ordered
    *  newest first, so the newest row is the one thing truncation cannot take. */
   latest: ExerciseOuting | null;
@@ -509,19 +620,32 @@ export interface ExerciseTrend {
 }
 
 const UNREADABLE_TREND: ExerciseTrend = {
-  state: 'unreadable', outings: [], whole: false, outingCount: null,
+  state: 'unreadable', outings: [], whole: false, coversRecord: false,
+  outingCount: null, recordOutingCount: null,
   latest: null, best: null, sinceLast: NO_MOVEMENT, sinceFirst: NO_MOVEMENT,
 };
 
-export function exerciseTrend(outings: ExerciseOuting[] | null, status: LoadStatus): ExerciseTrend {
+export function exerciseTrend(
+  outings: ExerciseOuting[] | null,
+  /** A bare `LoadStatus` still means what it always meant about truncation,
+   *  and says nothing about the window — so `coversRecord` is false under it
+   *  and every record-shaped figure is withheld. A caller that reads the whole
+   *  record passes `{ status, windowDays: null }` and gets them back. */
+  read: ExerciseRead | LoadStatus,
+): ExerciseTrend {
+  const status = readStatus(read);
   if (outings == null || status === 'error') return UNREADABLE_TREND;
   const whole = status === 'ready';
+  const coversRecord = readCoversRecord(read);
   if (!outings.length) {
     // A read still in flight has not established anything, and 'nothing on
     // record' is a statement about a person that must never be made from a
     // question nobody has finished asking.
     if (status === 'loading') return UNREADABLE_TREND;
-    return { ...UNREADABLE_TREND, state: 'none', whole, outingCount: whole ? 0 : null };
+    return {
+      ...UNREADABLE_TREND, state: 'none', whole, coversRecord,
+      outingCount: whole ? 0 : null, recordOutingCount: coversRecord ? 0 : null,
+    };
   }
 
   const latest = outings[0];
@@ -538,7 +662,9 @@ export function exerciseTrend(outings: ExerciseOuting[] | null, status: LoadStat
     state: 'some',
     outings,
     whole,
+    coversRecord,
     outingCount: whole ? outings.length : null,
+    recordOutingCount: coversRecord ? outings.length : null,
     latest,
     best,
     sinceLast: movementBetween(previous, latest),

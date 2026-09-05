@@ -674,6 +674,12 @@ export default function History() {
     <ExerciseHistoryPanel
       log={log}
       status={whole ? 'ready' : 'partial'}
+      /* The read above has no date bound on it at all — it asks for this
+         member's whole `workouts` table and the row cap is the only thing that
+         can shorten it. So the window is null, which is what licenses "on
+         record" and "the first day" here, and truncation is still carried by
+         the status beside it. */
+      windowDays={null}
       unit={wu}
       voice={{ they: 'You', their: 'your', have: 'have' }}
       /* The panel already draws a read stamp; without this it said WHEN and

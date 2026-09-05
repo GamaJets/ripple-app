@@ -22,7 +22,7 @@ import {
   isLateCancellation, insideNoticeWindow, noticeHoursOf, lateCancelFee,
   feeAmountLine, unstatedCurrency, unstatedCurrencyCoach, noticeLabel, cancelWarningLine, feeRecordedLine,
   waitlistOrder, nextWaitlistClaim, waitlistPosition, waitlistLine, ordinal,
-  openSlotWindow, slotWindowLine, SLOT_WARN_DAYS,
+  openSlotWindow, slotWindowLine, weeklyFromSlots, SLOT_WARN_DAYS,
   classClashes, classCheckCaveat, overlaps,
   type CancellationPolicy, type WaitlistEntry,
 } from './booking';
@@ -357,6 +357,60 @@ eq(ordinal(22), '22nd', '22nd');
   // time, and counting it would hold the warning back on a diary that is empty.
   eq(openSlotWindow([{ startsAt: 'not a date', status: 'available' }], { known: true, hasWeekly: true, now: NOW }).state,
     'empty', 'an unreadable start is not a bookable slot');
+
+  /* ── the third state of the weekly hours ──────────────────────────────────
+   *
+   * `known` and `clientsOnBook` were three-state from the start and `hasWeekly`
+   * was a bare boolean, so "we have not read the availability yet" and "there
+   * is none" were the same value.
+   *
+   * The roster read is small and the availability read is not, so the roster
+   * lands first: `clientsOnBook = 12` with the weekly hours still in flight,
+   * and the calendar drew "Your 12 clients cannot book you. You have no weekly
+   * hours set" — with a call to action — to a coach who has Tuesday-to-Saturday
+   * hours and four weeks of slots behind them. The same sentence appeared when
+   * the availability read FAILED, because a failed read is an empty slot list
+   * too. */
+  {
+    const waiting = { known: true, clientsOnBook: 12, now: NOW } as const;
+
+    eq(openSlotWindow([], { ...waiting, hasWeekly: null }).state, 'unknown',
+      'an unread availability with nothing open says nothing: never-set and empty are opposite sentences and both are live');
+    eq(slotWindowLine(openSlotWindow([], { ...waiting, hasWeekly: null }), 12), null,
+      'so no coach is told their book is dead on the strength of a read that has not come back');
+
+    // And it is not a blanket silence. Open slots settle the question without
+    // the availability read at all — the clients CAN book, which is what both
+    // silent states are about — so the window warning still runs.
+    const ending = openSlotWindow([slot(2)], { ...waiting, hasWeekly: null });
+    eq(ending.state, 'ending', 'open slots make the weekly-hours read irrelevant to the sentence');
+    ok((slotWindowLine(ending) ?? '').includes('in 2 days'), 'and the coach still hears their diary is running out');
+    eq(openSlotWindow([slot(28)], { ...waiting, hasWeekly: null }).state, 'healthy',
+      'a healthy window is healthy whether or not the weekly hours have been read');
+
+    // False still means what it meant. The fix must not have bought silence by
+    // losing the sentence the state exists for.
+    eq(openSlotWindow([], { ...waiting, hasWeekly: false }).state, 'never-set',
+      'a read that came back saying there are no weekly hours still reaches never-set');
+    eq(openSlotWindow([], { known: true, hasWeekly: true, now: NOW }).state, 'empty',
+      'and hours that ARE set with nothing open is still an empty window');
+  }
+
+  /* ── and the one-liner that produced the false ─────────────────────────────
+   *
+   * `isWhole(status) && slots.length > 0` reads as somebody who thought about
+   * truncation and answers "they have none" for every read that has not landed.
+   * `weeklyFromSlots` is the three-state version of that expression. */
+  {
+    eq(weeklyFromSlots('loading', 0), null, 'nothing read yet is not "no hours set"');
+    eq(weeklyFromSlots('error', 0), null, 'and neither is a read that failed');
+    eq(weeklyFromSlots('ready', 0), false, 'a whole read with no slots is genuinely none');
+    eq(weeklyFromSlots('ready', 4), true, 'and one with slots is genuinely some');
+    eq(weeklyFromSlots('partial', 3), true,
+      'a truncated availability read holds real rows: a coach with more weekly slots than fit in one read is not a coach with none');
+    eq(weeklyFromSlots('loading', 3), true,
+      'and a slot in hand proves the hours exist before the read has finished landing');
+  }
 }
 
 /* ── classes and one-to-ones now know the other exists ──────────────────── */

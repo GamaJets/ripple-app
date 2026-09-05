@@ -123,9 +123,15 @@ export default function ExerciseScreen() {
   // Built from the whole log rather than from a filtered one, because the index
   // is what knows whether a movement was logged with no sets against it at all
   // — the cardio case, which reads as "never done" if it is filtered out first.
+  // The read is handed in with the log. `useWorkoutLog` asks for this member's
+  // whole `workouts` table with no date bound, so the window is null and the
+  // day count on the trail below is a fact about them; `logStatus` still
+  // carries truncation on its own.
   const summary = useMemo(
-    () => (slug ? exerciseIndex(log, weightSeries).find((e) => e.slug === slug) ?? null : null),
-    [log, weightSeries, slug],
+    () => (slug
+      ? exerciseIndex(log, weightSeries, { status: logStatus, windowDays: null }).find((e) => e.slug === slug) ?? null
+      : null),
+    [log, weightSeries, slug, logStatus],
   );
   const [saving, setSaving] = useState(false);
 
@@ -455,6 +461,9 @@ export default function ExerciseScreen() {
               summary={summary}
               log={log}
               status={logStatus}
+              /* Unwindowed, as above — so nothing here loses the sentences it
+                 has today. */
+              windowDays={null}
               unit={wu}
               voice={{ they: 'You', their: 'your', have: 'have' }}
               history={weightSeries}

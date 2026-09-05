@@ -356,10 +356,13 @@ export interface SessionLogCounts {
   /** Session id → how many `workouts` rows name it. Only meaningful under a
    *  status `isWhole` accepts. */
   bySession: Map<string, number>;
-  /** Session id → the movements that were done in it, in the order they were
-   *  performed, de-duplicated. A count answers "was it written up"; the names
-   *  answer "what did we do", which is the question a coach opening last
-   *  Tuesday actually has. */
+  /** Session id → the movements that were done in it, newest first and
+   *  de-duplicated — the same direction the read is ordered in, so the three
+   *  `loggedExercisesLine` names are the three most recent rather than three
+   *  chosen from an end the cap may have removed.
+   *
+   *  A count answers "was it written up"; the names answer "what did we do",
+   *  which is the question a coach opening last Tuesday actually has. */
   namesBySession: Map<string, string[]>;
 }
 
@@ -416,12 +419,33 @@ export async function fetchSessionLogCounts(
       .from('workouts')
       .select('id, session_id, exercise, performed_at')
       .in('session_id', chunk)
+      // ── Newest first, and this is the whole of the cap's honesty ────────
+      //
+      // Both of these read `ascending: true` until now, and the effect was that
+      // the cap kept the OLDEST rows. `readCappedByIds` chunks the id list in
+      // the order it is given, and app/(trainer)/sessions.tsx gives it
+      // `pastSessions(...)` — newest first — so the first chunk is the ~200
+      // most recent sessions and the cap falls inside it: a coach with 150 past
+      // sessions averaging four movements sends 600 rows at a 400 cap, and the
+      // 200 that were dropped were THIS WEEK's. The row then read "at least 0
+      // exercises" under sessions they had run and written up two days ago,
+      // while sessions from two months ago showed real counts. The truncation
+      // was flagged honestly the whole time; the cut was landing on the wrong
+      // end of the list.
+      //
+      // Descending puts the cut where a cut can be afforded. The rows a coach
+      // is looking at on a marking screen are the recent ones, and a count that
+      // is missing the oldest hour of a long history is a count that says "at
+      // least" about something nobody is reading.
+      //
       // `.order('id')` behind `performed_at` so the rows the cap CUTS are the
       // same ones every time. Two movements logged in the same second are two
       // rows Postgres may return in either order, and at the boundary that
-      // decides which of them a coach is shown.
-      .order('performed_at', { ascending: true })
-      .order('id', { ascending: true })
+      // decides which of them a coach is shown. It follows the same direction
+      // as the key it is breaking ties for; a descending primary with an
+      // ascending tiebreak is a third order that matches neither.
+      .order('performed_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(capLimit(cap)),
     { cap },
   );

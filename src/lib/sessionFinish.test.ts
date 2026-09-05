@@ -332,15 +332,25 @@ function fakeSb(
   rows: Row[] | null | ((chunk: string[], nth: number) => { data: Row[] | null; error: unknown }),
   error: unknown = null,
 ) {
-  const asked: { table: string; in: string[] | null; limit: number | null; chunks: string[][] } =
-    { table: '', in: null, limit: null, chunks: [] };
+  const asked: {
+    table: string; in: string[] | null; limit: number | null; chunks: string[][];
+    /** Every `.order()` of the LAST chunk asked for, in the order it was
+     *  applied. Recorded because the direction of these two decides WHICH rows
+     *  the cap keeps, and a fake that swallowed the arguments could not tell a
+     *  read that keeps this week from one that keeps last spring. */
+    orders: { column: string; ascending: boolean | undefined }[];
+  } = { table: '', in: null, limit: null, chunks: [], orders: [] };
   const from = (table: string) => {
     asked.table = table;
+    asked.orders = [];
     let mine: string[] = [];
     const chain: any = {
       select: () => chain,
       in: (_c: string, ids: string[]) => { mine = ids; asked.in = ids; asked.chunks.push(ids); return chain; },
-      order: () => chain,
+      order: (column: string, opts?: { ascending?: boolean }) => {
+        asked.orders.push({ column, ascending: opts?.ascending });
+        return chain;
+      },
       limit: (n: number) => { asked.limit = n; return chain; },
       then: (res: (v: { data: Row[] | null; error: unknown }) => unknown) => res(
         typeof rows === 'function' ? rows(mine, asked.chunks.length - 1) : { data: rows, error },
@@ -367,7 +377,7 @@ async function readAssertions(): Promise<void> {
     eq(out.bySession.get('s1'), 3, 'three rows filed against a session is a count of three');
     eq(out.bySession.get('s2'), 1, 'and one is one');
     eq(out.bySession.get('s3'), undefined, 'a session nothing was filed against has no entry rather than a zero it did not earn');
-    eq(out.namesBySession.get('s1')!.join(', '), 'Back Squat, Bench Press, Deadlift', 'and the movements are named in the order they were performed');
+    eq(out.namesBySession.get('s1')!.join(', '), 'Back Squat, Bench Press, Deadlift', 'and the movements are named in the order the read returned them');
   }
 
   {
@@ -418,6 +428,32 @@ async function readAssertions(): Promise<void> {
     // total it cannot stand behind.
     ok(/not necessarily all of them/.test(loggedAgainstLine(out.status, out.bySession.get('s1') ?? null)),
       'and the sentence a coach reads says the figure is a floor rather than a total');
+  }
+
+  /* ── which end the cap cuts ───────────────────────────────────────────────
+   *
+   * The flag above is honest and it was landing on the wrong rows. Both orders
+   * read `ascending: true`, so the cap kept the OLDEST workouts; the id list
+   * arrives from app/(trainer)/sessions.tsx as `pastSessions(...)` — newest
+   * first — and `readCappedByIds` chunks it in that order, so the cap falls
+   * inside the chunk holding the most recent sessions. A coach with 150 past
+   * sessions averaging four movements sends 600 rows at a 400 cap and the 200
+   * that fell off were THIS WEEK's: their marking screen read "at least 0
+   * exercises" under hours they had run and written up two days ago, while
+   * sessions from two months back showed real counts.
+   *
+   * Asserted on the query rather than on the output, because the cut happens in
+   * PostgREST and the only thing this side can be right or wrong about is the
+   * direction it asks for. */
+  {
+    const { sb, asked } = fakeSb([log('s1')]);
+    await fetchSessionLogCounts(sb, ['s1']);
+    eq(asked.orders.length, 2, 'the read is ordered on two columns, so a tie cannot decide which rows the cap keeps');
+    eq(asked.orders[0].column, 'performed_at', 'the newest workout is the one a coach is looking at');
+    eq(asked.orders[0].ascending, false, 'so the read is newest-first and the cap cuts the oldest rows, not this week\'s');
+    eq(asked.orders[1].column, 'id', 'and the tie-break is stable');
+    eq(asked.orders[1].ascending, false,
+      'in the same direction as the key it breaks ties for — a descending primary with an ascending tie-break is a third order matching neither');
   }
 
   /* ── a read that did not happen ───────────────────────────────────────── */

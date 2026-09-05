@@ -20,7 +20,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, Flag, Field, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric } from '../../src/theme/scale';
-import { insideNoticeWindow, feeAmountLine, unstatedCurrencyCoach, noticeLabel, openSlotWindow, slotWindowLine, classClashes, classCheckCaveat, type CancellationPolicy } from '../../src/lib/booking';
+import { insideNoticeWindow, feeAmountLine, unstatedCurrencyCoach, noticeLabel, openSlotWindow, slotWindowLine, weeklyFromSlots, classClashes, classCheckCaveat, type CancellationPolicy } from '../../src/lib/booking';
 // "I work Tuesdays 7 to 7", said once instead of forty-eight times. See that
 // file's header for why trainer_availability was empty: offering 07:00–19:00 in
 // quarters meant forty-eight separate additions for ONE day.
@@ -638,12 +638,19 @@ export default function TrainerSchedule() {
    * one, and this is the screen where that mistake sends a coach to regenerate
    * a diary that is already full.
    *
-   * `availKnown` gates the OTHER half: a coach whose weekly times could not be
-   * read has not been shown to have none, so they are not told their generated
-   * slots have run out either.
+   * `hasWeekly` is the OTHER half, and it is three-state for the same reason
+   * the two above are. `availKnown && availSlots.length > 0` collapsed it into
+   * a boolean that answered FALSE — "this coach has no weekly hours" — for
+   * every read still in flight and every read that failed, and 'never-set' is
+   * the state that prints "Your 12 clients cannot book you" with a call to
+   * action. `weeklyFromSlots` is the same question answered in three: any slot
+   * at all proves the hours exist whatever the status, zero slots means none
+   * only once the read was whole, and everything else — including
+   * `availStatus === 'error'`, which the old expression also read as none — is
+   * null, which `openSlotWindow` keeps silent about.
    */
   const slotWindow = openSlotWindow(sessions, {
-    known, hasWeekly: availKnown && availSlots.length > 0, clientsOnBook,
+    known, hasWeekly: weeklyFromSlots(availStatus, availSlots.length), clientsOnBook,
   });
   const slotLine = slotWindowLine(slotWindow, clientsOnBook);
   const [availOpen, setAvailOpen] = useState(false);
@@ -2412,6 +2419,18 @@ export default function TrainerSchedule() {
    * inside the block, so unblocking gives back the hours but not the offers.
    * A coach who frees up a fortnight and finds their clients still cannot book
    * it has been told nothing, twice.
+   *
+   * ── And both buttons threw the answer away ────────────────────────────
+   *
+   * `removeSession` restores the row when the server refuses the delete —
+   * PostgREST answers a delete that matched nothing with a 204 and no error, so
+   * a stale row or another trainer's slot used to vanish off the calendar and
+   * be back at the next launch. Now it comes straight back, which is right, and
+   * with the promise discarded it came back with NOTHING SAID: the coach
+   * watched a row they had just confirmed away reappear under their thumb. The
+   * blocked arm is the worse half — they were told in the sheet above that the
+   * block would be lifted. Same shape as `confirmWaive`: read the boolean, and
+   * say so when it is false.
    */
   function removeOpen(s: TrainingSession) {
     if (s.status === 'blocked') {
@@ -2420,14 +2439,32 @@ export default function TrainerSchedule() {
         `${timeLabel(s.startsAt)} on ${dateOfLabel(new Date(s.startsAt))} is blocked, so nobody can book it. Freeing it lifts the block.\n\nAny open slots the block withdrew do not come back — put them up again with Generate Open Slots in Weekly Availability.`,
         [
           { text: 'Keep it blocked', style: 'cancel' },
-          { text: 'Free it up', style: 'destructive', onPress: () => removeSession(s.id) },
+          { text: 'Free it up', style: 'destructive', onPress: async () => {
+            const ok = await removeSession(s.id);
+            if (!ok) {
+              Alert.alert(
+                'Still blocked',
+                `That did not save, so ${timeLabel(s.startsAt)} on ${dateOfLabel(new Date(s.startsAt))} is still blocked and nobody can book it. It is back on your calendar. Try again.`,
+                [{ text: 'OK' }],
+              );
+            }
+          } },
         ],
       );
       return;
     }
     Alert.alert('Remove open slot?', `${timeLabel(s.startsAt)} is currently open. Remove it from your availability?`, [
       { text: 'Keep', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => removeSession(s.id) },
+      { text: 'Remove', style: 'destructive', onPress: async () => {
+        const ok = await removeSession(s.id);
+        if (!ok) {
+          Alert.alert(
+            'Still open',
+            `That did not save, so ${timeLabel(s.startsAt)} is still on your availability and a client can still book it. It is back on your calendar. Try again.`,
+            [{ text: 'OK' }],
+          );
+        }
+      } },
     ]);
   }
 

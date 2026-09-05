@@ -7,6 +7,9 @@ import type { TrainingSession, CancellationResult } from './types';
 // units, and the `* 100` that bridged them was a hundred-times error waiting
 // for the first gym that charges in yen.
 import { wholeMoney } from './coachMoney';
+// `openSlotWindow` has to be able to say "the availability read has not landed
+// yet", and `isWhole` is the codebase's one answer to "is this all of it".
+import { isWhole, type LoadStatus } from '../ui/loadStatus';
 
 export const CANCEL_WINDOW_HOURS = 24;
 
@@ -389,6 +392,16 @@ export function overlaps(
  * said.
  */
 export type SlotWindowState =
+  /**
+   * Nothing may be said. Two ways in, and the second was missing until a coach
+   * with a full week was told their clients could not book them:
+   *
+   *   · the diary itself is unread (`known` false), or
+   *   · the weekly availability is unread (`hasWeekly` null) and there are no
+   *     open slots to settle it either way — in which case "you have never set
+   *     your hours" and "your hours are set and the generated slots have run
+   *     out" are both live, and they are opposite sentences.
+   */
   | 'unknown'
   /** No weekly availability, and nobody on the book yet. Nothing to say. */
   | 'idle'
@@ -418,9 +431,52 @@ export interface SlotWindow {
  *  that it is not on screen for most of a month and stops being read. */
 export const SLOT_WARN_DAYS = 7;
 
+/**
+ * Does this coach have weekly hours set, as far as anybody can tell?
+ *
+ * True, false, and NOT YET KNOWN, from the availability read's own status and
+ * the slots it returned. Exported because collapsing those three into a
+ * boolean is the mistake this exists to stop, and the collapse is a one-liner
+ * that reads as care: `isWhole(status) && slots.length > 0` looks like somebody
+ * who thought about truncation, and it answers `false` — "they have none" —
+ * for every read that has not landed and every read that failed.
+ *
+ * Any slot at all proves the hours exist, whatever the status: a 'partial'
+ * availability read holds real rows, and a coach with more weekly slots than
+ * fit in one read is not a coach with none. Zero slots means none ONLY when the
+ * read was whole. Everything else is null.
+ */
+export function weeklyFromSlots(status: LoadStatus, slotCount: number): boolean | null {
+  if (slotCount > 0) return true;
+  return isWhole(status) ? false : null;
+}
+
 export function openSlotWindow(
   sessions: readonly { startsAt: string; status?: string | null }[],
-  opts: { known: boolean; hasWeekly: boolean; clientsOnBook?: number | null; now?: number; warnDays?: number },
+  opts: {
+    known: boolean;
+    /**
+     * Whether weekly availability is set — or null when that read has not
+     * landed, which is a third state and not a quiet `false`.
+     *
+     * ── What the boolean cost ──────────────────────────────────────────
+     *
+     * The roster read is small and the availability read is not, so the roster
+     * lands first. With `hasWeekly` a bare boolean, `clientsOnBook = 12` and an
+     * availability read still in flight, this function reached 'never-set' and
+     * the calendar drew "Your 12 clients cannot book you. You have no weekly
+     * hours set" — with a call to action — to a coach with Tuesday-to-Saturday
+     * hours and four weeks of open slots. `known` and `clientsOnBook` were both
+     * already three-state, for this exact reason; this field was the one that
+     * was not, and it is the one the sentence is about.
+     *
+     * `weeklyFromSlots` above is how a screen produces it.
+     */
+    hasWeekly: boolean | null;
+    clientsOnBook?: number | null;
+    now?: number;
+    warnDays?: number;
+  },
 ): SlotWindow {
   const now = opts.now ?? Date.now();
   const warnDays = opts.warnDays ?? SLOT_WARN_DAYS;
@@ -454,12 +510,25 @@ export function openSlotWindow(
   const lastMs = open > 0 ? future[future.length - 1] : null;
   const lastAt = lastMs === null ? null : new Date(lastMs).toISOString();
   const daysLeft = lastMs === null ? null : Math.floor((lastMs - now) / 86_400_000);
-  if (!opts.hasWeekly) {
+  // `=== false` and not `!hasWeekly`. Null is "we have not read it", and the
+  // two sentences below — one of which tells a coach their book is dead —
+  // are only available once somebody has actually looked.
+  if (opts.hasWeekly === false) {
     const waiting = opts.clientsOnBook != null && opts.clientsOnBook > 0;
     return { state: waiting ? 'never-set' : 'idle', open, lastAt, daysLeft };
   }
-  if (open === 0) return { state: 'empty', open, lastAt, daysLeft };
-  return { state: (daysLeft as number) <= warnDays ? 'ending' : 'healthy', open, lastAt, daysLeft };
+  if (open > 0) {
+    // Open slots settle it without needing the availability read at all: the
+    // clients CAN book, which is what both of the silent states above are
+    // about, and neither of the two sentences below mentions weekly hours.
+    return { state: (daysLeft as number) <= warnDays ? 'ending' : 'healthy', open, lastAt, daysLeft };
+  }
+  // No open slots and no answer about the weekly hours. 'never-set' and 'empty'
+  // are the two live readings, they say opposite things about what the coach
+  // has done, and picking one on the strength of a read that has not come back
+  // is how the wrong one gets printed. Silence until it does.
+  if (opts.hasWeekly == null) return { state: 'unknown', open, lastAt, daysLeft };
+  return { state: 'empty', open, lastAt, daysLeft };
 }
 
 /**

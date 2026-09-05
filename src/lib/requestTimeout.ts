@@ -15,9 +15,13 @@
 // that has stopped forwarding, a bar of signal in a lift shaft. The radio is
 // associated, the request leaves, and nothing comes back — AND NOTHING ERRORS.
 // That last clause is the whole bug. `noteUnreachable` is never called, so the
-// app still believes it is online: no banner, `canAssertEmpty` still true, and
-// every provider waiting on that read sits in 'loading' with no way out. The
-// screens all have correct 'error' copy and none of it can ever be reached.
+// app still believes it is online: no `offlineBanner`, `retryLine` still
+// wording a dead network as though the server had refused, and every provider
+// waiting on that read sits in 'loading' with no way out. The screens all have
+// correct 'error' copy and none of it can ever be reached. (This sentence used
+// to name a `canAssertEmpty` as well. It was exported, tested and called by
+// nothing, and has been deleted — see the note standing in its place in
+// src/lib/reachability.ts.)
 //
 // A coach reported the visible half — "I pull down to refresh and it keeps
 // refreshing". src/lib/pullRefresh.ts put a 20-second ceiling on the SPINNER,

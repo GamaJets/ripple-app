@@ -107,8 +107,11 @@ import { CALL_CEILING_MS, maxAttempts } from './requestTimeout';
  *
  * Because it is not silence. The transport files its verdict per ATTEMPT, so
  * the first timeout at thirty seconds already marks the app unreachable —
- * `offlineBanner` appears, `canAssertEmpty` goes false, and every screen
- * switches to the sentences it has for a phone that cannot reach us. This
+ * `offlineBanner` appears and `retryLine` stops sending people to their router
+ * over a refusal, which are the two things that state actually reaches today.
+ * (It used to claim a third, `canAssertEmpty`; that function was exported,
+ * tested and called by nothing, and has been deleted — the note standing where
+ * it was in src/lib/reachability.ts says why.) This
  * deadline is not how long before the member is told something is wrong. It is
  * how long before a screen stops describing itself as busy, which must not
  * happen while the app is still genuinely trying.

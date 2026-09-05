@@ -1331,8 +1331,17 @@ export default function ClientTraining() {
                         it, and the panel is shared with the member's own
                         history screen so the two apps cannot disagree either. */}
                     <Rule />
-                    <ExerciseHistoryPanel log={log} status={status} unit={unit} voice={voice}
-                      onRefresh={reloadLog} />
+                    {/* `rangeDays` and not just `status`. The range control
+                        above narrows the QUERY, so a windowed read comes back
+                        complete and `status` is 'ready' with nothing to flag —
+                        which is how this panel came to print "Best Est. 1RM",
+                        "Since the First Day on Record" and a count of
+                        movements "on record" over twelve weeks of a
+                        three-year client. The window is the second half of
+                        what the read was, and the panel words every
+                        record-shaped claim off it. */}
+                    <ExerciseHistoryPanel log={log} status={status} windowDays={rangeDays}
+                      unit={unit} voice={voice} onRefresh={reloadLog} />
                   </>
                 )}
 

@@ -101,9 +101,12 @@ const PROBE_TIMEOUT_MS = 6_000;
  * log and nothing else — while making the probe depend on a credential being
  * present and current. The moment somebody later "tightens" this by checking
  * `res.ok`, that version reports the entire backend UNREACHABLE on a rotated or
- * mistyped key: the app draws an offline banner, `canAssertEmpty` goes false and
- * every screen switches to its no-signal copy, on a server that is answering
- * perfectly. This version cannot fail that way, because there is no key here to
+ * mistyped key: the app draws `offlineBanner`, `retryLine` starts telling
+ * people to go and find signal, and every read that fails behind it shows its
+ * own 'error' copy — on a server that is answering perfectly. (Those are what
+ * the state reaches today. This sentence used to name a `canAssertEmpty` too;
+ * it was exported, tested and called by nothing, and has been deleted — see
+ * the note standing in its place in src/lib/reachability.ts.) This version cannot fail that way, because there is no key here to
  * be wrong. That immunity is worth more than a clean log.
  *
  * The volume is also smaller than it looks. The probe runs FOREGROUND ONLY and

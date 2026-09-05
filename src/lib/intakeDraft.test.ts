@@ -10,7 +10,7 @@
 // expensive — the words are no longer the price of obeying it. So the
 // assertions that matter here are the ones that stop a draft turning into the
 // very overwrite the rule forbids.
-import { emptyIntake, type Intake } from './intake';
+import { INTAKE_VERSION, TRAINING_YEARS, TIME_WINDOWS, emptyIntake, type Intake } from './intake';
 import {
   INTAKE_DRAFT_PREFIX, draftDecision, draftHasContent, intakeDraftKey,
   parseIntakeDraft, serialiseIntakeDraft, type IntakeDraft,
@@ -113,6 +113,64 @@ const draft = (at: string, basedOn: string | null, intake?: Intake): IntakeDraft
   const whitespace = emptyIntake('2026-09-01T00:00:00.000Z');
   whitespace.want = { ...whitespace.want, headline: '   ' };
   eq(draftHasContent(whitespace), false, 'three spaces are not an answer');
+}
+
+/* ── the answer that did not count as an answer ────────────────────────────
+ *
+ * `history.years` was tested with `typeof n === 'number'` and `TrainingYears`
+ * is a string union, so no value it can hold ever passed. It is the FIRST
+ * question of the FIRST section and the only one of the six choice fields not
+ * caught by another line, and `draftHasContent` is the early return on the only
+ * write to disk. */
+
+{
+  const AT = '2026-09-01T00:00:00.000Z';
+
+  // Every value the field can hold, from the catalogue rather than from three
+  // hand-picked ones — a fix that happened to catch 'threeToTen' and missed
+  // 'none' would be the same defect one option along.
+  for (const y of TRAINING_YEARS) {
+    const only = emptyIntake(AT);
+    only.history = { ...only.history, years: y.id };
+    eq(draftHasContent(only), true,
+      `"${y.label}" as somebody's first and only answer is content and must survive backing out of the screen`);
+  }
+
+  // The second shape, and the worse one. Clearing the free text while a chip
+  // stands must still be worth writing: a false answer here does not merely
+  // skip a save, it LEAVES THE PREVIOUS DRAFT ON THE DISK, to be handed back
+  // later as the member's current answers. Deleting a sentence and being given
+  // it again is worse than losing it.
+  const cleared = emptyIntake(AT);
+  cleared.want = { ...cleared.want, headline: 'lose two stone' };
+  cleared.history = { ...cleared.history, years: 'oneToThree', doingNow: 'parkrun' };
+  eq(draftHasContent(cleared), true, 'a form with text and a chip is content');
+  cleared.want = { ...cleared.want, headline: '' };
+  cleared.history = { ...cleared.history, doingNow: '' };
+  eq(draftHasContent(cleared), true,
+    'and with every word deleted and only the chip left it is STILL content, so the stale draft is overwritten rather than left to be offered back');
+
+  // The rest of the field's neighbourhood, so the fix is a rule and not a
+  // patch: a null choice is still nothing, and the other choice fields were
+  // already right and must stay right.
+  const none = emptyIntake(AT);
+  none.history = { ...none.history, years: null };
+  eq(draftHasContent(none), false, 'and an unanswered one is still an empty form');
+
+  const coached = emptyIntake(AT);
+  coached.history = { ...coached.history, coachedBefore: 'no' };
+  eq(draftHasContent(coached), true, '"have you been coached before" was already counted and still is');
+
+  const times = emptyIntake(AT);
+  times.availability = { ...times.availability, times: [TIME_WINDOWS[0].id] };
+  eq(draftHasContent(times), true, 'and so was a picked time window');
+
+  // The draft round-trips through JSON, so the answer that was being dropped
+  // has to come back out again as itself.
+  const kept = draft(AT, null, cleared);
+  const back = parseIntakeDraft(serialiseIntakeDraft(kept));
+  eq(back?.intake.history.years, 'oneToThree', 'and it survives the disk it can now reach');
+  eq(back?.intake.version, INTAKE_VERSION, 'under the version it was written at');
 }
 
 if (errors.length) {
