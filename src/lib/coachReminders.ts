@@ -132,8 +132,20 @@ export function toArm(
   sessions: readonly RemindableSession[],
   armed: ArmedMap,
   now: number = Date.now(),
+  /**
+   * How far ahead to arm. Defaults to `ARM_AHEAD_DAYS`, which is the COACH's
+   * number and is argued for above: a full book has more than sixty-four
+   * sessions in a month and iOS silently drops the pending ones past that, so
+   * a coach's window is short and is re-armed on every visit to the schedule.
+   *
+   * A member is not in that position — they have one session at a time — and
+   * their window has to cover the case the coach's never does: booking three
+   * weeks out and then not opening the app until the morning of it. See
+   * `CLIENT_ARM_AHEAD_DAYS` in src/lib/clientReminders.ts.
+   */
+  aheadDays: number = ARM_AHEAD_DAYS,
 ): RemindableSession[] {
-  const horizon = now + ARM_AHEAD_DAYS * 86_400_000;
+  const horizon = now + Math.max(0, aheadDays) * 86_400_000;
   const out = sessions.filter((s) => {
     if (s.status !== 'booked') return false;
     if (s.outcome != null) return false;

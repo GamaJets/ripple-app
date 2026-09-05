@@ -384,7 +384,18 @@ export function useNudges(): NudgeBook {
       coach_id: coachId,
       client_id: clientId,
       action,
-      muted_days: mutedDaysFor(action, drift),
+      // The coach's OWN cooldown, which the board is already built with and
+      // the write was not. `mutedDaysFor(action, drift)` with no bounds falls
+      // back to MIN_COOLDOWN_DAYS/MAX_COOLDOWN_DAYS (src/lib/interventions.ts),
+      // so the number STORED had nothing to do with the setting — while the
+      // number the screen promised did: app/(trainer)/nudges.tsx prints
+      // `mutedDaysIfSent` and `mutedDaysIfDismissed`, both computed from
+      // `board`, which is built at `bounds: { minCooldownDays: cooldownPref }`
+      // sixty lines above. So a coach who set "no more often than every 45
+      // days" read "they will not be suggested again for 45 days" and got 28,
+      // and a coach who set 3 got 7. `mutedBy` reads `muted_days` back
+      // verbatim by design, so nothing downstream repairs it.
+      muted_days: mutedDaysFor(action, drift, { minCooldownDays: cooldownPref }),
       observed: observed.slice(0, 500),
       quiet_days: drift.quietDays,
     }).select('id').single();
@@ -399,7 +410,7 @@ export function useNudges(): NudgeBook {
     }
     await load();
     return { ok: true };
-  }, [coachId, load]);
+  }, [coachId, load, cooldownPref]);
 
   const recordSent = useCallback(
     (clientId: string, drift: Drift, observed: string) => write(clientId, 'sent', drift, observed),

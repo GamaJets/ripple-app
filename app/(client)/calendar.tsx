@@ -73,6 +73,7 @@ import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } f
 import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, useSlotWaitlist, useLateCancelCharges, cancelWarningFor, waitlistLine } from '../../src/ui/sessions';
 // Moving costs nothing and cancelling can cost a credit and a fee, so the
 // cheaper answer is offered first. See src/lib/reschedule.ts.
+import { useClientReminders } from '../../src/ui/clientReminders';
 import { canOfferMove } from '../../src/lib/reschedule';
 import { feeAmountLine } from '../../src/lib/booking';
 import { isUpcoming } from '../../src/lib/upcomingWindow';
@@ -318,6 +319,22 @@ export default function Calendar() {
   // giving a second, subtly different answer.
   const coachNote = peer.kind === 'loading' ? 'Checking who your coach is…' : head.note;
   const cd = useClientData();
+  // ── the "Session in 1 hour" banner, armed AND disarmed ──────────────────
+  //
+  // It used to be armed once, inside `bookSession`, at the moment of the tap —
+  // so a member who cancelled or moved their session still got told at 5:30 to
+  // go to it, and a member whose session arrived any other way (a standing
+  // appointment, a waitlist promotion, their coach booking them in) was never
+  // told anything at all. This is a pass over the diary instead: it arms what
+  // this screen's own read says is booked and cancels what it no longer says.
+  // Nothing at all happens under 'loading' or 'error' — see `readWindow`.
+  //
+  // `cd.id` is `sbUid ?? 'unknown'` (src/ui/clientData.tsx), and 'unknown' is
+  // the window between mount and the auth read landing rather than an account.
+  // It is turned back into null here: the map is keyed per account, and one
+  // keyed 'unknown' would be a set of reminders no signed-in member ever owns
+  // and nothing can ever cancel.
+  useClientReminders(cd.id === 'unknown' ? null : cd.id, sessions, sessionsStatus, coachName);
   // TF-18: this screen read PT session slots and nothing else, so a day full of
   // logged training looked empty here while Activity listed all of it. Same log,
   // same day, same words — see `logDetail` above.

@@ -66,6 +66,7 @@ import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy,
 // for why a move never charges and why one made inside the coach's notice
 // window is refused rather than priced.
 import { canOfferMove, moveConfirm, noSlotsLine, rescheduleLines, rescheduleRefusalLine } from '../../src/lib/reschedule';
+import { useClientReminders } from '../../src/ui/clientReminders';
 import { useBrand } from '../../src/ui/brand';
 import { useClientData } from '../../src/ui/clientData';
 import type { TrainingSession } from '../../src/lib/types';
@@ -186,6 +187,12 @@ export default function Bookings() {
   const coachName = head.isName ? head.text : null;
   const cd = useClientData();
   const { appName } = useBrand();
+  // The "Session in 1 hour" banner, armed AND disarmed off this screen's own
+  // read of the diary — see src/ui/clientReminders.ts. Run here as well as on
+  // the calendar because either screen may be the one a member opens, and the
+  // two cannot collide: the pass is serialised per account. `'unknown'` is
+  // `cd.id` before the auth read has landed and is not an account.
+  useClientReminders(cd.id === 'unknown' ? null : cd.id, sessions, sessionStatus, coachName);
 
   // ── what is going to pay for these ────────────────────────────────────
   //

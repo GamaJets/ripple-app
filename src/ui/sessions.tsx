@@ -35,7 +35,10 @@ import { NOT_MOVED, COACH_NOT_MOVED, type RescheduleRefusal, type RescheduleRepo
 // of the same name, which takes ONE argument and swallows the context string —
 // so every report from this file would have arrived unattributable.
 import { reportError } from '../lib/reportError';
-import { scheduleLocal, sendPushChecked } from './pushNotifications';
+// `scheduleLocal` is deliberately NOT imported any more. The one local
+// reminder this file used to arm now lives in src/ui/clientReminders.ts, which
+// arms AND cancels off the diary — see the note in `bookSession`.
+import { sendPushChecked } from './pushNotifications';
 import { reofferSlot, refundSession, sessionsRemaining } from '../lib/connect';
 import { useAuthRevision } from './authRevision';
 import { supabase } from '../lib/supabase';
@@ -490,9 +493,8 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const bookSession: SessionsValue['bookSession'] = async (id, clientId) => {
-    const s = sessions.find((x) => x.id === id);
-    // Drawing the booking and scheduling the reminder are what a CONFIRMED
-    // booking looks like, so neither happens until the server has confirmed one.
+    // Drawing the booking is what a CONFIRMED booking looks like, so it does
+    // not happen until the server has confirmed one.
     //
     // `who` is the id the SERVER booked it for, not the one the caller passed.
     // `book_session` writes `auth.uid()` and can write nothing else, so on the
@@ -506,22 +508,33 @@ export function SessionsProvider({ children }: { children: React.ReactNode }) {
     // confirmed, was on neither the grid nor the day list until the next
     // refresh. Falling back to `clientId` keeps the offline branch below, where
     // there is no `uid` and nothing has been confirmed by anybody, unchanged.
+    // ── the reminder is NOT armed here any more ──────────────────────────
+    //
+    // It used to be: one `scheduleLocal('Session in 1 hour', …)` on this line,
+    // id discarded. A local notification survives the app being closed, so that
+    // one call was a promise the handset kept whatever happened next — and this
+    // is the ONLY moment in a member's relationship with a session at which the
+    // handset is involved at all. Everything else happens on a server:
+    // cancelling (`cancel_my_session`), moving (`reschedule_my_session`), being
+    // handed the slot off a waitlist, the coach booking them in, the nightly job
+    // materialising their standing Tuesday. So the one gesture that could arm a
+    // reminder was also the only one, and not one of the gestures that
+    // INVALIDATE a reminder could take it back.
+    //
+    // What that cost, in the three directions it went: a banner an hour before
+    // a session the member had cancelled; no banner at all for the hour they
+    // moved it to; and no banner ever for a session that arrived any way but
+    // this tap. It also fired on the `!uid` branch below, which returns false
+    // and makes the caller say "Not booked" — a reminder for a booking the
+    // member had just been told they did not have.
+    //
+    // src/ui/clientReminders.ts is the replacement and is a PASS over the
+    // diary rather than a hook on one gesture: it arms what the calendar says
+    // is booked and cancels what it no longer says, whoever changed it and
+    // wherever from. The coach's side has worked that way since
+    // src/lib/coachReminders.ts, whose header states the rule this broke.
     const apply = (who: string = clientId) => {
       setSessions((p) => p.map((x) => (x.id === id ? { ...x, status: 'booked', clientId: who, released: false } : x)));
-      if (s && s.startsAt) {
-        const start = new Date(s.startsAt);
-        // With a route. Without one this reminder was the only notification in
-        // the app that opened the front door: `addNotificationTapListener`
-        // reads `data.route` and does nothing when there is not one, so an
-        // hour before their session a client tapped "Session in 1 hour" and
-        // landed on the dashboard, with the session they had just been
-        // reminded of one more tap away on the calendar.
-        // Category 'sessions', so the member's own switch decides whether this
-        // arrives — and, deliberately, so quiet hours do NOT move it: they
-        // booked a 6:30am session and the warning has to reach them before the
-        // session does. See CATEGORIES in src/lib/notifyPrefs.ts.
-        scheduleLocal('Session in 1 hour', 'Your training session starts at ' + start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) + '.', new Date(start.getTime() - 60 * 60 * 1000), { route: '/(client)/calendar' }, 'sessions');
-      }
     };
     if (!USE_SUPABASE || !uid) { apply(); return false; }
     // `book_session` books only a slot that is still 'available' and belongs to

@@ -26,6 +26,10 @@ import { writeFailure } from '../lib/wroteRows';
 import { settleRemoval } from '../lib/optimisticList';
 import { useAuthRevision } from './authRevision';
 import { shapeSeries, type RecurringSeries, type RawSeries } from '../lib/recurring';
+// The zone a weekly hour is an hour IN. See the header of that file: the
+// nightly generator uses the row's `tz` and this screen's button used to use the
+// handset's, and the two are a different hour for any coach who has travelled.
+import { slotInstants } from '../lib/slotDates';
 
 /**
  * The IANA zone this handset is in, or null when the runtime cannot say.
@@ -46,7 +50,22 @@ function deviceZone(): string | null {
   } catch { return null; }
 }
 
-export interface AvailSlot { id: string; dow: number; hour: number; minute: number; dur: number }
+export interface AvailSlot {
+  id: string; dow: number; hour: number; minute: number; dur: number;
+  /**
+   * The zone this hour is an hour IN — `trainer_availability.tz`.
+   *
+   * Carried rather than dropped, which is what it used to be. The nightly
+   * generator builds each concrete slot in this zone (part 650) and the
+   * Generate button on the coach's calendar built it in the HANDSET's, so the
+   * two opened different hours for any coach who had moved since they set their
+   * week — see the header of src/lib/slotDates.ts. Null for a row written
+   * before the column existed, for a handset that cannot name its zone, and for
+   * a slot that has only ever been on this phone; every one of those falls back
+   * to the handset's clock, which is what the whole feature did before.
+   */
+  tz: string | null;
+}
 
 /** The outcome of `addSlot`. See the note on it for why this is not a boolean. */
 export type AddSlotResult = 'saved' | 'duplicate' | 'local';
@@ -100,7 +119,10 @@ export function useAvailability() {
       try {
         const raw = await AsyncStorage.getItem(KEY);
         if (raw) {
-          local = (JSON.parse(raw) as AvailSlot[]).map((sl) => ({ ...sl, minute: Number(sl.minute) || 0 }));
+          // `tz` arrived after this cache did, exactly as `minute` did, so a
+          // saved copy from an older build has none. Null means "fall back to
+          // this handset", which is what that build did for every slot.
+          local = (JSON.parse(raw) as AvailSlot[]).map((sl) => ({ ...sl, minute: Number(sl.minute) || 0, tz: typeof sl.tz === 'string' && sl.tz ? sl.tz : null }));
           if (!cancelled) applySlots(local);
         }
       } catch { /* no cached copy; the server read below is the only source */ }
@@ -144,7 +166,7 @@ export function useAvailability() {
           // there means on the hour, which is what those rows have always
           // meant — coerced rather than left undefined, because undefined
           // reaches `String(m).padStart` and renders ":NaN".
-          const server: AvailSlot[] = page.rows.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur }));
+          const server: AvailSlot[] = page.rows.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur, tz: typeof r.tz === 'string' && r.tz ? r.tz : null }));
           // Counted off the rows themselves rather than asked for separately,
           // so the count and the grid can never disagree about the same week.
           setZoneless(page.rows.filter((r: any) => r.tz == null).length);
@@ -173,7 +195,7 @@ export function useAvailability() {
             .select('id, dow, hour, minute, dur, tz');
           if (cancelled) return;
           if (upErr || !up) { setStatus('error'); return; }
-          const synced: AvailSlot[] = up.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur })).sort(byTime);
+          const synced: AvailSlot[] = up.map((r: any) => ({ id: String(r.id), dow: r.dow, hour: r.hour, minute: Number(r.minute) || 0, dur: r.dur, tz: typeof r.tz === 'string' && r.tz ? r.tz : null })).sort(byTime);
           applySlots(synced);
           // Counted off what came BACK, for the same reason the rows are: these
           // were just written with deviceZone(), which is null on a handset
@@ -242,7 +264,11 @@ export function useAvailability() {
     // every slot the loop had itself just added.
     if (slotsRef.current.some((s) => s.dow === dow && s.hour === hour && s.minute === minute)) return 'duplicate';
     const localId = 'av' + Date.now().toString(36) + SEQ++;
-    persist([...slotsRef.current, { id: localId, dow, hour, minute, dur }]);
+    // The zone this hour is being written in, held locally as well as sent, so
+    // the Generate button opens it where the coach was standing when they said
+    // it rather than wherever they happen to be the day they press it.
+    const tz = deviceZone();
+    persist([...slotsRef.current, { id: localId, dow, hour, minute, dur, tz }]);
     if (!USE_SUPABASE || !uid) return 'local';
     try {
       // The zone goes with the hour, because 07:00 is not an instant. Until
@@ -252,8 +278,8 @@ export function useAvailability() {
       // than guesses at — and a slot generated in the wrong zone is worse than
       // no slot, because a client books it.
       const { data, error } = await supabase.from('trainer_availability')
-        .insert({ trainer_id: uid, dow, hour, minute, dur, tz: deviceZone() })
-        .select('id').single();
+        .insert({ trainer_id: uid, dow, hour, minute, dur, tz })
+        .select('id, tz').single();
       const sid = data?.id;
       if (error || !sid) return 'local';
       // Through `persist`, so the server id reaches the CACHE as well as the
@@ -264,7 +290,14 @@ export function useAvailability() {
       // working from the cached copy, where deleting that slot takes it off the
       // phone and leaves the row generating sessions. Same failure the
       // push-up branch above was fixed for, at the other end of the hook.
-      persist(slotsRef.current.map((sl) => (sl.id === localId ? { ...sl, id: String(sid) } : sl)));
+      // The zone comes BACK as well as the id, and it is the server's answer
+      // that is kept. `trainer_availability_default_tz` fills `tz` from the
+      // gym's own timezone whenever this handset sent null, so the row's zone
+      // and the null this device asked for are not the same fact — and the
+      // nightly generator uses the row's. Reading it back is what keeps the
+      // button and the job opening the same hour.
+      const stz = typeof (data as any)?.tz === 'string' && (data as any).tz ? String((data as any).tz) : null;
+      persist(slotsRef.current.map((sl) => (sl.id === localId ? { ...sl, id: String(sid), tz: stz } : sl)));
       return 'saved';
     } catch { return 'local'; }
   };
@@ -337,6 +370,12 @@ export function useAvailability() {
         .is('tz', null)
         .select('id');
       if (error || !data) return 0;
+      // The rows on screen gain the zone too, so the Generate button starts
+      // opening them in it immediately rather than at the next launch. Only the
+      // ones the server actually changed: a slot that gained a zone elsewhere
+      // between the read and this write keeps the one it gained.
+      const healed = new Set(data.map((r: any) => String(r.id)));
+      persist(slotsRef.current.map((sl) => (healed.has(sl.id) ? { ...sl, tz: zone } : sl)));
       // Re-read rather than assumed: the local count is now stale by exactly
       // the number of rows that landed, and guessing it would be the same
       // mistake the write above refuses to make.
@@ -351,22 +390,18 @@ export function useAvailability() {
 /** Concrete dates for a weekly slot over the next `weeks` weeks (from today).
  *
  *  `minute` defaults to 0 so that a caller written before quarter hours
- *  existed still produces the on-the-hour dates it always did. */
-export function upcomingDates(dow: number, hour: number, minute = 0, weeks = 4, from = new Date()): Date[] {
-  const out: Date[] = [];
-  const base = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-  for (let w = 0; w < weeks; w++) {
-    for (let d = 0; d < 7; d++) {
-      const cand = new Date(base);
-      cand.setDate(base.getDate() + w * 7 + d);
-      if (cand.getDay() === dow) {
-        cand.setHours(hour, minute, 0, 0);
-        if (cand.getTime() > from.getTime()) out.push(cand);
-        break;
-      }
-    }
-  }
-  return out;
+ *  existed still produces the on-the-hour dates it always did.
+ *
+ *  `tz` is the zone recorded against the slot — `trainer_availability.tz` — and
+ *  it is what makes these the SAME instants the nightly job opens. This used to
+ *  build every date on the handset's own clock, which is a different hour from
+ *  the row's zone for any coach who has moved since they set their week and for
+ *  any row whose zone was filled from the gym rather than from the phone. The
+ *  whole argument, and both ways in, are in src/lib/slotDates.ts. */
+export function upcomingDates(
+  dow: number, hour: number, minute = 0, weeks = 4, from = new Date(), tz: string | null = null,
+): Date[] {
+  return slotInstants({ dow, hour, minute, weeks, tz, fromMs: from.getTime() }).map((iso) => new Date(iso));
 }
 
 /* ── Standing appointments ──────────────────────────────────────────────────

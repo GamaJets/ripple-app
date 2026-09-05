@@ -867,10 +867,30 @@ export default function TrainerSchedule() {
     // the list this screen holds, and under 'error' that list is empty for want
     // of a read rather than for want of bookings. The result is a coach offering
     // a client an hour somebody else already has.
-    if (!known) {
+    //
+    // `isWhole(sessionsStatus)` and not `known`, which is `!== 'error'`. This is
+    // the same argument `classesKnown` makes forty lines above about the class
+    // timetable, and it applies with more force here because the diary is the
+    // PRIMARY half of the double-booking guard: under 'loading' the calendar has
+    // not been read at all and `sessions` is empty for want of a read, so every
+    // overlap check in the loop below finds nothing in the way and reports a
+    // clear hour it never looked at. A coach who opens Schedule and goes
+    // straight to Generate — which is exactly what a coach who came here to
+    // generate does — publishes bookable hours on top of sessions they already
+    // have. `sessions_no_double_booking` then refuses the client's booking, so
+    // what the member sees is a slot they are offered and cannot take.
+    //
+    // 'partial' is included for the ordinary reason: the read is short by an
+    // unknown number of rows, and any one of them could be the booking that
+    // occupies the hour about to be opened.
+    if (!isWhole(sessionsStatus)) {
       Alert.alert(
         'Can’t generate slots yet',
-        'Your calendar could not be read, so Repple does not know what you already have booked — and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Pull down to refresh and try again.',
+        sessionsStatus === 'loading'
+          ? 'Your calendar is still being read, so Repple does not yet know what you already have booked — and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Give it a moment and try again.'
+          : sessionsStatus === 'partial'
+            ? 'There is more in your calendar than can be read in one go, so Repple cannot say what you already have booked at every one of these times — and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Nothing has been changed.'
+            : 'Your calendar could not be read, so Repple does not know what you already have booked — and generating now could open slots on top of existing sessions.\n\nYour weekly availability is safe. Pull down to refresh and try again.',
         [{ text: 'OK' }],
       );
       return;
@@ -892,7 +912,13 @@ export default function TrainerSchedule() {
     // reason to skip, and not a thing to keep quiet about either.
     let unattributed = 0;
     for (const sl of availSlots) {
-      for (const d of upcomingDates(sl.dow, sl.hour, sl.minute, 4)) {
+      // `sl.tz` — the zone recorded against the weekly hour, not this handset's.
+      // Without it the button opened 07:00 on whatever clock the coach's phone
+      // was on today while the nightly job opened 07:00 on the clock the hour
+      // was set in, so a coach who had travelled published two slots at two
+      // different hours and their client booked the wrong one. Null falls back
+      // to this handset, which is what every slot did before.
+      for (const d of upcomingDates(sl.dow, sl.hour, sl.minute, 4, new Date(), sl.tz)) {
         const iso = d.toISOString();
         const cl = classClashes(iso, sl.dur, gymClasses, coachId);
         if (cl.mine.length > 0) { teaching++; continue; }
@@ -4107,8 +4133,24 @@ export default function TrainerSchedule() {
                   ) : null}
                   {state === 'two-way' && classesKnown ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                      {/* `planned == null` is `!isWhole(sessionsStatus)` (see
+                          `plannedKnown` above), and that is EXACTLY the state
+                          `doPush` returns from before it sends anything — a
+                          push is a reconciliation, and a diary read short by an
+                          unknown number of rows would clear real sessions out
+                          of Google. So this branch used to open with "Your
+                          booked sessions go across on their own while this
+                          screen is open" over a state in which they are going
+                          nowhere, and then qualify only the COUNT. The
+                          neighbouring flag for an unread class timetable says
+                          the true thing — "nothing is being sent to Google for
+                          the moment. This is a pause, not a change" — and this
+                          half now says it too. It is not cosmetic: a coach
+                          reading the old sentence believes their Google
+                          calendar is current, and a coach whose diary is over
+                          ROW_CAP is in this state permanently. */}
                       {planned == null
-                        ? `Your booked sessions go across on their own while this screen is open. Your Repple calendar could not be read in full just now, so this cannot say how many are waiting to go — that is a connection problem and not an empty diary. Open slots and blocked time are never written.`
+                        ? `Your Repple calendar could not be read in full just now, so nothing is being sent to Google for the moment. This is a pause, not a change: what is already in your Google calendar is untouched, and sending resumes on its own once your calendar has come back whole. That is a connection problem and not an empty diary.`
                         : `Your booked sessions go across on their own while this screen is open, and there ${planned === 1 ? 'is 1 session' : `are ${planned} sessions`} in the next ${PUSH_DAYS} days to send. Open slots and blocked time are never written.`}
                     </Text>
                   ) : null}
