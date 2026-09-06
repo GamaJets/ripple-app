@@ -45,12 +45,42 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 
-/** Module → the Info.plist keys it cannot work without. */
+/**
+ * Module → the Info.plist keys it cannot work without.
+ *
+ * ── what this table missed, twice, and why each line is now here ───────────
+ *
+ * NSMicrophoneUsageDescription. Both expo-camera and expo-image-picker install
+ * it, and `launchCameraAsync({ mediaTypes: ['videos'] })` — the coach app's
+ * exercise-clip upload and the session-clip share — records sound, so the
+ * prompt is one a real coach sees. The key was not on this table, so nothing
+ * looked at it, and its value was the library default
+ * "Allow $(PRODUCT_NAME) to access your microphone": exactly the shape
+ * `isDefault` below was written to catch, on a key nothing was asking it about.
+ * The absence test would not have found it either — the key was present. It was
+ * merely nobody's.
+ *
+ * @kingstinct/react-native-healthkit. The HealthKit line used to name
+ * `react-native-health`, which was replaced (see
+ * src/lib/wearables/appleHealthShim.ts for the whole account of why) and is no
+ * longer a dependency. `installed()` therefore skipped that entry on every run,
+ * so the two strings HealthKit REFUSES AUTHORISATION WITHOUT — which is the
+ * original reason this file exists — went unchecked from the day the package
+ * changed. They are set, and they are checked again now.
+ *
+ * expo-calendar arrived on 2 Sep with its own plugin defaults for four keys.
+ * Two of them (NSRemindersUsageDescription and its full-access twin) were for a
+ * permission this app never requests and are now deleted by passing
+ * `remindersPermission: false`; the two calendar ones are written by a person
+ * and are named here so they stay that way.
+ */
 const NEEDS_PLIST = {
   'expo-local-authentication': ['NSFaceIDUsageDescription'],
-  'expo-camera': ['NSCameraUsageDescription'],
-  'expo-image-picker': ['NSPhotoLibraryUsageDescription'],
+  'expo-camera': ['NSCameraUsageDescription', 'NSMicrophoneUsageDescription'],
+  'expo-image-picker': ['NSPhotoLibraryUsageDescription', 'NSMicrophoneUsageDescription'],
+  'expo-calendar': ['NSCalendarsUsageDescription', 'NSCalendarsFullAccessUsageDescription'],
   'react-native-health': ['NSHealthShareUsageDescription', 'NSHealthUpdateUsageDescription'],
+  '@kingstinct/react-native-healthkit': ['NSHealthShareUsageDescription', 'NSHealthUpdateUsageDescription'],
 };
 
 /**

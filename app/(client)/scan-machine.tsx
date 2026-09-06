@@ -32,6 +32,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { analyzeMachine, visionAvailable } from '../../src/lib/vision';
 import { mayAnalyzePhoto, PHOTO_SENT, PHOTO_NOT_SENT, PHOTO_DESTINATION } from '../../src/lib/photoAI';
+import { ensureMediaPermission, offerCameraSettings } from '../../src/ui/permissions';
 import { usePhotoAI } from '../../src/ui/photoAI';
 import { MACHINES, identifyMachine, looksLikeSerial, type MachineDef } from '../../src/lib/machines';
 import { recallMachine, rememberMachine } from '../../src/lib/machineMemory';
@@ -130,8 +131,15 @@ export default function ScanMachine() {
   };
 
   const capturePhoto = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera access to identify a machine by photo.'); return; }
+    // Through ensureMediaPermission, not a bare request and an Alert. The bare
+    // version was the shape src/ui/permissions.ts was written to delete: after
+    // a refusal iOS has recorded, `requestCameraPermissionsAsync` returns
+    // `{ granted: false, canAskAgain: false }` without showing anything, and
+    // "Allow camera access to identify a machine by photo" is then a box with
+    // one button that dismisses and no route to anywhere permission can be
+    // given. Eleven screens were fixed for that; this one and nutrition.tsx
+    // were written afterwards and reintroduced it.
+    if (!(await ensureMediaPermission('camera', 'identify a machine by photo'))) return;
     const res = await ImagePicker.launchCameraAsync({ quality: 0.6, base64: true });
     if (res.canceled || !res.assets || !res.assets[0]) return;
     const asset = res.assets[0];
@@ -307,8 +315,21 @@ export default function ScanMachine() {
             ) : !permission.granted ? (
               <Notice kicker="Camera" title="Camera access"
                 note={`${BRAND.label} reads the code on a machine, then names the exercise and muscle group for you.`}>
+                {/* Three-way, not two. `permission.canAskAgain` false means
+                    iOS has recorded a refusal and will never show the sheet
+                    again, so `requestPermission` returns immediately having
+                    displayed nothing — "Allow Camera" was then a button that
+                    did nothing, on the screen a member reaches by walking up to
+                    a machine. Settings is the only place the answer can still
+                    change, so that is what the button offers once it is the
+                    only true one. Picking the machine by hand is below either
+                    way, and is untouched. */}
                 <View style={{ marginTop: sp.lg }}>
-                  <Cta label="Allow Camera" wide onPress={requestPermission} />
+                  {permission.canAskAgain ? (
+                    <Cta label="Allow Camera" wide onPress={requestPermission} />
+                  ) : (
+                    <Cta label="Open Settings" wide onPress={() => offerCameraSettings('scan the code on a machine')} />
+                  )}
                 </View>
               </Notice>
             ) : (

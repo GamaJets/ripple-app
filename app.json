@@ -15,6 +15,7 @@
         "NSCalendarsUsageDescription": "Repple reads your calendar so it can offer to block the times you are already busy, rather than asking you to type them in twice. It reads the times only, never who you are meeting or what about, nothing is sent to your clients, and nothing is written back to your calendar.",
         "NSCalendarsFullAccessUsageDescription": "Repple reads your calendar so it can offer to block the times you are already busy, rather than asking you to type them in twice. It reads the times only, never who you are meeting or what about, nothing is sent to your clients, and nothing is written back to your calendar.",
         "NSCameraUsageDescription": "Repple uses the camera to capture InBody scans and progress photos.",
+        "NSMicrophoneUsageDescription": "Repple uses the microphone only while you are recording a coaching clip with the camera, so the video has your voice on it. Nothing is recorded at any other time, and Repple never listens in the background.",
         "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSHealthUpdateUsageDescription": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written."
@@ -75,6 +76,12 @@
         "expo-local-authentication",
         {
           "faceIDPermission": "Repple uses Face ID to unlock the app, so your training record is not open to anyone who picks up your phone."
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "remindersPermission": false
         }
       ],
       "expo-web-browser",

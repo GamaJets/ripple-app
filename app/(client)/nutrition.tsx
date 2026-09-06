@@ -59,6 +59,7 @@ import {
   PHOTO_REFUSED_NOTE, PHOTO_UNREAD_NOTE, PHOTO_OFF_NOTE,
 } from '../../src/lib/photoAI';
 import { usePhotoAI } from '../../src/ui/photoAI';
+import { ensureMediaPermission } from '../../src/ui/permissions';
 import { parseFoodText, foodAIAvailable, type ParsedFood } from '../../src/lib/foodAI';
 import { BarcodeSheet } from '../../src/ui/BarcodeSheet';
 // The same review sheet the Food Log tab uses. This tab's photo path COMMITTED
@@ -464,8 +465,15 @@ export default function Nutrition() {
    * figures are typed against it.
    */
   const runPhotoLog = async (outcome: 'send' | 'refused' | 'off') => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) { Alert.alert('Camera needed', 'Allow camera to log a meal by photo.'); return; }
+    // Through ensureMediaPermission, with the same purpose phrase foodlog.tsx
+    // passes for the same act. The bare request and Alert that used to be here
+    // is the defect src/ui/permissions.ts exists to delete: after a refusal iOS
+    // has recorded, `requestCameraPermissionsAsync` returns
+    // `{ granted: false, canAskAgain: false }` having shown nothing, so "Allow
+    // camera to log a meal by photo" was a box with one button and no route to
+    // anywhere the camera could actually be allowed. The Food Log tab was fixed
+    // for this; this tab offers the same photo log and was not.
+    if (!(await ensureMediaPermission('camera', 'log a meal by photo'))) return;
     const res = await ImagePicker.launchCameraAsync({ quality: 0.5, base64: true });
     if (res.canceled || !res.assets || !res.assets[0]) return;
     const asset = res.assets[0];

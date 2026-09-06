@@ -51,7 +51,8 @@
 // failure mode this codebase spends most of its comments trying to prevent.
 import {
   requestAuthorization,
-  getRequestStatusForAuthorization,
+  authorizationStatusFor,
+  AuthorizationStatus,
   isHealthDataAvailable,
   queryQuantitySamples,
   queryCategorySamples,
@@ -300,8 +301,69 @@ export const AppleHealthCompat = {
       .catch((e) => done(e?.message ?? String(e)));
   },
 
+  /**
+   * The fifth silent translation, and the one that cost a member the sentence
+   * telling them how to undo their own refusal.
+   *
+   * This was `getRequestStatusForAuthorization(...)`, which is a different
+   * question with a different answer shape. That call returns ONE number for
+   * the whole request — HKAuthorizationRequestStatus: unknown 0, shouldRequest
+   * 1, unnecessary 2 — meaning "would the sheet show anything if I asked
+   * again". `writeAuthStatus()` in appleHealth.ts reads
+   * `res.permissions.write[0]`, which on a bare number is `undefined`, so it
+   * took the `!Array.isArray(w)` branch and resolved 'unknown' on EVERY
+   * handset, for ever, whatever the member had chosen.
+   *
+   * Two things followed on the Devices screen, and both are silent:
+   *
+   *   · The `hkAuth === 'denied'` Notice — the only place in the app that says
+   *     "Health ▸ Sharing ▸ Apps ▸ Repple ▸ turn on Workouts" — could never
+   *     render. A member who tapped Don't Allow on the workout toggle instead
+   *     watched every session land in the `failed` list under the generic
+   *     "Apple Health refused the write", with no route to the switch that
+   *     would fix it. `writeSessions` has a whole 'denied' state written for
+   *     this and it was unreachable.
+   *   · `writeHk` re-asked authorisation on every single tap, because
+   *     'unknown' is neither 'granted' nor 'denied'.
+   *
+   * `authorizationStatusFor` is the right question: HKAuthorizationStatus per
+   * type — notDetermined 0, sharingDenied 1, sharingAuthorized 2 — which is
+   * exactly the numbering react-native-health published and exactly what
+   * `writeAuthStatus()` already decodes.
+   *
+   * It is synchronous and it throws on an identifier this OS version does not
+   * know, so each type is asked for separately and a throw becomes 0 — which
+   * `writeAuthStatus` reads as 'undetermined', the honest answer to "we could
+   * not find out" for a type that has not been decided.
+   *
+   * The `read` array is filled in the same way and MUST NOT be trusted:
+   * HealthKit deliberately refuses to reveal read authorisation and answers
+   * sharingDenied for a granted read type, which is precisely why
+   * `permissionSet()` in appleHealth.ts documents read denials as invisible and
+   * why nothing reads this half. It is present because the old bridge's shape
+   * had it, and a caller reaching for `permissions.read` should find a list
+   * rather than `undefined` and quietly conclude something from its absence.
+   */
   getAuthStatus(permSet: any, done: (err: any, res: any) => void) {
-    cb(getRequestStatusForAuthorization(toAuth(permSet)) as any, done);
+    const statusOf = (id: string): number => {
+      try {
+        const s = authorizationStatusFor(id as any);
+        return typeof s === 'number' ? s : AuthorizationStatus.notDetermined;
+      } catch {
+        return AuthorizationStatus.notDetermined;
+      }
+    };
+    try {
+      const { toRead, toShare } = toAuth(permSet);
+      done(null, {
+        permissions: {
+          read: (toRead as string[]).map(statusOf),
+          write: (toShare as string[]).map(statusOf),
+        },
+      });
+    } catch (e) {
+      done(e ?? new Error('Apple Health did not answer'), null);
+    }
   },
 
   getHeartRateSamples: (o: any, d: any) => cb(quantity(READ_ID.HeartRate, o), d),

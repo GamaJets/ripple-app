@@ -71,6 +71,35 @@ export async function ensureMediaPermission(
   }
 
   // iOS will not ask again. Settings is the only way, so take them there.
+  offerSettings(thing, purpose);
+  return false;
+}
+
+/**
+ * The second half of the same rule, for the screens that hold a live camera
+ * rather than opening a picker.
+ *
+ * `useCameraPermissions` from expo-camera hands back the same three-way answer
+ * ensureMediaPermission decodes — null while it is still being read, then
+ * `{ granted, canAskAgain }` — and two screens treated it as two-way. They
+ * rendered one button, "Allow Camera", wired straight to `requestPermission`.
+ * On the FIRST refusal that is correct: the sheet is still available and the
+ * button raises it. After a refusal iOS has recorded, `requestPermission`
+ * returns `{ granted: false, canAskAgain: false }` without showing anything, so
+ * the button is a control that does nothing at all — the same "No way to give
+ * permission" a tester reported about the picker screens, on the two screens
+ * that were not picker screens and so were not fixed with them.
+ *
+ * `purpose` completes "…to <purpose>", exactly as it does above, so the person
+ * arriving in Settings still knows what they were trying to do.
+ */
+export function offerCameraSettings(purpose: string): void {
+  offerSettings('the camera', purpose);
+}
+
+/** Says iOS will not ask again, and offers the one place it can still be
+ *  changed. Shared so the two entry points cannot drift into two sentences. */
+function offerSettings(thing: string, purpose: string): void {
   Alert.alert(
     'Turn on access in Settings',
     `iOS will not ask again, so ${thing} has to be switched on in Settings to ${purpose}.`,
@@ -79,5 +108,4 @@ export async function ensureMediaPermission(
       { text: 'Open Settings', onPress: () => { Linking.openSettings().catch(() => {}); } },
     ],
   );
-  return false;
 }
