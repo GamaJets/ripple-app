@@ -56,7 +56,7 @@ import { sliceLoading, sliceReady, sliceFailed, sliceNote, type Slice } from '@l
 import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
 import {
   monthWindow, monthKeyOf, buildClose, isOverdue, closeHeadline,
-  type CloseRecord, type MonthClose, type GymInvoice, type Line, type Blocker,
+  type CloseRecord, type MonthClose, type GymInvoice, type Line, type Blocker, type Owed,
 } from '@lib/monthEnd';
 /*
  * The month, on the GYM's clock rather than on this laptop's.
@@ -779,9 +779,33 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
 }) {
   const m = (cents: number | null | undefined) => money(cents, currency);
 
-  // What the INVOICES agree on, and what the PASSES agree on. Null when a set
-  // disagrees with itself, which is not a currency and must not borrow one.
-  const owedCcy = rec.invoices.state === 'ready' ? agreedCurrency(rec.invoices.rows) : null;
+  /*
+   * What the INVOICES agree on — asked TWICE, because they are two sets.
+   *
+   * This was one answer, `agreedCurrency(rec.invoices.rows)`, over the rows as
+   * they arrived. `fetchInvoices` takes no month: it reads every invoice this
+   * gym has issued up to the end of the month, because arrears reach back and
+   * an invoice raised in June and still open in August is money owed at the
+   * August close. `buildClose` then filters that set in two — `c.owed` is the
+   * invoices ISSUED IN THIS MONTH, `c.arrears` is everything still open up to
+   * its end — and sums each separately.
+   *
+   * So the single answer priced the month's billing off the gym's whole
+   * history. One EUR invoice raised in 2024 makes `agreedCurrency` null
+   * forever, and August's tile then shows a real, single-currency GBP total
+   * with no code beside it — and `snapshotOf` writes that null into
+   * `gym_month_closes.invoiced_currency`, permanently, where every later drift
+   * line reads back through it and the handoff CSV exports it. The comment in
+   * gymClose.ts says what an accountant does with an unlabelled figure: prices
+   * it with the gym's code, which is the substitution supabase/parts/2540 was
+   * written to stop.
+   *
+   * The passes side twelve lines down had this defect and states the rule that
+   * fixes it: read the currency back off the summary that produced the sum,
+   * rather than deriving it again from a wider set. That is what these do.
+   */
+  const invoicedCcy = agreedIn(c.owed);
+  const arrearsCcy = agreedIn(c.arrears);
   // The passes side does NOT recompute, and that is the fix rather than the
   // shortcut. `agreedCurrency(rec.passes.rows)` asked the wrong set twice over:
   // `fetchPasses` takes no window, so it ran over every pass this gym has ever
@@ -806,10 +830,10 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
           owner cannot get back to once they press Close. */}
       <CostsBeforeClose v={costs} reason={costsReason} monthKey={monthKey} />
       <Signoff
-        c={c} currency={currency} owedCcy={owedCcy} monthKey={monthKey} zone={zone} tenantId={tenantId} me={me}
+        c={c} currency={currency} invoicedCcy={invoicedCcy} arrearsCcy={arrearsCcy} monthKey={monthKey} zone={zone} tenantId={tenantId} me={me}
         closes={closes} closesErr={closesErr} costs={costs} payErr={payErr} onChange={onChange}
       />
-      <Handoff c={c} rec={rec} currency={currency} owedCcy={owedCcy} gymName={gymName} monthKey={monthKey} />
+      <Handoff c={c} rec={rec} currency={currency} arrearsCcy={arrearsCcy} gymName={gymName} monthKey={monthKey} />
 
       {c.warning ? <Banner tone="crit">{c.warning}</Banner> : null}
       {feeRead === 'failed' ? (
@@ -865,23 +889,23 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
             one is the one at the top in bold. */}
         <Kpi
           label="Billed this month"
-          text={c.owed ? money(sumOrNull(c.owed.settledCents, c.owed.outstandingCents), owedCcy) : null}
+          text={c.owed ? money(sumOrNull(c.owed.settledCents, c.owed.outstandingCents), invoicedCcy) : null}
           note={
             !c.owed ? stateNote(rec.invoices, 'invoices')
               : c.owed.issued === 0 ? 'no invoice issued'
               // A dash for want of a currency needs its own sentence, or the
               // invoice count reads as an explanation of a missing figure.
-              : !owedCcy ? `${c.owed.issued} invoice${c.owed.issued === 1 ? '' : 's'}, and they do not all state the same currency — so there is no one total`
+              : !invoicedCcy ? `${c.owed.issued} invoice${c.owed.issued === 1 ? '' : 's'}, and they do not all state the same currency — so there is no one total`
               : `${c.owed.issued} invoice${c.owed.issued === 1 ? '' : 's'}${c.owed.dropped ? `, ${c.owed.dropped} void or written off` : ''}`
           }
         />
         <Kpi
           label="Still owed"
-          text={c.arrears ? money(c.arrears.outstandingCents, owedCcy) : null}
+          text={c.arrears ? money(c.arrears.outstandingCents, arrearsCcy) : null}
           note={
             !c.arrears ? stateNote(rec.invoices, 'invoices')
               : c.arrears.outstanding === 0 ? 'nothing outstanding'
-              : !owedCcy ? `${c.arrears.outstanding} open, and they do not all state the same currency — so there is no one total`
+              : !arrearsCcy ? `${c.arrears.outstanding} open, and they do not all state the same currency — so there is no one total`
               : `${c.arrears.outstanding} open, ${c.arrears.overdue} past due`
           }
         />
@@ -944,7 +968,8 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
           `c.payroll.currency`, each trainer's pay by its own line, each rate
           held by its own session. */}
       <Income c={c} rec={rec} currency={currency} />
-      <Owed c={c} rec={rec} currency={owedCcy} zone={zone} nowMs={nowMs} />
+      {/* Arrears, not the month's billing — every figure inside is `c.arrears`. */}
+      <Owed c={c} rec={rec} currency={arrearsCcy} zone={zone} nowMs={nowMs} />
       <Reconciliation c={c} rec={rec} />
       <Payroll c={c} rec={rec} zone={zone} nowMs={nowMs} sessionFee={sessionFee} feeCents={feeCents} />
       <Passes c={c} rec={rec} currency={passesCcy} />
@@ -1010,7 +1035,7 @@ function Verdict({ c }: { c: MonthClose }) {
  * standing. A month that closed and then moved is two facts and an auditor
  * wants both.
  */
-function Signoff({ c, currency, owedCcy, monthKey, zone, tenantId, me, closes, closesErr, costs, payErr, onChange }: {
+function Signoff({ c, currency, invoicedCcy, arrearsCcy, monthKey, zone, tenantId, me, closes, closesErr, costs, payErr, onChange }: {
   c: MonthClose; currency: TenantCurrency; monthKey: string;
   /**
    * What the INVOICES agree on, or null when they do not agree.
@@ -1021,7 +1046,11 @@ function Signoff({ c, currency, owedCcy, monthKey, zone, tenantId, me, closes, c
    * comes off `c.payroll`, which derived it from the sessions the figure is a
    * sum of. Four figures, four currencies — supabase/parts/2540.
    */
-  owedCcy: TenantCurrency;
+  invoicedCcy: TenantCurrency;
+  /** And what everything STILL OPEN agrees on — the code beside
+   *  `outstandingCents`. A different set of invoices to the one above, so a
+   *  different answer, and the two are stored in two columns. */
+  arrearsCcy: TenantCurrency;
   /** The costs verdict, for the confirmation and for what gets stored. */
   costs: CostVerdict | null;
   /** `tenants.timezone`. A close is stamped at an instant and read as a date;
@@ -1084,7 +1113,7 @@ function Signoff({ c, currency, owedCcy, monthKey, zone, tenantId, me, closes, c
    * correctly, and the row it filed did not. It is permanent, every later drift
    * line reads back through it, and the handoff CSV exports it.
    */
-  const base = snapshotOf(c, { taken: currency, invoiced: owedCcy, outstanding: owedCcy });
+  const base = snapshotOf(c, { taken: currency, invoiced: invoicedCcy, outstanding: arrearsCcy });
   const costNote = costs ? costNoteForClose(costs) : null;
   const snap = { ...base, blockersAtClose: joinCloseBlockers(base.blockersAtClose, costNote) };
   // Over AT THE GYM. This was `monthEnded(c.window)`, which compares the
@@ -1357,11 +1386,13 @@ function Signoff({ c, currency, owedCcy, monthKey, zone, tenantId, me, closes, c
  * they see, and a file that opened with the takings would be a file whose
  * refusals are below the fold.
  */
-function Handoff({ c, rec, currency, owedCcy, gymName, monthKey }: {
+function Handoff({ c, rec, currency, arrearsCcy, gymName, monthKey }: {
   c: MonthClose; rec: CloseRecord; currency: TenantCurrency;
   /** What the month's INVOICES agree on. "Still owed" is denominated in this,
    *  not in what the card takings happened to be in. */
-  owedCcy: TenantCurrency;
+  /** Every invoice figure in this export is `c.arrears`, so this is the arrears
+   *  code and not the month's billing one. */
+  arrearsCcy: TenantCurrency;
   /* `gymCcy` used to be a prop here, on the argument that payroll "comes off
    * the session fee and the snapshotted rates, so this is its unit". The
    * snapshotted rates carry their own unit (supabase/parts/1010), so it is not:
@@ -1408,8 +1439,8 @@ function Handoff({ c, rec, currency, owedCcy, gymName, monthKey }: {
       [
         ['Taken', c.income?.takenCents ?? null, currency ?? '(not stated)',
           c.income ? `${c.income.count} payment(s)${c.income.currencies.length > 1 ? ', more than one currency so no total' : ''}` : 'the payments were not read'],
-        ['Still owed', c.arrears?.outstandingCents ?? null, owedCcy ?? '(not stated)',
-          c.arrears ? `${c.arrears.outstanding} open, ${c.arrears.overdue} past due${owedCcy ? '' : ' — the invoices do not all state one currency, so this is not one total'}` : 'the invoices were not read'],
+        ['Still owed', c.arrears?.outstandingCents ?? null, arrearsCcy ?? '(not stated)',
+          c.arrears ? `${c.arrears.outstanding} open, ${c.arrears.overdue} past due${arrearsCcy ? '' : ' — the invoices do not all state one currency, so this is not one total'}` : 'the invoices were not read'],
         // The payroll run's OWN money, and no amount at all where the run
         // covers more than one. `gymCcy` here was `tenants.currency` — the code
         // the gym charges in today — printed against a sum of rates snapshotted
@@ -2157,6 +2188,24 @@ function sumOrNull(a: number | null, b: number | null): number | null {
  */
 const agreedCurrency = (rows: Array<{ currency: string | null }>): TenantCurrency =>
   sharedCurrency(rows);
+
+/**
+ * The one code a set of invoices agreed on, read back off the summary that
+ * summed them.
+ *
+ * Not `agreedCurrency` over rows the caller narrowed itself: `owedOf` has
+ * already normalised every code the same way `sharedCurrency` does, and asking
+ * a second time is how the sum and its label come to be derived from two
+ * different sets.
+ *
+ * Both fields are consulted because they answer two different questions.
+ * `currencies` is what the rows STATED, with the "nobody said" member dropped;
+ * `mixedCurrency` counts that member. A month of GBP invoices with one row
+ * carrying no currency at all has `currencies.length === 1` and is not a month
+ * in one money, and every figure `owedOf` returned for it is already null.
+ */
+const agreedIn = (o: Owed | null): TenantCurrency =>
+  o && !o.mixedCurrency && o.currencies.length === 1 ? o.currencies[0] : null;
 
 function currencyOf(rec: CloseRecord, gym: TenantCurrency): TenantCurrency {
   if (rec.payments.state === 'ready' && rec.payments.rows.length) {

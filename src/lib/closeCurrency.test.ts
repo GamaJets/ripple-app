@@ -249,5 +249,57 @@ for (const s of [noCcy.summary, ...noCcy.strengths.map((x) => x.detail), ...noCc
   ok(!/\b[A-Z]{3}\s[\d,]/.test(s), `no currency set, so no amount may be written — got "${s}"`);
 }
 
+/* ── 9. the month's invoices and the arrears are TWO sets ──────────────────── */
+
+// `fetchInvoices` on studio-web/app/close/page.tsx takes no month: it reads
+// every invoice the gym has issued up to the month end, because an invoice
+// raised in June and still open in August is money owed at the August close.
+// `buildClose` then splits that one read in two — `owed` is what was ISSUED IN
+// THE MONTH, `arrears` is everything still open up to its end — and sums each
+// separately.
+//
+// The close page derived ONE currency from the rows as they arrived and put it
+// beside both figures, so a single EUR invoice raised in 2024 and never paid
+// withheld the code from August's GBP billing total. `invoicedCents` then went
+// into `gym_month_closes` with a null currency beside it, permanently, and
+// gymClose.ts states what an accountant does with an unlabelled figure: prices
+// it with the gym's code.
+//
+// These assertions pin the FACT the fix rests on — that the two sets can give
+// two answers. If they ever stop being able to, a single shared answer would be
+// correct and this section should fail rather than quietly still pass.
+const invOn = (amountCents: number, currency: string, issuedOn: string, status: 'paid' | 'open' = 'paid') =>
+  ({ ...inv(amountCents, currency, status), issuedOn });
+
+const spanning = buildClose({
+  payments: sliceReady([]),
+  invoices: sliceReady([
+    invOn(40000, 'EUR', '2024-11-02', 'open'),
+    invOn(120000, 'GBP', '2026-08-03', 'paid'),
+    invOn(80000, 'GBP', '2026-08-19', 'open'),
+  ]),
+  sessions: sliceReady([]),
+  memberships: sliceReady([]),
+  passes: sliceReady([]),
+} as unknown as Parameters<typeof buildClose>[0], W, { policy: PAY_DELIVERED_ONLY, now: AFTER, today: '2026-09-02' });
+
+eq(spanning.owed?.currencies.join(','), 'GBP',
+  "August's own invoices are all in one money");
+eq(spanning.owed?.mixedCurrency, false,
+  'so the billing figure for the month is sayable');
+eq(spanning.owed?.settledCents, 120000,
+  'and it is a real total, not a dash');
+
+eq(spanning.arrears?.currencies.join(','), 'EUR,GBP',
+  'while the arrears reach back to a 2024 invoice in another currency');
+eq(spanning.arrears?.mixedCurrency, true,
+  'so THAT figure is the one that cannot be totalled');
+eq(spanning.arrears?.outstandingCents, null,
+  'and is withheld, which is correct and always was');
+
+ok(spanning.owed?.mixedCurrency !== spanning.arrears?.mixedCurrency,
+  'the two sets disagree about their own money, which is exactly why one answer '
+  + 'could not label both figures');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('closeCurrency.test.ts OK');
