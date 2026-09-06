@@ -237,9 +237,25 @@ eq(mealRowSpoken({ name: 'Trail mix', kcal: null }), 'Trail mix', 'and neither i
   const inIt = mealAllergens(meal, EVERY);
   const said = mealRowSpoken({ slot: meal.slot, name: meal.n, allergens: inIt, kcal: String(meal.k) });
   ok(said.startsWith(`${meal.slot}. ${meal.n}`), 'a real meal leads with its slot and its name');
+
+  // ── this loop used to be unable to fail ────────────────────────────────
+  //
+  // It was `ok(said.includes(a) || said.toLowerCase().includes('contains'))`.
+  // The second disjunct is CONSTANT across the loop — `mealRowSpoken` writes
+  // the word "Contains" whenever there is any allergen at all — so once the
+  // sentence said "Contains" every iteration passed whatever it named, and a
+  // dish whose dairy mark had been dropped would have gone through. Nothing
+  // asserted the loop ran either, so a `mealAllergens` that returned nothing
+  // passed by running zero times.
+  //
+  // The same shape as the four `process.exit(1)` epilogues found mid-file
+  // earlier tonight, and worse in one way: those at least reported. This one
+  // was counted as coverage of a SAFETY surface.
+  ok(inIt.length > 0,
+    `the breakfast this asserts over must actually carry an allergen — ${meal.n} carried ${inIt.length}`);
   for (const a of inIt) {
-    ok(said.includes(a === 'nuts' ? 'nuts' : a) || said.toLowerCase().includes('contains'),
-      `and every allergen the engine found on ${meal.n} reaches the sentence`);
+    ok(said.includes(a === 'nuts' ? 'nuts' : a),
+      `and every allergen the engine found on ${meal.n} is NAMED in the sentence, not merely implied by the word "Contains"`);
   }
 }
 

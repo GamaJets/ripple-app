@@ -61872,3 +61872,491 @@ $function$;
 revoke all on function public.run_session_series_materialiser(integer) from public;
 revoke all on function public.run_session_series_materialiser(integer) from anon;
 revoke all on function public.run_session_series_materialiser(integer) from authenticated;
+
+-- ▶ the-guard-that-only-watched-updates.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The guard that only watched updates
+-- ═══════════════════════════════════════════════════════════════════════════
+-- NOT APPLIED. Written to be applied by hand. Every fact below was read out of
+-- the LIVE database on 6 Sep 2026 with pg_policies, pg_trigger, pg_proc,
+-- pg_get_functiondef and has_table_privilege — not out of the parts.
+-- APPLIED. Proved live as the `authenticated` role inside a transaction
+-- aborted on purpose: an INSERT into public.clients naming a listed coach is
+-- refused with the guard's own sentence — 'A client cannot set their own coach.'
+--
+--
+-- ── What this is ─────────────────────────────────────────────────────────
+--
+-- supabase/parts/2400 (commit dfc2744, "Anybody signed in could make
+-- themselves any coach's client") closed `link_coaching`. Its argument for why
+-- that function was the defect rather than the rule is quoted from its own
+-- commit message:
+--
+--     "It is a hole in a rule rather than a missing rule.
+--      guard_client_trainer_link on `clients` says outright: 'A client cannot
+--      set their own coach.' ... That trigger IS the rule; this function was
+--      the way around it."
+--
+-- The trigger is not the rule it is described as. Live:
+--
+--     CREATE TRIGGER guard_client_trainer_link_t
+--       BEFORE UPDATE ON public.clients
+--       FOR EACH ROW EXECUTE FUNCTION guard_client_trainer_link()
+--
+-- BEFORE UPDATE, and the function body is `new.trainer_id is distinct from
+-- old.trainer_id`, which has no meaning on an INSERT and could not run on one.
+-- So the sentence "a client cannot set their own coach" is enforced against
+-- changing the column and not against writing it the first time.
+--
+-- ── The second way in, exactly as it stands live ─────────────────────────
+--
+--   public.clients, rls enabled. ONE policy admits a write:
+--
+--     client_self  FOR ALL  USING (id = auth.uid())   -- WITH CHECK is NULL
+--
+--   A FOR ALL policy with no WITH CHECK uses its USING expression as the
+--   WITH CHECK for INSERT. So the whole of the test applied to an inserted row
+--   is `id = auth.uid()`. `trainer_id` is not mentioned anywhere.
+--
+--   grants: `authenticated` and `anon` both hold INSERT (has_table_privilege).
+--
+--   the other BEFORE INSERT trigger, guard_client_tenant_t, fires on
+--   INSERT OR UPDATE and guards `tenant_id` ALONE — it is the shape this part
+--   copies, and it is the proof the INSERT case was thought about for one
+--   column and not for the other.
+--
+-- One statement from any signed-in account with no `clients` row of its own:
+--
+--     insert into clients (id, trainer_id) values (auth.uid(), '<any coach>');
+--
+-- The coach's id is not a secret — `trainers_public_directory_r` is
+-- `using (listed = true)` to authenticated, and two coaches are listed on
+-- production. 10 of the 20 accounts on production have no `clients` row today
+-- and so are not stopped by the primary key.
+--
+-- ── What it is worth, stated narrowly ────────────────────────────────────
+--
+-- LESS than `link_coaching` gave, and the difference is worth writing down so
+-- nobody reads this as the same finding twice. `link_coaching` also wrote
+-- `coaching_relationships`; this does not. So the star rating via
+-- `can_review_coach`, and everything else keyed on that table, is NOT reachable
+-- this way. Neither are `availability_templates_client_r`,
+-- `trainers_assigned_client_r` or `tenants_client_r` — all three key on
+-- `coach_clients`, which is a TABLE (relkind 'r'), not a view over `clients`.
+--
+-- What IS reachable, every one a live policy satisfied the moment the row
+-- exists, read out of pg_policies:
+--
+--   · the caller appears on that coach's roster — `clients_trainer_read` is
+--     `trainer_id = auth.uid()`, and the coach has no way to tell this row from
+--     one they agreed to.
+--   · a MESSAGE THREAD with a coach who never agreed. `is_my_client(c)` is
+--     `exists (select 1 from clients where id = c and trainer_id = auth.uid())`
+--     — it reads `clients.trainer_id` and nothing else — and 20 policies across
+--     18 tables turn on it, `msg_coach_r` and `msg_coach_i` among them. The
+--     caller's own `msg_client_i` then lets them post into it, and the AFTER
+--     INSERT trigger on `messages` pushes it to the coach's phone.
+--   · `coach_documents_client_r` — the coach's documents.
+--   · `sessions_client_read` — every slot that coach has open.
+--   · `exvid_read` at `visibility = 'clients'` — the coach's exercise videos.
+--
+-- ── Why closing it costs nothing ─────────────────────────────────────────
+--
+-- NOTHING in this repository inserts a `clients` row from a handset or a
+-- browser. Grepped across src/, app/, studio-web/ and supabase/functions/:
+-- every `from('clients')` is a `.select()` or an `.update()`; there is no
+-- `.insert()` and no `.upsert()` on the table anywhere.
+--
+-- `prosrc ~* 'insert into (public.)?clients'` over every function in the public
+-- schema returns exactly two — `accept_member_invite` and `provision_profile`
+-- — and both are SECURITY DEFINER owned by `postgres`. `current_user` inside
+-- them is therefore `postgres`, which the guard below does not test, so both
+-- are untouched. That is the same exemption `guard_client_tenant` already
+-- relies on and the same one part 2400 relied on for `accept_invite`.
+--
+-- ── The shape of the fix ─────────────────────────────────────────────────
+--
+-- The trigger is widened to INSERT and the function grows the arm it never
+-- had, in the shape `guard_client_tenant` already uses for `tenant_id`: a
+-- client may create their own row, and may not name a coach on it. Coaching
+-- still starts where the sentence has always said it does — a code, an
+-- invitation, or a directory request — and each of those runs as `postgres`.
+--
+-- The WITH CHECK on `client_self` is deliberately NOT touched. Two mechanisms
+-- for one rule is how part 2400's hole came to exist; the trigger is where the
+-- sentence is already written, and this puts it where it can be read.
+-- ─────────────────────────────────────────────────────────────────────────
+
+create or replace function public.guard_client_trainer_link()
+returns trigger
+language plpgsql
+set search_path to 'public', 'pg_temp'
+as $function$
+begin
+  if current_user in ('authenticated', 'anon') then
+    if tg_op = 'INSERT' then
+      -- The arm that did not exist. `old` is null here, so the comparison
+      -- below cannot be reused: on an INSERT the question is not "did this
+      -- change" but "was it named at all".
+      if new.trainer_id is not null then
+        raise exception 'A client cannot set their own coach. Coaching starts with a code, an invitation or a directory request, and ends with end_coaching().'
+          using errcode = '42501';
+      end if;
+    elsif new.trainer_id is distinct from old.trainer_id then
+      raise exception 'A client cannot set their own coach. Coaching starts with a code, an invitation or a directory request, and ends with end_coaching().'
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end
+$function$;
+
+drop trigger if exists guard_client_trainer_link_t on public.clients;
+create trigger guard_client_trainer_link_t
+  before insert or update on public.clients
+  for each row execute function public.guard_client_trainer_link();
+
+-- ── after applying ───────────────────────────────────────────────────────
+--
+--   · re-read pg_get_triggerdef and confirm it says BEFORE INSERT OR UPDATE.
+--   · confirm the two definer writers still work: accept_member_invite and
+--     provision_profile both run as `postgres` and must be unaffected.
+--   · run get_advisors(security). This part creates no new function grant —
+--     `create or replace` keeps the existing proacl — but the rule is that a
+--     part is not finished until the advisors are read.
+
+-- ▶ a-client-could-rewrite-or-delete-the-record-of-what-they-paid.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A client could rewrite or delete the record of what they paid
+-- ═══════════════════════════════════════════════════════════════════════════
+-- NOT APPLIED. Written to be applied by hand. Every fact below was read out of
+-- the LIVE database on 6 Sep 2026 with pg_policy, pg_class, pg_constraint,
+-- pg_trigger, pg_proc and information_schema.role_table_grants — not out of the
+-- parts, which are a build log rather than the truth.
+-- APPLIED. Proved live in the same aborted transaction: an INSERT into
+-- public.client_purchases as `authenticated` now answers 'permission denied for
+-- table client_purchases'. Verified first that every writer is an edge function
+-- on the SERVICE ROLE (stripe-webhook, connect-checkout, connect-refund), which
+-- a revoke from authenticated does not touch.
+--
+--
+-- ── What a person suffers ─────────────────────────────────────────────────
+--
+-- A coach opens Payments and a pack they sold on Tuesday for AED 4,800 is
+-- gone: not refunded, not withdrawn, gone. Their month is short by it, their
+-- Statement of Record is short by it, and the client's value on the Money
+-- screen is short by it. Nothing on any screen says a sale was removed,
+-- because there is no such thing as a removed sale in this product — every
+-- takings figure is a sum over `client_purchases` rows and the row is simply
+-- not there any more.
+--
+-- Or the sale is still there and says it was fully refunded. `refundBlocker`
+-- in src/lib/refunds.ts then refuses the coach's real refund with "The whole
+-- of this one has already been given back", the sale renders as refunded on
+-- the coach's own screen, and Stripe has no refund on it at all. That is this
+-- lane's worst shape — a refund reported as done that never happened — and it
+-- can be written by the person who benefits from it.
+--
+-- Or the ten-session pack the client bought once never runs out, because
+-- `sessions_used` goes back to 0 whenever they like. The coach delivers
+-- session eleven, twelve and thirty and is paid for ten.
+--
+-- Or a pack appears that was never bought. A signed-in account can INSERT a
+-- `client_purchases` row naming ANY coach, `status = 'paid'`,
+-- `sessions_total = 100`, `amount_cents = 0` — and `client_purchases_notify_
+-- trainer` fires, so the coach is notified of a sale that did not happen,
+-- `redeem_pack_session` will draw sessions off it, and the coach's Delivery
+-- and Revenue screens count it.
+--
+-- All four need nothing but the publishable key that ships in every build and
+-- an ordinary client session.
+--
+-- ── The policy chain, exactly as it stands live ───────────────────────────
+--
+--   public.client_purchases, rls enabled, THREE permissive policies:
+--
+--     cp_self          FOR ALL     USING      (client_id = auth.uid())
+--                                  WITH CHECK (client_id = auth.uid())
+--     cp_trainer_read  FOR SELECT  USING      (trainer_id = auth.uid())
+--     purch_read       FOR SELECT  USING      (client_id = auth.uid()
+--                                              OR trainer_id = auth.uid()
+--                                              OR is_owner_of(staff_tenant_of(trainer_id)))
+--
+--   grants: authenticated and anon both hold SELECT, INSERT, UPDATE, DELETE.
+--
+-- `anon` cannot reach any of it — `auth.uid()` is null and `client_id = null`
+-- is null, not true — so this is an ordinary signed-in client, which is
+-- everybody who has ever bought anything.
+--
+-- The table's CHECK constraints bound the damage and do not stop it:
+-- `client_purchases_sessions_used_ck` permits `sessions_used = 0` on any pack,
+-- and `client_purchases_refund_within_charge` permits
+-- `refunded_cents = amount_cents` with `refunded_at = now()`. Both of those
+-- are the exploit, not a barrier to it. DELETE is bounded by nothing.
+--
+--     -- as any signed-in client, against /rest/v1:
+--     patch  client_purchases?id=eq.<mine>  {"sessions_used": 0}
+--     patch  client_purchases?id=eq.<mine>  {"refunded_cents": 480000,
+--                                            "refunded_at": "2026-09-06T00:00:00Z"}
+--     delete client_purchases?id=eq.<mine>
+--     post   client_purchases {"client_id":"<me>","trainer_id":"<any coach>",
+--                              "status":"paid","sessions_total":100}
+--
+-- ── Why the write half of cp_self exists, and why it no longer does ───────
+--
+-- supabase/parts/121 recorded `cp_self` as it already stood in the live
+-- database, and its note is explicit about the job it was doing: `redeemSession`
+-- and `refundSession` in src/lib/connect.ts wrote `sessions_used` DIRECTLY, as
+-- the client, so the client needed UPDATE on their own row. Part 121 was right
+-- at the time.
+--
+-- It has not been true since redemption moved into RPCs. All three credit
+-- movements are now SECURITY DEFINER functions, verified live:
+--
+--   redeem_pack_session(p_trainer)     scopes to client_id = auth.uid()
+--   refund_pack_session(p_trainer)     scopes to client_id = auth.uid()
+--   adjust_pack_credit(p_purchase, ±1) scopes to trainer_id = auth.uid()
+--
+-- Each takes `for update`, re-checks authorisation inside the function because
+-- SECURITY DEFINER bypasses the row policies, and asserts `row_count = 1`.
+-- EXECUTE is held by `authenticated` and NOT by `anon` on all three.
+--
+-- Every other write to this table is the service role from
+-- supabase/functions/stripe-webhook (the upsert at index.ts:1200) and
+-- connect-refund, neither of which is subject to RLS. Grepped across src/,
+-- app/, studio-web/src/ and supabase/functions/: there is no client-side or
+-- coach-side insert, update or delete of `client_purchases` anywhere in this
+-- repository. The write half of `cp_self` is a verb nobody meant to offer,
+-- standing open at the REST endpoint.
+--
+-- ── The fix ───────────────────────────────────────────────────────────────
+--
+-- Both halves, because either alone is a half-fix: a policy without the grant
+-- revoke leaves the verb reachable the moment somebody adds a policy, and a
+-- revoke without the policy change leaves a FOR ALL policy that reads as
+-- intent.
+--
+--   1. `cp_self` becomes SELECT-only. Nothing is lost: `purch_read` already
+--      carries `client_id = auth.uid()`, so the buyer's read of their own
+--      purchase survives twice over. It is kept rather than dropped so that a
+--      later `drop policy if exists purch_read` cannot silently take a
+--      client's own purchase history away from them.
+--   2. INSERT, UPDATE and DELETE are revoked from `authenticated` and `anon`.
+--      SELECT stays.
+--
+-- Two dead grants on neighbouring tables go with it, and they are dead in the
+-- precise sense that RLS refuses the verb today because no policy permits it —
+-- `client_subscriptions` carries only `client_subs_read` (SELECT) and
+-- `promo_redemptions` only two SELECT policies, while both tables grant
+-- INSERT/UPDATE/DELETE to `authenticated` and `anon`. They are revoked here so
+-- that the next `for all` policy written on either table does not turn a
+-- read-only table into a writable one without anybody noticing. Redemption
+-- writes go through `redeem_promo`, which is SECURITY DEFINER.
+--
+-- Idempotent. Safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1 · client_purchases: the buyer reads their own row and writes nothing ──
+
+drop policy if exists cp_self on public.client_purchases;
+create policy cp_self on public.client_purchases
+  for select
+  using (client_id = (select auth.uid()));
+
+comment on table public.client_purchases is
+  'One-off sales, written ONLY by the service role from the Stripe webhook and connect-refund. No role holds INSERT, UPDATE or DELETE: session credits move through redeem_pack_session, refund_pack_session and adjust_pack_credit, which are SECURITY DEFINER and re-check authorisation themselves. Before part 2580 the buyer held FOR ALL on their own row and could zero sessions_used, stamp a refund Stripe never made, delete the record of a sale, or insert one that never happened.';
+
+revoke insert, update, delete on public.client_purchases from authenticated;
+revoke insert, update, delete on public.client_purchases from anon;
+
+-- ── 2 · two dead grants beside it, closed before a policy wakes them ───────
+
+revoke insert, update, delete on public.client_subscriptions from authenticated;
+revoke insert, update, delete on public.client_subscriptions from anon;
+
+revoke insert, update, delete on public.promo_redemptions from authenticated;
+revoke insert, update, delete on public.promo_redemptions from anon;
+
+-- ── verify, after applying ────────────────────────────────────────────────
+--
+-- Expect cp_self to be 'r' (SELECT) and no policy on client_purchases to be
+-- '*' (ALL):
+--
+--   select polname, polcmd, polpermissive
+--     from pg_policy p join pg_class c on c.oid = p.polrelid
+--    where c.relname = 'client_purchases';
+--
+-- Expect exactly SELECT for both roles on all three tables:
+--
+--   select table_name, grantee, string_agg(distinct privilege_type, ',')
+--     from information_schema.role_table_grants
+--    where table_schema = 'public'
+--      and grantee in ('anon', 'authenticated')
+--      and table_name in ('client_purchases', 'client_subscriptions', 'promo_redemptions')
+--    group by 1, 2 order by 1, 2;
+--
+-- Then draw and return a credit as a real client, which must still work — it
+-- goes through the RPCs and never touches the table grants:
+--
+--   select * from redeem_pack_session('<a coach uuid>');
+--   select * from refund_pack_session('<the same coach uuid>');
+
+-- ▶ two-product-calls-the-catalogue-and-the-signature.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Two product calls, made and written down
+-- ═══════════════════════════════════════════════════════════════════════════
+-- APPLIED. Verified after: gym_agreement_signatures carries only INSERT and
+-- SELECT policies and `authenticated` holds only INSERT and SELECT on it;
+-- exercises.created_by exists; the four authorless coach rows are
+-- 1-arm-plated-row, dumbbell-over-head-press-single-arm,
+-- machine-preacher-tricep-extension and standing-dumbbell-curls — all real
+-- movements rather than typos, which is worth knowing before anyone corrects
+-- them. Anon-executable SECURITY DEFINER functions still hold at 2.
+--
+--
+-- Both were raised as findings earlier and deliberately left, because each
+-- needed a decision rather than a repair. Tim asked for the decisions. They are
+-- below, with the reasoning, so the next person can disagree with the argument
+-- rather than guess at it.
+--
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · Custom movements stay in the GLOBAL catalogue
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- The question was whether a coach's own movement belongs in `exercises`,
+-- which every gym reads, or in the tenant-scoped `coach_exercises`.
+--
+-- It belongs in `exercises`, and the reason is that the slug is not a name —
+-- it is an IDENTITY, and four separate systems key on it:
+--
+--   · `exercise_translations` — 1,166 rows landed against these exact ids
+--     tonight, 583 German and 583 Spanish. A movement outside the catalogue
+--     has no translation and never will.
+--   · `exercise_videos` and the demo/animation paths, which are keyed on
+--     `exercises.id`.
+--   · `muscle_volume`, which joins a logged movement to its muscle group
+--     THROUGH the catalogue — the only reason the app can answer "how much
+--     back work did I do".
+--   · `matchExercises` in src/lib/exerciseHistory.ts, which resolves a logged
+--     NAME to a catalogue row so history matches across a rename.
+--
+-- Moving custom movements to `coach_exercises` would give a coach's own
+-- movements none of those, and would give the same physical movement a
+-- different identity in every gym that invented it. `coach_exercises` is the
+-- right place for a coach's own LIBRARY — which is what it holds — and the
+-- wrong place for the identity of a movement.
+--
+-- ── what was actually wrong, and what this does about it ──────────────────
+--
+-- The real complaint stands: one coach's typo becomes a permanent globally
+-- readable row keyed on their typing. Part 2380 gave that half its answer — a
+-- platform admin can now UPDATE and DELETE, where before nobody could.
+--
+-- The half left over is that a wrong row cannot be TRACED. `source = 'coach'`
+-- says a coach wrote it and nothing says which coach, so an admin looking at
+-- `barbell-benchpres` has no one to ask what it was meant to be, and no way to
+-- tell a typo from a real movement they have not heard of.
+--
+-- `created_by` closes that. Nullable, because the 604 curated rows have no
+-- author and inventing one would be worse than the gap. ON DELETE SET NULL,
+-- because a movement outlives the account that named it — and because the
+-- alternative, CASCADE, would delete catalogue rows other gyms are using when
+-- a coach closes their account.
+--
+-- Not enforced as NOT NULL for coach rows, deliberately: a constraint that can
+-- only be satisfied by a client sending a column it has never sent would
+-- refuse every custom movement the moment this applied, on every handset that
+-- has not taken the update. The app sets it going forward; the four existing
+-- coach rows keep a null and are named in the query at the foot of this file.
+
+alter table public.exercises
+  add column if not exists created_by uuid references public.profiles(id) on delete set null;
+
+comment on column public.exercises.created_by is
+  'Who added this row, when a person did. NULL on the curated catalogue, which has no author, and NULL on the four coach rows that predate supabase/parts/2590. Set by src/ui/customExercise.ts on every coach-written row from that part onwards. It exists so a wrong row can be TRACED: `source = ''coach''` says a coach wrote it and nothing said which, so a platform admin correcting a typo had nobody to ask what it was meant to be. ON DELETE SET NULL because a movement outlives the account that named it, and because CASCADE would delete catalogue rows other gyms are using when a coach closes their account.';
+
+-- The insert policy gains the one thing it can honestly check: a row claiming
+-- an author must claim the caller. It cannot require an author, for the reason
+-- in the header — an older bundle sends no column at all.
+drop policy if exists exercises_staff_w on public.exercises;
+create policy exercises_staff_w on public.exercises for insert
+  to authenticated
+  with check (
+    my_role() in ('trainer', 'owner')
+    and (created_by is null or created_by = (select auth.uid()))
+  );
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · A gym owner may NOT rewrite or delete a member's signed waiver
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `gym_agreement_signatures` carried, live:
+--
+--     gym_agreement_sig_owner_u  UPDATE  using/with check is_owner_of(tenant_id)
+--     gym_agreement_sig_owner_d  DELETE  using           is_owner_of(tenant_id)
+--
+-- A signature is the record that a member agreed to something — the gym's
+-- liability waiver, its terms, its cancellation policy. The party it protects
+-- the gym FROM is the member; the party it could be inconvenient for is the
+-- gym. So the gym being able to rewrite or remove it is the interested party
+-- withdrawing the evidence, and a signature that the counterparty can edit is
+-- not a signature.
+--
+-- The shape this should have is already in this schema and was decided
+-- deliberately: `coach_document_acceptances` has no UPDATE and no DELETE
+-- policy at all, for exactly this reason.
+--
+-- Both are dropped. Checked before dropping, not after: nothing in app/,
+-- src/, studio-web/ or supabase/functions/ updates or deletes a signature —
+-- every reference is an insert or a read (gymDocs.ts, gymSigning.ts,
+-- agreements.tsx, the export path). And the table holds 0 rows, so nothing
+-- that exists is affected either way.
+--
+-- What is deliberately KEPT:
+--
+--   · `gym_agreement_sig_owner_i` — the owner may INSERT a signature for
+--     somebody else (`member_id is distinct from auth.uid()`). That is the
+--     front desk signing a member in on the gym's own tablet, which is how
+--     most waivers actually get signed, and it is a different act from
+--     altering one that exists.
+--   · both SELECT policies. The gym must be able to read what was signed;
+--     that is the whole point of keeping it.
+--
+-- An erasure still removes them: the FK to the member cascades, executed by
+-- the database, which consults neither grant nor policy.
+
+drop policy if exists gym_agreement_sig_owner_u on public.gym_agreement_signatures;
+drop policy if exists gym_agreement_sig_owner_d on public.gym_agreement_signatures;
+
+-- Revoked as well as unpoliced. A policy is the rule and the grant is the
+-- door; leaving `authenticated` holding UPDATE and DELETE on this table would
+-- mean the next `for all` policy anybody adds silently reopens it.
+revoke update, delete on public.gym_agreement_signatures from authenticated;
+revoke all on public.gym_agreement_signatures from anon;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · What to check after applying
+-- ═════════════════════════════════════════════════════════════════════════
+--
+--   · the four authorless coach rows, which are the ones an admin may want to
+--     ask about and now cannot:
+--
+--       select id, name, created_by from public.exercises
+--        where source = 'coach' order by id;
+--
+--   · the signature table has no UPDATE or DELETE policy, and authenticated
+--     holds neither verb:
+--
+--       select policyname, cmd from pg_policies
+--        where tablename = 'gym_agreement_signatures';
+--       select privilege_type from information_schema.role_table_grants
+--        where table_name = 'gym_agreement_signatures' and grantee = 'authenticated';
+--
+--   · `select public.get_advisors('security')` is clean and the count of
+--     anon-executable SECURITY DEFINER functions still holds at 2.
+-- ═══════════════════════════════════════════════════════════════════════════

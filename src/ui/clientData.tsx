@@ -662,10 +662,38 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
         if (!cancelled) await loadForUser(id);
       } catch (e) { reportError('clientData.hydrate.auth', e); if (!cancelled) { setScansStatus('error'); setProfileStatus('error'); } }
     })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (cancelled) return;
       const id = session?.user?.id;
       if (id) { loadForUser(id); return; }
+      // ── a null session is not the same thing as a sign-out ───────────────
+      //
+      // SIGNED_OUT is the only event that means the session ENDED, and it is
+      // the only one auth-js raises after `_removeSession()` — every path that
+      // drops a session goes through it, including `getUser()` learning the
+      // JWT names a session the server no longer has. So gating on it loses
+      // nothing the clear below was written for.
+      //
+      // INITIAL_SESSION arrives with a null session for a reason that is NOT a
+      // sign-out, and it arrives here on every re-registration of this listener
+      // — this effect re-runs on `readTick`, which `reload` bumps, which
+      // `useRecoverRead` bumps on foreground and on reconnect.
+      // `_emitInitialSession` calls back with `null` whenever `getSession()`
+      // ERRORS, and `getSession()` errors when the access token has expired and
+      // the refresh could not be made — a dead gym wifi, a captive portal, the
+      // basement. The refresh token is still on the handset and still good; the
+      // member is still signed in and auth-js restores them on the next tick.
+      //
+      // Clearing on that is worse than the bug it fixes, because the member IS
+      // looking: `profileStatus` would be settled to 'ready' over an empty
+      // profile, and app/(client)/injuries.tsx prints "no injuries" on exactly
+      // `injuries.length === 0 && profileStatus === 'ready'`, foodlog and
+      // restaurant mark dishes safe off an emptied `avoid`, and the dashboard's
+      // `targetInputsUnknown` goes false so Fuel Today is drawn from the
+      // constructed 'muscle'/'meat' defaults. It does not self-heal on its own
+      // either: `sbUid` is null, so the read effect above no longer runs, and
+      // 'ready' is a whole status, so `useRecoverRead` stops asking.
+      if (event !== 'SIGNED_OUT') return;
       // ── and when the session GOES ────────────────────────────────────────
       //
       // This listener used to be `if (id) loadForUser(id)` and nothing else, so
@@ -692,9 +720,13 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       // blob on disk with the empty one, which takes the departing member's
       // injuries off the handset as well as off the screen.
       //
-      // `sbUid` last, and `nameSynced` false, because those two are the push
-      // effect's arming gate: it must not see a cleared name beside a live uid
-      // and conclude the member has just erased their own profile.
+      // `nameSynced` and `sbUid` FIRST — the order below is load-bearing and
+      // this comment used to describe the opposite of it. Those two are the
+      // push effect's arming gate, and disarming them before a single field is
+      // blanked is what stops that effect ever seeing a cleared name beside a
+      // live uid and concluding the member has just erased their own profile.
+      // Under React's batching the whole block is one render either way; under
+      // a legacy non-batched update it is not, and then only this order holds.
       setNameSynced(false);
       setSbUid(null);
       setName(''); setDob(''); setPhoto(null); setHeightCm(null);

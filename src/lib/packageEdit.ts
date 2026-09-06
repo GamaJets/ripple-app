@@ -125,6 +125,39 @@ export function isReprice(p: PackagePatch, currentCents: number | null | undefin
   return p.price_cents !== currentCents;
 }
 
+/** True when the patch changes the name at all. The counterpart to `isReprice`,
+ *  and it exists for the same reason: the warning below must appear when the
+ *  name has actually moved and not when a coach is correcting a price. */
+export function isRename(p: PackagePatch, currentName: string | null | undefined): boolean {
+  if (p.name === undefined) return false;
+  return p.name.trim() !== String(currentName ?? '').trim();
+}
+
+/**
+ * What a rename does to sales that have already happened.
+ *
+ * ── The one thing on this screen that is NOT forward-looking ──────────────
+ *
+ * The header above spends four paragraphs establishing that a price edit
+ * cannot reach a sale already made: `client_purchases.amount_cents` and
+ * `client_subscriptions.amount_cents` are written at checkout and every screen
+ * renders from those columns. That is true of the PRICE and it is not true of
+ * the NAME, because there is no name column on either table. `packageLabels`
+ * and `fetchClientPurchases` in src/lib/connect.ts both resolve a sale's label
+ * with a LIVE `trainer_packages` lookup, so renaming "10-Session Pack" to
+ * "20-Session Pack" relabels every pack ever sold under the old name — in the
+ * coach's own Session Packs list, in the client's purchase history, and on the
+ * refund sheet, where a coach decides how much money to give back while
+ * reading a product description that did not exist at the time of the sale.
+ *
+ * The proper fix is a stored label on the sale, written at checkout, which
+ * needs a column and a webhook change. Until that exists this is the honest
+ * thing to do: say so before the coach taps Save, so a rename is a decision
+ * rather than a surprise found months later.
+ */
+export const RENAME_RELABELS_HISTORY =
+  'A name is the one thing here that is not forward-looking. Sales already made carry no name of their own, so they are labelled from this package as it stands today — rename it and every pack you have already sold under the old name is relabelled too, in your own lists, in your client’s purchase history and on the refund screen. The price, the currency and the number of sessions on those sales do not move.';
+
 /**
  * What a coach has to be told before they reprice, or null when there is
  * nothing to say.

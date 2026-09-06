@@ -63,11 +63,28 @@ export async function ensureCatalogueRow(
     if (readErr) { reportError('customExercise.read', readErr, { id }); return { id, created: false }; }
     if (found) return { id, created: false };
 
+    // ── who wrote it ──────────────────────────────────────────────────
+    //
+    // `source = 'coach'` said a coach added this row and nothing said WHICH
+    // coach — so a platform admin looking at a typo in a catalogue every gym
+    // reads had nobody to ask what it was meant to be, and no way to tell a
+    // mistake from a movement they simply had not heard of. Part 2380 gave
+    // them the ability to correct a row; this is what makes it answerable.
+    //
+    // A failed read of our own id does not stop the write. The row is worth
+    // more than its provenance — refusing to record a coach's movement
+    // because we could not name them would be trading the thing for the
+    // label — and `created_by` is nullable precisely so this can be absent.
+    // The insert policy accepts null or the caller's own id and nothing else.
+    let author: string | null = null;
+    try { author = (await supabase.auth.getUser()).data?.user?.id ?? null; } catch { author = null; }
+
     const { error } = await supabase.from('exercises').insert({
       id,
       name: clean,
       muscle_group: opts.group?.trim() || null,
       source: COACH_SOURCE,
+      ...(author ? { created_by: author } : {}),
     });
     if (error) {
       // 23505 is a unique violation: another writer got there between the

@@ -64,14 +64,16 @@ import { monthWindow, monthKeyOf, type MonthWindow } from '@lib/monthEnd';
 // The bounds on this screen need no zone and are left alone: `fetchGymCosts` is
 // filtered on `mw.firstDay`/`mw.lastDay` against `gym_costs.paid_on`, a `date`
 // column, and the days of August are August's wherever they are read. What DID
-// need one is the list of months offered. The default key below already follows
-// `gymDay(Date.now(), zone)` — so at a gym ahead of the reader, on the 1st, the
-// select's own value was a month `recentMonths` had not put in its options, and
-// a <select> whose value is not among its children shows the wrong row selected
-// while `key` says otherwise. Same clock for the value and for the list, or
-// neither can be trusted.
-import { gymRecentMonths } from '@lib/gymMonth';
-import { monthTickStart } from '@lib/pickerMonth';
+// need one is the list of months offered. The default key below follows
+// `gymDay(Date.now(), zone)`, and a list built from `recentMonths` follows the
+// reader — so a <select> whose value is not among its children shows the wrong
+// row selected while `key` says otherwise. Same clock for the value and for the
+// list, or neither can be trusted.
+// `monthsBefore` steps back from a NAMED month by arithmetic on the two integers
+// in its key, so every key in the list below is on the same calendar as the
+// first one. See the note on the picker for why the first one may not come from
+// an instant this device chose.
+import { monthsBefore } from '@lib/closeCosts';
 import { useMonthTick } from '@/lib/monthTick';
 import { isoDate } from '@lib/format';
 import { gymDay, NO_ZONE_NOTE } from '@lib/gymZone';
@@ -135,7 +137,11 @@ export default function Costs() {
   // set has nothing better, and the note under the picker says so.
   const [picked, setPicked] = useState<string | null>(null);
   const gymToday = gymDay(Date.now(), zone);
-  const key = picked ?? (gymToday ? gymToday.slice(0, 7) : monthKeyOf());
+  /** The month RUNNING at the gym, or the reader's where no zone is set. The
+   *  select's default value AND the head of the select's own option list — one
+   *  derivation, so the two cannot name different months. */
+  const monthNow = gymToday ? gymToday.slice(0, 7) : monthKeyOf();
+  const key = picked ?? monthNow;
   const setKey = setPicked;
   const w = useMemo(() => monthWindow(key), [key]);
 
@@ -231,7 +237,27 @@ export default function Costs() {
    * that had just ended was not in the list at all. The only repair was the full
    * page reload this console spent a wave learning not to need.
    */
-  const months = useMemo(() => gymRecentMonths(MONTHS_OFFERED, zone, monthTickStart(tick).getTime()).keys, [tick, zone]);
+  /*
+   * Anchored on `monthNow` — the same string the select's value defaults to —
+   * and NOT on an instant.
+   *
+   * This was `gymRecentMonths(MONTHS_OFFERED, zone, monthTickStart(tick))`, and
+   * `monthTickStart(tick)` is local midnight on the first of the READER's
+   * current month. Asking which month the GYM was in at that instant answers
+   * with the gym's PREVIOUS month for any gym behind the reader — a London gym
+   * read from Dubai, all month, not just at a boundary — so the list started one
+   * month back from the month the select was already set to and the value was
+   * not among its own children. Anchoring the list on the same key the value
+   * comes from is the only way the two can agree by construction.
+   *
+   * `tick` stays in the dependency list because it is what re-renders this
+   * screen when the calendar month turns over; it no longer decides which
+   * months are in the list.
+   */
+  const months = useMemo(
+    () => [monthNow, ...monthsBefore(monthNow, MONTHS_OFFERED - 1)],
+    [monthNow, tick],
+  );
 
   useEffect(() => {
     if (me?.tenantId && w) refresh();

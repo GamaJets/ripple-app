@@ -688,7 +688,14 @@ export default function Invoices() {
             place a coach looks to find out what they have. The section is
             still drawn whenever the read FAILED, because `book.reason` is the
             only thing on this screen that says why. */}
-        {book.totals && !book.totals.pots.length ? null : (
+        {/* "No pots" is NOT "nothing issued". `sumTaken` routes an invoice
+            whose currency is missing to `unlabelled` rather than into a pot, so
+            a coach whose whole live book is unlabelled — or whose whole book is
+            voided — had `pots.length === 0` and lost this entire section, and
+            with it the two sentences that exist to say part of their book is in
+            no figure at all. The suppression is for a coach with genuinely
+            nothing to state, which is all three being empty. */}
+        {book.totals && !book.totals.pots.length && !book.totals.unlabelled && !book.voided ? null : (
         <>
         <Rule />
 
@@ -698,7 +705,6 @@ export default function Invoices() {
             note={ccy.currency ? `Priced in ${ccy.currency}${ccy.source === 'packages' ? ', from your own packages' : ccy.source === 'gym' ? ', from your gym’s setting' : ''}` : undefined}
           />
           {book.totals ? (
-            book.totals.pots.length ? (
               <View style={{ marginTop: sp.sm }}>
                 {book.totals.pots.map((p) => (
                   <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
@@ -713,18 +719,22 @@ export default function Invoices() {
                     These are separate amounts of money and are deliberately not added together.
                   </Flag>
                 ) : null}
+                {/* Said whether or not there is a figure to be left out of.
+                    With no pots at all the sentence has to change — "not in any
+                    figure above" reads as a qualification on figures that are
+                    not there — but it must still be said, because this is the
+                    only place it is said anywhere. */}
                 {book.totals.unlabelled > 0 ? (
                   <Flag style={{ marginTop: sp.sm }}>
-                    {book.totals.unlabelled} invoice{book.totals.unlabelled === 1 ? ' has' : 's have'} an amount with no currency on it, so {book.totals.unlabelled === 1 ? 'it is' : 'they are'} not in any figure above.
+                    {book.totals.unlabelled} invoice{book.totals.unlabelled === 1 ? ' has' : 's have'} an amount with no currency on it, so {book.totals.unlabelled === 1 ? 'it is' : 'they are'} not in {book.totals.pots.length ? 'any figure above' : 'any figure at all — which is why there is none here'}.
                   </Flag>
                 ) : null}
                 {book.voided > 0 ? (
                   <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
-                    {book.voided} voided invoice{book.voided === 1 ? ' is' : 's are'} left out of these figures. {book.voided === 1 ? 'It is' : 'They are'} still listed below.
+                    {book.voided} voided invoice{book.voided === 1 ? ' is' : 's are'} left out of {book.totals.pots.length ? 'these figures' : 'any figure here'}. {book.voided === 1 ? 'It is' : 'They are'} still listed below.
                   </Flag>
                 ) : null}
               </View>
-            ) : null
           ) : (
             <Flag style={{ marginTop: sp.sm }}>{book.reason}</Flag>
           )}
@@ -833,8 +843,20 @@ export default function Invoices() {
                 <View key={g.key} style={{ paddingVertical: sp.md, borderBottomWidth: 1, borderBottomColor: t.ring }}>
                   <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
                     <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, flex: 1 }} numberOfLines={1}>{g.billTo}</Text>
+                    {/* A floor when the read was not whole, and said as one.
+                        `chaseGroups` nulls `pots` under anything but 'ready'
+                        and leaves every COUNT populated, so this line, the
+                        lateness line below it and the note caveat were all
+                        totals over a prefix — printed three lines under the
+                        banner that had just said the record is bigger than one
+                        read. A coach reading "Priya Nair · 3 invoices" decides
+                        Priya is the worst offender and chases her for three
+                        when she owes five. `g.pots` is the same flag the
+                        button below is already gated on. */}
                     <Text style={{ ...ty.label, color: t.ink3 }}>
-                      {g.invoices.length} invoice{g.invoices.length === 1 ? '' : 's'}
+                      {g.pots
+                        ? `${g.invoices.length} invoice${g.invoices.length === 1 ? '' : 's'}`
+                        : `at least ${g.invoices.length}`}
                     </Text>
                   </View>
                   {/* One line per currency and never a sum across them. `pots`
@@ -858,16 +880,28 @@ export default function Invoices() {
                       first alone — see `fromChaseDate` in
                       src/lib/coachInvoice.ts. */}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                    {g.overdue
-                      ? `${g.overdue} past a date you stated, the oldest by ${g.worstDays} day${g.worstDays === 1 ? '' : 's'}.`
-                      : 'Outstanding, and none of it is past a date the client was ever shown.'}
+                    {g.pots
+                      ? (g.overdue
+                        ? `${g.overdue} past a date you stated, the oldest by ${g.worstDays} day${g.worstDays === 1 ? '' : 's'}.`
+                        : 'Outstanding, and none of it is past a date the client was ever shown.')
+                      : (g.overdue
+                        // "None of it" is a claim about the whole of what this
+                        // person owes, and under a short read it is a claim
+                        // about a prefix of it. Both branches say so.
+                        ? `At least ${g.overdue} past a date you stated, and the oldest of the ones that came back is ${g.worstDays} day${g.worstDays === 1 ? '' : 's'} late. There are more than one read returns.`
+                        : 'None of what came back is past a date the client was ever shown — but there are more than one read returns, so that is not all of it.')}
                   </Text>
                   {g.clientId ? null : (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       Not tied to an account, so nothing here can notify them. This note is how you reach them.
                     </Text>
                   )}
-                  {chaseMessageCaveat(g) ? (
+                  {/* Only where the note can actually be written. The caveat
+                      is a COUNT ("3 of these have no amount recorded") over the
+                      same prefix, and it describes a note that is not offered
+                      under a short read — the button below is gated on the
+                      same `g.pots`. */}
+                  {g.pots && chaseMessageCaveat(g) ? (
                     <Flag style={{ marginTop: sp.sm }}>{chaseMessageCaveat(g)}</Flag>
                   ) : null}
                   {/* Absent rather than dead under a read that came back short:

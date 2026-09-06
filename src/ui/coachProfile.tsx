@@ -219,9 +219,27 @@ export function MyTrainerProfileProvider({ children }: { children: ReactNode }) 
       if (!cancelled) setSynced(true);
     };
     fetchReal();
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (cancelled) return;
       if (!session) {
+        // A null session is not the same thing as a sign-out. SIGNED_OUT is the
+        // only event that means the session ended — auth-js raises it from
+        // `_removeSession()`, which every path that drops a session goes
+        // through — while INITIAL_SESSION is delivered with `null` whenever
+        // `getSession()` ERRORS, which it does when the access token has
+        // expired and the refresh could not be made. The refresh token is still
+        // on the handset and still good.
+        //
+        // This listener is re-registered on every `readNonce`, so `reload()`
+        // (pull-to-refresh) on a dead connection is enough to raise it. Clearing
+        // there signs a coach out of their own screen while they are looking at
+        // it: `uid` null makes `resolveTrainerAccess` answer 'signed-out',
+        // which blanks the profile AND turns every setter on this provider into
+        // a no-op, so their Name and Bio fields go quietly read-only. Anything
+        // typed since the last save is replaced by the server copy when the
+        // session comes back, with `save` left reading "Saving…" — the debounce
+        // is disarmed by the same `uid: null`, so it never resolves.
+        if (event !== 'SIGNED_OUT') return;
         // ── the sign-out this listener did not have ────────────────────────
         //
         // It was `if (cancelled || !session) return;`, so a session ending was

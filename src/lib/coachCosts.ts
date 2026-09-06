@@ -62,6 +62,7 @@ import type { LoadStatus } from '../ui/loadStatus';
 // One summing function for the whole app: currencies never merge, and an amount
 // with no unit is counted rather than dropped.
 import { sumTaken, type Taken, type TakenRow } from './coachMoney';
+import { localDate } from './localDate';
 // The typed-amount reader the invoice sheet and the receipt sheet already use,
 // rather than a third one. A coach typing "12.500" into two money fields in
 // this app must not get two different amounts out, and it is the reader that
@@ -207,6 +208,18 @@ export function costBlockers(d: CostDraft): string[] {
  * written up in one evening must not all land in that evening's month, and
  * `since()` and `splitByPeriod()` both read this field.
  *
+ * It goes through `localDate`, which is the whole of why `receiptTakenRows`
+ * exists next door in src/lib/coachReceipts.ts. `paid_on` is a `date` column
+ * and arrives as a bare `YYYY-MM-DD`; `Date.parse` reads that as UTC midnight,
+ * so for every coach west of Greenwich a cost paid on the 1st falls into the
+ * PREVIOUS month — silently, because `sumTaken` never sees the row, it lands
+ * in no `unlabelled` and no `unpriced` count, and the status beside the figure
+ * still says 'ready'. That is the rent, which is the largest line this feature
+ * was built for. Neither caller windows costs today, so nothing is wrong on any
+ * screen; the bare string was still a rule kept in one of two places that are
+ * supposed to be one, which is exactly how `receiptTakenRows` came to be hoisted
+ * out of a screen in the first place.
+ *
  * ── What this function does NOT know, and who has to ───────────────────────
  *
  * It takes rows and nothing else, so `costsTaken([])` is a `Taken` with no pots
@@ -231,7 +244,7 @@ export function costsTaken(rows: readonly CoachCost[]): Taken {
   return sumTaken(rows.map((c): TakenRow => ({
     amount_cents: c.amountCents,
     currency: c.currency,
-    created_at: c.paidOn,
+    created_at: localDate(c.paidOn)?.toISOString() ?? 'unknown',
   })));
 }
 

@@ -256,7 +256,7 @@ import {
   readValidityDays, validityLine, expiryLine, strandedNote, expiryDayLabel, packWindow,
   VALIDITY_NOT_RETROACTIVE, NO_VALIDITY_IS_FOREVER, EXPIRY_IS_NOT_A_REFUND,
 } from '../../src/lib/packExpiry';
-import { packageEditBlocker, isReprice, repriceNote } from '../../src/lib/packageEdit';
+import { packageEditBlocker, isReprice, isRename, repriceNote, RENAME_RELABELS_HISTORY } from '../../src/lib/packageEdit';
 import { fetchMySubscribers, fetchMySubscriptionPayments, pkgMoney, pkgPriceLine, statusLabel, cancelSubscription, resumeSubscription, endSubscriptionNow, type BillingInterval, type Subscriber, type SubscriptionPayment } from '../../src/lib/subscriptions';
 import {
   normaliseCode, promoBlocker, promoState, promoStateLabel, promoUseLine,
@@ -545,6 +545,24 @@ export default function TrainerPayments() {
    *  four places for the count and the list to stop agreeing. */
   const activePkgs = pkgs.filter((p) => p.active);
 
+  /**
+   * Which package a discount code takes its percentage off, or null when this
+   * screen cannot say.
+   *
+   * Read from `pkgs` rather than `activePkgs`: a code can perfectly well be
+   * attached to a package the coach has since withdrawn, and answering "not one
+   * of yours" for that would be worse than saying nothing. Null under a read
+   * that did not come back whole, and null for a code with no package on it —
+   * the caller says which silence it is rather than printing a blank.
+   */
+  const promoPkgLine = (p: PromoCode): string | null => {
+    if (!p.packageId) return null;
+    if (pkgRead !== 'ready') return null;
+    const found = pkgs.find((k) => k.id === p.packageId);
+    if (!found) return null;
+    return found.active ? `On ${found.name}` : `On ${found.name}, which you have withdrawn`;
+  };
+
   const onboard = async () => { setBusy(true); const r = await startTrainerOnboarding(); setBusy(false); if (!r.ok) Alert.alert('Payouts setup', r.error || 'Could not start setup. Make sure Stripe Connect is enabled.'); };
 
   const addPkg = async () => {
@@ -797,7 +815,13 @@ export default function TrainerPayments() {
   const withdrawPromo = (p: PromoCode) => {
     Alert.alert(
       `Withdraw ${p.code}?`,
-      `${PROMO_WITHDRAW_IS_FORWARD_ONLY}\n\n${promoUseLine(p)}`,
+      // WHICH PACKAGE. A coach running "NEWYEAR 50% off" on a £300 programme
+      // and "SUMMER 10% off" on a £60 pack was shown a code, a percentage and
+      // nothing else — here and in the list — so withdrawing the wrong one
+      // leaves the expensive offer live and stops the cheap one, and nothing
+      // on the confirmation could have told them apart. `packageId` has been
+      // on `PromoCode` since the feature was written and no screen read it.
+      `${promoPkgLine(p) ?? 'Which package this applies to could not be read, so check it at Stripe before withdrawing.'}\n\n${PROMO_WITHDRAW_IS_FORWARD_ONLY}\n\n${promoUseLine(p)}`,
       [
         { text: 'Leave It', style: 'cancel' },
         {
@@ -869,7 +893,22 @@ export default function TrainerPayments() {
       : await refundPurchase(target.id, cents);
     setRefundBusy(null);
     if (!r.ok) {
-      Alert.alert('No refund was made', (r.error || 'Nothing has been given back.') + '\n\nThey have not been refunded and nothing on your side has changed.');
+      // Two failures, and they are opposites. A REFUSAL happened before Stripe
+      // was asked, or is Stripe's own rejection, and for those "nothing has
+      // changed" is true and is the reassurance the coach needs. An
+      // UNCONFIRMED call reached the network and lost the answer, so the money
+      // may already be gone — and this branch used to append the reassurance
+      // to that one too, under the title "No refund was made", flatly
+      // contradicting the sentence `callRefund` had just written. A coach who
+      // reads "they have not been refunded" refunds again, and the client is
+      // credited twice out of the coach's own Stripe balance.
+      if (r.unconfirmed) {
+        Alert.alert('This refund could not be confirmed',
+          (r.error || 'The refund was not confirmed.')
+          + `\n\nDo NOT send it again from here until you have looked. Your Stripe dashboard is the record of whether the money moved, and this ${thing} still shows the amount it showed before.`);
+      } else {
+        Alert.alert('No refund was made', (r.error || 'Nothing has been given back.') + '\n\nThey have not been refunded and nothing on your side has changed.');
+      }
       load();
       return;
     }
@@ -1251,7 +1290,15 @@ export default function TrainerPayments() {
   // this. Under 'error' there are no rows to count and nothing is claimed —
   // which is the house rule, and here it means "we could not check", never
   // "everything reconciles".
-  const feeGaps = buysStatus === 'error' ? null : feeMismatches(buys);
+  // `buysWhole`, not `buysStatus !== 'error'`. This is a COUNT and a SUM over
+  // `buys`, and under 'partial' that is a count over a prefix — "4 sales had
+  // Repple's share worked out wrongly" when there are eleven. It renders today
+  // only inside the `earnedStatus === 'ready'` arm, so nothing is wrong on the
+  // screen; the gate is here rather than left to that arm because a moved JSX
+  // block is all it takes, and `check:whole` cannot see a `=== 'error'`
+  // ternary. Under 'partial' nothing is claimed, which is the house rule:
+  // "we could not check" is never "everything reconciles".
+  const feeGaps = buysWhole ? feeMismatches(buys) : null;
 
   // A standing price, not a takings. Renewals ARE now recorded as money and are
   // in the figures above; this is a different statement — what the live
@@ -1515,13 +1562,27 @@ export default function TrainerPayments() {
                     132 onward; older sales were backfilled from the package they
                     came from, and one already deleted by then left the amount
                     unlabelled for good. */}
+                {/* TWO sentences, not one of two. The test outside was `||`
+                    and the test inside was a ternary, so a coach with both
+                    kinds of hole — some payments whose currency is
+                    unrecoverable AND some Stripe never stated an amount for —
+                    was told about the first kind only. The second kind stayed
+                    missing from every figure on the screen with nothing
+                    anywhere saying so, which is the exact thing this flag
+                    exists to prevent, half-done. They are separate facts about
+                    separate payments and each gets its own line. */}
                 {takenAll.unlabelled || takenAll.unpriced ? (
                   <View style={{ marginTop: sp.md }}>
-                    <Flag tone={t.warn}>
-                      {takenAll.unlabelled
-                        ? `${takenAll.unlabelled === 1 ? 'One payment is' : takenAll.unlabelled + ' payments are'} not in the figures above: the package ${takenAll.unlabelled === 1 ? 'it was' : 'they were'} bought from is gone, and the currency was only ever recorded there. Stripe still has ${takenAll.unlabelled === 1 ? 'it' : 'them'}.`
-                        : `${takenAll.unpriced === 1 ? 'One payment has' : takenAll.unpriced + ' payments have'} no amount recorded, so ${takenAll.unpriced === 1 ? 'it is' : 'they are'} not in the figures above.`}
-                    </Flag>
+                    {takenAll.unlabelled ? (
+                      <Flag tone={t.warn}>
+                        {`${takenAll.unlabelled === 1 ? 'One payment is' : takenAll.unlabelled + ' payments are'} not in the figures above: the package ${takenAll.unlabelled === 1 ? 'it was' : 'they were'} bought from is gone, and the currency was only ever recorded there. Stripe still has ${takenAll.unlabelled === 1 ? 'it' : 'them'}.`}
+                      </Flag>
+                    ) : null}
+                    {takenAll.unpriced ? (
+                      <Flag tone={t.warn} style={takenAll.unlabelled ? { marginTop: sp.sm } : undefined}>
+                        {`${takenAll.unpriced === 1 ? 'One payment has' : takenAll.unpriced + ' payments have'} no amount recorded, so ${takenAll.unpriced === 1 ? 'it is' : 'they are'} not in the figures above.`}
+                      </Flag>
+                    ) : null}
                   </View>
                 ) : null}
 
@@ -2053,7 +2114,18 @@ export default function TrainerPayments() {
                   from the takings at the top of the screen, which are money
                   that has already moved: this one is forward-looking, and a
                   charge nobody has made yet is not earnings. */}
-              {recurring && recurring.pots.length ? (
+              {/* Drawn whenever the read came back whole and there is
+                  ANYTHING to say — a pot, or a subscription that could not go
+                  into one. The test was `recurring.pots.length` alone, so
+                  `sumRecurring`'s `unlabelled` and `unpriced` were computed and
+                  never read: a live subscription with no currency, no billing
+                  interval or no amount on it fell out of "Priced to recur" in
+                  silence, and a coach whose subscriptions were ALL like that
+                  got no block at all rather than a sentence saying three of
+                  them are not in any figure. `sumTaken` gets this treatment
+                  four hundred lines above and it is the same rule: an amount
+                  left out of a total is stated, never dropped. */}
+              {recurring && (recurring.pots.length || recurring.unlabelled || recurring.unpriced) ? (
                 <View style={{ marginTop: sp.md, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                   <Text style={{ ...ty.caption, color: t.ink3 }}>Priced to recur</Text>
                   {recurring.pots.map((p) => (
@@ -2061,6 +2133,16 @@ export default function TrainerPayments() {
                       {fig(pkgPriceLine(p.minorUnits, p.currency, p.interval))}
                     </Text>
                   ))}
+                  {recurring.unlabelled ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                      {`${recurring.unlabelled === 1 ? 'One live subscription is' : recurring.unlabelled + ' live subscriptions are'} not in the figure${recurring.pots.length === 1 ? '' : 's'} above: ${recurring.unlabelled === 1 ? 'it carries' : 'they carry'} no currency or no billing period, and a price with neither is not a figure to plan against. Stripe is still charging ${recurring.unlabelled === 1 ? 'it' : 'them'}.`}
+                    </Flag>
+                  ) : null}
+                  {recurring.unpriced ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                      {`${recurring.unpriced === 1 ? 'One live subscription has' : recurring.unpriced + ' live subscriptions have'} no amount recorded, so ${recurring.unpriced === 1 ? 'it is' : 'they are'} not in the figure${recurring.pots.length === 1 ? '' : 's'} above.`}
+                    </Flag>
+                  ) : null}
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                     What your live subscriptions are priced at — what they are set to charge next,
                     if nobody cancels and no card fails. It is not money you have been paid. What
@@ -2243,6 +2325,13 @@ export default function TrainerPayments() {
                             {p.percentOff}% off
                           </Text>
                         </View>
+                        {/* The package the code is attached to. Two codes at
+                            two percentages off two packages were rendered as
+                            two identical-looking rows, and Withdraw is
+                            destructive and forward-only. */}
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                          {promoPkgLine(p) ?? 'Which package this applies to could not be read'}
+                        </Text>
                         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
                           {promoStateLabel(state)} · {promoUseLine(p)}
                         </Text>
@@ -2304,10 +2393,33 @@ export default function TrainerPayments() {
                     </View>
                   </View>
                 ) : (
+                  /* Four causes and not one. `promoTargets` comes off
+                     `activePkgs`, which is `[]` under 'error' and 'loading'
+                     exactly as it is for a coach who genuinely sells nothing —
+                     so this told a coach their price list was empty on the
+                     strength of a read that never answered, two sections below
+                     the same screen correctly saying it could not be read. It
+                     is also short rather than empty under 'partial', where the
+                     picker would quietly omit packages a code could be
+                     attached to. */
+                  pkgRead === 'error' ? (
+                    <Flag style={{ marginTop: sp.lg }}>
+                      Your packages could not be read, so there is nothing to choose from here. That is not a
+                      statement that you have none on sale — anything already on sale still is.
+                    </Flag>
+                  ) : pkgRead === 'loading' ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>Still reading your packages.</Text>
+                  ) : pkgRead === 'partial' ? (
+                    <Flag style={{ marginTop: sp.lg }}>
+                      You have more packages than came back in one read, so this list is not all of them. Reload
+                      before attaching a code, or the one you want may not be here.
+                    </Flag>
+                  ) : (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
                     You have nothing on sale, so there is nothing to attach a code to yet. Add a package below
                     and it appears here.
                   </Text>
+                  )
                 )
               ) : null}
 
@@ -2612,6 +2724,16 @@ export default function TrainerPayments() {
                   reading the warning, and this is the warning that matters. */}
               {editing && isReprice(editPatch() ?? {}, editing.price_cents) ? (
                 <Flag tone={t.warn} style={{ marginTop: sp.md }}>{repriceNote(subCount)}</Flag>
+              ) : null}
+
+              {/* The rename warning, and it is a different warning. A price
+                  edit cannot reach a sale already made; a NAME edit relabels
+                  every one of them, because no sale carries a name of its own
+                  and every list resolves one with a live package lookup. Said
+                  only when the name has actually moved, for the same reason
+                  the reprice note is. */}
+              {editing && isRename(editPatch() ?? {}, editing.name) ? (
+                <Flag tone={t.warn} style={{ marginTop: sp.md }}>{RENAME_RELABELS_HISTORY}</Flag>
               ) : null}
 
               {editing && (editing.sessions != null || editing.billing_interval) ? (

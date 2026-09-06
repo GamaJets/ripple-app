@@ -480,10 +480,29 @@ export async function packageLabels(ids: string[]): Promise<Map<string, { name: 
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return new Map();
   try {
-    const { data, error } = await supabase.from('trainer_packages').select('id, name, currency').in('id', unique).limit(capLimit());
-    if (error) { reportError('connect.packageLabels', error); return new Map(); }
+    // CHUNKED, and the limit that forces it is the REQUEST LINE rather than
+    // the row ceiling — the identical argument `fetchClientPurchases` makes
+    // three hundred lines below, which this call was the last copy not to
+    // follow. A client with a few hundred purchases produces a few hundred ids;
+    // at ~39 bytes each inside a PostgREST `in.("…","…")` list that is a query
+    // string past the 8KB request line nginx and most CDNs enforce, refused
+    // with a 414 that supabase-js does not reject on and that arrives as
+    // `data: null`. The old shape read that as "none of these packages could be
+    // read" and returned an empty map — which takes the name AND the currency
+    // off EVERY purchase at once, on the client's own record of what they paid
+    // for, so every amount renders as a dash and every pack as an unnamed one.
+    //
+    // `.order('id')` because a primary-key lookup is the only total order a
+    // page boundary can be drawn on, and `readByIds` pages rather than
+    // truncating, so the probe row is never mistaken for data either.
+    const rows = await readByIds<{ id: string; name: string | null; currency: string | null }>(
+      unique,
+      (chunk, from, to) => supabase.from('trainer_packages').select('id, name, currency')
+        .in('id', chunk).order('id', { ascending: true }).range(from, to),
+      'the packages behind what you have bought',
+    );
     const out = new Map<string, { name: string | null; currency: string | null }>();
-    ((data as { id: string; name: string | null; currency: string | null }[]) ?? []).forEach((p) => {
+    rows.forEach((p) => {
       if (p?.id) out.set(p.id, { name: (p.name || '').trim() || null, currency: (p.currency || '').trim() || null });
     });
     return out;
@@ -1091,6 +1110,25 @@ export interface RefundResult {
   currency?: string | null;
   /** False when the money went back and this app could not record it. */
   mirrored?: boolean;
+  /**
+   * True when NOBODY KNOWS whether a refund was made.
+   *
+   * The third answer, and it is not `ok: false`. Every refusal the edge
+   * function returns happens either before `stripe.refunds.create` or is
+   * Stripe's own rejection of it, so for all of those "nothing has changed" is
+   * a true statement. The one case where it is not is a call that THREW on
+   * this side — the request may have reached Stripe and the answer may have
+   * been lost coming back — and `callRefund` writes a sentence saying exactly
+   * that.
+   *
+   * It needed a flag because that sentence was being overwritten. The screen
+   * appended "They have not been refunded and nothing on your side has
+   * changed." to every `ok: false`, under the title "No refund was made", so a
+   * coach read Stripe's warning and then a flat contradiction of it — and the
+   * obvious next act on a refund that did not happen is to make it again,
+   * which credits the client twice out of the coach's own balance.
+   */
+  unconfirmed?: boolean;
   error?: string;
 }
 
@@ -1099,7 +1137,28 @@ async function callRefund(kind: 'purchase' | 'renewal', id: string, amountCents?
     const { data, error } = await supabase.functions.invoke('connect-refund', {
       body: { kind, id, amount_cents: amountCents ?? null },
     });
-    if (error) { reportError('connect.refund', error); return { ok: false, error: error.message }; }
+    if (error) {
+      reportError('connect.refund', error);
+      // supabase-js puts the function's JSON error body on `error.context` (a
+      // Response) and leaves `error.message` as its own generic "Edge Function
+      // returned a non-2xx status code". Every refusal connect-refund writes
+      // is a specific, actionable sentence — the whole of this one has already
+      // been given back; your Stripe balance is too short to refund from; this
+      // charge is too old for the payment method — and all of them were being
+      // thrown away and replaced with that shrug, on the screen where a coach
+      // is trying to give somebody their money back. Read the body, exactly as
+      // src/lib/vision.ts already does.
+      //
+      // Still `unconfirmed: false`. Every non-2xx path in that function runs
+      // BEFORE `stripe.refunds.create` or is Stripe's own rejection of it, so
+      // no money has moved on any of them and the screen may say so.
+      let why = error.message;
+      try {
+        const body = await (error as { context?: { json?: () => Promise<{ error?: unknown }> } })?.context?.json?.();
+        if (body?.error) why = String(body.error);
+      } catch { /* the body was not JSON, which leaves supabase-js's own message */ }
+      return { ok: false, error: why };
+    }
     if (data?.ok) {
       return {
         ok: true,
@@ -1116,7 +1175,15 @@ async function callRefund(kind: 'purchase' | 'renewal', id: string, amountCents?
     // reached Stripe and the answer may have been lost on the way back. The
     // sentence says so rather than telling a coach to try again, because trying
     // again is how somebody gets refunded twice.
-    return { ok: false, error: 'The refund was not confirmed. Check your Stripe dashboard before trying it again — a second attempt could give the money back twice.' };
+    return {
+      ok: false,
+      // The flag, not just the sentence. See `unconfirmed` on RefundResult:
+      // the screen has to be able to tell this apart from a clean refusal,
+      // because the sentence it appends to a clean refusal is the exact
+      // opposite of what is true here.
+      unconfirmed: true,
+      error: 'The refund was not confirmed. Check your Stripe dashboard before trying it again — a second attempt could give the money back twice.',
+    };
   }
 }
 

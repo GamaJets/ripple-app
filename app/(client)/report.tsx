@@ -21,6 +21,7 @@
 // a percentage does not have a unit system.
 import { View, Text, ScrollView } from 'react-native';
 import { num, num1 } from '../../src/lib/format';
+import { startOfWeek } from '../../src/lib/weekStart';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -151,9 +152,24 @@ export default function WeeklyReport() {
   //
   // Counting from midnight makes the sentence true: the window the report
   // states and the window it counts are now the same seven days.
-  const weekStart = new Date(today);
-  weekStart.setDate(today.getDate() - 6);
-  weekStart.setHours(0, 0, 0, 0);
+  // ── the same seven days the rest of the app calls "this week" ──────────
+  //
+  // This was `today - 6 days`, a ROLLING window, while Home's goal ring, its
+  // tiles and its WeekDots all use `thisWeekStats`, which counts from
+  // `startOfWeek`. The two coincide on Saturdays and on no other day.
+  //
+  // What that looked like: trained Thursday, Friday, Saturday and Monday, read
+  // on a Wednesday. Home said "1 of 4 this week". This report's hero said 4,
+  // and the fact list handed to the model that writes the summary said
+  // "Trained on 4 day(s) this week." One member, one training log, two
+  // numbers, and the second one is the one their coach reads.
+  //
+  // The calendar week wins, for a reason beyond consistency: Home's goal is
+  // `planDays.length`, the number of days the PROGRAMME runs in a week, and a
+  // programme week is a calendar week. A rolling seven days cannot be compared
+  // against it at all — and `startOfWeek` honours the member's own configured
+  // week start, which a rolling window silently ignores.
+  const weekStart = startOfWeek(today);
   const range = `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${today.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
   const wk = statsSince(log, weekStart.getTime(), c.weightSeries);
   // ── the tonnage that needed no failed read to be wrong ────────────────
