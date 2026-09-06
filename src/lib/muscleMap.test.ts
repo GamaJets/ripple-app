@@ -4,7 +4,14 @@
 // claims to draw must actually be a file in the shipped manifest. A typo in
 // that table is invisible — the overlay simply never lights — and a heatmap
 // that quietly omits the lats is worse than one that fails.
-import { readFileSync } from 'node:fs';
+// `require`, not `import`, and the same shape consoleRoutes.test.ts uses for
+// the same reason: this file lives under src/**, which `check:types` compiles
+// with the PHONE app's tsconfig — no node types — so a top-level
+// `import … from 'node:fs'` fails that gate while passing the test build.
+// Caught by check:types on the commit that added it, which is what it is for.
+const { readFileSync } = require('node:fs') as {
+  readFileSync: (p: string, enc: string) => string;
+};
 import {
   mapMuscle, unmapped, approximations, isUndrawn, drawnIntensity,
 } from './muscleMap';
