@@ -523,6 +523,8 @@
     "src/lib/updateCheck.ts",
     "src/lib/updateCheck.test.ts",
     "src/lib/strengthLifts.ts",
-    "src/lib/strengthLifts.test.ts"
+    "src/lib/strengthLifts.test.ts",
+    "src/lib/muscleMap.ts",
+    "src/lib/muscleMap.test.ts"
   ]
 }
