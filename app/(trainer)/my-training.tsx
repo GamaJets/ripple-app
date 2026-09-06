@@ -63,7 +63,18 @@ import { parseWorkoutText } from '../../src/lib/workoutParse';
 import { trainingDays, setsSummary } from '../../src/lib/ownTraining';
 import { tonnageNote, type BodyweightHistory } from '../../src/lib/bodyweightSets';
 import { useCheckIns } from '../../src/ui/checkins';
-import { useToday } from '../../src/ui/today';
+import { useToday, useNow } from '../../src/ui/today';
+// ── the coach's own muscles, read on the CLIENT hooks ──────────────────────
+//
+// Repple's rule, and it is a rule about the data model rather than a
+// preference: trainers self-track, and there is no client→trainer promotion
+// anywhere in this product. So the coach's own body diagram is built on the
+// same provider their own sets are logged through — `useWorkoutLog()`, which
+// reads `user_id = auth.uid()` and in this app is the coach — and on the same
+// panel app/(trainer)/client-training.tsx hands a client's log to. There is no
+// coach-of-themselves path, nothing here consults the roster, and a coach with
+// no clients at all gets the identical screen.
+import { MuscleWorkPanel } from '../../src/ui/MuscleWorkPanel';
 import { readLift, volumeIn, convertedNote, type WeightUnit } from '../../src/lib/units';
 import { weekStats } from '../../src/lib/streaks';
 import { num } from '../../src/lib/format';
@@ -76,6 +87,15 @@ import { BACK_ICON } from '../../src/ui/direction';
  *  log a coach reads and starts being a history screen, which is not what this
  *  is for. */
 const RECENT_DAYS = 14;
+
+/** The windows the muscle panel offers, in days.
+ *
+ *  Wider than this screen's session list on purpose, and the widest of them is
+ *  ninety rather than a year: `muscleWorkBoard` scales its shading to the
+ *  hardest-worked muscle IN the window, so the longer the window the more of a
+ *  coach's own history is compressed into one picture, and a year of training
+ *  drawn against a single peak says almost nothing about this month. */
+const MUSCLE_WINDOWS = [7, 30, 90] as const;
 
 /** A day key as a person reads it: "Fri 14 Aug". */
 function dayLabel(day: string): string {
@@ -121,6 +141,21 @@ export default function MyTraining() {
   // actually turns. Same day format, same local timezone: `todayKey` and
   // `dayKeyOfDate` both build `YYYY-MM-DD` off the same three local getters.
   const todayKey = useToday();
+  /* ── the instant the muscle window ends ──────────────────────────────
+   *
+   * `useNow()` and not `Date.now()`, for the reason the block above gives
+   * about `useToday`: this route is registered `href: null`, so it mounts once
+   * and never tears down, and a rolling "last 30 days" computed off a clock
+   * read at mount is a window that stopped moving the day the coach first
+   * opened the tab. `useNow` moves on focus, which is exactly when a coach
+   * coming back to this screen is asking about the thirty days ending now. */
+  const nowMs = useNow().getTime();
+  /** How far back the muscle panel looks. Wider than the fortnight `RECENT_DAYS`
+   *  lists, because the question it answers is a different one: a list of
+   *  sessions is read forwards from today and a body diagram is read as a
+   *  balance, and a balance over one week is mostly a picture of which day of
+   *  the split somebody is standing in. Thirty is the default for that reason. */
+  const [muscleDays, setMuscleDays] = useState<number>(30);
   const today = days.find((d) => d.day === todayKey) ?? null;
   const recent = days.filter((d) => d.day !== todayKey).slice(0, RECENT_DAYS);
   /* ── the coach's own weight, so their bodyweight sets are worth something ──
@@ -588,6 +623,55 @@ export default function MyTraining() {
                 and only you ever see it.
               </Text>
             )}
+          </Section>
+
+          <Rule />
+
+          {/* ── which muscles the coach's own work landed on ───────────────
+              The same four blocks a coach reads about a client, about
+              themselves, off the same panel and the same modules — Training
+              Summary, the body, the rankings and the Recovery Map.
+
+              Built on `useWorkoutLog()`, the client-side hook, because that is
+              the rule: trainers self-track and nothing in this app promotes a
+              client path into a trainer one. The provider reads the signed-in
+              user's rows, so in the coach app it is the coach's own training
+              and can never be somebody else's — the header on this file records
+              the one time that was got wrong, on a dashboard sheet that showed
+              a coach their own volume under a client's name.
+
+              `status === 'error' ? null : log` for the same reason every other
+              screen in this app does it: `useWorkoutLog` keeps whatever it had
+              before a failure, and a stale array under 'error' drawn as a body
+              is a picture of a week that may not be this one. Null is the only
+              value that makes the panel say it could not read.
+
+              `cat.signedOut` is folded into the catalogue status rather than
+              checked beside it: a signed-out catalogue read comes back as zero
+              rows with no error, and a WHOLE read of an empty catalogue would
+              publish an empty vocabulary — which is the board asserting that
+              every muscle in the coach's body is untrained.
+
+              No `fullScaleAt`: one window, one picture, so it scales to its own
+              peak and the panel prints the scale beside the key. */}
+          <Section>
+            <SectionHead title="Your Muscles" />
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+              Your own training, broken down by the muscles the exercise catalogue names for each
+              movement you logged. Nothing here is about a client, and nothing here is a judgement
+              about how recovered you are — it is what you logged and when you logged it.
+            </Text>
+            <MuscleWorkPanel
+              log={status === 'error' ? null : log}
+              logStatus={status}
+              catalogue={cat.rows}
+              catalogueStatus={cat.signedOut ? 'error' : cat.status}
+              nowMs={nowMs}
+              windowDays={muscleDays}
+              windows={MUSCLE_WINDOWS}
+              onWindowDays={setMuscleDays}
+              voice={{ they: 'You', their: 'your', have: 'have' }}
+            />
           </Section>
 
           <Rule />

@@ -525,6 +525,14 @@
     "src/lib/strengthLifts.ts",
     "src/lib/strengthLifts.test.ts",
     "src/lib/muscleMap.ts",
-    "src/lib/muscleMap.test.ts"
+    "src/lib/muscleMap.test.ts",
+    "src/lib/muscleWork.ts",
+    "src/lib/muscleWork.test.ts",
+    "src/lib/muscleRecovery.ts",
+    "src/lib/muscleRecovery.test.ts",
+    "src/lib/muscleRanking.ts",
+    "src/lib/muscleRanking.test.ts",
+    "src/lib/bodyHeat.ts",
+    "src/lib/bodyHeat.test.ts"
   ]
 }

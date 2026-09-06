@@ -1,6 +1,6 @@
 // One exercise's full catalogue entry, read on demand.
 //
-// Deliberately not a provider holding all 917 rows. The catalogue carries
+// Deliberately not a provider holding all 608 rows. The catalogue carries
 // instructions for nearly every movement, so loading it whole to show one
 // screen would pull roughly a megabyte to render a page about a single lift —
 // on a phone, on mobile data, to display twelve lines of text.
@@ -181,11 +181,22 @@ export interface CatalogueRow {
   equipment: string | null;
   hasDemo: boolean;
   /** The first still, for the row's thumbnail. One path per row, not the whole
-   *  array — a list of 601 needs one picture each and never the second. */
+   *  array — a list of 608 needs one picture each and never the second. */
   thumbPath: string | null;
   /** Which catalogue the thumbnail belongs to, so it resolves against the
    *  right host. Same reason frameUrls takes it. */
   source: string | null;
+  /**
+   * The muscles the catalogue names, in ITS vocabulary — 'gluteus maximus',
+   * not the artwork's `gluteus_maximus`. src/lib/muscleMap.ts does that
+   * translation; nothing here should.
+   *
+   * Empty arrays where the row names none. That is a gap in the catalogue and
+   * not the claim that the movement trains nothing, which is why every count
+   * built on these carries the number of rows it could not place.
+   */
+  primaryMuscles: string[];
+  secondaryMuscles: string[];
   /**
    * The name to PUT ON SCREEN, in the reader's language where we have it.
    *
@@ -198,13 +209,22 @@ export interface CatalogueRow {
 }
 
 /**
- * Every movement in the catalogue, names only.
+ * Every movement in the catalogue, names and the muscles they name.
  *
- * Name, group, equipment and whether a demonstration exists — nothing else.
- * The full rows carry instructions and descriptions for the whole catalogue and
- * come to roughly a megabyte; pulling that to draw a scrollable list of names
- * would spend it on text no one is reading yet. The detail screen fetches the
- * one row it needs.
+ * Name, group, equipment, the two muscle lists, and whether a demonstration
+ * exists — nothing else. The full rows carry instructions and descriptions for
+ * the whole catalogue and come to roughly a megabyte; pulling that to draw a
+ * scrollable list of names would spend it on text no one is reading yet. The
+ * detail screen fetches the one row it needs.
+ *
+ * `primary_muscles` and `secondary_muscles` are here for the same reason
+ * `equipment` is, and they pay for themselves the same way. The heatmap, the
+ * recovery map and the muscle rankings all have to answer "which muscles did
+ * that set touch" for EVERY exercise a member has ever logged, and the only
+ * other way to learn it is one detail read per distinct movement — a member
+ * with forty movements in their history would make forty round trips to draw
+ * one diagram. Two short text arrays across the catalogue are tens of
+ * kilobytes; `instructions` is the megabyte.
  *
  * `equipment` is here because the gym owner's library filters on it — a short
  * text column against 900 rows is a few kilobytes, where `instructions` is the
@@ -233,7 +253,7 @@ export function useExerciseCatalogue() {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, equipment, image_paths, equipment_icon_path, source')
+        .select('id, name, muscle_group, equipment, primary_muscles, secondary_muscles, image_paths, equipment_icon_path, source')
         .order('name', { ascending: true })
         .limit(capLimit());
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
@@ -257,9 +277,12 @@ export function useExerciseCatalogue() {
           ? String(r.image_paths[0])
           : (typeof r.equipment_icon_path === 'string' && r.equipment_icon_path ? r.equipment_icon_path : null),
         source: r.source ?? null,
+        primaryMuscles: strs(r.primary_muscles),
+        secondaryMuscles: strs(r.secondary_muscles),
       })));
-      // 'partial' rather than 'ready': the catalogue is 917 rows against a cap
-      // of 1000, so this is quiet today and will not be forever. A list that
+      // 'partial' rather than 'ready': the catalogue is 608 rows against a cap
+      // of 1000 (checked live, 6 Sep 2026), so this is quiet today and will not
+      // be forever — RepDB's last drop alone took it from 519. A list that
       // silently stops at the cap is how a client concludes we have never heard
       // of an exercise that is sitting just past row 1000.
       setStatus(page.truncated ? 'partial' : 'ready');

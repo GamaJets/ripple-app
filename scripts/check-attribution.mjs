@@ -79,7 +79,10 @@ for (const app of APPS) {
   if (!credits) {
     problems.push(
       `app/(${app}) reads the exercise catalogue but never renders <${COMPONENT}/>. `
-      + 'The RepDB free tier is free because of that credit — without it this build is unlicensed.',
+      + 'Anything left from the RepDB free archive is licensed on that credit and nothing else '
+      + '(Free Tier v1.0, term 2), so without it that content is unlicensed. The Standard-tier '
+      + 'catalogue and artwork we ship today ask for the credit rather than require it, which '
+      + 'lowers the stakes and does not change the answer. See data/repdb-PROVENANCE.md.',
     );
   }
 }

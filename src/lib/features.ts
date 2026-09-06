@@ -191,6 +191,14 @@ export const CLIENT_FEATURES: Feature[] = [
   // weeks. 'year' and 'months' are in the keywords because that is what the
   // question sounds like when a member asks it.
   { key: 'history', label: 'Your History', note: 'Months and years, not weeks', route: '/(client)/history', icon: 'clock', area: 'progress', keywords: 'history long view year years months all time how far have i come past archive' },
+  // The finer half of History's own muscle-group board: the same log joined
+  // against the catalogue's `primary_muscles` / `secondary_muscles` rather than
+  // its eleven display groups, so it can light a body. 'heatmap', 'recovery'
+  // and 'rest' are in the keywords because that is what the question sounds
+  // like — "which muscles have I not trained", "is my chest recovered" — even
+  // though the screen itself will not use the third of those words about a
+  // body. See src/lib/muscleRecovery.ts.
+  { key: 'muscles', label: 'Your Muscles', note: 'The body, what you worked, and how long it has rested', route: '/(client)/muscles', icon: 'dumbbell', area: 'progress', keywords: 'muscle muscles heatmap heat map body diagram anatomy recovery map rest rested days since last trained which muscles have i not trained neglected chest back legs shoulders arms most trained least trained ranking' },
 
   // ── Coaching & Account ────────────────────────────────────
   { key: 'trainers', label: 'Find a Trainer', note: 'Browse coaches · online or in-person', route: '/(client)/trainers', icon: 'people', area: 'me', keywords: 'coach hire book' },

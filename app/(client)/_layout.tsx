@@ -176,6 +176,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="progression" options={{ href: null, title: 'Progression' }} />
       <Tabs.Screen name="trends" options={{ href: null, title: 'Trends' }} />
       <Tabs.Screen name="history" options={{ href: null, title: 'Your History' }} />
+      <Tabs.Screen name="muscles" options={{ href: null, title: 'Your Muscles' }} />
       <Tabs.Screen name="body-trends" options={{ href: null, title: 'Composition Trends' }} />
       <Tabs.Screen name="scan-machine" options={{ href: null, title: 'Scan Machine' }} />
       <Tabs.Screen name="feedback" options={{ href: null, title: 'Send Feedback' }} />

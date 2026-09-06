@@ -723,6 +723,7 @@ function MuscleSection({ log, unit, weightSeries }: {
   log: WorkoutEntry[]; unit: WeightUnit; weightSeries: { t: string; v: number }[];
 }) {
   const t = useTheme();
+  const router = useRouter();
   const [days, setDays] = useState<7 | 28>(7);
   const { rows, status, signedOut } = useExerciseCatalogue();
   // muscleBoard() groups by the log's own English names, so the list of
@@ -838,6 +839,24 @@ function MuscleSection({ log, unit, weightSeries }: {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{note}</Text>
         ) : null}
       </>)}
+
+      {/* ── the finer grain, and the only way into it ─────────────────────
+          The board above keys on the catalogue's `muscle_group`: eleven
+          display strings, one per movement, of which 200 of the 608 rows are
+          'Full body'. It is the right answer to "have I trained legs this
+          week" and it cannot draw a body. app/(client)/muscles.tsx joins the
+          same log against `primary_muscles` and `secondary_muscles` on the
+          same rows — thirty muscle names instead of eleven groups — which is
+          what the diagram, the rankings and the Recovery Map all stand on. See
+          the header of src/lib/muscleWork.ts for why the two boards are two
+          modules and why the finer one may not be summed like this one.
+
+          Outside every branch above on purpose. The reason to go and look is
+          strongest exactly when this section has nothing to show, and a link
+          that appears only on a good week is a link nobody finds. */}
+      <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+        <Ghost label="See It on the Body" onPress={() => router.push('/(client)/muscles')} />
+      </View>
     </Section>
   );
 }

@@ -91,6 +91,17 @@ import { ExerciseHistoryPanel, type HistoryVoice } from '../../src/ui/ExerciseHi
 // Neither module is changed. Both are pure, both are tested, and this screen
 // reads them exactly as app/(client)/history.tsx does.
 import { muscleBoard, unmatchedNote } from '../../src/lib/muscleVolume';
+// ── the finer grain, and the picture of it ─────────────────────────────────
+//
+// `muscleBoard` above keys on the catalogue's eleven display GROUPS, 200 of
+// whose 608 movements are filed under 'Full body' — right for "have they
+// trained legs this week", unusable for a body. `MuscleWorkPanel` reads the
+// `primary_muscles` and `secondary_muscles` columns instead, which is thirty
+// names rather than eleven, and draws the Training Summary, the diagram, the
+// rankings and the Recovery Map off them. The two boards answer two questions
+// and both stay; see the header of src/lib/muscleWork.ts on why widening one
+// into the other would have been a silent double count rather than a refactor.
+import { MuscleWorkPanel } from '../../src/ui/MuscleWorkPanel';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { useToday, useNow } from '../../src/ui/today';
 import {
@@ -1133,6 +1144,13 @@ export default function ClientTraining() {
                         for a back and this screen does not pretend to know one. */}
                     <Section>
                       <SectionHead title="By Muscle Group" note={cat.status === 'ready' ? `last ${muscleDays} days` : undefined} />
+                      {/* One piece of state behind two controls. The muscle
+                          panel below draws its own copy of these chips, and
+                          both read and write `muscleDays`, so the group board
+                          and the per-muscle board on this screen can never be
+                          describing two different fortnights — a disagreement a
+                          coach scrolling between them would have no way to
+                          see. */}
                       <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
                         {([7, 28] as const).map((dd) => (
                           <Pressable key={dd} onPress={() => setMuscleDays(dd)}
@@ -1208,6 +1226,48 @@ export default function ClientTraining() {
                         ) : null}
                       </>)}
                     </Section>
+
+                    <Rule />
+
+                    {/* ── the same work, per MUSCLE, and drawn ────────────
+                        The section above answers "have they trained legs"; this
+                        one answers "which part of the leg, how hard relative to
+                        everything else, and when was the last time anything
+                        touched it". It is the same log and the same catalogue
+                        read — nothing new is fetched — read through the finer
+                        of the two columns.
+
+                        Why it is on the COACH's screen and not only the
+                        member's: balance is the coach's job. The comment on
+                        `muscleDays` above makes that argument for the eleven
+                        groups and it is stronger here, because a hamstring that
+                        has only ever assisted does not show up as a gap in
+                        'Legs' at all — it shows up as a leg that was trained.
+
+                        `cat.signedOut` is folded into the status rather than
+                        checked separately: that case comes back as zero
+                        catalogue rows with NO error, and a whole read of an
+                        empty catalogue would publish an empty vocabulary, which
+                        is the board asserting that every muscle in this
+                        client's body is untrained. 'error' is what it is.
+
+                        No `fullScaleAt` is passed. There is one client and one
+                        window on this screen, so the picture scales to its own
+                        peak — which is what makes a beginner visible at all —
+                        and the panel prints the scale beside the key so the
+                        darkest band is never read as a quantity. A screen that
+                        ever draws two of these side by side has to fix it. */}
+                    <MuscleWorkPanel
+                      log={log}
+                      logStatus={status}
+                      catalogue={cat.rows}
+                      catalogueStatus={cat.signedOut ? 'error' : cat.status}
+                      nowMs={nowMs}
+                      windowDays={muscleDays}
+                      windows={[7, 28]}
+                      onWindowDays={(d) => setMuscleDays(d === 7 ? 7 : 28)}
+                      voice={voice}
+                    />
 
                     <Rule />
 
