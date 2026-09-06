@@ -102,13 +102,14 @@ import {
   type ActivityEvent, type Drift,
 } from '../../src/lib/clientDrift';
 import { appLocale } from '../../src/lib/locale';
+import { fmtFullDay } from '../../src/lib/format';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 // The credit rule, shared with the client's own ledger and with the booking
 // screen, so a coach and their client can never be shown different answers
 // about which pack paid for the same hour. See supabase/parts/370.
 import {
   coachPackLines, gymPtLines, chooseRoute, creditsLeft, payingLines,
-  buildLedger, coachLedgerLine, shortfallLine,
+  buildLedger, coachLedgerLine, shortfallLine, entitlementWindowLine,
   type CreditRoute, type CreditSession, type Entitlement, type Ledger,
 } from '../../src/lib/sessionCredits';
 import { packBalance, type PackPurchase } from '../../src/lib/packDraw';
@@ -1788,12 +1789,40 @@ export default function ClientScreen() {
               { label: 'Sold By', value: creditRoute === 'gym_pass' ? 'The gym' : 'You' },
               { label: 'Booked Ahead', value: fig(creditLedger ? creditLedger.upcoming.length : null) },
             ]} />
-            {(creditLines ?? []).map((l) => (
-              <View key={l.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: sp.md }}>
-                <Text style={{ ...ty.label, color: t.ink2, flex: 1, paddingRight: sp.md }}>{l.label}</Text>
-                <Text style={{ ...ty.label, color: t.ink2 }}>{`${l.left} of ${l.sessions_total}`}</Text>
-              </View>
-            ))}
+            {/* A pack whose validity window has closed is still listed here,
+                because route 1 in supabase/parts/370 has no expiry clause: it
+                still wins the route, so leaving it out would have this screen
+                disagreeing with the server about who is paying. What it must
+                not do is sit in the list as a bare "0 of 10" with nothing to
+                explain it — the coach reading this list is reading the same
+                list the client is, and a renewal conversation goes just as
+                wrong when neither of them can see WHY the balance is nought.
+
+                Marked exactly as the client's own "What Is Left" marks it, and
+                that sameness is the point rather than a coincidence: this whole
+                module exists so the two of them cannot be shown different
+                answers about the same hour, and a coach who sees a quiet grey
+                nought where the client sees a flagged one is back to guessing.
+                `Flag` also keeps the warn tone in a 6pt mark rather than in the
+                text, which is the rule scripts/check-contrast.mjs holds this
+                file to — warn is tuned to the 3:1 a mark needs, not the 4.5:1
+                text does. */}
+            {(creditLines ?? []).map((l) => {
+              const windowLine = entitlementWindowLine(l, l.expiresOn ? fmtFullDay(l.expiresOn) : null);
+              return (
+                <View key={l.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: sp.md }}>
+                  <View style={{ flex: 1, paddingRight: sp.md }}>
+                    <Text style={{ ...ty.label, color: l.expired ? t.ink3 : t.ink2 }}>{l.label}</Text>
+                    {windowLine == null ? null : l.expired ? (
+                      <Flag tone={t.warn} style={{ marginTop: 3 }}>{windowLine}</Flag>
+                    ) : (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{windowLine}</Text>
+                    )}
+                  </View>
+                  <Text style={{ ...ty.label, color: l.expired ? t.ink3 : t.ink2 }}>{`${l.left} of ${l.sessions_total}`}</Text>
+                </View>
+              );
+            })}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
               {creditRoute === 'gym_pass'
                 ? 'The gym sold this pack and assigned you. One credit comes off it when you mark a session complete.'

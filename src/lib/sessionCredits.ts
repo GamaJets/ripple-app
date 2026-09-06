@@ -62,9 +62,30 @@ export interface Entitlement {
    * thousands separator on purpose rather than by omission.
    */
   sessions_total: number;
-  /** ISO date this expires on, or null for one that does not. A coach pack has
-   *  no expiry in this schema; a gym pass may. */
+  /** ISO date this expires on, or null for one that does not. Both halves of
+   *  the product can carry one: a gym pass always could, and a coach pack has
+   *  since supabase/parts/612 gave packages a validity window. */
   expiresOn: string | null;
+  /**
+   * The window on this one has CLOSED.
+   *
+   * Straight off `PackLine.expired`, which is `client_purchases.expired_at`
+   * being set — the fact part 612's nightly pass writes — and never a date
+   * comparison run here. packDraw.ts refuses that comparison on purpose and
+   * this module will not reintroduce it: until the pass has run the credits are
+   * genuinely still spendable, and an app that says otherwise is wrong about
+   * somebody's money a day early.
+   *
+   * Optional because only one of the two systems ever reaches a screen expired.
+   * `gymPtLines` DROPS a pass that is not live on the day, so a gym line is
+   * live by construction; a coach pack is carried rather than filtered, because
+   * the ROUTE must not move. Part 370 picks a coach pack on `status = 'paid'
+   * and cp.sessions_total is not null` with no expiry clause, so an expired
+   * pack still wins the route — and a screen that hid it would disagree with
+   * the server about who is paying while showing the member a nought with
+   * nothing beside it to explain the nought.
+   */
+  expired?: boolean;
 }
 
 /** A session as the credit ledger reads it — the columns parts 193 and 370 put
@@ -214,6 +235,10 @@ export function gymPtLines(
       left: Math.max(0, Math.min(total, total - spent)),
       sessions_total: total,
       expiresOn: p.expiresOn,
+      // Never true here, and stated rather than left off: the `passLiveOn`
+      // guard above has already dropped every pass whose day has passed, so a
+      // gym line reaching a screen is one that can still be spent.
+      expired: false,
     });
   }
   out.sort((a, b) => {
@@ -225,10 +250,27 @@ export function gymPtLines(
   return out;
 }
 
-/** Coach packs as entitlement lines. Takes `PackLine`s from packDraw.ts rather
- *  than re-deriving a balance this module has no business computing twice. */
+/**
+ * Coach packs as entitlement lines. Takes `PackLine`s from packDraw.ts rather
+ * than re-deriving a balance this module has no business computing twice.
+ *
+ * A pack whose window has closed is KEPT, and carries its window with it. It is
+ * kept because part 370 keeps it: route 1 is `status = 'paid' and
+ * cp.sessions_total is not null` with no expiry clause, so an expired pack
+ * still wins, and the whole point of this module is that the app and the server
+ * name the same payer. It carries `expired` and `expiresOn` because the price
+ * of keeping it is that a screen must be able to SAY why a pack it is listing
+ * has nothing on it — see `entitlementWindowLine` below.
+ */
 export function coachPackLines(
-  lines: readonly { id: string; label: string; left: number; sessions_total: number }[] | null | undefined,
+  lines: readonly {
+    id: string;
+    label: string;
+    left: number;
+    sessions_total: number;
+    expired?: boolean;
+    expiresOn?: string | null;
+  }[] | null | undefined,
 ): Entitlement[] | null {
   if (lines == null) return null;
   return lines.map((l) => ({
@@ -237,7 +279,8 @@ export function coachPackLines(
     label: l.label,
     left: Math.max(0, l.left),
     sessions_total: l.sessions_total,
-    expiresOn: null,
+    expiresOn: l.expiresOn ?? null,
+    expired: l.expired === true,
   }));
 }
 
@@ -453,6 +496,88 @@ export function shortfallLine(ledger: Ledger | null | undefined): string | null 
   return n === 1
     ? 'One delivered session had nothing left to draw from.'
     : `${n} delivered sessions had nothing left to draw from.`;
+}
+
+/* ── a window that has closed ──────────────────────────────────────────────── */
+
+/**
+ * The caption under one entitlement about its own window, or null when there is
+ * no window to describe.
+ *
+ * `day` is the date already written the reader's way — `fmtFullDay` in
+ * src/lib/format.ts — because a pack's last day is a calendar day rather than an
+ * instant, and the screen is the only thing in reach that knows the reader's
+ * locale. A `day` that would not format gives null rather than a sentence with a
+ * hole in it.
+ *
+ * The tense is the whole of it. A window still open is a promise about a day
+ * that has not come; a window that closed is a fact about one that has. The same
+ * word — "Expires" — printed in September under a day in August, beside "0 of
+ * 10", is this app telling somebody their money is still waiting for them.
+ */
+export function entitlementWindowLine(
+  l: Pick<Entitlement, 'expiresOn' | 'expired'>,
+  day: string | null | undefined,
+): string | null {
+  if (!l.expiresOn || !day) return null;
+  return l.expired ? `Ran out of time on ${day}` : `Expires ${day}`;
+}
+
+/**
+ * Why the balance is nought, when the reason is a closed window rather than a
+ * spend. Null in every other case.
+ *
+ * Null for a pack somebody simply used up: that is the same nought about a
+ * different person — one got what they paid for and one did not — and packDraw's
+ * `exhausted` is false on an expired pack for exactly this reason.
+ *
+ * It says the window closed and stops there. It does NOT say credits were
+ * stranded, because this module holds no such figure: a pack fully used and then
+ * closed reads 0 here too, and `sessionsExpired` in packDraw.ts is the only
+ * thing entitled to claim somebody lost something. `expiryLine` in
+ * src/lib/packExpiry.ts is where that sentence lives.
+ */
+export function creditsEmptyLine(lines: readonly Entitlement[] | null | undefined): string | null {
+  if (lines == null || lines.length === 0) return null;
+  if (creditsLeft(lines) !== 0) return null;
+  const closed = lines.filter((l) => l.expired === true).length;
+  if (closed === 0) return null;
+  const many = closed > 1;
+  return `Your pack${many ? 's' : ''} ran out of time.`
+    + ` Nothing can be booked against ${many ? 'them' : 'it'} now, and whether anything is done about that`
+    + ' is a conversation with your coach rather than something this app settles on its own.';
+}
+
+/**
+ * The note under the "Sessions Remaining" figure: what the figure is across, and
+ * what is booked against it.
+ *
+ * Null for a list that is unread or empty, so a screen prints nothing rather
+ * than a note about no packs. `expected` is `expectedDraws`, three-state as
+ * ever — null is "we could not count the bookings", and it is said by leaving
+ * the clause off rather than by printing a nought nobody counted.
+ *
+ * A closed window is named up here and not left to the lines below, because the
+ * figure above it is what somebody plans a month against: "3" across four packs,
+ * two of which nothing can be booked against, is not the same 3.
+ */
+export function creditsHeroNote(
+  lines: readonly Entitlement[] | null | undefined,
+  expected: number | null,
+): string | null {
+  if (lines == null || lines.length === 0) return null;
+  const n = lines.length;
+  const s = n === 1 ? '' : 's';
+  const closed = lines.filter((l) => l.expired === true).length;
+  const across = closed === 0
+    ? `Across ${n} pack${s}`
+    : closed === n
+      ? `Across ${n} pack${s} whose validity has run out`
+      : `Across ${n} pack${s} · ${closed} whose validity has run out`;
+  if (expected == null) return across;
+  return expected === 0
+    ? `${across} · nothing booked is due to draw one`
+    : `${across} · ${expected} booked session${expected === 1 ? '' : 's'} still to draw`;
 }
 
 /**

@@ -36,12 +36,21 @@
 //    pack is not a ten-PT-session pack, and spending one on the other is the
 //    "wrong credit" failure pointed at the member instead of the coach.
 //
+// 7. A PACK WHOSE WINDOW CLOSED IS LISTED, AND SAID OUT LOUD. Part 370 route 1
+//    is `status = 'paid' and cp.sessions_total is not null` with no expiry
+//    clause, so an expired pack still WINS the route — hiding it here would
+//    have the app naming a different payer than the server. The price of
+//    keeping it is that it must never be captioned in the future tense: an
+//    expired pack reads "0 of 10" and "Expires 14 Aug" in September is this
+//    app telling somebody their money is still waiting for them.
+//
 // No formatted date is asserted against a literal — `npm test` runs under six
 // timezones — and every instant here is an explicit ISO string.
 import {
   chooseRoute, routeReason, creditsLeft, payingLines, passLiveOn, gymPtLines,
   coachPackLines, ledgerStateOf, buildLedger, expectedDraws,
   clientLedgerLine, coachLedgerLine, shortfallLine, bookingCreditNote,
+  entitlementWindowLine, creditsEmptyLine, creditsHeroNote,
   type CreditSession, type Entitlement, type LedgerState,
 } from './sessionCredits';
 
@@ -145,8 +154,8 @@ eq(unnamed[0].label, '8-session PT pass',
 
 eq(coachPackLines(null), null, 'unread coach packs stay unread');
 eq(coachPackLines([{ id: 'z', label: '10-session pack', left: 4, sessions_total: 10 }]),
-  [{ id: 'z', kind: 'coach_pack', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: null }],
-  'a coach pack line carries no expiry, because a coach pack has none in this schema');
+  [{ id: 'z', kind: 'coach_pack', label: '10-session pack', left: 4, sessions_total: 10, expiresOn: null, expired: false }],
+  'a pack with no window carries none — which is every pack sold before part 612, and most of them');
 
 /* ── 4 · one session's state ──────────────────────────────────────────────── */
 
@@ -261,5 +270,77 @@ ok(!(bookingCreditNote('gym_pass', 3) || '').includes('the moment you book'),
   'and never claims a credit is spent at booking when the design spends it at delivery');
 eq(bookingCreditNote('none', 0), null, 'somebody who holds nothing is told nothing about packs at all');
 
+/* ── 7 · a window that has closed ─────────────────────────────────────────── */
+
+// The pack part 370 still spends the route on, and the one this module used to
+// flatten: `coachPackLines` set `expiresOn: null` on every line and carried no
+// flag at all, so the screens had nothing to say about a nought they were
+// printing.
+const closed = coachPackLines([
+  { id: 'e1', label: '10-session pack', left: 0, sessions_total: 10, expired: true, expiresOn: '2026-08-14' },
+]) as Entitlement[];
+
+eq(closed.length, 1,
+  'a pack whose window closed is LISTED, not filtered — route 1 of part 370 has no expiry clause, so it is still the answer to who is paying');
+eq(closed[0].expired, true, 'and it says so, which is the only way a screen can explain the nought beside it');
+eq(closed[0].expiresOn, '2026-08-14', 'carrying the day the window closed on, rather than the null the old mapping invented');
+eq(chooseRoute(closed.length > 0, true), 'coach_pack',
+  'an expired coach pack still beats a live gym pass, exactly as the server picks it — the app and the database name one payer or neither can be trusted');
+eq(creditsLeft(closed), 0, 'and the figures are untouched: nothing here manufactures a credit to soften the sentence');
+
+// A gym pass never reaches a screen expired, because `gymPtLines` drops one
+// that is not live on the day. Stated rather than assumed: it is what makes
+// `expired` a coach-pack fact everywhere else in this module.
+ok(pt.every((l) => l.expired === false),
+  'every gym line is live by construction, so none of them arrives claiming a closed window');
+
+// The tense. This is the whole of the defect, and it is one word.
+eq(entitlementWindowLine({ expiresOn: '2026-08-14', expired: false }, '14 Aug 2026'), 'Expires 14 Aug 2026',
+  'a window still open is a promise about a day that has not come yet');
+eq(entitlementWindowLine({ expiresOn: '2026-08-14', expired: true }, '14 Aug 2026'), 'Ran out of time on 14 Aug 2026',
+  'and one that has closed is a fact about a day that has passed, naming the day either way');
+ok(!(entitlementWindowLine({ expiresOn: '2026-08-14', expired: true }, '14 Aug 2026') || '').includes('Expires'),
+  'the closed sentence never borrows the open one, which is the future tense read over a nought');
+ok((entitlementWindowLine({ expiresOn: '2026-08-14', expired: true }, '14 Aug 2026') || '').includes('14 Aug 2026'),
+  'and it names the day: "this ran out" with no date is a fact somebody cannot check against their own receipt');
+eq(entitlementWindowLine({ expiresOn: null, expired: false }, '14 Aug 2026'), null,
+  'a pack with no window gets no line — "this does not expire" under every pack in the product is noise on the ninety-nine per cent');
+eq(entitlementWindowLine({ expiresOn: '2026-08-14', expired: true }, null), null,
+  'and a day that would not format gives null rather than a sentence with a hole where the date goes');
+
+// Why the balance is nought, when the reason is a window rather than a spend.
+const usedUp: Entitlement[] = [
+  { id: 'u', kind: 'coach_pack', label: '10-session pack', left: 0, sessions_total: 10, expiresOn: null, expired: false },
+];
+eq(creditsEmptyLine(usedUp), null,
+  'a pack somebody used up is explained by nothing here: they got what they paid for, and packDraw keeps that nought apart from this one on purpose');
+ok((creditsEmptyLine(closed) || '').includes('ran out of time'),
+  'a nought caused by a closed window says so, in the words packExpiry already uses for it rather than a fourth phrasing');
+ok(!(creditsEmptyLine(closed) || '').includes('refund'),
+  'and promises no refund, which is not a thing this app can make happen');
+ok(!/[0-9]/.test(creditsEmptyLine(closed) || ''),
+  'and carries no figure at all: a pack used up and THEN closed reads nought here too, and only packDraw holds the number that was genuinely stranded');
+eq(creditsEmptyLine([...closed, { id: 'l', kind: 'coach_pack', label: '5-session pack', left: 2, sessions_total: 5, expiresOn: null, expired: false }]), null,
+  'nothing is explained while anything is still spendable — the sentence is about a whole balance of nought, not about one dead pack in a list');
+eq(creditsEmptyLine(null), null, 'an unread list has no balance to explain, and will not be given one');
+eq(creditsEmptyLine([]), null, 'and somebody who holds nothing is told nothing about packs running out of time');
+
+// The note under the figure a member plans a month against.
+eq(creditsHeroNote(null, 0), null, 'no note over a list nobody could read');
+eq(creditsHeroNote([], 0), null, 'and none over a client who holds nothing at all');
+eq(creditsHeroNote(packs, 0), 'Across 2 packs · nothing booked is due to draw one',
+  'the ordinary note is unchanged, so moving it out of the screen moved nothing else with it');
+eq(creditsHeroNote(packs, 2), 'Across 2 packs · 2 booked sessions still to draw',
+  'and the booking clause still counts what is expected to draw');
+eq(creditsHeroNote(packs, null), 'Across 2 packs',
+  'a booking count nobody could read is left off rather than printed as a nought nobody counted');
+eq(creditsHeroNote(closed, null), 'Across 1 pack whose validity has run out',
+  'a member whose only pack has expired is told that above the figure, not left to work it out from a nought');
+const mixed: Entitlement[] = [...closed, ...packs];
+eq(creditsHeroNote(mixed, null), 'Across 3 packs · 1 whose validity has run out',
+  'and where some are live it says how many are not, because 8 across three packs one of which is dead is not the same 8');
+ok((creditsHeroNote(mixed, 0) || '').includes('whose validity has run out'),
+  'the closed window keeps its clause even when a booking clause has to fit in beside it');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('sessionCredits: ok (an empty coach pack still beats a gym pass, unread is never nought, a shortfall is not cash)');
+console.log('sessionCredits: ok (an empty coach pack still beats a gym pass, a closed window is past tense, unread is never nought, a shortfall is not cash)');

@@ -40,9 +40,11 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Hero, Card, Ghost, Flag, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { appLocale } from '../../src/lib/locale';
+import { fmtFullDay } from '../../src/lib/format';
 import { sessionPacks, myPtPasses, mySessionCredits, type PtPassRow } from '../../src/lib/connect';
 import { coachPackLines, gymPtLines, chooseRoute, routeReason, creditsLeft, payingLines,
   buildLedger, expectedDraws, clientLedgerLine, shortfallLine,
+  entitlementWindowLine, creditsEmptyLine, creditsHeroNote,
   type CreditRoute, type CreditSession, type Entitlement, type Ledger, type LedgerRow } from '../../src/lib/sessionCredits';
 import type { PackBalance } from '../../src/lib/packDraw';
 
@@ -101,6 +103,10 @@ export default function SessionCredits() {
     () => (sessions === undefined ? null : buildLedger(sessions, route)), [sessions, route]);
   const expected = useMemo(() => expectedDraws(ledger), [ledger]);
   const shortfalls = useMemo(() => shortfallLine(ledger), [ledger]);
+  // Why the balance is nought, when the reason is a window that closed rather
+  // than a pack somebody used up. Null in every other case, including the
+  // ordinary nought of a pack fully spent, which needs no explaining.
+  const emptyReason = useMemo(() => creditsEmptyLine(lines), [lines]);
 
   const loading = packs === undefined || passes === undefined || sessions === undefined;
   // Named separately from `loading`, because "still reading" and "we asked and
@@ -111,6 +117,32 @@ export default function SessionCredits() {
   const labelFor = (row: LedgerRow): string | null => {
     if (!row.entitlementId || !lines) return null;
     return lines.find((l) => l.id === row.entitlementId)?.label ?? null;
+  };
+
+  // One entitlement and its own window. A pack whose window has closed is
+  // LISTED rather than hidden, because part 370 still picks it and a screen
+  // that dropped it would name a different payer from the server. The price of
+  // listing it is that it must not read like a live one: dimmed to the quiet
+  // ink the rest of this screen uses for what is no longer in play, and its
+  // caption flagged, because "Expires 14 Aug 2026" printed in September beside
+  // "0 of 10" is this app promising a member something it cannot give them.
+  const Line = ({ l }: { l: Entitlement }) => {
+    const windowLine = l.expiresOn ? entitlementWindowLine(l, fmtFullDay(l.expiresOn)) : null;
+    return (
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.md }}>
+        <View style={{ flex: 1, paddingRight: sp.md }}>
+          <Text style={{ ...ty.label, color: l.expired ? t.ink3 : t.ink }}>{l.label}</Text>
+          {windowLine == null ? null : l.expired ? (
+            // A mark in the warn tone beside ink-coloured text, never warn as
+            // the text colour itself — the rule `Flag` exists to keep.
+            <Flag tone={t.warn} style={{ marginTop: 3 }}>{windowLine}</Flag>
+          ) : (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{windowLine}</Text>
+          )}
+        </View>
+        <Text style={{ ...ty.label, color: l.expired ? t.ink3 : t.ink2 }}>{`${l.left} of ${l.sessions_total}`}</Text>
+      </View>
+    );
   };
 
   const Row = ({ row }: { row: LedgerRow }) => (
@@ -134,11 +166,7 @@ export default function SessionCredits() {
             holding ten that they have none. */}
         {!loading && left != null && lines && lines.length > 0 ? (
           <Hero label="Sessions Remaining" figure={fig(left)}
-            note={expected == null
-              ? `Across ${lines.length} pack${lines.length === 1 ? '' : 's'}`
-              : expected === 0
-                ? `Across ${lines.length} pack${lines.length === 1 ? '' : 's'} · nothing booked is due to draw one`
-                : `Across ${lines.length} pack${lines.length === 1 ? '' : 's'} · ${expected} booked session${expected === 1 ? '' : 's'} still to draw`} />
+            note={creditsHeroNote(lines, expected) ?? undefined} />
         ) : null}
 
         {unread ? (
@@ -162,6 +190,15 @@ export default function SessionCredits() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{routeReason(route)}</Text>
         ) : null}
 
+        {/* The sentence that explains the nought above it, and only when a
+            closed window is what made it nought. It sits under the figure and
+            over the list, because both of those are the nought it is about. */}
+        {emptyReason ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Flag tone={t.warn}>{emptyReason}</Flag>
+          </View>
+        ) : null}
+
         {/* The one line that needs acting on, and it is never a reassuring
             zero: `shortfallLine` is null both for no shortfalls and for a
             ledger nobody could read. */}
@@ -175,19 +212,7 @@ export default function SessionCredits() {
           <Rule />
           <Section>
             <SectionHead title="What Is Left" />
-            {lines.map((l) => (
-              <View key={l.id} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: sp.md }}>
-                <View style={{ flex: 1, paddingRight: sp.md }}>
-                  <Text style={{ ...ty.label, color: t.ink }}>{l.label}</Text>
-                  {l.expiresOn ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-                      Expires {new Date(l.expiresOn).toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' })}
-                    </Text>
-                  ) : null}
-                </View>
-                <Text style={{ ...ty.label, color: t.ink2 }}>{`${l.left} of ${l.sessions_total}`}</Text>
-              </View>
-            ))}
+            {lines.map((l) => <Line key={l.id} l={l} />)}
           </Section>
         </>) : null}
 
