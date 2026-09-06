@@ -14,9 +14,9 @@
 // an empty one and being told plainly that nothing has been sent is a better
 // answer than a screen that does not exist.
 //
-// Registering this route needs a line in app/(owner)/_layout.tsx, which this
-// work does not own:
-//   <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
+// Registered in app/(owner)/_layout.tsx as an href: null tab — reachable by
+// route, absent from the bar. This comment used to ask for that line as work
+// somebody else owned; the line is there and the ask outlived it.
 import { NotificationInbox } from '../../src/ui/notifications';
 
 export default function OwnerNotifications() {

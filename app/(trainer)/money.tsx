@@ -77,9 +77,13 @@
 //     sees — which makes getting it right the whole job rather than a detail.
 //     `ledgerEmptyLine` says "nothing recorded" under a whole read and "the read
 //     failed" under a broken one, and those are different sentences.
-//   · An amount in a currency nobody chose. 35 of 54 live tenants have
-//     `tenants.currency` NULL and part 150 removed the last database defaults,
-//     so no currency set is the COMMON path. Amounts that carry their own
+//   · An amount in a currency nobody chose. Part 150 removed the last database
+//     defaults, so a tenant with no currency is a real state and not a
+//     misconfiguration. This used to read "35 of 54 live tenants" and call it
+//     the common path; the table has since been cleaned and it is 3 of 20
+//     (checked live, 6 Sep 2026). The rule does not move with the count — a
+//     figure printed in a currency nobody chose is wrong at one tenant in
+//     twenty exactly as it was at two in three. Amounts that carry their own
 //     currency (a sale, a renewal, a recorded fee) print it; the ones that do
 //     not are withheld with `denominate` saying which silence it is.
 //   · A projection. Nothing here is annualised, averaged forward, or run to a
