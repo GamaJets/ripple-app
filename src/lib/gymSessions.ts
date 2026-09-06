@@ -21,6 +21,13 @@
 import { assertWhole, capLimit, readAll, ROW_CAP } from './rowCap';
 import { chunkIds, uniqueIds } from './idLookup';
 import { assertWrote } from './wroteRows';
+// What money a run of sessions is actually denominated in. `payrollByTrainer`
+// adds `rate_cents` up across whatever rows it is handed, and until this import
+// the answer to "in what?" was supplied by whichever screen rendered the number
+// — `tenants.currency`, the gym's code TODAY, over rates snapshotted whenever
+// they were snapshotted. See the header of ./gymRateCurrency.ts, which is the
+// one place that rule lives; nothing here re-derives it.
+import { runCurrency } from './gymRateCurrency';
 
 type Queryable = { from: (table: string) => any };
 
@@ -153,6 +160,43 @@ export function isPayable(s: Pick<PtSession, 'outcome'>, policy: PayPolicy): boo
   }
 }
 
+/**
+ * The rate a payroll run would actually add up for one session, carrying the
+ * unit it would add it up IN — or null when the session is not payable or has
+ * no rate at any layer.
+ *
+ * Exported because two functions have to agree about it exactly:
+ * `payrollByTrainer` below, which produces the figures, and `payrollOf` in
+ * ./monthEnd.ts, which asks ./gymRateCurrency.ts what money those figures are
+ * in. A second, separately-written answer to "which sessions went into this
+ * total, at what rate" is how a total and its own currency label come to be
+ * derived from different sets of rows — the exact fault this pair exists to
+ * close.
+ *
+ * ── why a fallback-priced session has a null currency ─────────────────────
+ *
+ * `fallbackRateCents` arrives here as a bare integer. Nothing tells this
+ * function what money it is in, so it says so — null, the 'unrecorded' answer
+ * in ./gymRateCurrency.ts — rather than borrowing the unit off a neighbouring
+ * snapshotted row. A gym whose coaches are on GBP rates and whose standard fee
+ * is set in EUR would otherwise have its fee-priced sessions silently labelled
+ * GBP and added to the GBP ones.
+ *
+ * Callers that resolve rates up front through `withResolvedRates` in
+ * ./gymPay.ts — which stamps the unit with the number, at the layer that knows
+ * it — pass `fallbackRateCents: null` and never reach that case.
+ */
+export function payableRate(
+  s: Pick<PtSession, 'outcome' | 'rateCents' | 'rateCurrency'>,
+  policy: PayPolicy,
+  fallbackRateCents: number | null,
+): { rateCents: number; rateCurrency: string | null } | null {
+  if (!isPayable(s, policy)) return null;
+  const rate = s.rateCents ?? fallbackRateCents;
+  if (rate == null) return null; // priced later, or never — not zero
+  return { rateCents: rate, rateCurrency: s.rateCents == null ? null : s.rateCurrency };
+}
+
 export interface PayrollLine {
   trainerId: string;
   trainerName: string | null;
@@ -163,6 +207,22 @@ export interface PayrollLine {
   unmarked: number;
   /** Null when not one payable session carried a rate. */
   cents: number | null;
+  /**
+   * The one currency `cents` may be LABELLED with, or null when no single label
+   * is honest — `runLabel`'s rule, from ./gymRateCurrency.ts, applied to this
+   * trainer's payable sessions.
+   *
+   * Null in two different cases and `mixedCurrency` beside it is what tells
+   * them apart: this coach's month straddles two moneys (mixed), or their rates
+   * predate supabase/parts/1010 and carry no unit at all (unrecorded). Neither
+   * is the gym's own code, and a screen that supplies that code over the top is
+   * the defect this field exists to make impossible.
+   */
+  currency: string | null;
+  /** True when this line's payable sessions were priced in more than one money.
+   *  `cents` is then a sum across currencies, which is not an amount of
+   *  anything: it must not be printed, exported or filed. */
+  mixedCurrency: boolean;
   /** How many payable sessions actually had a rate to price. */
   priced: number;
   payable: number;
@@ -189,12 +249,17 @@ export function payrollByTrainer(
       l = {
         trainerId: s.trainerId, trainerName: s.trainerName,
         delivered: 0, noShows: 0, cancelled: 0, unmarked: 0,
-        cents: null, priced: 0, payable: 0,
+        cents: null, currency: null, mixedCurrency: false, priced: 0, payable: 0,
       };
       lines.set(s.trainerId, l);
     }
     return l;
   };
+
+  /** The rates this function actually added up, per trainer, each carrying the
+   *  unit it was added up in — see `payableRate` for why a fallback-priced one
+   *  carries none. */
+  const rated = new Map<string, { rateCents: number; rateCurrency: string | null }[]>();
 
   for (const s of sessions) {
     const l = line(s);
@@ -205,10 +270,22 @@ export function payrollByTrainer(
 
     if (!isPayable(s, policy)) continue;
     l.payable += 1;
-    const rate = s.rateCents ?? fallbackRateCents;
-    if (rate == null) continue; // priced later, or never — not zero
-    l.cents = (l.cents ?? 0) + rate;
+    const r = payableRate(s, policy, fallbackRateCents);
+    if (r == null) continue; // priced later, or never — not zero
+    l.cents = (l.cents ?? 0) + r.rateCents;
     l.priced += 1;
+    const bucket = rated.get(s.trainerId) ?? [];
+    bucket.push(r);
+    rated.set(s.trainerId, bucket);
+  }
+
+  // What each line's money is, asked of the rows that made it. `runCurrency` is
+  // the whole answer — one code, no code, or more than one — and neither branch
+  // below invents a code for the last two.
+  for (const l of lines.values()) {
+    const run = runCurrency(rated.get(l.trainerId) ?? []);
+    l.currency = run.kind === 'one' ? run.currency : null;
+    l.mixedCurrency = run.kind === 'mixed';
   }
 
   return [...lines.values()].sort(

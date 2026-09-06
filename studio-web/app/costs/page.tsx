@@ -58,7 +58,19 @@ import { DataTable, type Column } from '@/components/DataTable';
 import { money } from '@lib/gymRecord';
 import { readMinorAmount, type Taken } from '@lib/coachMoney';
 import { gymLink, noGymNote } from '@lib/gymLink';
-import { monthWindow, recentMonths, monthKeyOf, type MonthWindow } from '@lib/monthEnd';
+import { monthWindow, monthKeyOf, type MonthWindow } from '@lib/monthEnd';
+// The months this gym has had, on the GYM's calendar.
+//
+// The bounds on this screen need no zone and are left alone: `fetchGymCosts` is
+// filtered on `mw.firstDay`/`mw.lastDay` against `gym_costs.paid_on`, a `date`
+// column, and the days of August are August's wherever they are read. What DID
+// need one is the list of months offered. The default key below already follows
+// `gymDay(Date.now(), zone)` — so at a gym ahead of the reader, on the 1st, the
+// select's own value was a month `recentMonths` had not put in its options, and
+// a <select> whose value is not among its children shows the wrong row selected
+// while `key` says otherwise. Same clock for the value and for the list, or
+// neither can be trusted.
+import { gymRecentMonths } from '@lib/gymMonth';
 import { monthTickStart } from '@lib/pickerMonth';
 import { useMonthTick } from '@/lib/monthTick';
 import { isoDate } from '@lib/format';
@@ -219,7 +231,7 @@ export default function Costs() {
    * that had just ended was not in the list at all. The only repair was the full
    * page reload this console spent a wave learning not to need.
    */
-  const months = useMemo(() => recentMonths(MONTHS_OFFERED, monthTickStart(tick).getTime()), [tick]);
+  const months = useMemo(() => gymRecentMonths(MONTHS_OFFERED, zone, monthTickStart(tick).getTime()).keys, [tick, zone]);
 
   useEffect(() => {
     if (me?.tenantId && w) refresh();

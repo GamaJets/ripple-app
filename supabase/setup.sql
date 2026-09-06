@@ -61224,3 +61224,651 @@ end $fn$;
 revoke execute on function public.challenge_board(uuid) from public;
 revoke execute on function public.challenge_board(uuid) from anon;
 grant execute on function public.challenge_board(uuid) to authenticated;
+
+-- ▶ a-close-that-named-one-currency-over-four-figures.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A month-end close that named one currency over four figures
+-- ═══════════════════════════════════════════════════════════════════════════
+-- NOT APPLIED. Written by the month-close repair lane; apply, rebuild
+-- supabase/setup.sql with `npm run db:build`, and then run the advisors.
+-- APPLIED. Verified after: the four columns exist as nullable text, all four
+-- ISO-3 checks are on the table, and `authenticated` holds both SELECT and
+-- INSERT on them — the part-191 failure mode, asserted rather than reasoned
+-- about, because this table's grants are table-level and a column added later
+-- would NOT be covered if they were column-level.
+--
+--
+--
+-- ── WHY THIS IS A FOUR-LINE CHANGE TODAY AND WOULD NOT BE LATER ───────────
+--
+-- Read live on this project on 6 September 2026, before writing a word of it:
+--
+--     select count(*) as rows, count(currency) as with_currency
+--       from public.gym_month_closes;
+--     -- rows: 0, with_currency: 0
+--
+-- No gym has ever closed a month. So there is NOTHING to backfill and nothing
+-- to guess: not one stored row exists whose single `currency` code somebody
+-- would later have to decide the meaning of, figure by figure, from a close
+-- taken months earlier by an owner who is not available to ask.
+--
+-- That is the whole reason this is being done now rather than when it starts
+-- to hurt. The first gym to close a month writes four figures and one code,
+-- permanently; the second month reads back through that row for its drift
+-- lines; the accountant's copy leaves the building in the handoff CSV. From
+-- the first close onwards, splitting the column stops being an ALTER and
+-- starts being an archaeology exercise with a customer's books as the dig.
+--
+--
+-- ── WHAT IS WRONG ─────────────────────────────────────────────────────────
+--
+-- `gym_month_closes` (supabase/parts/182) stores FOUR money figures and ONE
+-- currency, and its own comment says so in as many words:
+--
+--     -- What all four are denominated in, or NULL because the gym had not
+--     -- said and the screen was showing dashes.
+--
+-- They are not all denominated in it. studio-web/app/close/page.tsx fills that
+-- column from `currencyOf(rec, gymCcy)`, which is PAYMENTS-FIRST: what the
+-- month's `gym_payments` rows agree on, falling back to the invoices and then
+-- to `tenants.currency`. It is a true statement about `taken_cents` and about
+-- nothing else beside it:
+--
+--   · `invoiced_cents` and `outstanding_cents` come off `gym_invoices`, which
+--     carries `currency` PER ROW. A gym billing an overseas member in EUR has
+--     invoices that never agreed with its card takings in the first place;
+--   · `payroll_cents` comes off `sessions.rate_cents` — snapshotted with their
+--     own `rate_currency` since supabase/parts/1010 — and off
+--     `tenants.session_fee`, which is denominated in `tenants.currency`.
+--     Neither of those is what the card machine took that month.
+--
+-- So a gym whose August takings happened to be all AED filed its GBP invoices,
+-- its GBP arrears and its GBP payroll as dirhams. The KPI row on that very
+-- screen was repaired for exactly this and now prices those three figures with
+-- the invoices' own agreed code and with the payroll run's own. The STORED row
+-- was not. One screen, one month, two answers — and the one that leaves the
+-- building is the stored one.
+--
+--
+-- ── WHAT IT DOES TO A REAL PERSON ────────────────────────────────────────
+--
+-- An owner in London runs a gym that also sells a handful of memberships to a
+-- Dubai corporate client, invoiced in AED, paid by transfer. In August the
+-- card terminal takes only AED — a quiet month, one visiting group — so
+-- `currencyOf` answers AED and the close is filed:
+--
+--     taken 4,200 · billed 39,000 · still owed 15,500 · payroll 18,000 — AED
+--
+-- Three of those four are pounds. The owner hands the CSV to their accountant,
+-- who reconciles 18,000 dirhams of payroll against 18,000 pounds leaving the
+-- business account and cannot make the month balance. Nothing on the sheet is
+-- marked as assumed, because nothing about it was: a single column had a
+-- single value and every reader took it at its word.
+--
+-- In September the owner opens the close screen again. `driftSince` reads the
+-- stored row back, prints every figure in the stored code, and reports the
+-- month as unchanged — because it is comparing the same numbers. The label was
+-- never part of the comparison.
+--
+--
+-- ── THE DECISION: RECORD THE TRUTH, DO NOT REFUSE THE CLOSE ──────────────
+--
+-- The other way to fix this is to block a gym from closing a month whose
+-- figures are in more than one currency. That is refused here, deliberately.
+-- An owner must always be able to close their month — supabase/parts/182 and
+-- src/lib/gymClose.ts already argue at length that a gym with one unmarkable
+-- session from a trainer who left in March cannot be locked out of March
+-- forever — and a gym that bills in more than one currency is a legitimate
+-- gym, not an error state. It is the RECORD that has to be able to say what it
+-- means, not the owner who has to be prevented from having a real business.
+--
+-- So: one currency column per figure. Four figures, four codes, each of them
+-- the code the tile above it was priced with when somebody pressed Close.
+--
+--
+-- ── WHY `currency` IS KEPT AND NOT DROPPED ───────────────────────────────
+--
+-- Nothing in supabase/parts has ever dropped a column — grep for DROP COLUMN
+-- and there is not one — and part 83 and part 2300 are the shape this schema
+-- uses instead: a superseded thing is narrowed and SAID, in the object's own
+-- comment, rather than removed. A column that has ever been written is a
+-- column something might still read, and here that is not hypothetical: a
+-- console tab left open on the previous bundle can still insert a row with
+-- `currency` set and the four new columns null, for as long as that tab lives.
+--
+-- So `currency` stays, its comment is rewritten to say what it now means —
+-- the legacy single code, payments-first, NULL on everything written since
+-- this part — and src/lib/gymClose.ts reads it as a fallback for `taken` ALONE
+-- and for no other figure. Falling back for the other three would reinstate
+-- the defect for exactly the rows that carry it.
+--
+--
+-- ── WHAT THIS DOES NOT DO ────────────────────────────────────────────────
+--
+-- It does not backfill: there is nothing to backfill (0 rows), and there never
+-- will be a row this part could have guessed at.
+--
+-- It does not make any column NOT NULL. Every figure on a close is nullable
+-- because every figure is nullable on screen, and a currency is nullable for
+-- the same reason one level along: a set of rows that names no single money
+-- has no code, and storing one to satisfy a constraint is the precise lie the
+-- close screen exists to refuse.
+--
+-- It does not add a grant. `gym_month_closes` holds TABLE-level select/insert/
+-- update for `authenticated` (part 182, line 131 — confirmed against
+-- information_schema.table_privileges on this project, not assumed), and a
+-- table-level privilege covers columns added afterwards. This is the failure
+-- mode `check:grants` exists for — part 191 added `trainers.trial_started_at`
+-- to a table whose grants are COLUMN-level, and PostgREST refused every read
+-- of it with a 403 for as long as the column existed — so it was checked
+-- rather than reasoned about.
+--
+-- It does not touch RLS. `gym_month_closes_owner` is a row policy and says
+-- nothing about columns.
+--
+-- Idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · One currency per figure
+-- ═════════════════════════════════════════════════════════════════════════
+
+alter table public.gym_month_closes
+  add column if not exists taken_currency       text,
+  add column if not exists invoiced_currency    text,
+  add column if not exists outstanding_currency text,
+  add column if not exists payroll_currency     text;
+
+-- The same ISO-3 shape the existing `currency` check has carried since part
+-- 182, four times over rather than once loosely: a close is the document an
+-- owner reconciles against a bank statement, and a code that is not a code is
+-- how a figure comes to be read as an amount of something it is not.
+alter table public.gym_month_closes drop constraint if exists gym_month_closes_taken_ccy_is_iso;
+alter table public.gym_month_closes add constraint gym_month_closes_taken_ccy_is_iso
+  check (taken_currency is null or taken_currency ~ '^[A-Z]{3}$');
+
+alter table public.gym_month_closes drop constraint if exists gym_month_closes_invoiced_ccy_is_iso;
+alter table public.gym_month_closes add constraint gym_month_closes_invoiced_ccy_is_iso
+  check (invoiced_currency is null or invoiced_currency ~ '^[A-Z]{3}$');
+
+alter table public.gym_month_closes drop constraint if exists gym_month_closes_outstanding_ccy_is_iso;
+alter table public.gym_month_closes add constraint gym_month_closes_outstanding_ccy_is_iso
+  check (outstanding_currency is null or outstanding_currency ~ '^[A-Z]{3}$');
+
+alter table public.gym_month_closes drop constraint if exists gym_month_closes_payroll_ccy_is_iso;
+alter table public.gym_month_closes add constraint gym_month_closes_payroll_ccy_is_iso
+  check (payroll_currency is null or payroll_currency ~ '^[A-Z]{3}$');
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · What each column means, said in the database
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Where a reader of this table will be: they have the row and they do not have
+-- studio-web. NULL in any of these is "the rows behind this figure named no
+-- single money", which is a dash on screen — never a licence to reach for the
+-- gym's code.
+
+comment on column public.gym_month_closes.taken_currency is
+  'What taken_cents is denominated in: the one currency the month''s gym_payments rows agreed on. NULL when they did not agree, or when there was nothing to ask — the figure is then unlabelled on purpose and must not be priced with the gym''s currency.';
+
+comment on column public.gym_month_closes.invoiced_currency is
+  'What invoiced_cents is denominated in: the one currency the month''s gym_invoices rows agreed on. NULL when they did not. This is NOT taken_currency — an overseas member invoiced in another money is an ordinary gym, and before supabase/parts/2540 those invoices were filed in whatever the card terminal happened to take.';
+
+comment on column public.gym_month_closes.outstanding_currency is
+  'What outstanding_cents is denominated in: the currency the invoices behind the arrears agreed on. Separate from invoiced_currency because they are two figures over two sets of rows — the arrears reach back past this month — and a screen that ever prices them apart must be able to record that.';
+
+comment on column public.gym_month_closes.payroll_currency is
+  'What payroll_cents is denominated in: the one currency the payable sessions were priced in, from sessions.rate_currency (supabase/parts/1010) — never tenants.currency, which is what the gym charges in TODAY over rates snapshotted whenever they were snapshotted. NULL where the rates predate part 1010 and genuinely record no unit. Where the month spans more than one currency there is no total at all: payroll_cents is NULL too, because a sum across currencies is not an amount of anything, and the reason is written into blockers_at_close.';
+
+comment on column public.gym_month_closes.currency is
+  'SUPERSEDED by the four per-figure currency columns (supabase/parts/2540), and NULL on everything written since. It was one code beside four figures, filled payments-first, so it was true of taken_cents alone and mislabelled the other three. Kept rather than dropped because a client on an older bundle can still write it: readers may use it as a fallback for taken_currency and MUST NOT use it for the invoiced, outstanding or payroll figures — that substitution is the defect it is superseded for. No row on this platform has ever carried a value here.';
+
+comment on table public.gym_month_closes is
+  'One row per act of closing a month, with the figures as they stood at the time and one currency PER FIGURE — they are four different questions over four different sets of rows and money is never added across currencies here. A reopen sets reopened_at and a reason rather than deleting the row, so a month that was closed and then moved is visible as exactly that. The live close for a month is the row with reopened_at null; the partial unique index guarantees there is at most one.';
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · What to check after applying
+-- ═════════════════════════════════════════════════════════════════════════
+--
+--   · the four columns exist and are nullable text:
+--
+--       select column_name, data_type, is_nullable
+--         from information_schema.columns
+--        where table_schema = 'public' and table_name = 'gym_month_closes'
+--          and column_name like '%_currency';
+--
+--     expected: four rows, text, YES.
+--
+--   · `authenticated` can actually read them — the part-191 failure mode.
+--     Column-level grants do not extend to a column added later; this table's
+--     are table-level, and this is the assertion that says so rather than
+--     assuming it:
+--
+--       select has_column_privilege('authenticated',
+--                'public.gym_month_closes', 'payroll_currency', 'SELECT'),
+--              has_column_privilege('authenticated',
+--                'public.gym_month_closes', 'payroll_currency', 'INSERT');
+--
+--     expected: true, true. (Same for the other three.)
+--
+--   · the ISO check bites:
+--
+--       -- as an owner, against a month that may be closed:
+--       -- inserting taken_currency = 'pounds' must raise 23514.
+--
+--   · nothing was invented for a row that already existed:
+--
+--       select count(*) from public.gym_month_closes where currency is not null;
+--
+--     expected: 0 — and if it is ever not 0, that row was written by a client
+--     on a bundle older than supabase/parts/2540 and its `currency` speaks for
+--     taken_cents only.
+--
+--   · `select * from public.get_advisors('security')` is clean, and
+--     `get_advisors('performance')` has gained nothing.
+
+-- ▶ five-notice-passes-that-have-never-once-succeeded.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Five notice passes that have failed on every single run since part 1870.
+-- APPLIED, in three parts, each verified. §1: all five passes now RUN —
+-- run_pack_expiry returned {told:0, closed:0, digest_rows:0, digest_posts:0}
+-- and the other four returned their own shapes, where every one of them had
+-- raised 42883 on every run for 121 runs. §2: cron.job is now 12 jobs and
+-- `cron-job-failure-alarm` is scheduled at 9 9 * * *; anon cannot execute it.
+-- §3: the materialiser returns {failed: 0, series: 0, created: 0, skipped: 0}
+-- — a `failed` count where there was none.
+--
+--
+-- ── THE DEFECT, STATED EXACTLY ────────────────────────────────────────────
+--
+-- `run_notices_with_digest` (part 1870) groups a pass's held pushes and, when a
+-- recipient has more than one, folds them into one worded digest:
+--
+--     with decided as (
+--       select …, count(*) as n, … from repple_push_hold group by …
+--     ),
+--     worded as (
+--       select …,
+--              case when d.n = 1 then d.body
+--                   else public.notification_digest_body(d.body, d.n - 1) end
+--         from decided d
+--     )
+--
+-- `count(*)` is `bigint`. `d.n - 1` is therefore `bigint`. The function is
+-- declared `notification_digest_body(p_body text, p_more integer)`, and
+-- bigint → integer is an ASSIGNMENT cast in Postgres, not an implicit one, so
+-- it is not considered during function resolution. The call does not resolve:
+--
+--     ERROR: function public.notification_digest_body(text, bigint) does not exist
+--
+-- Reproduced on the live database, both directions:
+--
+--     select public.notification_digest_body('x', count(*) - 1)   from …  -- 42883
+--     select public.notification_digest_body('x', (count(*) - 1)::integer) from … -- ok
+--
+-- ── WHY IT FAILS EVEN WHEN THERE IS NOTHING TO SEND ──────────────────────
+--
+-- This is not a bug that waits for a coach with two aged invoices. The `for r
+-- in <query> loop` is PLANNED before its first row is fetched, and an
+-- unresolvable function is a PLAN-time error. So the statement raises whether
+-- `repple_push_hold` holds nine rows, one row, or none — which is why the
+-- failure is total rather than occasional.
+--
+-- ── WHAT IT COST ─────────────────────────────────────────────────────────
+--
+-- Read off cron.job_run_details on the live database:
+--
+--     120 failed runs, 0 successful runs, 5 jobs,
+--     from 2026-09-05 04:12 UTC to 2026-09-06 03:40 UTC — every run since 1870.
+--
+--     overdue-client-notices     12 * * * *   run_overdue_client_notices     (202)
+--     credential-expiry-notices  19 * * * *   run_credential_expiry_notices  (202)
+--     block-ended-notices        26 * * * *   run_block_ended_notices        (471)
+--     pack-expiry                33 * * * *   run_pack_expiry                (612)
+--     invoice-ageing-notices     40 * * * *   run_invoice_ageing_notices     (613)
+--
+-- A cron statement is one transaction, so the raise rolled back everything the
+-- inner pass had just done. That is the one mercy in this: no coach was stamped
+-- as told about something they were never told about, `notice_pass_runs` was
+-- not falsely claimed, and `coach_invoice_ageing_notices` /
+-- `coach_credential_notices` / `coach_overdue_notices` hold no phantom rows. The
+-- bookkeeping is honest. It is simply that for a day and a night:
+--
+--   · no coach was told a client had gone quiet;
+--   · no coach was told their insurance or a qualification had expired;
+--   · no coach was told a training block had run out;
+--   · no coach was told an invoice had crossed an ageing band;
+--   · AND — the one that is not merely a missed message — `run_pack_expiry`
+--     never ran, so no expired pack was closed. `client_purchases.expired_at`
+--     stays null, `sessions_total` is never trimmed to `sessions_used`, and the
+--     credits on a pack whose validity ran out remain bookable. That is a
+--     WRITE the product depends on, not a notification.
+--
+-- `notifications` has 0 rows in the last 48 hours, which is the same fact from
+-- the other end.
+--
+-- ── THE FIX ──────────────────────────────────────────────────────────────
+--
+-- One explicit cast, at the call site rather than on the function. Changing
+-- `notification_digest_body`'s signature to bigint would leave an
+-- `(text, integer)` overload behind for the next caller to resolve to by
+-- accident, and part 1870 revokes execute on the `(text, integer)` identity by
+-- name in three places. The call site is the thing that is wrong, so the call
+-- site is what changes. `greatest(0, …)` inside the function already handles
+-- the value; this is purely about which function the parser can find.
+--
+-- Everything else in this body is byte-for-byte part 1870's. It is restated in
+-- full because `create or replace function` has no other form.
+--
+-- ── SECTION 2: WHY NOBODY NOTICED FOR A DAY ──────────────────────────────
+--
+-- The failure was loud in exactly one place — cron.job_run_details — and
+-- nothing reads it. Part 1153 built precisely this alarm for the storage purge
+-- queue (`check_storage_purge_backlog`, raising so that the failure lands in
+-- the same table an operator is already looking at) and the notice lane never
+-- got the equivalent. Section 2 is that alarm, in part 1153's shape.
+--
+-- It excludes ITSELF from what it checks. An alarm that raises makes its own
+-- last run a failure, and one that then read that back would go on raising
+-- after the real cause was fixed — a false alarm that can never be cleared.
+--
+-- Additive and idempotent; safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 1 · The cast
+-- ═════════════════════════════════════════════════════════════════════════
+
+create or replace function public.run_notices_with_digest(p_fn text)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_key    text;
+  v_result jsonb;
+  v_posts  integer := 0;
+  v_rows   integer := 0;
+  r        record;
+begin
+  if p_fn not in (
+    'run_overdue_client_notices',
+    'run_credential_expiry_notices',
+    'run_block_ended_notices',
+    'run_pack_expiry',
+    'run_invoice_ageing_notices'
+  ) then
+    raise exception 'run_notices_with_digest: % is not one of the notice passes', p_fn;
+  end if;
+
+  -- `seq` is what makes "the first row's own words" a fact rather than
+  -- whichever row the planner happened to return. It is the order the pass
+  -- wrote them in, which is the order of its own select — deterministic, and
+  -- not claimed to be a ranking of urgency.
+  create temp table if not exists repple_push_hold (
+    seq     bigint generated always as identity,
+    user_id uuid not null,
+    channel text not null,
+    title   text not null,
+    body    text not null,
+    route   text not null
+  ) on commit drop;
+  delete from repple_push_hold;
+
+  perform set_config('repple.push_hold', 'on', true);
+  begin
+    execute format('select public.%I()', p_fn) into v_result;
+  exception when others then
+    -- The hold must come off even when the pass fails, or a later statement in
+    -- this transaction would buffer a push nobody ever sends.
+    perform set_config('repple.push_hold', 'off', true);
+    raise;
+  end;
+  perform set_config('repple.push_hold', 'off', true);
+
+  select count(*) into v_rows from repple_push_hold;
+
+  select decrypted_secret into v_key
+    from vault.decrypted_secrets
+   where name = 'storage_service_key'
+   limit 1;
+  if v_key is null or v_key = '' then
+    -- Nothing to post with. The rows are written and claimed, exactly as they
+    -- are when part 900's dispatcher finds no key.
+    return coalesce(v_result, '{}'::jsonb) || jsonb_build_object('digest_rows', v_rows, 'digest_posts', 0);
+  end if;
+
+  for r in
+    -- Stage one: per recipient per (channel, route), decide the ONE message.
+    with decided as (
+      select h.user_id,
+             h.channel,
+             h.route,
+             count(*)                                          as n,
+             (array_agg(h.title order by h.seq))[1]            as title,
+             (array_agg(h.body  order by h.seq))[1]            as body
+        from repple_push_hold h
+       group by h.user_id, h.channel, h.route
+    ),
+    worded as (
+      select d.user_id, d.channel, d.route, d.title,
+             case when d.n = 1 then d.body
+                  -- ── THE LINE THIS PART EXISTS FOR ────────────────────────
+                  -- `d.n` is count(*), which is bigint. Without this cast the
+                  -- parser looks for notification_digest_body(text, bigint),
+                  -- finds only (text, integer), and refuses — at PLAN time, so
+                  -- the whole pass raises even with nothing to send. See the
+                  -- header: 120 consecutive failed runs across five jobs.
+                  else public.notification_digest_body(d.body, (d.n - 1)::integer) end as body
+        from decided d
+    )
+    -- Stage two: identical messages share a post, which is what part 900's
+    -- dispatcher does for forty members of a cancelled class. Two coaches with
+    -- one aged invoice each get one post with two ids; two coaches with nine
+    -- each get two, because their bodies name different invoices.
+    select w.channel, w.title, w.body, w.route,
+           array_agg(distinct w.user_id) as user_ids
+      from worded w
+     group by w.channel, w.title, w.body, w.route
+  loop
+    perform net.http_post(
+      url     := 'https://phgfwzpkkwdysftlgkoq.supabase.co/functions/v1/send-push',
+      headers := jsonb_build_object(
+        'Content-Type',  'application/json',
+        'Authorization', 'Bearer ' || v_key,
+        'apikey',        v_key
+      ),
+      body    := jsonb_build_object(
+        'user_ids', to_jsonb(r.user_ids),
+        'title',    r.title,
+        'body',     r.body,
+        'channel',  r.channel,
+        'data',     case when r.route = '' then '{}'::jsonb
+                         else jsonb_build_object('route', r.route) end
+      )
+    );
+    v_posts := v_posts + 1;
+  end loop;
+
+  -- Counted, and the two figures are the point: `digest_rows` is what was
+  -- written and `digest_posts` is what buzzed. They were equal before this
+  -- part, and cron.job_run_details keeps the answer, so the saving is
+  -- measurable rather than asserted.
+  return coalesce(v_result, '{}'::jsonb)
+         || jsonb_build_object('digest_rows', v_rows, 'digest_posts', v_posts);
+end
+$function$;
+
+revoke all on function public.run_notices_with_digest(text) from public;
+revoke all on function public.run_notices_with_digest(text) from anon;
+revoke all on function public.run_notices_with_digest(text) from authenticated;
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 2 · The alarm the notice lane never had
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- Part 1153's shape: raise, so that a scheduled job's failure appears in the
+-- one table an operator already reads, rather than in a channel nobody has.
+--
+-- What it checks is the LATEST run of each job, not the history. A job that
+-- failed at 03:12 and succeeded at 04:12 has recovered and is not news; a job
+-- whose most recent run failed is currently broken. `where d.end_time is not
+-- null` skips a run still in flight, whose status is 'running'.
+--
+-- The 26-hour cutoff is so that a job which has been UNSCHEDULED — its history
+-- still in the table, its last run days old — does not raise forever. It is
+-- deliberately longer than the slowest job's interval (daily) so that a daily
+-- job's single failure is still caught on the next morning's check.
+
+create or replace function public.check_cron_job_failures()
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_n     int;
+  v_list  text;
+begin
+  with latest as (
+    select distinct on (d.jobid)
+           d.jobid, d.status, d.end_time, d.return_message
+      from cron.job_run_details d
+     where d.end_time is not null
+     order by d.jobid, d.end_time desc
+  )
+  select count(*),
+         string_agg(
+           j.jobname || ' (last ran ' || to_char(l.end_time, 'YYYY-MM-DD HH24:MI')
+             || ' UTC) — ' || left(coalesce(l.return_message, '(no message)'), 300),
+           E'\n  · ' order by j.jobname)
+    into v_n, v_list
+    from latest l
+    join cron.job j on j.jobid = l.jobid
+   where l.status = 'failed'
+     and l.end_time > now() - interval '26 hours'
+     -- Never itself. This function raises as its alarm, which makes its own
+     -- last run a failure; reading that back would mean it could never stop
+     -- raising once it had raised even once.
+     and j.jobname <> 'cron-job-failure-alarm';
+
+  if coalesce(v_n, 0) = 0 then
+    return;
+  end if;
+
+  raise exception
+    'SCHEDULED JOB FAILING: % job(s) whose most recent run failed:%',
+    v_n, E'\n  · ' || v_list;
+end
+$function$;
+
+revoke all on function public.check_cron_job_failures() from public;
+revoke all on function public.check_cron_job_failures() from anon;
+revoke all on function public.check_cron_job_failures() from authenticated;
+
+comment on function public.check_cron_job_failures() is
+  'Raises when any pg_cron job''s most recent run failed within the last 26 hours, so that a silently-failing scheduled pass lands in cron.job_run_details where an operator is already looking. Part 1153 does the same for the storage purge queue. Excludes itself, because it signals by raising.';
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'cron-job-failure-alarm') then
+    perform cron.unschedule('cron-job-failure-alarm');
+  end if;
+end $$;
+
+select cron.schedule(
+  'cron-job-failure-alarm',
+  '9 9 * * *',
+  $cron$ select public.check_cron_job_failures(); $cron$
+);
+
+
+-- ═════════════════════════════════════════════════════════════════════════
+-- 3 · The standing appointment that stops materialising and says nothing
+-- ═════════════════════════════════════════════════════════════════════════
+--
+-- `run_session_series_materialiser` (part 135, cron `materialise-session-
+-- series`, 17 3 * * *) loops over every active series and calls
+-- `_materialise_session_series` for each, wrapped in:
+--
+--     exception when others then
+--       continue;
+--
+-- The per-series isolation is RIGHT and is kept below: one series with a bad
+-- timezone, a deleted trainer or a clash the inner function cannot resolve must
+-- not stop the other coaches' standing appointments being written. That was a
+-- deliberate decision and this part does not reverse it.
+--
+-- What is wrong is that `continue` is the WHOLE of the handling. The failure is
+-- not counted, not logged, and not in the returned jsonb — and `v_series` is
+-- incremented AFTER the call, so a series that raises is not even counted as
+-- attempted. The job then returns normally and cron.job_run_details records
+-- `succeeded`. A client whose Tuesday 07:00 with their coach simply stops
+-- appearing four weeks out is indistinguishable, from every surface an operator
+-- has, from a night on which there was nothing to do. That is the exact shape
+-- this file's section 1 was written about, sitting one job away from it.
+--
+-- The change is the smallest one that removes the silence:
+--
+--   · `v_failed` counts them, and goes into the returned jsonb alongside the
+--     rest, so a caller running this by hand sees it;
+--   · a `raise warning` names the series id and SQLERRM. A warning does not
+--     abort the transaction and does not fail the cron run — the good series
+--     still commit, which is the point of the isolation — but it lands in the
+--     Postgres log, which is a place somebody can actually look. `continue`
+--     writes to nowhere at all.
+--
+-- Deliberately NOT an exception: raising at the end of the loop would roll back
+-- every series that succeeded, which would turn one broken series into a night
+-- on which nobody's standing appointment was written.
+
+create or replace function public.run_session_series_materialiser(p_horizon_days integer default 56)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+declare
+  v_id      uuid;
+  v_rep     jsonb;
+  v_series  int := 0;
+  v_created int := 0;
+  v_skipped int := 0;
+  v_failed  int := 0;
+begin
+  for v_id in
+    select ss.id from session_series ss
+     where ss.status = 'active'
+       and (ss.ends_on is null or ss.ends_on >= (now() at time zone ss.tz)::date)
+     order by ss.created_at
+  loop
+    begin
+      v_rep := public._materialise_session_series(v_id, p_horizon_days);
+      v_series  := v_series + 1;
+      v_created := v_created + (v_rep->>'created')::int;
+      v_skipped := v_skipped + (v_rep->>'skipped')::int;
+    exception when others then
+      -- Isolation kept, silence removed. See the header for why this is a
+      -- warning and not a raise.
+      v_failed := v_failed + 1;
+      raise warning
+        'run_session_series_materialiser: series % did not materialise — % (%)',
+        v_id, sqlerrm, sqlstate;
+      continue;
+    end;
+  end loop;
+  return jsonb_build_object('series', v_series, 'created', v_created,
+                            'skipped', v_skipped, 'failed', v_failed);
+end
+$function$;
+
+revoke all on function public.run_session_series_materialiser(integer) from public;
+revoke all on function public.run_session_series_materialiser(integer) from anon;
+revoke all on function public.run_session_series_materialiser(integer) from authenticated;

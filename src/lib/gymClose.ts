@@ -26,11 +26,39 @@
 // handed over" — and it applies with more force here, because a close is what
 // leaves the building.
 //
-// Every figure is NULLABLE and so is the currency, because every one of them is
-// nullable on screen. A month whose invoice read failed, or a gym that has not
-// set a currency, produces a close with holes in it, and a close that turned
-// those into zeros to satisfy a NOT NULL would be storing the exact lie the
-// whole screen is built to refuse.
+// Every figure is NULLABLE and so is every currency, because every one of them
+// is nullable on screen. A month whose invoice read failed, or a gym that has
+// not set a currency, produces a close with holes in it, and a close that
+// turned those into zeros to satisfy a NOT NULL would be storing the exact lie
+// the whole screen is built to refuse.
+//
+// ── One currency beside four figures, and only one of them was in it ──────
+//
+// This module stored FOUR money figures and ONE currency code, and /close
+// handed it `currencyOf(rec, gymCcy)` — which is payments-first: what the
+// month's `gym_payments` rows agree on, falling back to the invoices and then
+// to `tenants.currency`. So the code was true of `takenCents` and of nothing
+// else beside it:
+//
+//   · `invoicedCents` and `outstandingCents` come off `gym_invoices`, which
+//     carries its own currency per row;
+//   · `payrollCents` comes off `sessions.rate_cents` — snapshotted with their
+//     own `rate_currency` since supabase/parts/1010 — and off
+//     `tenants.session_fee`, which is denominated in `tenants.currency`.
+//
+// A gym whose August card takings happened to be all AED therefore filed its
+// GBP invoices, its GBP arrears and its GBP payroll as dirhams, permanently, on
+// the one document an owner reconciles against a bank statement and hands to an
+// accountant. Every later drift line reads back through the stored row, and the
+// handoff CSV exports it.
+//
+// The KPI row on /close was repaired for exactly this and now prices those
+// figures with the invoices' own agreed code and with the payroll run's own.
+// The STORED row was not, so the screen and the record it wrote disagreed.
+//
+// supabase/parts/2540 adds a currency column PER FIGURE and this module writes
+// all four. `currency` — the single legacy code — is kept and is written NULL
+// from here on; see the note on `CloseSnapshot.currency` below.
 //
 // ── Closing over a blocker is allowed, and recorded ───────────────────────
 //
@@ -60,6 +88,23 @@ export interface MonthCloseRow {
   invoicedCents: number | null;
   outstandingCents: number | null;
   payrollCents: number | null;
+  /** One code per figure — supabase/parts/2540. Null where the figure's own
+   *  rows named no single money, which is a dash on screen and not a borrowed
+   *  code. */
+  takenCurrency: string | null;
+  invoicedCurrency: string | null;
+  outstandingCurrency: string | null;
+  payrollCurrency: string | null;
+  /**
+   * The legacy single code, and NULL on everything written since 2540.
+   *
+   * Kept rather than dropped, and read rather than ignored, because a column
+   * that has ever been written is a column something might still read: a
+   * console tab left open on the previous bundle can still insert one. It was
+   * derived payments-first, so it can honestly speak for `takenCents` and for
+   * no other figure on the row — which is how the four "at the close" tiles
+   * read it.
+   */
   currency: string | null;
   unmarkedSessions: number | null;
   blockersAtClose: string | null;
@@ -69,15 +114,47 @@ export interface MonthCloseRow {
   reopenReason: string | null;
 }
 
-/** What is written when a month is closed. Every figure may be absent. */
+/** What is written when a month is closed. Every figure may be absent, and so
+ *  may the currency of any one of them, independently of the other three. */
 export interface CloseSnapshot {
   takenCents: number | null;
   invoicedCents: number | null;
   outstandingCents: number | null;
   payrollCents: number | null;
-  currency: string | null;
+  takenCurrency: string | null;
+  invoicedCurrency: string | null;
+  outstandingCurrency: string | null;
+  payrollCurrency: string | null;
+  /** Always null. The legacy single code is never written again — see the
+   *  header, and `MonthCloseRow.currency` for why the column stays. */
+  currency: null;
   unmarkedSessions: number | null;
   blockersAtClose: string | null;
+}
+
+/**
+ * The three currencies the SCREEN priced its tiles with, handed in.
+ *
+ * Not re-derived here, and that is the point. `takenCents` is the figure the
+ * "Taken" tile rendered and `takenCurrency` must be the code that tile rendered
+ * it in, or the stored row and the screen it was taken from disagree about the
+ * same month — which is the whole class of fault this file's header is about.
+ * /close computes these once, at the top of `CloseView`, and the KPI row and
+ * the close are handed the same three values.
+ *
+ * Payroll is deliberately NOT among them: `MonthClose.payroll` already carries
+ * its own answer, computed by `payrollOf` from the very sessions the figure is
+ * a sum of, so the label cannot be derived from a different set of rows than
+ * the number. See `PayrollView.currency` in src/lib/monthEnd.ts.
+ */
+export interface CloseCurrencies {
+  /** What the month's PAYMENTS agree on, or null when they do not agree. */
+  taken: string | null;
+  /** What the INVOICES agree on. Two fields rather than one because they are
+   *  two columns and two figures; today /close derives both from the same set,
+   *  and a screen that later prices them apart must be able to store that. */
+  invoiced: string | null;
+  outstanding: string | null;
 }
 
 /**
@@ -93,10 +170,28 @@ export interface CloseSnapshot {
  * `blockers` is joined rather than counted. "Closed over 3 blockers" is not
  * something anybody can act on in March; "12 sessions still need an outcome" is.
  */
-export function snapshotOf(c: MonthClose, currency: string | null): CloseSnapshot {
+export function snapshotOf(c: MonthClose, ccy: CloseCurrencies): CloseSnapshot {
   const invoiced = c.owed
     ? sumOrNull(c.owed.settledCents, c.owed.outstandingCents)
     : null;
+  /*
+   * A payroll total across more than one rate currency is not filed.
+   *
+   * `payroll.total.cents` is still a sum in that case — `payrollTotal` adds the
+   * per-trainer lines and has no opinion about money — and the screen withholds
+   * it, because a number made of dirhams and pounds is not an amount of
+   * anything. Storing it with a null currency beside it would be worse than the
+   * defect this part closes: an unlabelled figure reads as "the currency was
+   * not recorded", and an accountant would price it with the gym's code, which
+   * is precisely the substitution the whole change is here to stop. So the
+   * figure goes in as absent, and `blockers_at_close` carries the sentence
+   * saying why the month was signed off without it.
+   *
+   * The 'unrecorded' case is different and IS stored: rates snapshotted before
+   * supabase/parts/1010 are a real sum in one unknown unit, not a sum across
+   * two known ones, and `payrollCurrency` null says exactly that.
+   */
+  const payrollCents = c.payroll && !c.payroll.mixedCurrency ? c.payroll.total.cents : null;
   return {
     // The KPI reads `c.income.takenCents`, which is already null when the
     // month's payments carry more than one currency. That null is carried
@@ -108,8 +203,15 @@ export function snapshotOf(c: MonthClose, currency: string | null): CloseSnapsho
     // `payroll.total.cents` is null while anything is unpriced, and it is a
     // FLOOR rather than a total while anything is unmarked. `unmarkedSessions`
     // beside it is what says which of the two this figure is.
-    payrollCents: c.payroll ? c.payroll.total.cents : null,
-    currency: currency ?? null,
+    payrollCents,
+    takenCurrency: ccy.taken ?? null,
+    invoicedCurrency: ccy.invoiced ?? null,
+    outstandingCurrency: ccy.outstanding ?? null,
+    // From the close itself, not from the caller: `payrollOf` derived it from
+    // the same sessions `payrollCents` is a sum of.
+    payrollCurrency: c.payroll ? c.payroll.currency : null,
+    // Never again. The column stays for the rows that predate the split.
+    currency: null,
     unmarkedSessions: c.payroll ? c.payroll.total.unmarked : null,
     blockersAtClose: c.blockers.length ? c.blockers.map((b) => b.text).join('\n') : null,
   };
@@ -240,7 +342,7 @@ export function reopenBlocker(reason: string): string | null {
 export async function fetchCloses(sb: Queryable, tenantId: string): Promise<MonthCloseRow[]> {
   const { data, error } = await sb
     .from('gym_month_closes')
-    .select('id, month_key, closed_at, closed_by, note, taken_cents, invoiced_cents, outstanding_cents, payroll_cents, currency, unmarked_sessions, blockers_at_close, reopened_at, reopened_by, reopen_reason')
+    .select('id, month_key, closed_at, closed_by, note, taken_cents, invoiced_cents, outstanding_cents, payroll_cents, taken_currency, invoiced_currency, outstanding_currency, payroll_currency, currency, unmarked_sessions, blockers_at_close, reopened_at, reopened_by, reopen_reason')
     .eq('tenant_id', tenantId)
     .order('month_key', { ascending: false })
     .order('closed_at', { ascending: false })
@@ -260,6 +362,10 @@ export async function fetchCloses(sb: Queryable, tenantId: string): Promise<Mont
     invoicedCents: numOrNull(r.invoiced_cents),
     outstandingCents: numOrNull(r.outstanding_cents),
     payrollCents: numOrNull(r.payroll_cents),
+    takenCurrency: r.taken_currency ?? null,
+    invoicedCurrency: r.invoiced_currency ?? null,
+    outstandingCurrency: r.outstanding_currency ?? null,
+    payrollCurrency: r.payroll_currency ?? null,
     currency: r.currency ?? null,
     unmarkedSessions: numOrNull(r.unmarked_sessions),
     blockersAtClose: r.blockers_at_close ?? null,
@@ -287,22 +393,43 @@ export function liveCloseFor(monthKey: string, rows: MonthCloseRow[] | null): Mo
  * Returns one line per figure that has moved, in the words of the tile it came
  * from. An empty array means the month reads today exactly as it read when it
  * was closed.
+ *
+ * ── each side is priced in its OWN money ──────────────────────────────────
+ *
+ * `fmt` took cents alone, so /close closed over one code and printed all eight
+ * amounts in it — the same single-currency assumption that produced the stored
+ * row this function reads. Now it takes the currency too, and each side of each
+ * comparison is formatted in the currency THAT side was recorded in.
+ *
+ * A CHANGE OF CURRENCY is itself a drift line, and it is the one this could
+ * previously not see at all: `was === is` returned early, so a payroll figure of
+ * 180,000 recorded in GBP and reading 180,000 in EUR today — a gym that changed
+ * `tenants.currency`, or a coach re-rated in another money — reported that the
+ * month had not moved. The number had not. The money had.
  */
 export function driftSince(
-  stored: MonthCloseRow, now: CloseSnapshot, fmt: (cents: number | null) => string,
+  stored: MonthCloseRow, now: CloseSnapshot,
+  fmt: (cents: number | null, currency: string | null) => string,
 ): string[] {
   const out: string[] = [];
-  const check = (label: string, was: number | null, is: number | null) => {
-    if (was === is) return;
+  const check = (
+    label: string,
+    was: number | null, wasCcy: string | null,
+    is: number | null, isCcy: string | null,
+  ) => {
+    if (was === is && wasCcy === isCcy) return;
     // One side unknown is still a difference worth naming, and naming it needs
     // the words rather than a dash: "was 4,200.00, is now not known" is a
     // sentence, and "4,200.00 → —" is a puzzle.
-    out.push(`${label} was ${was == null ? 'not known' : fmt(was)} at the close and is ${is == null ? 'not known' : fmt(is)} now.`);
+    out.push(`${label} was ${was == null ? 'not known' : fmt(was, wasCcy)} at the close and is ${is == null ? 'not known' : fmt(is, isCcy)} now.`);
   };
-  check('Taken', stored.takenCents, now.takenCents);
-  check('Billed', stored.invoicedCents, now.invoicedCents);
-  check('Still owed', stored.outstandingCents, now.outstandingCents);
-  check('Payroll', stored.payrollCents, now.payrollCents);
+  // The stored side reads its own per-figure column, falling back for `Taken`
+  // alone to the legacy single code — which was derived payments-first and so
+  // is the one figure it can honestly speak for. See `MonthCloseRow.currency`.
+  check('Taken', stored.takenCents, stored.takenCurrency ?? stored.currency, now.takenCents, now.takenCurrency);
+  check('Billed', stored.invoicedCents, stored.invoicedCurrency, now.invoicedCents, now.invoicedCurrency);
+  check('Still owed', stored.outstandingCents, stored.outstandingCurrency, now.outstandingCents, now.outstandingCurrency);
+  check('Payroll', stored.payrollCents, stored.payrollCurrency, now.payrollCents, now.payrollCurrency);
   if (stored.unmarkedSessions !== now.unmarkedSessions) {
     out.push(`${stored.unmarkedSessions ?? 'An unknown number of'} session(s) were unmarked at the close; ${now.unmarkedSessions ?? 'an unknown number'} are now.`);
   }
@@ -337,6 +464,13 @@ export async function closeMonth(
     invoiced_cents: snap.invoicedCents,
     outstanding_cents: snap.outstandingCents,
     payroll_cents: snap.payrollCents,
+    // One code per figure — supabase/parts/2540. `currency` is written NULL
+    // rather than omitted, so a reader of the row can tell a close written
+    // since the split from one written before it without a join to anything.
+    taken_currency: snap.takenCurrency,
+    invoiced_currency: snap.invoicedCurrency,
+    outstanding_currency: snap.outstandingCurrency,
+    payroll_currency: snap.payrollCurrency,
     currency: snap.currency,
     unmarked_sessions: snap.unmarkedSessions,
     blockers_at_close: snap.blockersAtClose,

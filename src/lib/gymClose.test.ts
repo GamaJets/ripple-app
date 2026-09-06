@@ -49,6 +49,9 @@ const closeOf = (o: Partial<MonthClose> = {}): MonthClose => ({
     lines: [],
     total: { cents: 180000, delivered: 40, payable: 40, priced: 40, unmarked: 0, settleable: true },
     blocker: null,
+    // What `payrollOf` derived from the sessions the total is a sum of. GBP
+    // here and AED in `currency` below would be the whole point of the split.
+    currency: 'GBP', mixedCurrency: false, currencyNote: null,
   },
   passes: null,
   blockers: [],
@@ -59,8 +62,11 @@ const closeOf = (o: Partial<MonthClose> = {}): MonthClose => ({
 
 /* ── the snapshot is the tiles, and only the tiles ─────────────────────────── */
 
+/** The three the screen hands in. The payroll's own comes off the close. */
+const GBP = { taken: 'GBP', invoiced: 'GBP', outstanding: 'GBP' };
+
 {
-  const s = snapshotOf(closeOf(), 'GBP');
+  const s = snapshotOf(closeOf(), GBP);
 
   eq(s.takenCents, 420000, 'Taken is the income figure the first tile renders');
   // "Billed this month" is settled PLUS outstanding, which is what /close's own
@@ -74,21 +80,99 @@ const closeOf = (o: Partial<MonthClose> = {}): MonthClose => ({
   eq(s.outstandingCents, 155000, 'Still owed is the arrears figure, not the month’s own invoices');
   eq(s.payrollCents, 180000, 'Payroll is the total, in minor units');
   eq(s.unmarkedSessions, 0, 'and the unmarked count travels with it');
-  eq(s.currency, 'GBP', 'the currency is stored so the figures can be read back');
+  eq(s.takenCurrency, 'GBP', 'each figure is stored with its OWN currency, so it can be read back');
+  eq(s.invoicedCurrency, 'GBP', 'the invoices state theirs');
+  eq(s.outstandingCurrency, 'GBP', 'and so do the arrears');
+  eq(s.payrollCurrency, 'GBP', 'and payroll takes the code its own sessions were priced in');
+  eq(s.currency, null, 'the legacy single-code column is never written again');
   eq(s.blockersAtClose, null, 'a clean month records nothing in the way');
+}
+
+/* ── four figures, four currencies ─────────────────────────────────────────
+ *
+ * The defect: ONE code, `currencyOf(rec, gymCcy)`, which is payments-first, was
+ * stored beside all four figures. A gym whose August takings happened to be all
+ * AED filed its GBP invoices, its GBP arrears and its GBP payroll as dirhams —
+ * permanently, in the row every later drift line is measured against and the
+ * handoff CSV exports.
+ */
+{
+  const c = closeOf();
+  const s = snapshotOf(c, { taken: 'AED', invoiced: 'GBP', outstanding: 'GBP' });
+  eq(s.takenCurrency, 'AED', 'the takings wear what the PAYMENTS agreed on');
+  eq(s.invoicedCurrency, 'GBP', 'and the invoices are not relabelled by them');
+  eq(s.outstandingCurrency, 'GBP', 'nor are the arrears');
+  eq(s.payrollCurrency, 'GBP',
+    'nor is payroll, which is priced by the sessions it is a sum of and never by a card machine');
+}
+
+{
+  // A figure whose own rows name no single money stores none. Not the gym's,
+  // not a neighbour's — that substitution is the whole defect.
+  const s = snapshotOf(closeOf(), { taken: null, invoiced: null, outstanding: null });
+  eq(s.takenCurrency, null, 'payments that disagree name no currency');
+  eq(s.invoicedCurrency, null, 'and neither do invoices that disagree');
+  eq(s.outstandingCurrency, null, 'nor arrears');
+  eq(s.takenCents, 420000, 'and the figure is still stored — the currency is what is unknown, not the number');
+}
+
+{
+  /*
+   * A payroll total across two currencies is REFUSED, not filed.
+   *
+   * `payrollTotal` adds the per-trainer lines and has no opinion about money,
+   * so `total.cents` is still a number here. It is a sum of dirhams and pounds
+   * and is not an amount of anything, and stored with a null currency it would
+   * read as "the currency was not recorded" — which an accountant resolves with
+   * the gym's code, the exact substitution this change exists to stop.
+   */
+  const mixedPay = closeOf({
+    payroll: {
+      lines: [],
+      total: { cents: 180000, delivered: 40, payable: 40, priced: 40, unmarked: 0, settleable: true },
+      blocker: null,
+      currency: null, mixedCurrency: true,
+      currencyNote: 'This period covers more than one currency — 20 sessions in AED, 20 sessions in GBP — so there is no single total.',
+    },
+  });
+  const s = snapshotOf(mixedPay, GBP);
+  eq(s.payrollCents, null, 'a payroll total spanning two currencies is not filed as a figure');
+  eq(s.payrollCurrency, null, 'and it is given no code either');
+  eq(s.takenCents, 420000, 'the other three figures are unaffected — one bad total does not empty the close');
+}
+
+{
+  // Rates snapshotted before supabase/parts/1010 are a real sum in an unknown
+  // unit, not a sum across two known ones. The figure IS stored; the currency
+  // is null and says so.
+  const unrecorded = closeOf({
+    payroll: {
+      lines: [],
+      total: { cents: 180000, delivered: 40, payable: 40, priced: 40, unmarked: 0, settleable: true },
+      blocker: null,
+      currency: null, mixedCurrency: false,
+      currencyNote: 'These 40 sessions were filed before Repple recorded what money a session rate is in.',
+    },
+  });
+  const s = snapshotOf(unrecorded, GBP);
+  eq(s.payrollCents, 180000, 'a run of unrecorded rates is a real figure and is filed');
+  eq(s.payrollCurrency, null,
+    'with no currency, rather than with the gym’s code stamped over a guess about the past');
 }
 
 {
   // Every one of these is nullable ON SCREEN, so every one is nullable here. A
   // close that turned an unread month into zeros would store the exact lie the
   // whole screen is built to refuse.
-  const s = snapshotOf(closeOf({ income: null, owed: null, arrears: null, payroll: null }), null);
+  const s = snapshotOf(closeOf({ income: null, owed: null, arrears: null, payroll: null }),
+    { taken: null, invoiced: null, outstanding: null });
   eq(s.takenCents, null, 'an unread payments month stores no figure, not a zero');
   eq(s.invoicedCents, null, 'nor an unread invoice register');
   eq(s.outstandingCents, null, 'nor the arrears');
   eq(s.payrollCents, null, 'nor the payroll');
   eq(s.unmarkedSessions, null, 'nor the unmarked count');
-  eq(s.currency, null, 'and a gym with no currency stores none rather than a guess');
+  eq(s.takenCurrency, null, 'and a gym with no currency stores none rather than a guess');
+  eq(s.payrollCurrency, null, 'including for the payroll, whose close carries no payroll at all');
 }
 
 {
@@ -96,7 +180,7 @@ const closeOf = (o: Partial<MonthClose> = {}): MonthClose => ({
   // closed.
   const c = closeOf();
   const mixed = closeOf({ income: { ...c.income!, takenCents: null, currencies: ['GBP', 'AED'] } });
-  eq(snapshotOf(mixed, 'GBP').takenCents, null,
+  eq(snapshotOf(mixed, GBP).takenCents, null,
     'a month whose payments are in two currencies is closed with no takings figure, not with one of them');
 }
 
@@ -109,9 +193,12 @@ const closeOf = (o: Partial<MonthClose> = {}): MonthClose => ({
       { kind: 'unmarked_sessions', text: '12 sessions still need an outcome.' },
       { kind: 'money_gap', text: 'Two invoices marked paid have no payment behind them.' },
     ],
-    payroll: { lines: [], total: { cents: 180000, delivered: 40, payable: 52, priced: 40, unmarked: 12, settleable: false }, blocker: 'unmarked' },
+    payroll: {
+      lines: [], total: { cents: 180000, delivered: 40, payable: 52, priced: 40, unmarked: 12, settleable: false },
+      blocker: 'unmarked', currency: 'GBP', mixedCurrency: false, currencyNote: null,
+    },
   });
-  const s = snapshotOf(blocked, 'GBP');
+  const s = snapshotOf(blocked, GBP);
   ok((s.blockersAtClose ?? '').includes('12 sessions'),
     'the blockers are stored verbatim, so a month signed off over a known problem reads as a decision');
   ok((s.blockersAtClose ?? '').includes('no payment behind them'), 'and all of them, not the first');
@@ -124,7 +211,11 @@ const row = (o: Partial<MonthCloseRow> = {}): MonthCloseRow => ({
   id: 'c1', monthKey: '2026-08', closedAt: '2026-09-01T09:00:00Z',
   closedBy: 'o1', closedByName: 'Owner', note: null,
   takenCents: 420000, invoicedCents: 390000, outstandingCents: 155000,
-  payrollCents: 180000, currency: 'GBP', unmarkedSessions: 0, blockersAtClose: null,
+  payrollCents: 180000,
+  takenCurrency: 'GBP', invoicedCurrency: 'GBP', outstandingCurrency: 'GBP', payrollCurrency: 'GBP',
+  // Null on everything written since supabase/parts/2540. The column stays for
+  // rows a console tab on the previous bundle could still write.
+  currency: null, unmarkedSessions: 0, blockersAtClose: null,
   reopenedAt: null, reopenedBy: null, reopenedByName: null, reopenReason: null, ...o,
 });
 
@@ -155,12 +246,17 @@ eq(reopenBlocker('Late cash from the 31st'), null, 'a reason is a reason');
 /* ── the record moving after a close ───────────────────────────────────────── */
 
 {
-  const fmt = (c: number | null) => (c == null ? '—' : `GBP ${(c / 100).toFixed(2)}`);
+  // The currency comes IN with the figure now, and the formatter prints it —
+  // which is what makes a change of money visible as drift at all.
+  const fmt = (c: number | null, ccy: string | null) =>
+    (c == null ? '—' : `${ccy ?? '(no currency)'} ${(c / 100).toFixed(2)}`);
   const stored = row();
 
   const same: CloseSnapshot = {
     takenCents: 420000, invoicedCents: 390000, outstandingCents: 155000,
-    payrollCents: 180000, currency: 'GBP', unmarkedSessions: 0, blockersAtClose: null,
+    payrollCents: 180000,
+    takenCurrency: 'GBP', invoicedCurrency: 'GBP', outstandingCurrency: 'GBP', payrollCurrency: 'GBP',
+    currency: null, unmarkedSessions: 0, blockersAtClose: null,
   };
   eq(driftSince(stored, same, fmt).length, 0, 'a month that has not moved reports nothing');
 
@@ -179,6 +275,36 @@ eq(reopenBlocker('Late cash from the 31st'), null, 'a reason is a reason');
 
   const unmarkedNow: CloseSnapshot = { ...same, unmarkedSessions: 3 };
   eq(driftSince(stored, unmarkedNow, fmt).length, 1, 'the unmarked count is watched too');
+
+  /*
+   * The drift this could not see at all.
+   *
+   * `was === is` returned early, so a payroll figure of 180,000 filed in GBP
+   * and reading 180,000 in EUR today — a gym that changed `tenants.currency`,
+   * or a coach re-rated in another money — reported that the month had not
+   * moved. The number had not. The money had, and that is a different amount.
+   */
+  const reDenominated: CloseSnapshot = { ...same, payrollCurrency: 'EUR' };
+  const dc = driftSince(stored, reDenominated, fmt);
+  eq(dc.length, 1, 'the same number in a different currency is a difference');
+  ok(dc[0].startsWith('Payroll'), 'and it is named as the payroll line');
+  ok(dc[0].includes('GBP') && dc[0].includes('EUR'), 'with both moneys in it, so the reader can see which way');
+
+  // Each figure is compared in its OWN currency, so a takings-side change
+  // cannot report itself as three lines about invoices.
+  const takenMoved: CloseSnapshot = { ...same, takenCents: 415000, takenCurrency: 'AED' };
+  eq(driftSince(stored, takenMoved, fmt).length, 1, 'one figure, one line, whatever its currency did');
+
+  // A row written before the split: the legacy code speaks for the takings and
+  // for nothing else. Nothing on the platform has ever written one — the table
+  // was empty when the columns were split — so this is about a console tab left
+  // open on the previous bundle.
+  const legacy = row({
+    takenCurrency: null, invoicedCurrency: null, outstandingCurrency: null, payrollCurrency: null,
+    currency: 'GBP',
+  });
+  eq(driftSince(legacy, same, fmt).length, 3,
+    'a legacy row drifts on the three figures whose currency it never recorded, and not on the takings');
 }
 
 /* ── a closed month refuses money dated into it ───────────────────────────
@@ -194,6 +320,7 @@ eq(reopenBlocker('Late cash from the 31st'), null, 'a reason is a reason');
     id: 'c-' + monthKey, monthKey, closedAt: '2026-09-02T09:00:00.000Z',
     closedBy: null, closedByName: null, note: null,
     takenCents: null, invoicedCents: null, outstandingCents: null, payrollCents: null,
+    takenCurrency: null, invoicedCurrency: null, outstandingCurrency: null, payrollCurrency: null,
     currency: null, unmarkedSessions: null, blockersAtClose: null,
     reopenedAt, reopenedBy: null, reopenedByName: null,
     reopenReason: reopenedAt ? 'a late payment' : null,

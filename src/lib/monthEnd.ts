@@ -47,7 +47,11 @@ import type { GymPayment, Membership, InvoiceStatus } from './gymRecord';
 // group money by method alone and had no opinion about currency at all.
 import { sharedCurrency, normaliseCurrency } from './gymRecord';
 import type { PtSession, PayrollLine, PayrollTotal, PayPolicy } from './gymSessions';
-import { payrollByTrainer, payrollTotal, settlementBlocker } from './gymSessions';
+import { payrollByTrainer, payrollTotal, settlementBlocker, payableRate } from './gymSessions';
+// What money a payroll total is actually in. The one place that rule lives —
+// /sessions, /payroll and /coach/earnings all ask it before printing a total,
+// and /close asked nothing and labelled the figure with `tenants.currency`.
+import { runCurrency, runLabel, totalNote } from './gymRateCurrency';
 import type { GymPass } from './gymPasses';
 import { passRevenueCents } from './gymPasses';
 import type { Slice } from './memberView';
@@ -642,6 +646,31 @@ export interface PayrollView {
   total: PayrollTotal;
   /** From `settlementBlocker` — why this figure is not safe to settle on. */
   blocker: string | null;
+  /**
+   * The one currency `total.cents` may be LABELLED with, or null when no single
+   * label is honest.
+   *
+   * ── the defect this closes ────────────────────────────────────────────
+   *
+   * `total.cents` is a sum over `sessions.rate_cents`, which have carried their
+   * own `rate_currency` since supabase/parts/1010. Every screen that printed
+   * this figure supplied the unit from `tenants.currency` instead — the gym's
+   * code TODAY, over rates snapshotted whenever they were snapshotted — and
+   * /close, the screen that FILES the month, wrote that pairing into
+   * `gym_month_closes` and exported it in the handoff CSV. /sessions, /payroll
+   * and /coach/earnings all ask src/lib/gymRateCurrency.ts this question before
+   * printing a total; this is that same call, made once, where the figure is
+   * computed rather than where it is rendered, so the label and the number can
+   * never be derived from different rows.
+   */
+  currency: string | null;
+  /** True when the payable sessions were priced in more than one money.
+   *  `total.cents` is then a sum ACROSS currencies — not an amount of anything —
+   *  and must be withheld rather than labelled with whichever code is to hand. */
+  mixedCurrency: boolean;
+  /** The sentence that goes where the total would have been, from `totalNote`.
+   *  Null when the run has one currency, or no priced sessions at all. */
+  currencyNote: string | null;
 }
 
 /** Payroll for the month's sessions, and whether it may be acted on. */
@@ -653,7 +682,28 @@ export function payrollOf(
 ): PayrollView {
   const lines = payrollByTrainer(sessions, policy, fallbackRateCents, now);
   const total = payrollTotal(lines);
-  return { lines, total, blocker: settlementBlocker(total) };
+  /*
+   * Exactly the rates `total.cents` is a sum of, through the same function
+   * `payrollByTrainer` prices each session with — not `sessions`, and not a
+   * filter written a second time here.
+   *
+   * The set matters twice over. A cancelled session in a currency this month
+   * paid nothing in must not withhold a total it contributes nothing to (the
+   * mistake the passes tile on /close was repaired for), and a session priced
+   * off the gym's standard fee must not be counted as agreeing with a
+   * snapshotted rate whose unit it never shared.
+   */
+  const rates = sessions
+    .map((s) => payableRate(s, policy, fallbackRateCents))
+    .filter((r): r is { rateCents: number; rateCurrency: string | null } => r != null);
+  return {
+    lines,
+    total,
+    blocker: settlementBlocker(total),
+    currency: runLabel(rates),
+    mixedCurrency: runCurrency(rates).kind === 'mixed',
+    currencyNote: totalNote(rates),
+  };
 }
 
 /* ── the parts, and their three states ─────────────────────────────────────── */
@@ -887,8 +937,9 @@ export function closeBlockers(
   // Passes are the third money record on this screen, and until now the only
   // one nothing here asked a currency question about. They do NOT enter
   // `CloseSnapshot` — `closeMonth` in src/lib/gymClose.ts writes taken,
-  // invoiced, outstanding, payroll, currency and unmarked sessions, and no pass
-  // figure among them — so nothing wrong has ever been written to
+  // invoiced, outstanding and payroll, a currency for each of those four, and
+  // the unmarked count, and no pass figure among them — so nothing wrong has
+  // ever been written to
   // `gym_month_closes` over this. It is still a line on the close: a gym that
   // changed currency mid-month has a pass total that is not a total, and the
   // month may not be signed off with an unexplained figure on it.

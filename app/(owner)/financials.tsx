@@ -60,12 +60,21 @@ import { wholeFromMinor, NO_CURRENCY_CHECK_NOTE } from '../../src/lib/wholeUnits
 // What money a SUM is in — the rule this screen held and breached six lines
 // apart. See the header of src/lib/sumCurrency.ts.
 import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE, type TotalMoney } from '../../src/lib/sumCurrency';
-// `tenants.timezone`, and the one function that turns it into a calendar day.
-// The "joined this month" check compares against `memberships.started_on`,
-// which app/(owner)/members.tsx writes on the gym's own calendar.
 import { num, num1 } from '../../src/lib/format';
 // The calendar month, not a rolling thirty days. See the note on `basisMonth`.
-import { monthWindow, recentMonths } from '../../src/lib/monthEnd';
+//
+// And the month cut on the GYM's clock, not this phone's. `monthWindow`'s
+// `firstDay`/`lastDay` are pure string arithmetic and are right in every zone —
+// which is why the joiners check below needs no timezone at all — but its
+// `fromIso`/`toIso` come out of `new Date(y, mo - 1, 1)`, the phone's own
+// midnight, and those are the bounds the PAYMENTS read is filtered on.
+// `gym_payments.taken_at` is a `timestamptz`, so an owner in London reading a
+// Dubai gym asked for a window four hours off the gym's own month at both ends:
+// the figure that came back was offered under a "Use It" button that writes it
+// into the owner's scorecard, where it is 25 of the 100 points behind the grade
+// this screen prints.
+import { monthAtGym, gymRecentMonths } from '../../src/lib/gymMonth';
+import { fetchGymZone } from '../../src/lib/gymZone';
 // When the register was read, whether the phone can reach us, and a way to ask
 // again — the three things nineteen of the twenty owner screens did without.
 import { Fetched } from '../../src/ui/fetched';
@@ -164,6 +173,9 @@ export default function Financials() {
    * filed as a calendar month's joiners.
    */
   const [basisMonth, setBasisMonth] = useState<string | null>(null);
+  /** The same month, named with the clock caveat the revenue check needs.
+   *  See where it is set for why the joiners check must NOT carry it. */
+  const [basisClock, setBasisClock] = useState<string | null>(null);
   /**
    * The register could not be read.
    *
@@ -303,7 +315,33 @@ export default function Financials() {
          * payments read takes instants, and those come from `monthWindow` —
          * local midnight, shared with /close and /accounting.
          */
-        const mw = monthWindow(recentMonths(2)[1]);
+        /**
+         * ── And it is cut on the GYM's clock ───────────────────────────────
+         *
+         * The zone read this screen used to hold was removed when the window
+         * became a calendar month, on the argument that "its two ends are
+         * already days, so there is no instant left to cut". That is true of
+         * the joiners check below and false of the payments read here: this
+         * line hands `fromIso`/`toIso` to `fetchPayments`, and those are the
+         * one part of a `MonthWindow` that a zone still decides.
+         *
+         * So the read is back, with a consumer. `fetchGymZone` is the narrow
+         * read written for screens that need the zone and nothing else — it
+         * does not drag the gym's pay policy and brand colour along with it —
+         * and it keeps "the gym has not said" apart from "we could not ask".
+         * Both arrive here as null, which is the honest basis for each: neither
+         * is a gym whose month is known, and `at.basis` below says so out loud
+         * in the sentence that quotes the figure.
+         *
+         * Which MONTH is the last full one is the gym's fact too, so it comes
+         * from `gymRecentMonths` rather than `recentMonths`: for four hours on
+         * the 1st those two name different months at a Gulf gym, and this
+         * screen would have compared an owner's August entry against July.
+         */
+        const { zone } = await fetchGymZone(supabase, tenant.id);
+        if (!live) return;
+        const at = monthAtGym(gymRecentMonths(2, zone).keys[1] ?? '', zone);
+        const mw = at?.window ?? null;
         const [plans, memberships, payments] = await Promise.all([
           fetchPlans(supabase, tenant.id),
           fetchMemberships(supabase, tenant.id),
@@ -409,6 +447,25 @@ export default function Financials() {
             : null,
         );
         setBasisMonth(mw ? mw.label : null);
+        // The same month, named with the caveat the REVENUE figure needs and
+        // the joiners figure does not.
+        //
+        // Two basis strings rather than one, because the two checks are not
+        // equally exposed. Joiners compares `memberships.started_on` — a `date`
+        // column — against `firstDay`/`lastDay`, and the days of August are
+        // August's wherever they are read: a clock caveat there would be a
+        // false caveat, and a caveat that appears where it is not needed is how
+        // a reader learns to skip the one that is. Revenue is bounded by
+        // instants, and with no zone recorded those instants are this phone's.
+        //
+        // On the sentence rather than in a comment for the reason `basisMonth`
+        // itself is on the sentence: the figure is offered under a button that
+        // writes it into the owner's own numbers.
+        setBasisClock(
+          mw == null ? null
+            : at!.basis === 'gym' ? mw.label
+              : `${mw.label} — cut on this phone’s clock, because this gym has not set a timezone`,
+        );
         setDerivedFailed(false);
         setFetchedAt(Date.now());
       } catch (e) {
@@ -417,7 +474,7 @@ export default function Financials() {
         // so they are cleared rather than left standing beside the failure.
         if (!live) return;
         setDerivedMrr(null); setDerivedMembers(null);
-        setDerivedRevenue(null); setDerivedNew(null); setBasisMonth(null); setDerivedFailed(true);
+        setDerivedRevenue(null); setDerivedNew(null); setBasisMonth(null); setBasisClock(null); setDerivedFailed(true);
         setMrrCcy(null); setRevCcy(null);
       } finally {
         if (live) setBusy(false);
@@ -648,8 +705,14 @@ export default function Financials() {
                     // period — revenue, MRR-adjacent counts and joiners — are
                     // all over the last full month; `members` is a headcount
                     // today and takes no basis.
+                    //
+                    // And `revenue` takes the basis WITH the clock caveat on
+                    // it: its window has instants at both ends and the joiners
+                    // window has days, so only one of the two can be cut on the
+                    // wrong clock.
                     : reconcileNote(chk, f.label.toLowerCase(), fmtv,
-                        f.key === 'members' || f.key === 'mrr' ? null : basisMonth);
+                        f.key === 'members' || f.key === 'mrr' ? null
+                          : f.key === 'revenue' ? basisClock : basisMonth);
                   if (!note) return null;
                   return (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 6 }}>

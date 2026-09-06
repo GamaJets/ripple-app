@@ -55,9 +55,29 @@ import { sliceLoading, sliceReady, sliceFailed, sliceNote, type Slice } from '@l
 // month closed at 09:00 in Dubai reads as the previous day in London.
 import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
 import {
-  monthWindow, recentMonths, monthKeyOf, buildClose, isOverdue, closeHeadline, monthEnded,
+  monthWindow, monthKeyOf, buildClose, isOverdue, closeHeadline,
   type CloseRecord, type MonthClose, type GymInvoice, type Line, type Blocker,
 } from '@lib/monthEnd';
+/*
+ * The month, on the GYM's clock rather than on this laptop's.
+ *
+ * `monthWindow` above is still imported and still used — for LABELS, which are
+ * calendar facts and need no zone. What it must not be used for on this page is
+ * the bounds a read is filtered on: `fromIso`/`toIso` come out of
+ * `new Date(y, mo - 1, 1)`, which is midnight where the browser is, and the two
+ * reads this page filters on them are `gym_payments.taken_at` and
+ * `sessions.starts_at` — both `timestamptz`. An owner in London closing a Dubai
+ * gym asked for August from 23:00Z on 31 July to 23:00Z on 31 August, when the
+ * gym's August ran 20:00Z to 20:00Z. Four hours of takings at each boundary
+ * were filed in the wrong month, and this is the one screen where that is
+ * permanent: `close_month` writes a snapshot of the figure into
+ * `gym_month_closes` and an accountant works from it afterwards.
+ *
+ * `recentMonths` and `monthEnded` are gone from the import for the same reason
+ * one layer up — which month is RUNNING and whether a month is OVER are facts
+ * about the gym, and both of those read the device's calendar to answer.
+ */
+import { monthAtGym, gymRecentMonths, gymMonthEnded } from '@lib/gymMonth';
 import { monthTickStart } from '@lib/pickerMonth';
 import { useMonthTick } from '@/lib/monthTick';
 import {
@@ -215,10 +235,21 @@ export default function Close() {
   // Default to the month that has actually finished. Opening on the running
   // month would greet an owner with a refusal about a month nobody claimed was
   // over, and train them to skip the refusals.
-  const [key, setKey] = useState<string>(() => {
-    const all = recentMonths(2);
-    return all[1] ?? monthKeyOf();
-  });
+  //
+  // Finished FOR THE GYM, which is not the same month as finished for the
+  // laptop. This was `useState(() => recentMonths(2)[1])`, read once at mount on
+  // the device's calendar: at 01:00 on 1 September in London, a Dubai gym has
+  // been in September for four hours and this screen offered July to close —
+  // the month before the one that had just ended, on the screen whose entire
+  // purpose is closing the month that has just ended.
+  //
+  // Null means "the owner has not chosen", exactly as /costs holds it, so the
+  // default follows the gym's own month as soon as the zone read lands rather
+  // than being frozen at mount by a value the page could not yet know. Once the
+  // owner picks a month it stays picked — this does not move under anybody who
+  // has made a choice.
+  const [picked, setPicked] = useState<string | null>(null);
+  const setKey = setPicked;
 
   /**
    * Whether a no-show is payable is a gym policy, and this screen READS it.
@@ -232,7 +263,33 @@ export default function Close() {
    */
   const [policyCode, setPolicyCode] = useState<string | null>(null);
 
-  const w = useMemo(() => monthWindow(key), [key]);
+  /**
+   * The month this sheet is about, and the month it OPENS on until somebody
+   * chooses. Both on the gym's clock where the gym has given one.
+   *
+   * `gymRecentMonths(2, zone)[1]` is "the month that has just finished at the
+   * gym"; with no zone recorded it is the reader's, and `.note` on the same
+   * result is the sentence that says so, printed beside the picker below.
+   */
+  // Read in the render body rather than latched in a memo, which is the shape
+  // /costs already uses for the same decision and for the same reason: the
+  // answer is a short string, so re-deriving it costs nothing and it cannot go
+  // stale in a tab left open across a month boundary. `useMemo` here would need
+  // a clock in its dependency list to be correct, and a clock in a dependency
+  // list is what `check:frozen-day` exists to keep out of one.
+  const openOn = gymRecentMonths(2, zone, Date.now());
+  const key = picked ?? openOn.keys[1] ?? monthKeyOf();
+
+  /**
+   * The window, cut on the gym's own clock, with the caption that says whose.
+   *
+   * `at.window.firstDay`/`lastDay` are untouched by the cut — a calendar day is
+   * a calendar day in any zone, and the invoice, cost and pass reads below are
+   * filtered on `date` columns with those. Only `fromIso`/`toIso` move, and
+   * they are what the payments and sessions reads are bounded by.
+   */
+  const at = useMemo(() => monthAtGym(key, zone), [key, zone]);
+  const w = at?.window ?? null;
 
   const load = useCallback(async (tenantId: string, mw: NonNullable<ReturnType<typeof monthWindow>>): Promise<boolean> => {
     // Five independent reads, deliberately not one Promise.all under a single
@@ -369,10 +426,20 @@ export default function Close() {
    * deliberately still a one-time read: which month the sheet OPENS on is a
    * decision made once, and moving it under somebody would be a different bug.
    */
+  //
+  // And the months offered are the GYM's, not the device's. `monthTickStart`
+  // reduces the reader's clock to an instant inside the reader's current month,
+  // and `gymRecentMonths` then asks which month the GYM was in at that instant
+  // — so a gym behind the reader correctly does not gain a month the reader has
+  // entered and it has not. The residual is the reverse case: a gym AHEAD of
+  // the reader turns its month over first, and the list gains that month when
+  // the reader's clock catches up rather than when the gym's does. That is the
+  // lag this tick has always had; what changes here is that the list is now
+  // named on the gym's calendar rather than on the laptop's.
   const tick = useMonthTick();
   const months = useMemo(
-    () => recentMonths(MONTHS_OFFERED + 1, monthTickStart(tick).getTime()),
-    [tick],
+    () => gymRecentMonths(MONTHS_OFFERED + 1, zone, monthTickStart(tick).getTime()).keys,
+    [tick, zone],
   );
 
   useEffect(() => {
@@ -617,6 +684,19 @@ export default function Close() {
         </span>
       </div>
 
+      {/* Whose clock this month was cut on.
+          The caption travels with the bounds out of `monthAtGym`, so this
+          screen cannot print the confident wording over the device's clock
+          without going out of its way to — which is the half of the defect that
+          made it dangerous rather than merely wrong. `tenants.timezone` is
+          unset on every gym on the platform today, so this is the sentence
+          every owner sees, and it is the truth about the figures below. */}
+      {at ? (
+        <p style={{ color: 'var(--ink3)', fontSize: 12.5, margin: '8px 0 0', maxWidth: '78ch' }}>
+          {at.note}
+        </p>
+      ) : null}
+
       {/* A month is closed here and the figure goes to an accountant, so the
           floor is said in a banner rather than only in a caption beside a
           dropdown. */}
@@ -726,10 +806,10 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
           owner cannot get back to once they press Close. */}
       <CostsBeforeClose v={costs} reason={costsReason} monthKey={monthKey} />
       <Signoff
-        c={c} currency={currency} monthKey={monthKey} zone={zone} tenantId={tenantId} me={me}
+        c={c} currency={currency} owedCcy={owedCcy} monthKey={monthKey} zone={zone} tenantId={tenantId} me={me}
         closes={closes} closesErr={closesErr} costs={costs} payErr={payErr} onChange={onChange}
       />
-      <Handoff c={c} rec={rec} currency={currency} owedCcy={owedCcy} gymCcy={gymCcy} gymName={gymName} monthKey={monthKey} />
+      <Handoff c={c} rec={rec} currency={currency} owedCcy={owedCcy} gymName={gymName} monthKey={monthKey} />
 
       {c.warning ? <Banner tone="crit">{c.warning}</Banner> : null}
       {feeRead === 'failed' ? (
@@ -805,16 +885,33 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
               : `${c.arrears.outstanding} open, ${c.arrears.overdue} past due`
           }
         />
+        {/* ── the payroll figure, in the money the WORK was priced in ──────
+            This tile read `money(c.payroll.total.cents, gymCcy)`. The figure is
+            a sum over `sessions.rate_cents`, which have carried their own
+            `rate_currency` since supabase/parts/1010, and `gymCcy` is
+            `tenants.currency` — the code the gym charges in TODAY. A gym that
+            changed it had its whole PT history relabelled by this tile in one
+            write, and a month that straddled the change was ADDED ACROSS two
+            currencies and presented as one total.
+
+            `c.payroll.currency` is `runLabel` from src/lib/gymRateCurrency.ts,
+            asked of the very sessions the sum is made of — the same call
+            /sessions, /payroll and /coach/earnings make before printing a
+            total. It is null when no single label is honest, `money()` withholds
+            the figure for a null currency, and `currencyNote` is the sentence
+            that says which of the two silences this is. */}
         <Kpi
           label="Payroll"
-          text={c.payroll ? money(c.payroll.total.cents, gymCcy) : null}
+          text={c.payroll ? money(c.payroll.total.cents, c.payroll.currency) : null}
           note={
             !c.payroll ? stateNote(rec.sessions, 'one-to-ones')
               : c.payroll.total.unmarked > 0
                 ? `NOT final — ${c.payroll.total.unmarked} unmarked`
                 : c.payroll.total.payable === 0 ? 'no payable sessions'
-                : !gymCcy ? `${c.payroll.total.delivered} delivered, and ${NO_CURRENCY_NOTE}`
-                : `${c.payroll.total.delivered} delivered`
+                : c.payroll.currencyNote
+                  ? `${c.payroll.total.delivered} delivered. ${c.payroll.currencyNote}`
+                  : !gymCcy ? `${c.payroll.total.delivered} delivered, and ${NO_CURRENCY_NOTE}`
+                  : `${c.payroll.total.delivered} delivered`
           }
         />
         <Kpi
@@ -832,15 +929,24 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
           three inches above an invoice table rendering each row honestly with
           `money(i.amountCents, i.currency)`.
 
-          Income keeps it, because Income IS the payments. Payroll takes the
-          gym's own, because it comes from `sessions.rate_cents` and
-          `tenants.session_fee` and from nothing else. Owed and Passes take what
-          their own rows agree on, and null where they agree on nothing — which
-          each of those sections already has a sentence for. */}
+          Income keeps it, because Income IS the payments. Owed and Passes take
+          what their own rows agree on, and null where they agree on nothing —
+          which each of those sections already has a sentence for.
+
+          Payroll takes no currency prop at all any more. It was handed the
+          gym's own, on the argument that the figure "comes from
+          `sessions.rate_cents` and `tenants.session_fee` and from nothing
+          else". The first half of that is what breaks it: a snapshotted rate
+          has carried its own `rate_currency` since supabase/parts/1010, so
+          `tenants.currency` is the gym's code TODAY laid over rates recorded
+          whenever they were recorded. Every figure inside that section is now
+          priced by the rows that produced it — the total by
+          `c.payroll.currency`, each trainer's pay by its own line, each rate
+          held by its own session. */}
       <Income c={c} rec={rec} currency={currency} />
       <Owed c={c} rec={rec} currency={owedCcy} zone={zone} nowMs={nowMs} />
       <Reconciliation c={c} rec={rec} />
-      <Payroll c={c} rec={rec} currency={gymCcy} zone={zone} nowMs={nowMs} sessionFee={sessionFee} feeCents={feeCents} />
+      <Payroll c={c} rec={rec} zone={zone} nowMs={nowMs} sessionFee={sessionFee} feeCents={feeCents} />
       <Passes c={c} rec={rec} currency={passesCcy} />
     </>
   );
@@ -904,8 +1010,18 @@ function Verdict({ c }: { c: MonthClose }) {
  * standing. A month that closed and then moved is two facts and an auditor
  * wants both.
  */
-function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr, costs, payErr, onChange }: {
+function Signoff({ c, currency, owedCcy, monthKey, zone, tenantId, me, closes, closesErr, costs, payErr, onChange }: {
   c: MonthClose; currency: TenantCurrency; monthKey: string;
+  /**
+   * What the INVOICES agree on, or null when they do not agree.
+   *
+   * Passed down rather than recomputed here so that the row this button writes
+   * carries the same codes the tiles above it rendered. `currency` beside it is
+   * the PAYMENTS' code and speaks for the takings alone; the payroll's own
+   * comes off `c.payroll`, which derived it from the sessions the figure is a
+   * sum of. Four figures, four currencies — supabase/parts/2540.
+   */
+  owedCcy: TenantCurrency;
   /** The costs verdict, for the confirmation and for what gets stored. */
   costs: CostVerdict | null;
   /** `tenants.timezone`. A close is stamped at an instant and read as a date;
@@ -956,10 +1072,34 @@ function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr,
    * not a live claim, so a failed read, a gym with no history and a month with
    * nothing missing all store precisely what they stored before.
    */
-  const base = snapshotOf(c, currency);
+  /*
+   * One code per figure, and each one is the code the tile above it was priced
+   * with.
+   *
+   * This was `snapshotOf(c, currency)` — a single code, `currencyOf(rec,
+   * gymCcy)`, which is payments-first — written into `gym_month_closes` beside
+   * FOUR figures. Only the takings were in it. The invoices carry their own
+   * currency per row, and the payroll comes off snapshotted session rates; the
+   * KPI row three inches up this screen already prices all three of those
+   * correctly, and the row it filed did not. It is permanent, every later drift
+   * line reads back through it, and the handoff CSV exports it.
+   */
+  const base = snapshotOf(c, { taken: currency, invoiced: owedCcy, outstanding: owedCcy });
   const costNote = costs ? costNoteForClose(costs) : null;
   const snap = { ...base, blockersAtClose: joinCloseBlockers(base.blockersAtClose, costNote) };
-  const ended = monthEnded(c.window);
+  // Over AT THE GYM. This was `monthEnded(c.window)`, which compares the
+  // reader's clock against `c.window.toIso` — and `toIso` was built by
+  // `new Date(y, mo, 1)` on the reader's own machine, so the two sides agreed
+  // with each other and with nobody else. A bookkeeper in London was told a
+  // Dubai gym's August was over four hours before it was, and this is the
+  // boolean the Close button is gated on: those four hours of takings are then
+  // outside a snapshot that says it holds the whole month.
+  //
+  // Keys, not instants. 'YYYY-MM' sorts chronologically and neither side of the
+  // comparison has an instant in it left to put on the wrong clock. With no
+  // zone recorded it is the reader's month against the key — what the screen
+  // was already doing — and the caption above the picker says so.
+  const ended = gymMonthEnded(monthKey, zone);
   const blocker = closes === null
     ? 'The record of closed months could not be read, so this console cannot tell whether this month is already closed. Closing it again would be refused by the database with an error nobody could act on.'
     // The per-coach rates. Same refusal /payroll makes before a settlement run,
@@ -972,7 +1112,18 @@ function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr,
     ? `${payErr} Until it does, the payroll figure on this sheet is the gym's standard fee applied to everybody, which is the wrong figure for anyone on their own rate — and closing would file it.`
     : closeBlocker(monthKey, ended, live);
 
-  const drift = live ? driftSince(live, snap, (cents) => money(cents, live.currency ?? currency) ?? 'an unstateable amount') : [];
+  /*
+   * Each side of each comparison in the money THAT side was recorded in.
+   *
+   * The formatter closed over `live.currency ?? currency` — one code for all
+   * eight amounts, which is the same assumption that produced the single-code
+   * row this reads back. `driftSince` now hands the currency in with the
+   * figure: the stored side's own column, and the live side's from the snapshot
+   * just built above.
+   */
+  const drift = live
+    ? driftSince(live, snap, (cents, ccy) => money(cents, ccy) ?? 'an unstateable amount')
+    : [];
 
   const doClose = async () => {
     setBusy(true); setErr(null);
@@ -1039,10 +1190,25 @@ function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr,
             </div>
           ) : null}
           <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', padding: '0 14px 14px' }}>
-            <Kpi label="Taken, at the close" text={money(live.takenCents, live.currency)} note={live.currency ? undefined : NO_CURRENCY_NOTE} />
-            <Kpi label="Billed, at the close" text={money(live.invoicedCents, live.currency)} />
-            <Kpi label="Still owed, at the close" text={money(live.outstandingCents, live.currency)} />
-            <Kpi label="Payroll, at the close" text={money(live.payrollCents, live.currency)}
+            {/* ── read back the way it was written ─────────────────────────
+                All four tiles read the single `live.currency` column, which is
+                what /close wrote and which was the PAYMENTS' code. Each now
+                reads the figure's own column (supabase/parts/2540).
+
+                Only Taken falls back to the legacy column. It was derived
+                payments-first, so it can honestly speak for the takings and for
+                nothing else on the row: pricing a filed payroll figure with the
+                code a card machine happened to take that month is the defect,
+                not the fallback for it. Nothing on this platform has ever
+                written such a row — `gym_month_closes` was empty when the
+                columns were split — so the fallback exists for a console tab
+                left open on the previous bundle, and the other three withhold
+                rather than borrow. */}
+            <Kpi label="Taken, at the close" text={money(live.takenCents, live.takenCurrency ?? live.currency)}
+                 note={(live.takenCurrency ?? live.currency) ? undefined : NO_CURRENCY_NOTE} />
+            <Kpi label="Billed, at the close" text={money(live.invoicedCents, live.invoicedCurrency)} />
+            <Kpi label="Still owed, at the close" text={money(live.outstandingCents, live.outstandingCurrency)} />
+            <Kpi label="Payroll, at the close" text={money(live.payrollCents, live.payrollCurrency)}
                  note={live.unmarkedSessions ? `${live.unmarkedSessions} session(s) were unmarked` : undefined} />
           </div>
           {drift.length ? (
@@ -1191,14 +1357,17 @@ function Signoff({ c, currency, monthKey, zone, tenantId, me, closes, closesErr,
  * they see, and a file that opened with the takings would be a file whose
  * refusals are below the fold.
  */
-function Handoff({ c, rec, currency, owedCcy, gymCcy, gymName, monthKey }: {
+function Handoff({ c, rec, currency, owedCcy, gymName, monthKey }: {
   c: MonthClose; rec: CloseRecord; currency: TenantCurrency;
   /** What the month's INVOICES agree on. "Still owed" is denominated in this,
    *  not in what the card takings happened to be in. */
   owedCcy: TenantCurrency;
-  /** `tenants.currency`. Payroll comes off the session fee and the snapshotted
-   *  rates, so this is its unit. */
-  gymCcy: TenantCurrency;
+  /* `gymCcy` used to be a prop here, on the argument that payroll "comes off
+   * the session fee and the snapshotted rates, so this is its unit". The
+   * snapshotted rates carry their own unit (supabase/parts/1010), so it is not:
+   * the payroll rows in this file now take theirs from `c.payroll` and from
+   * each line, which is where it was recorded. Nothing in this export is
+   * denominated in the gym's code any more, so nothing needs it. */
   gymName: string | null; monthKey: string;
 }) {
   const download = () => {
@@ -1241,8 +1410,25 @@ function Handoff({ c, rec, currency, owedCcy, gymCcy, gymName, monthKey }: {
           c.income ? `${c.income.count} payment(s)${c.income.currencies.length > 1 ? ', more than one currency so no total' : ''}` : 'the payments were not read'],
         ['Still owed', c.arrears?.outstandingCents ?? null, owedCcy ?? '(not stated)',
           c.arrears ? `${c.arrears.outstanding} open, ${c.arrears.overdue} past due${owedCcy ? '' : ' — the invoices do not all state one currency, so this is not one total'}` : 'the invoices were not read'],
-        ['Payroll', c.payroll?.total.cents ?? null, gymCcy ?? '(not stated)',
-          c.payroll ? (c.payroll.total.unmarked > 0 ? `NOT FINAL — ${c.payroll.total.unmarked} unmarked` : `${c.payroll.total.delivered} delivered`) : 'the sessions were not read'],
+        // The payroll run's OWN money, and no amount at all where the run
+        // covers more than one. `gymCcy` here was `tenants.currency` — the code
+        // the gym charges in today — printed against a sum of rates snapshotted
+        // whenever they were snapshotted, in the file an accountant reconciles
+        // against a bank statement. Where the sum spans two currencies it is
+        // not an amount of anything and the Note carries the sentence instead.
+        ['Payroll',
+          c.payroll && !c.payroll.mixedCurrency ? c.payroll.total.cents : null,
+          // Three different silences, and "(not stated)" is only one of them.
+          // A reader of this file has the row and nothing else.
+          !c.payroll ? '(not stated)'
+            : c.payroll.currency
+              ?? (c.payroll.mixedCurrency ? '(more than one — not totalled)' : '(not recorded)'),
+          c.payroll
+            ? [
+                c.payroll.total.unmarked > 0 ? `NOT FINAL — ${c.payroll.total.unmarked} unmarked` : `${c.payroll.total.delivered} delivered`,
+                c.payroll.currencyNote,
+              ].filter(Boolean).join(' — ')
+            : 'the sessions were not read'],
       ],
       false,
     ));
@@ -1267,11 +1453,22 @@ function Handoff({ c, rec, currency, owedCcy, gymCcy, gymName, monthKey }: {
           false)
       : 'NOT EXPORTED — the invoice register could not be read. This is unknown, not nil.\n');
 
+    // A Currency column, like every other table in this file. This one was the
+    // single exception: six columns, one of them money, and nothing anywhere on
+    // the row saying what money — so it was read against the one code in the
+    // front matter, which is the takings'. A coach paid in EUR at a gym banking
+    // in GBP was exported as a GBP figure. A line whose own sessions span two
+    // currencies has no code and no total, and says so in place of both rather
+    // than exporting a number that is not an amount.
     parts.push('\nPAYROLL BY TRAINER\n');
     parts.push(c.payroll
       ? toCsv(
-          ['Trainer', 'Delivered', 'No-shows', 'Cancelled', 'Unmarked', 'Pay (minor units)'],
-          c.payroll.lines.map((l) => [l.trainerName, l.delivered, l.noShows, l.cancelled, l.unmarked, l.cents]),
+          ['Trainer', 'Delivered', 'No-shows', 'Cancelled', 'Unmarked', 'Pay (minor units)', 'Currency'],
+          c.payroll.lines.map((l) => [
+            l.trainerName, l.delivered, l.noShows, l.cancelled, l.unmarked,
+            l.mixedCurrency ? null : l.cents,
+            l.currency ?? (l.mixedCurrency ? '(more than one — not totalled)' : '(not recorded)'),
+          ]),
           false)
       : 'NOT EXPORTED — the sessions could not be read. This is unknown, not nil.\n');
 
@@ -1556,8 +1753,8 @@ const RECON_LABEL: Record<Reconciliation['state'], string> = {
 
 /* ── what is unmarked, and therefore blocking payroll ──────────────────────── */
 
-function Payroll({ c, rec, currency, zone, nowMs, sessionFee, feeCents }: {
-  c: MonthClose; rec: CloseRecord; currency: TenantCurrency; zone: string | null;
+function Payroll({ c, rec, zone, nowMs, sessionFee, feeCents }: {
+  c: MonthClose; rec: CloseRecord; zone: string | null;
   nowMs: number; sessionFee: number | null; feeCents: number | null;
 }) {
   // `isAwaitingOutcome(s, nowMs)`, with `nowMs` in the dependency list. The
@@ -1573,9 +1770,12 @@ function Payroll({ c, rec, currency, zone, nowMs, sessionFee, feeCents }: {
     [rec.sessions, c, nowMs],
   );
 
-  // Null when the gym has not set a currency — see the paragraph below, which
-  // states the session count instead of a dash where the total would go.
-  const payrollTotal = c.payroll ? money(c.payroll.total.cents, currency) : null;
+  // Null when the run has no one honest label — see the paragraph below, which
+  // states the session count and `currencyNote` instead of a dash where the
+  // total would go. `c.payroll.currency` is `runLabel` asked of the sessions
+  // this sum is made of, and NOT `tenants.currency`: that was the gym's code
+  // today over rates snapshotted whenever they were snapshotted.
+  const payrollTotal = c.payroll ? money(c.payroll.total.cents, c.payroll.currency) : null;
 
   const cols: Column<PayrollLine>[] = [
     { key: 'trainer', header: 'Trainer', value: (l) => l.trainerName },
@@ -1587,12 +1787,20 @@ function Payroll({ c, rec, currency, zone, nowMs, sessionFee, feeCents }: {
         ? <span style={{ color: 'var(--crit)' }}>{l.unmarked}</span>
         : <span className="dash">0</span> },
     { key: 'cents', header: 'Pay', value: (l) => l.cents, numeric: true,
-      // Three silences, not two. `money()` returns null where the currency is
+      // Four silences, not three. `money()` returns null where the currency is
       // unknown, and this cell rendered that as an EMPTY cell — a blank in the
       // Pay column of a payroll table reads as nothing owed.
+      //
+      // `l.currency` and not the gym's. A coach paid in EUR at a gym that
+      // charges in GBP had their month printed here in pounds, beside a
+      // settlement screen that refuses to make that payment at all
+      // (`settleCurrencyBlocker`); and a coach whose own month straddles two
+      // moneys has a `cents` that is a sum across them, which is not an amount
+      // and is withheld rather than labelled with either.
       render: (l) => l.cents == null
         ? <span className="dash">no rate</span>
-        : money(l.cents, currency) ?? <span className="dash">no currency set</span> },
+        : money(l.cents, l.currency)
+          ?? <span className="dash">{l.mixedCurrency ? 'more than one currency' : 'no currency recorded'}</span> },
   ];
 
   const sessionCols: Column<PtSession>[] = [
@@ -1601,10 +1809,14 @@ function Payroll({ c, rec, currency, zone, nowMs, sessionFee, feeCents }: {
     { key: 'trainer', header: 'Trainer', value: (s) => s.trainerName },
     { key: 'client', header: 'Client', value: (s) => s.clientName },
     { key: 'mins', header: 'Minutes', value: (s) => s.durationMin, numeric: true },
+    // The row's OWN unit, exactly as the invoice table above renders each line
+    // with `money(i.amountCents, i.currency)`. This cell used the gym's code,
+    // which is the one thing a snapshotted rate is guaranteed not to be
+    // denominated in once a gym has changed it.
     { key: 'rate', header: 'Rate held', value: (s) => s.rateCents, numeric: true,
       render: (s) => s.rateCents == null
         ? <span className="dash">not snapshotted</span>
-        : money(s.rateCents, currency) ?? <span className="dash">no currency set</span> },
+        : money(s.rateCents, s.rateCurrency) ?? <span className="dash">no currency recorded</span> },
   ];
 
   return (
@@ -1625,7 +1837,17 @@ function Payroll({ c, rec, currency, zone, nowMs, sessionFee, feeCents }: {
                   as a total nobody can write. */}
               {c.payroll.blocker
                 ? <><strong>Not safe to settle.</strong> {c.payroll.blocker}</>
-                : <>Every session in {c.window.label} is marked and priced. {c.payroll.total.payable} payable session{c.payroll.total.payable === 1 ? '' : 's'}{payrollTotal ? <>, {payrollTotal} in all</> : null}.{payrollTotal ? null : ` What they come to cannot be stated because ${NO_CURRENCY_NOTE}.`}</>}
+                : <>Every session in {c.window.label} is marked and priced. {c.payroll.total.payable} payable session{c.payroll.total.payable === 1 ? '' : 's'}{payrollTotal ? <>, {payrollTotal} in all</> : null}.{
+                    // Which silence this is, in the words of the module that
+                    // decided it. `currencyNote` is `totalNote` — one sentence
+                    // for a run that straddles two moneys and a different one
+                    // for rates that predate supabase/parts/1010 — and only
+                    // where it has nothing to say does the gym-has-no-currency
+                    // sentence apply, which is the case it was written for.
+                    payrollTotal ? null
+                      : c.payroll.currencyNote ? ` ${c.payroll.currencyNote}`
+                      : ` What they come to cannot be stated because ${NO_CURRENCY_NOTE}.`
+                  }</>}
               {sessionFee == null
                 ? ' No standard session fee is set, so a session with no snapshotted rate stays unpriced rather than free.'
                 : feeCents == null

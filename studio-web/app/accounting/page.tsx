@@ -50,6 +50,16 @@ import { gymLink, noGymNote } from '@lib/gymLink';
 // The month's instants on the GYM'S clock, and the caption that says whose
 // clock they are. `fetchGymZone` keeps "not set" apart from "could not ask".
 import { cutAtGym, type AtGym } from '@lib/gymWindow';
+// Which month is the last FINISHED one, and which months to offer — both facts
+// about the gym, both answered here on the device's calendar until now.
+//
+// `cutAtGym` below already moves this page's bounds onto the gym's clock, and
+// that is the half of the defect that moved money between months. This is the
+// other half, which `cutAtGym` cannot reach because it takes a key rather than
+// deriving one: for the four hours after a Gulf gym's month ends and before a
+// London reader's does, `recentMonths(2)[1]` named the month BEFORE the one
+// that had just finished, and the picker did not offer the finished one at all.
+import { gymRecentMonths } from '@lib/gymMonth';
 // The reader's locale, the GYM's zone. Every date below was `toLocaleDateString()`
 // — the reader's zone — on the one document in this console where the month
 // boundary is the whole point: a payment taken at 01:00 on 1 September in Dubai
@@ -263,7 +273,12 @@ export default function Accounting() {
   // Opens on the month that has finished, not the one running. A part-month is
   // not something anybody files, and offering it first invites a figure to be
   // copied out of here before the month has stopped moving.
-  const [key, setKey] = useState<string>(() => recentMonths(2)[1] ?? monthKeyOf());
+  // Null means "the owner has not chosen", the same shape /costs and /close
+  // hold it in: the default then follows the gym's own month as soon as the
+  // zone read lands rather than being frozen at mount by a value the page could
+  // not yet know. A month the owner has picked stays picked.
+  const [picked, setPicked] = useState<string | null>(null);
+  const setKey = setPicked;
   /**
    * `tenants.timezone`, and the failure to read it, kept apart.
    *
@@ -274,6 +289,13 @@ export default function Accounting() {
    */
   const [zone, setZone] = useState<string | null>(null);
   const [zoneErr, setZoneErr] = useState<string | null>(null);
+
+  // The month that has just finished AT THE GYM, until the owner picks another.
+  // Read in the render body rather than latched in a memo, which is the shape
+  // /costs already uses for the same decision: the answer is a short string, so
+  // re-deriving it costs nothing and it cannot go stale in a tab left open
+  // across a month boundary, and no clock ends up in a dependency list.
+  const key = picked ?? gymRecentMonths(2, zone, Date.now()).keys[1] ?? monthKeyOf();
 
   const at: AtGym<MonthWindow> | null = useMemo(() => {
     const base = monthWindow(key);
@@ -443,7 +465,7 @@ export default function Accounting() {
    * that had just ended was not in the list at all. The only repair was the full
    * page reload this console spent a wave learning not to need.
    */
-  const months = useMemo(() => recentMonths(MONTHS_OFFERED, monthTickStart(tick).getTime()), [tick]);
+  const months = useMemo(() => gymRecentMonths(MONTHS_OFFERED, zone, monthTickStart(tick).getTime()).keys, [tick, zone]);
 
   useEffect(() => {
     if (me?.tenantId && w) refresh();
