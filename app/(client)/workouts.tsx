@@ -56,7 +56,7 @@ import { playSound, primeSounds, releaseSounds } from '../../src/ui/sounds';
 import { scheduleRestOverAlert, cancelReminders } from '../../src/ui/pushNotifications';
 import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, Flag, Field, fig, ListRow } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, PartialRead, Flag, Field, fig, ListRow } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { buildProgram, type ProgramExercise } from '../../src/lib/programs';
@@ -137,6 +137,7 @@ import { RECOVERY_ACTIVITIES } from '../../src/lib/recoveryActs';
 import { HIIT_ACTIVITIES, MOBILITY_ACTIVITIES } from '../../src/lib/workoutKind';
 import { STRETCH_ROUTINES, routineSummary, type StretchRoutine } from '../../src/lib/stretchRoutine';
 import { buildRoutine, BUILD_MINUTES, STRETCH_FOCUS } from '../../src/lib/stretchBuilder';
+import { useStretchCatalogue } from '../../src/ui/stretchCatalogue';
 import { StretchRunner } from '../../src/ui/StretchRunner';
 import { attributionLine } from '../../src/lib/workoutAttribution';
 import { dayKeyOf, instantForDay, readWorkoutEdit, type WorkoutDraftSet } from '../../src/lib/entryEdit';
@@ -552,14 +553,27 @@ export default function Train() {
   const [buildMins, setBuildMins] = useState(BUILD_MINUTES[1]);
   const [buildFocus, setBuildFocus] = useState(STRETCH_FOCUS[0].id);
   const [buildSeed, setBuildSeed] = useState(0);
-  // Built on every change of the three, and not on a button. There is no read
-  // behind it — src/lib/stretchBuilder.ts holds the catalogue as a constant and
-  // says at length why — so this is arithmetic over 51 rows and costs less than
-  // the tap that would have asked for it. A "Build" button would only be a
-  // chance to leave a stale routine on screen under changed chips.
+  // The stretches to build FROM, read from the catalogue rather than held as a
+  // constant — see the header of src/lib/stretchBuilder.ts, where the decision
+  // was reversed when `body_part` and `is_unilateral` arrived on the table.
+  const stretchCat = useStretchCatalogue();
+  // Built on every change of the three, and on the rows arriving. Not on a
+  // button: once the rows are here this is arithmetic over fifty-odd of them
+  // and costs less than the tap that would have asked for it, and a "Build"
+  // button would only be a chance to leave a stale routine on screen under
+  // changed chips.
+  //
+  // Gated on `isWhole`, not on `!== 'error'`. Under 'loading' the list is empty
+  // because nothing has arrived, and handing that to the builder would produce
+  // "We have no stretches to build a routine from." — a statement about our
+  // catalogue, made while the read is still in flight. Under 'partial' the rows
+  // are a prefix, and a routine assembled from a prefix looks exactly like one
+  // assembled from the whole catalogue.
   const built = useMemo(
-    () => buildRoutine({ minutes: buildMins, focus: buildFocus, seed: buildSeed }),
-    [buildMins, buildFocus, buildSeed],
+    () => (isWhole(stretchCat.status)
+      ? buildRoutine({ minutes: buildMins, focus: buildFocus, seed: buildSeed, catalogue: stretchCat.candidates })
+      : null),
+    [buildMins, buildFocus, buildSeed, stretchCat.status, stretchCat.candidates],
   );
 
   // While a session modal is open, poll local HR sources every 5s instead
@@ -2197,38 +2211,87 @@ export default function Train() {
                 ))}
               </ScrollView>
 
-              {/* There is no load status here and there is deliberately no
-                  spinner: nothing is fetched. A problem is therefore always
-                  something about the request itself, and it is worded as
-                  something we could not do rather than something you got
-                  wrong. */}
-              {built.problem ? (
-                <Notice tone={t.s3} kicker="Stretch" title="We could not build that one" note={built.problem} />
-              ) : null}
-
-              {built.routine ? (
-                <View>
-                  <ListRow icon="clock" title={built.routine.title}
-                    note={`${routineSummary(built.routine)} · ${built.routine.note}`}
-                    onPress={() => { if (built.routine) { setStretchOn(built.routine); tapLight(); } }} />
-                  {/* Said UNDER the routine rather than instead of it. Asked
-                      for twenty minutes of shoulders we have seven stretches
-                      for, the answer is those seven and a sentence — not a
-                      repeat of them, and not a two-minute hold on each. */}
-                  {built.shortfall ? (
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{built.shortfall}</Text>
+              {/* ── loading, unreadable, not allowed, cut short, and empty ─
+                  Five sentences, because they are five different things and
+                  four of them used to be impossible: the stretches were a
+                  constant in src/lib/stretchBuilder.ts, so there was no read
+                  and nothing to be honest about. They come from the catalogue
+                  now, so each answer gets its own words and none of them is
+                  "we have no stretches", which would be a false statement
+                  about our own data in four cases out of five. The six written
+                  routines below are unaffected either way — they are still a
+                  constant, and they still work when this does not. */}
+              {stretchCat.status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>Reading the stretch catalogue…</Text>
+              ) : stretchCat.status === 'error' ? (
+                <Notice tone={t.warn} kicker="Stretch" title="We could not read the stretch list"
+                  note="That is our end, not yours — the stretches are still there, and the ready-made routines below are unaffected.">
+                  <View style={{ marginTop: sp.md }}>
+                    <Ghost label="Try Again" onPress={() => { void stretchCat.reload(); }} />
+                  </View>
+                </Notice>
+              ) : stretchCat.signedOut ? (
+                // Nought rows and no error is what a session that has not
+                // restored looks like, and it is not an empty catalogue. Same
+                // sentence as app/(client)/library.tsx, for the same reason.
+                <Notice tone={t.warn} kicker="Stretch" title="Sign in to build a routine"
+                  note="The stretch list is only available once you are signed in, so this was not allowed to look it up. Nothing has been removed." />
+              ) : stretchCat.status === 'partial' ? (
+                // A prefix of the list, not the list. Nothing on screen would
+                // look wrong — a routine built from the first thousand rows is
+                // indistinguishable from one built from all of them — so the
+                // routine is withheld and the reason is given, rather than
+                // quietly building from part of the catalogue. Unreachable
+                // today at 58 rows against a cap of 1000, and here because the
+                // day it stops being unreachable is not a day anybody will be
+                // watching this screen.
+                <>
+                  <PartialRead what="stretches" shown={stretchCat.candidates.length} onPress={stretchCat.reload} />
+                  <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>
+                    We only have part of the stretch list, so we are not building a routine from it. The ready-made
+                    routines below are unaffected.
+                  </Text>
+                </>
+              ) : !stretchCat.candidates.length ? (
+                <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>
+                  We have no equipment-free stretches to build a routine from yet.
+                </Text>
+              ) : (
+                <>
+                  {/* A problem here is now always something about the REQUEST —
+                      the length, or the focus — because the rows are known to
+                      be present by the time this renders. It is worded as
+                      something we could not do rather than something you got
+                      wrong. */}
+                  {built?.problem ? (
+                    <Notice tone={t.s3} kicker="Stretch" title="We could not build that one" note={built.problem} />
                   ) : null}
-                  {/* Only offered when there is genuinely another one to
-                      build. On a focus whose whole list is already in the
-                      routine, this button would redraw the same stretches and
-                      look broken. */}
-                  {built.canVary ? (
-                    <View style={{ alignSelf: 'flex-start', marginTop: sp.xs }}>
-                      <Ghost label="Build Another" icon="swap" onPress={() => { setBuildSeed((n) => n + 1); tapLight(); }} />
+
+                  {built?.routine ? (
+                    <View>
+                      <ListRow icon="clock" title={built.routine.title}
+                        note={`${routineSummary(built.routine)} · ${built.routine.note}`}
+                        onPress={() => { const r = built?.routine; if (r) { setStretchOn(r); tapLight(); } }} />
+                      {/* Said UNDER the routine rather than instead of it. Asked
+                          for twenty minutes of shoulders we have seven stretches
+                          for, the answer is those seven and a sentence — not a
+                          repeat of them, and not a two-minute hold on each. */}
+                      {built.shortfall ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{built.shortfall}</Text>
+                      ) : null}
+                      {/* Only offered when there is genuinely another one to
+                          build. On a focus whose whole list is already in the
+                          routine, this button would redraw the same stretches and
+                          look broken. */}
+                      {built.canVary ? (
+                        <View style={{ alignSelf: 'flex-start', marginTop: sp.xs }}>
+                          <Ghost label="Build Another" icon="swap" onPress={() => { setBuildSeed((n) => n + 1); tapLight(); }} />
+                        </View>
+                      ) : null}
                     </View>
                   ) : null}
-                </View>
-              ) : null}
+                </>
+              )}
 
               <Rule />
 
@@ -2490,8 +2553,25 @@ export default function Train() {
             ['play', 'Playlists', '/(client)/music'],
             ['camera', 'Scan Machine', '/(client)/scan-machine'],
             ['video', 'Library', '/(client)/library'],
+            // Beside the Library, in the "before you start" group, because the
+            // two are the halves of one question: the Library is six hundred
+            // movements with no order to do them in, and this is fifteen
+            // complete plans that put them in one.
+            //
+            // "Ready-Made" is load-bearing and is not decoration. This screen is
+            // where a coached member reads the programme their coach wrote for
+            // them, so a row here labelled "Programmes" would read as that, and
+            // the fifteen behind it are written for nobody. The screen itself
+            // says so again at the top.
+            ['grid', 'Ready-Made Programmes', '/(client)/programmes'],
             ['calendar', 'This Week', '/(client)/week'],
             ['trending', 'Targets', '/(client)/progression'],
+            // Sits with the training tools rather than three levels down inside
+            // History, which is where its only link was. The four sections it
+            // opens — Training Summary, the body, Most/Least Trained and the
+            // Recovery Map — are about the training this screen logs, so this
+            // is where somebody goes looking for them.
+            ['dumbbell', 'Your Muscles', '/(client)/muscles'],
             ['moon', 'When to Rest', '/(client)/restday'],
             ['clock', 'History', '/(client)/activity'],
             ['chart', 'Trends', '/(client)/trends'],

@@ -61,7 +61,7 @@ import { useSettings } from '../../src/ui/settings';
 import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
-import { matchesSearch, fallbackTag } from '../../src/lib/catalogueLocale';
+import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { ensureCatalogueRow } from '../../src/ui/customExercise';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { buildProgram, type Program, type ProgramDay } from '../../src/lib/programs';
@@ -1417,11 +1417,13 @@ export default function Builder() {
   // is a coach assigning one lift and their client being shown another.
   const ownSlugs = useMemo(() => new Set(ownList.map((x) => exerciseSlug(x.name))), [ownList]);
   const catShownList = cat.rows.filter(
-    // Searched on BOTH names. Most German-speaking coaches learned these
-    // movements in English and type "bench"; their German-speaking clients
-    // read "Bankdrücken". Matching only one of the two hides half the
-    // catalogue from whoever is holding the phone.
-    (e) => !ownSlugs.has(e.id) && matchesSearch(pickTerm, e.name, e.display),
+    // Searched on BOTH names, and on the catalogue's synonyms. Most
+    // German-speaking coaches learned these movements in English and type
+    // "bench"; their German-speaking clients read "Bankdrücken". Matching only
+    // one of the two hides half the catalogue from whoever is holding the
+    // phone, and matching neither the synonyms hides Heel Flicks from every
+    // coach who calls the movement "butt kicks".
+    (e) => !ownSlugs.has(e.id) && matchesSearch(pickTerm, e.name, e.display, e.synonyms),
   );
 
   // A picture for every movement on this screen: the ones already in the days
@@ -3630,7 +3632,17 @@ export default function Builder() {
               ) : (
                 <>
                   {cat.status === 'partial' ? <PartialRead what="catalogue movements" shown={cat.rows.length} /> : null}
-                  {catShownList.slice(0, catShown).map((e, i) => (
+                  {catShownList.slice(0, catShown).map((e, i) => {
+                  // Which of the movement's other names the coach's search hit,
+                  // when its title holds none of what they typed. Null on every
+                  // row that matched by name — see matchedSynonym() in
+                  // src/lib/catalogueLocale.ts. A picker that offered Heel
+                  // Flicks for "butt kicks" without saying so would look like it
+                  // had ignored the search box, and this list is the one place
+                  // in the app where a wrong pick is written into a client's
+                  // week.
+                  const via = matchedSynonym(pickTerm, e.name, e.display, e.synonyms);
+                  return (
                     <View key={e.id} style={{
                       flexDirection: 'row', alignItems: 'center',
                       borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
@@ -3644,7 +3656,10 @@ export default function Builder() {
                         // illustration, no history, "not in our catalogue" on
                         // tap. The identity is English; only the label moves.
                         onPress={() => { if (pickerDay !== null) { addExercise(pickerDay, e.name, e.group || ''); setPickerDay(null); } }}
-                        accessibilityRole="button" accessibilityLabel={`Add ${e.display.text}`}
+                        // The matched synonym is spoken too. A coach who typed
+                        // "butt kicks" and hears only "Add Heel Flicks" has the
+                        // printed line's problem with nothing to read.
+                        accessibilityRole="button" accessibilityLabel={via ? `Add ${e.display.text}, matched ${via}` : `Add ${e.display.text}`}
                         style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                         <View style={{ flex: 1 }}>
                           <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{e.display.text}</Text>
@@ -3666,6 +3681,9 @@ export default function Builder() {
                               {[e.group, e.hasDemo ? 'Illustrated' : null, fallbackTag(e.display)].filter(Boolean).join(' · ')}
                             </Text>
                           ) : null}
+                          {via ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Matched “{via}”</Text>
+                          ) : null}
                         </View>
                       </Pressable>
                       <Pressable onPress={() => previewExercise(e.name)} hitSlop={8}
@@ -3674,7 +3692,8 @@ export default function Builder() {
                         <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
                       </Pressable>
                     </View>
-                  ))}
+                  );
+                  })}
                   {catShownList.length > catShown ? (
                     <View style={{ marginTop: sp.md }}>
                       {/* A count, not a bare "Show more". The number is what a

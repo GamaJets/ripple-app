@@ -37,7 +37,7 @@
 //
 // One table is deliberately NOT converted; see the note above the
 // metric-by-metric section further down.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -133,6 +133,14 @@ import { spanLabel } from '../../src/lib/photoCompare';
 import { clientReportDoc, reportShareBlurb, type ReportInjury } from '../../src/lib/clientReport';
 import { useMeasurements, METRICS as MEASURE_METRICS } from '../../src/ui/measurements';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { useNow } from '../../src/ui/today';
+// The Progress tab is where a member looks for "what have I worked" — reported
+// as exactly that. The full screen lives at /(client)/muscles; this is the
+// picture that gets somebody to it, because a list row named "Your Muscles"
+// among fourteen others is not a thing anybody finds.
+import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
+import { muscleWorkBoard, diagramShading } from '../../src/lib/muscleWork';
+import { MuscleBody } from '../../src/ui/MuscleBody';
 import { sessionsOf, trainingBoard } from '../../src/lib/clientTraining';
 import { areaLabel } from '../../src/lib/injuries';
 import { yearsAround } from '../../src/lib/scanYears';
@@ -388,6 +396,29 @@ export default function Scans() {
   // what a swallowed RLS refusal would have produced.
   const measures = useMeasurements();
   const wlog = useWorkoutLog();
+  // Seven days, front view only. A fortnight would be a better measure of
+  // training and a worse advertisement for the screen this opens: the point
+  // here is recognition, and the full screen offers 7/30/90 for the question.
+  const muscleCat = useExerciseCatalogue();
+  // `useNow()` rather than Date.now(), and it is IN the dependency list below.
+  // check:frozen-hook caught the first version of this: a clock read inside a
+  // memo body is a window that stops moving. This tab is one somebody leaves
+  // open, and a "last 7 days" that silently means "the 7 days ending whenever
+  // this screen mounted" is wrong in the direction nobody checks.
+  const muscleNow = useNow();
+  const muscleBoard7 = useMemo(
+    () => muscleWorkBoard(wlog.log, muscleCat.rows, {
+      sinceMs: muscleNow.getTime() - 7 * 24 * 60 * 60 * 1000,
+      nowMs: muscleNow.getTime(),
+      logStatus: wlog.status,
+      // A signed-out catalogue returns zero rows with no error, and a whole
+      // read of an empty catalogue would light nothing while claiming to have
+      // looked. Carried as an error so the body is not drawn at all.
+      catalogueStatus: muscleCat.signedOut ? 'error' : muscleCat.status,
+    }),
+    [wlog.log, wlog.status, muscleCat.rows, muscleCat.status, muscleCat.signedOut, muscleNow],
+  );
+  const muscleShading7 = useMemo(() => diagramShading(muscleBoard7), [muscleBoard7]);
 
   const buildReport = () => {
     // `cd.weightSeries` is passed, and it is the difference between a document
@@ -2051,6 +2082,42 @@ export default function Scans() {
           </View>
         </Section>
 
+        {/* ── what the training actually worked ───────────────────────────── */}
+        <Rule />
+        <Section>
+          <SectionHead title="Muscles Worked" note="last 7 days" />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Your Muscles. Opens the body diagram, recovery map and muscle rankings."
+            onPress={() => router.push('/(client)/muscles')}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}
+          >
+            <MuscleBody
+              side="front"
+              intensity={muscleShading7.byLayer}
+              status={muscleBoard7.status}
+              height={150}
+              surface={t.surface2}
+            />
+            <View style={{ flex: 1, gap: 6 }}>
+              {/* Three states, three sentences. A body with nothing lit is the
+                  same picture whether the read failed, the member is new, or
+                  they genuinely rested — and those are not the same fact. */}
+              <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
+                {muscleBoard7.status === 'loading' ? 'Reading your week\u2026'
+                  : muscleBoard7.status === 'error' ? 'Could not read this'
+                  : muscleShading7.hasWork ? 'See it on the body'
+                  : 'Nothing logged in seven days'}
+              </Text>
+              <Text style={{ ...ty.caption, color: t.ink2 }}>
+                {muscleBoard7.status === 'error'
+                  ? 'Your training is not affected — this panel could not read it.'
+                  : 'The body diagram, how long each muscle has rested, and what you train most and least.'}
+              </Text>
+            </View>
+          </Pressable>
+        </Section>
+
         {/* ── the rest: navigational, deliberately quiet ──────────────────── */}
         <Section>
           <SectionHead title="Go Deeper" />
@@ -2071,6 +2138,7 @@ export default function Scans() {
               ['camera', 'Compare', '/(client)/compare'],
               ['trending', 'Composition', '/(client)/body-trends'],
               ['ruler', 'Measurements', '/(client)/measurements'],
+              ['dumbbell', 'Muscles', '/(client)/muscles'],
               ['trophy', 'Records', '/(client)/records'],
               ['chart', 'Standards', '/(client)/standards'],
               ['flame', 'Consistency', '/(client)/consistency'],

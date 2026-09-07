@@ -79,6 +79,16 @@ export const CLIENT_FEATURES: Feature[] = [
   // ── Training ──────────────────────────────────────────────
   { key: 'week', label: 'This Week', note: 'Your week of training at a glance', route: '/(client)/week', icon: 'calendar', area: 'train', keywords: 'plan schedule' },
   { key: 'library', label: 'Exercise Library', note: 'How-to videos from your coach', route: '/(client)/library', icon: 'video', area: 'train', keywords: 'videos how to form' },
+  // Directly under the Exercise Library, because the two answer the halves of
+  // one question and a member who found only the first has been handed six
+  // hundred movements with no order to do them in. `workout_templates` had been
+  // live and populated since supabase/parts/2600 and was read by nothing, so
+  // this row is the whole difference between fifteen programmes existing and
+  // fifteen programmes being reachable.
+  //
+  // Not `soloHide`. A member training themselves is the person these are FOR;
+  // the note is what keeps them from reading as a coach's work.
+  { key: 'programmes', label: 'Programmes', note: 'Ready-made plans to follow — not written by your coach', route: '/(client)/programmes', icon: 'grid', area: 'train', keywords: 'programme programmes program plan plans routine routines workout plan template templates split ppl push pull legs upper lower full body 5x5 stronglifts beginner strength hypertrophy bodyweight home dumbbell kettlebell hiit mobility core ready made follow' },
   { key: 'tools', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools', icon: 'settings', area: 'train', keywords: 'calculator 1rm plates macros' },
   { key: 'recovery', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery', icon: 'water', area: 'train', keywords: 'sleep hydration mobility rest' },
   { key: 'habits', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits', icon: 'check', area: 'train', keywords: 'water streak daily' },

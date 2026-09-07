@@ -35,7 +35,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Notice, Ghost, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
-import { matchesSearch, fallbackTag } from '../../src/lib/catalogueLocale';
+import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { catalogueValue as cap } from '../../src/lib/format';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -146,11 +146,13 @@ export default function OwnerLibrary() {
   const list = useMemo(
     () => rows.filter((r: CatalogueRow) =>
       matches(r.group, group) && matches(r.equipment, kit) &&
-      // Both names, always. An owner who learned these movements in English
-      // types "squat" and must find the row their German library shows as
-      // "Kniebeuge"; a German-speaking owner types "Kniebeuge" and must find
-      // the same one. See matchesSearch() in src/lib/catalogueLocale.ts.
-      matchesSearch(term, r.name, r.display)),
+      // Both names, always, and the catalogue's synonyms. An owner who learned
+      // these movements in English types "squat" and must find the row their
+      // German library shows as "Kniebeuge"; a German-speaking owner types
+      // "Kniebeuge" and must find the same one; and an owner auditing whether
+      // the platform covers "butt kicks" must be told that it does, under the
+      // name Heel Flicks. See matchesSearch() in src/lib/catalogueLocale.ts.
+      matchesSearch(term, r.name, r.display, r.synonyms)),
     [rows, group, kit, term],
   );
   useEffect(() => { setShown(PAGE); }, [term, group, kit]);
@@ -170,7 +172,18 @@ export default function OwnerLibrary() {
   // Equipment first, because that is the question this screen is open to answer.
   // A row with no equipment recorded says so rather than being left blank, which
   // would read as bodyweight.
-  const rowNote = (r: CatalogueRow) => [
+  const rowNote = (r: CatalogueRow) => {
+    // Why this row is in the results, when its own title does not say. Null on
+    // every row whose name matched and on every row of an unfiltered list —
+    // see matchedSynonym() in src/lib/catalogueLocale.ts.
+    const via = matchedSynonym(term, r.name, r.display, r.synonyms);
+    return [
+    // FIRST, ahead of the equipment this screen is otherwise organised by,
+    // because it is the only item on the line that explains why the row is on
+    // screen at all. An owner who typed "butt kicks" and is looking at a row
+    // called Heel Flicks needs this before anything else, and a note that runs
+    // out of room must lose the muscle group rather than this.
+    via ? `Matched “${via}”` : null,
     r.equipment ? cap(r.equipment) : 'Equipment not recorded',
     r.group,
     r.hasDemo ? 'illustrated' : null,
@@ -181,7 +194,8 @@ export default function OwnerLibrary() {
     // translation. fallbackTag returns null for everybody when the reader is
     // English, so this line disappears entirely for them.
     fallbackTag(r.display),
-  ].filter(Boolean).join(' · ');
+    ].filter(Boolean).join(' · ');
+  };
 
   const emptyLine = () => {
     // A read we were not allowed to make is not an empty catalogue, and the

@@ -55,7 +55,7 @@ import { Rule, Section, SectionHead, Hero, KpiRow, Notice, Ghost, PartialRead, F
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useExerciseCatalogue, type CatalogueRow } from '../../src/ui/exerciseDetail';
 import { useCatalogueThumbs } from '../../src/ui/useCatalogueThumbs';
-import { matchesSearch, fallbackTag } from '../../src/lib/catalogueLocale';
+import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { useAuth } from '../../src/ui/auth';
@@ -237,10 +237,12 @@ export default function TrainerLibrary() {
   // Signed in one request rather than one per row — see useCatalogueThumbs.
   const term = q.trim().toLowerCase();
   const list = useMemo(
-    // Both names — see matchesSearch() in src/lib/catalogueLocale.ts. A coach
-    // who learned the movement in English and a coach reading the German
-    // library must find the same row from the same box.
-    () => rows.filter((r) => inGroup(r.group, group) && matchesSearch(term, r.name, r.display)),
+    // Both names, and the catalogue's synonyms — see matchesSearch() in
+    // src/lib/catalogueLocale.ts. A coach who learned the movement in English
+    // and a coach reading the German library must find the same row from the
+    // same box; so must a coach who has only ever called it "butt kicks", which
+    // is what the synonym list is for.
+    () => rows.filter((r) => inGroup(r.group, group) && matchesSearch(term, r.name, r.display, r.synonyms)),
     [rows, group, term],
   );
   useEffect(() => { setShown(PAGE); }, [term, group]);
@@ -432,6 +434,9 @@ export default function TrainerLibrary() {
                   {page.map((r, i) => {
                     const c = clipFor(r);
                     const note = clipNote(c);
+                    // Why this row is in the results when its title does not
+                    // say so. Null unless a synonym, and nothing else, matched.
+                    const via = matchedSynonym(term, r.name, r.display, r.synonyms);
                     return (
                       <View key={r.id}>
                         {i > 0 ? <Rule /> : null}
@@ -443,7 +448,7 @@ export default function TrainerLibrary() {
                         <Pressable
                           onPress={() => router.push({ pathname: '/(trainer)/exercise', params: { name: r.name, from: 'trainerLibrary' } })}
                           accessibilityRole="button"
-                          accessibilityLabel={[r.display.text, r.group ? cap(r.group) : null, note].filter(Boolean).join('. ')}
+                          accessibilityLabel={[r.display.text, via ? `matched ${via}` : null, r.group ? cap(r.group) : null, note].filter(Boolean).join('. ')}
                           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                           <ExerciseThumb uri={thumbFor(r)} t={t} size={44} />
                           <View style={{ flex: 1 }}>
@@ -454,6 +459,14 @@ export default function TrainerLibrary() {
                             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                               {[r.group ? cap(r.group) : 'Muscle group not recorded', fallbackTag(r.display)].filter(Boolean).join(' · ')}
                             </Text>
+                            {/* Its own line, and only when the title cannot
+                                explain itself: a search for "butt kicks" that
+                                answers with Heel Flicks has to say which of the
+                                movement's names it matched, or it reads as the
+                                search having ignored what was typed. */}
+                            {via ? (
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Matched “{via}”</Text>
+                            ) : null}
                           </View>
                           {note ? (
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>

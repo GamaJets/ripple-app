@@ -38,6 +38,14 @@ if [ ${#CHANNELS[@]} -eq 0 ]; then
 fi
 cd "$(dirname "$0")/.."
 
+# Scope check:runtime-reach to the channels this run is actually publishing to.
+#
+# That gate is in check:all, and check:all takes no arguments, so without this
+# it would judge all six channels during a run narrowed to one — and refuse the
+# publish over five channels nobody was publishing to. Narrowing is the whole
+# point of the paragraph above; it must not be the thing that blocks a publish.
+export REPPLE_REACH_CHANNELS="${CHANNELS[*]}"
+
 # Where the bundling actually happens. Set below to a detached worktree at HEAD
 # rather than this directory, so an agent writing a file mid-publish cannot
 # reach the thing being bundled at all. The first version of this script only
@@ -108,6 +116,33 @@ npm test >/dev/null
 npm run check:all
 printf '%-20s ' "check:schema"
 npm run --silent check:schema >/dev/null 2>&1 && echo ok || { echo FAIL; exit 1; }
+
+echo
+echo "── can these channels receive this runtime? ──"
+#
+# Run by name and NOT only inside check:all, because this is the one gate whose
+# answer is about the channels on the command line rather than about the source
+# tree, and its per-channel output is worth reading at the moment of publishing.
+#
+# It exists because of 4 September, and it is worth being exact about how much
+# of that it covers: app.json went to 1.3.0, this script published sixteen
+# bundles to runtime 1.3.0, and the only live client install was a 1.0.0 build
+# because the TestFlight group had never been given a newer one. Every publish
+# printed an Update group ID and exited 0.
+#
+# This gate would have been GREEN through all of it on iOS. Builds 44 and 45
+# were finished at 1.3.0 within minutes of the bump. What was missing was not a
+# binary, it was that binary being RELEASED TO A TESTER GROUP — App Store
+# Connect, an ASC API key this repo does not hold, and a screen no check here
+# can read. Submitted and approved is not released. Somebody still has to look.
+#
+# What it does catch: publishing into the gap between a version bump and a
+# build, and a platform where the build never followed. On 7 Sep 2026, with iOS
+# green, REPPLE_REACH_PLATFORM=android failed on all three preview channels —
+# the APKs, which per the note above are the ONLY installable Android artifacts
+# — because none has been built since the bump. Ask it that way before
+# believing an Android tester is receiving any of this.
+node scripts/check-runtime-reach.mjs "${CHANNELS[@]}"
 
 echo
 echo "── publish ──"

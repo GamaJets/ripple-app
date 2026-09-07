@@ -1117,6 +1117,12 @@ export default function Home() {
           <ListRow icon="clock" title="Your History" note="Every month you have trained, back to the start"
             onPress={() => router.push('/(client)/history')} />
 
+          {/* Beside History because that is where its only other link lives, and
+              one link three levels deep is how a feature ships and is never
+              found. */}
+          <ListRow icon="dumbbell" title="Your Muscles" note="What you worked, on the body, and how long it has rested"
+            onPress={() => router.push('/(client)/muscles')} />
+
           <ListRow icon="trophy" title="Challenges" note="Track your progress against the goal"
             onPress={() => router.push('/(client)/challenges')} />
 

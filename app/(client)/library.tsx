@@ -39,7 +39,7 @@
 // it does not, rather than closing on a set that exists on this phone alone.
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
-import { matchesSearch, fallbackTag } from '../../src/lib/catalogueLocale';
+import { matchesSearch, matchedSynonym, fallbackTag } from '../../src/lib/catalogueLocale';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Linking, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -147,10 +147,14 @@ export default function Library() {
  // than filtering one and leaving the other showing everything.
  const catList = cat.rows.filter((e) =>
   (group === 'All' || (e.group || '').trim().toLowerCase() === group.toLowerCase()) &&
-  // Both names. A member whose phone is in German sees "Kniebeuge" and must be
-  // able to type it; the same member reading a programme their coach wrote in
-  // English must be able to type "Back Squat" and land on the same row.
-  matchesSearch(term, e.name, e.display)
+  // Both names, and the catalogue's synonyms. A member whose phone is in German
+  // sees "Kniebeuge" and must be able to type it; the same member reading a
+  // programme their coach wrote in English must be able to type "Back Squat"
+  // and land on the same row. And a member who has only ever heard the movement
+  // called "butt kicks" must find Heel Flicks, which is what `synonyms` is for
+  // — before this, that search returned nothing and the screen said so, about a
+  // movement we have.
+  matchesSearch(term, e.name, e.display, e.synonyms)
  );
  useEffect(() => { setCatShown(50); }, [term, group]);
 
@@ -423,6 +427,10 @@ export default function Library() {
         const thumb = e.thumbPath && needsSigning(e.thumbPath)
           ? (thumbs.get(e.thumbPath) ?? null)
           : (frameUrls(e.thumbPath ? [e.thumbPath] : null, e.source)[0] ?? null);
+        // Why this row is in the results, when the answer is not visible in its
+        // title. Null on almost every row, including every row in an unfiltered
+        // list — see matchedSynonym() in src/lib/catalogueLocale.ts.
+        const via = matchedSynonym(term, e.name, e.display, e.synonyms);
         return (
         <View key={e.id}>
          {i > 0 ? <Rule /> : null}
@@ -432,7 +440,11 @@ export default function Library() {
           // The row's second line as well as its first. In a list of six
           // hundred movements the muscle group and the equipment are how one
           // is told from another, and the label was replacing both.
-          accessibilityLabel={[e.display.text, [e.group, e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' \u00b7 ')].filter(Boolean).join('. ')}
+          // The matched synonym is in the SPOKEN label too. A screen reader
+          // announces the title, and a member who searched "butt kicks" and
+          // hears "Heel Flicks" has exactly the problem the printed line
+          // below exists to solve, with no way to see the answer.
+          accessibilityLabel={[e.display.text, via ? `matched ${via}` : null, [e.group, e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' \u00b7 ')].filter(Boolean).join('. ')}
           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
          >
           <View style={{ width: 52, height: 52, borderRadius: radius.sm, backgroundColor: t.surface2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
@@ -457,6 +469,16 @@ export default function Library() {
                 absent, for a reader whose language the catalogue is in. */}
             {[e.group, e.equipment ? cap(e.equipment) : null, fallbackTag(e.display)].filter(Boolean).join(' · ')}
            </Text>
+           {/* Its OWN line, not another item on the one above. This is the
+               sentence that stops a result reading as a bug — a member types
+               "butt kicks", gets back a row titled Heel Flicks, and without
+               this has been shown a movement whose name contains nothing they
+               typed. Joined into the caption it would be the first thing
+               `numberOfLines={1}` dropped on a narrow phone, which is the one
+               place it is most needed. Absent entirely when a name matched. */}
+           {via ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>Matched “{via}”</Text>
+           ) : null}
           </View>
           <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
          </Pressable>

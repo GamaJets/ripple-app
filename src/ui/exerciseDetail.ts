@@ -198,6 +198,19 @@ export interface CatalogueRow {
   primaryMuscles: string[];
   secondaryMuscles: string[];
   /**
+   * The other things this movement is called — 'butt kicks' on heel-flicks.
+   *
+   * Searched, never shown as a title. `display` below is the name a row wears;
+   * a synonym only ever appears as the EXPLANATION for why a row is in a result
+   * list whose title contains nothing the member typed. See matchedSynonym() in
+   * src/lib/catalogueLocale.ts.
+   *
+   * Empty on most rows, and that is the ordinary answer: the column is `not
+   * null default '{}'` and a movement with one well-known name genuinely has no
+   * second one. An empty array is never the claim that we failed to read it.
+   */
+  synonyms: string[];
+  /**
    * The name to PUT ON SCREEN, in the reader's language where we have it.
    *
    * `name` above is untouched and stays the identity: it is what the id is the
@@ -231,6 +244,13 @@ export interface CatalogueRow {
  * megabyte. Adding a whole extra read to answer "what kit does this assume"
  * would have been the expensive way to get the cheap field.
  *
+ * `synonyms` is here on exactly the same accounting, and it is the cheapest of
+ * the lot: a text array of at most a handful of short names, empty on most
+ * rows, measured at about 25 kB across the whole catalogue. It is the SEARCH
+ * that needs it, so it has to be on every row before the member types — a
+ * per-row lookup to answer "is this also called what they typed" would be one
+ * round trip per row of a list of six hundred, which is not a search.
+ *
  * `hasDemo` is computed here rather than on the screen so the list can say
  * which entries are illustrated WITHOUT reading image_paths into every row —
  * `image_paths is not null` is a cheap thing for Postgres to answer and an
@@ -253,7 +273,7 @@ export function useExerciseCatalogue() {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, equipment, primary_muscles, secondary_muscles, image_paths, equipment_icon_path, source')
+        .select('id, name, muscle_group, equipment, primary_muscles, secondary_muscles, synonyms, image_paths, equipment_icon_path, source')
         .order('name', { ascending: true })
         .limit(capLimit());
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
@@ -279,6 +299,9 @@ export function useExerciseCatalogue() {
         source: r.source ?? null,
         primaryMuscles: strs(r.primary_muscles),
         secondaryMuscles: strs(r.secondary_muscles),
+        // `strs` drops blanks, so a row whose array holds an empty string does
+        // not acquire a synonym that matches every search term ever typed.
+        synonyms: strs(r.synonyms),
       })));
       // 'partial' rather than 'ready': the catalogue is 608 rows against a cap
       // of 1000 (checked live, 6 Sep 2026), so this is quiet today and will not

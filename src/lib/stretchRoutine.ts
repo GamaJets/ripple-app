@@ -71,19 +71,37 @@ export interface StretchStep {
   name: string;
   /** Seconds to hold the position — or, for a flow, seconds to keep moving. */
   holdSec: number;
-  /** 2 when the stretch is done on each side and 1 when it is not. Taken from
-   *  RepDB's `is_unilateral`, which our catalogue does not store, so it is
-   *  recorded here rather than read back from a column that does not exist. */
+  /**
+   * 2 when the stretch is done on each side and 1 when it is not.
+   *
+   * `exercises.is_unilateral`, which our catalogue DOES now store — the column
+   * arrived with the RepDB v1.41 drop, `boolean not null default false`, and it
+   * is granted SELECT to `authenticated`. The note that used to sit here said
+   * the opposite and was true when it was written.
+   *
+   * The six routines below still carry the number rather than reading it,
+   * because they are written down: a fixed routine is a copy decision, and its
+   * steps, its holds and its sides were chosen together and are edited
+   * together. What has changed is that this is no longer a fact with only one
+   * home. src/lib/stretchBuilder.ts derives the same field from the column for
+   * every routine it BUILDS, and stretchRoutine.test.ts checks the six against
+   * the same list of unilateral ids the builder's test keeps — so the day the
+   * pack and this file disagree, a test says so rather than a member stretching
+   * one leg and calling it done.
+   */
   sides: 1 | 2;
   /**
    * True for a stretch that MOVES rather than one that is held.
    *
    * This is the single most important field on the screen and it is not about
-   * media. Of the 76 stretches in the pack, 12 are `force_type: 'dynamic'` and
-   * 64 are `'static'`, and the 12 dynamic ones are exactly the 12 that ship an
-   * animation — because a flow is the only one of the two that HAS anything to
-   * animate. A still and a hold duration is not a degraded demonstration of a
-   * static stretch, it is the correct and complete one.
+   * media. `exercises.force` — RepDB's `force_type`, on our table since
+   * supabase/parts/71-exercise-catalogue.sql — is 'dynamic' on fifteen of the
+   * 79 stretching rows and 'static' on the rest, and the dynamic ones are
+   * exactly the ones that ship an animation, because a flow is the only one of
+   * the two that HAS anything to animate. A still and a hold duration is not a
+   * degraded demonstration of a static stretch, it is the correct and complete
+   * one. The builder next door reads that column; the six routines below carry
+   * the answer, for the reason `sides` above gives.
    *
    * So nothing downstream may treat the other 64 as missing media. The runner
    * reads this to choose its words — "Hold" against "Keep moving" — and never
@@ -147,10 +165,11 @@ export const TRANSITION_SEC = 10;
 
 /* ── the routines ────────────────────────────────────────────────────────── */
 
-// Built from the 76 `category: 'stretching'` rows in the RepDB Standard pack,
-// and deliberately from the 55 that need no equipment. Eleven of the 76 want a
-// resistance band and ten want a flat bench; a starter set that opened with
-// "you will need a band" is a routine most people cannot start, and the point
+// Built from the `category: 'stretching'` rows in the RepDB Standard pack — 79
+// of them as of v1.41 — and deliberately from the 58 that need no equipment.
+// Eleven of the 79 want a resistance band and ten want a flat bench; a starter
+// set that opened with "you will need a band" is a routine most people cannot
+// start, and the point
 // of these six is that somebody can begin one on the floor beside their bed.
 // The banded and bench variants are all in the catalogue and reachable from the
 // exercise library — they are simply not what a first routine should assume.

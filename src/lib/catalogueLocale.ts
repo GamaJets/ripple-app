@@ -241,15 +241,74 @@ export function fallbackNote(name: DisplayString, description?: DisplayString | 
  * app happened to be showing, and matching only the English one would make the
  * translation cosmetic.
  *
+ * AND the row's synonyms, when the caller has them. `exercises.synonyms` is the
+ * catalogue's list of the other things a movement is called — heel-flicks
+ * carries 'butt kicks', 'butt kick', 'heel flick', 'heel kicks' — and until it
+ * was consulted a member typing the only name they had ever heard for the
+ * movement was told, in words, that we do not have it. The column is `not null
+ * default '{}'` and most rows genuinely carry none, so an empty array is the
+ * ordinary case and means only that this row has no second name, never that the
+ * data is missing.
+ *
  * Lowercased substring, exactly as every list in this app already searches. No
  * fuzziness: see videoForExercise() in exerciseId.ts for why near-misses on
- * movement names are not a kindness.
+ * movement names are not a kindness. A synonym is an EXTRA exact-ish name, not
+ * a licence to loosen the comparison.
  */
-export function matchesSearch(term: string, english: string, display?: DisplayString | string | null): boolean {
+export function matchesSearch(
+  term: string,
+  english: string,
+  display?: DisplayString | string | null,
+  synonyms?: readonly string[] | null,
+): boolean {
   const t = (term || '').trim().toLowerCase();
   if (!t) return true;
+  if (namesContain(t, english, display)) return true;
+  return matchedSynonym(term, english, display, synonyms) != null;
+}
+
+/** Either name, lowercased, containing the (already lowercased, already
+ *  trimmed) term. Shared by the two functions below so that "did it match" and
+ *  "what matched it" can never answer differently about the names. */
+function namesContain(t: string, english: string, display?: DisplayString | string | null): boolean {
   const shown = typeof display === 'string' ? display : display?.text;
   return (english || '').toLowerCase().includes(t) || (shown || '').toLowerCase().includes(t);
+}
+
+/**
+ * The synonym that put this row in the results, or null.
+ *
+ * Null when a NAME matched, which is the common case and needs no explanation:
+ * the row's own title contains what was typed and the reader can see that for
+ * themselves. A second line saying "matched 'back squat'" under a row titled
+ * Back Squat is noise.
+ *
+ * A string when neither name contains the term and one of the synonyms does.
+ * That case has to be said out loud. A member types "butt kicks", the list
+ * comes back holding one row called "Heel Flicks", and nothing on screen
+ * contains a single word they typed — which reads as a broken search rather
+ * than as a movement with two names. The screen prints this beside the row so
+ * the result explains itself.
+ *
+ * The FIRST synonym that matches, in the order the catalogue stores them, so
+ * two members typing the same thing are told the same thing. Nothing ranks
+ * them: RepDB's array is a list of names, not a preference order, and inventing
+ * one would be an opinion dressed as data.
+ */
+export function matchedSynonym(
+  term: string,
+  english: string,
+  display?: DisplayString | string | null,
+  synonyms?: readonly string[] | null,
+): string | null {
+  const t = (term || '').trim().toLowerCase();
+  if (!t) return null;
+  if (namesContain(t, english, display)) return null;
+  if (!Array.isArray(synonyms)) return null;
+  for (const s of synonyms) {
+    if (typeof s === 'string' && s.toLowerCase().includes(t)) return s;
+  }
+  return null;
 }
 
 /**

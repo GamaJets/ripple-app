@@ -19,44 +19,54 @@
 // ── Why a sibling module and not more of stretchRoutine.ts ────────────────
 //
 // stretchRoutine.ts is already 470 lines and it holds two things: the six
-// routines we wrote, and the vocabulary the runner speaks. This file holds a
-// 51-row catalogue and a selection algorithm. Putting them together would
-// double that file and mix "the routines a person chose to write" with "the
-// machinery that invents one", which are edited for completely different
+// routines we wrote, and the vocabulary the runner speaks. This file holds the
+// rule for turning catalogue rows into candidates and a selection algorithm.
+// Putting them together would mix "the routines a person chose to write" with
+// "the machinery that invents one", which are edited for completely different
 // reasons — a new fixed routine is a copy decision, a change here is an
 // arithmetic decision. They stay apart. Nothing in stretchRoutine.ts imports
 // this, so the fixed six do not acquire a dependency on the builder.
 //
-// ── Why the catalogue is a constant here and not a database read ──────────
+// ── Where the builder's three facts come from ─────────────────────────────
 //
-// This is the load-bearing decision in the file, so it is written out.
+// This is the load-bearing decision in the file, so it is written out — and it
+// has been REVERSED, which is why the argument that used to stand here is
+// summarised rather than deleted.
 //
 // The builder needs three facts about a stretch: which part of the body it is
-// for, whether it is done on each side, and whether it moves. Our `exercises`
-// table stores NONE of them. It has `muscle_group` (a display string like
-// 'Back'), `category` and `equipment`; RepDB's `body_part`, `is_unilateral`
-// and `force_type` were not carried across when the pack was seeded — see
-// supabase/parts/74-repdb-catalogue.sql, whose insert names every column it
-// writes. stretchRoutine.ts already hit this and said so on `StretchStep.sides`:
-// "Taken from RepDB's is_unilateral, which our catalogue does not store, so it
-// is recorded here rather than read back from a column that does not exist."
+// for, whether it is done on each side, and whether it moves. Until the RepDB
+// v1.41 drop our `exercises` table stored none of them, so all three were typed
+// out here as a 51-row constant, and this file said so at length: reading names
+// from the database while taking sides and area from a constant would have been
+// two sources for one row, "and the day they disagree is the day somebody
+// stretches one leg"; adding columns to serve a routine builder was a schema
+// change to avoid typing out rows that do not change.
 //
-// The alternatives were both worse. Reading names from the database and taking
-// sides and area from a constant here means two sources for one row, and the
-// day they disagree is the day somebody stretches one leg. Adding three columns
-// and a migration to serve a routine builder is a schema change to avoid typing
-// out 51 rows that do not change.
+// Two of those three columns now exist and are populated, `body_part text` and
+// `is_unilateral boolean not null default false`, both granted SELECT to
+// `authenticated`. The third was never missing: `force` has been on the table
+// since supabase/parts/71-exercise-catalogue.sql and part 74 populates it from
+// RepDB's `force_type` — the old note here claiming otherwise was simply wrong
+// about our own schema, which is the kind of wrong a comment gets to be for a
+// year without anything failing.
 //
-// So the catalogue is below, generated once from the pack, and this screen has
-// NO load status: there is no read, so there is no loading, no error, and no
-// empty result that might mean either. `buildRoutine` still answers an empty
-// `catalogue` argument with a sentence, because an argument is an argument and
-// a caller may filter one down to nothing — but the app cannot reach that case,
-// and pretending otherwise with a spinner would be theatre.
+// So the constant is gone and the builder reads the columns, through
+// `stretchCandidates()` below. Three things follow and all three are the point:
 //
-// The ONE thing that is read at runtime is the picture, by the runner, keyed by
-// the stretch's name — exactly as it is for the fixed six. That read has its own
-// status and its own already-written answer for having none.
+//   · ONE source per row. The name, the area, the sides and the flow all
+//     arrive on the same row of the same table, so they cannot disagree.
+//   · The list stops going stale. The constant said 51; the pack now carries
+//     58 equipment-free stretching rows, 54 of them outside Pilates — Lateral
+//     Leg Swing, Front-to-Back Leg Swing and Torso Twists arrived with v1.41
+//     and no routine could ever have contained them.
+//   · This screen now HAS a load status, and the screen that draws it has to
+//     say which of loading, unreadable and genuinely empty it is looking at.
+//     There is no fallback list to quietly serve instead: a second copy of the
+//     catalogue kept for offline is the two-sources defect wearing a coat.
+//
+// `buildRoutine` still answers an empty catalogue with a sentence, and that
+// case is now REACHABLE rather than theoretical — a read that came back with
+// nothing, or a focus filtered down to nothing, both land there.
 import {
   routineTotalSec, routineMinutes,
   type StretchRoutine, type StretchStep,
@@ -82,124 +92,127 @@ export type StretchArea =
 
 /** One stretch the builder may choose, with the three facts it chooses on. */
 export interface StretchCandidate {
-  /** `exerciseSlug(name)`, which is the id of the row in `exercises`. The same
+  /** `exercises.id`, which for a seeded row is `exerciseSlug(name)`. The same
    *  key the fixed routines use, and for the same reason: get it wrong and the
    *  stretch renders with a name and no picture, which reads as artwork we are
-   *  missing rather than as a key we typed wrong. */
+   *  missing rather than as a key we typed wrong. Taken from the row rather
+   *  than re-derived from the name, because six of these rows are exactly where
+   *  our id and RepDB's disagree — ours is 'child-s-pose' and theirs is
+   *  'childs-pose', which cost this repo an incident once already. */
   id: string;
-  /** The catalogue's own spelling. */
+  /** `exercises.name` — the catalogue's own spelling, and the identity a
+   *  logged routine is written under. Never a translated name. */
   name: string;
+  /** `exercises.body_part`. */
   area: StretchArea;
   /**
-   * The first of RepDB's `primary_muscles`, used ONLY to spread a selection
-   * out. `upper_legs` holds twenty-four stretches and six of them are for the
+   * The first of `exercises.primary_muscles`, used ONLY to spread a selection
+   * out. `upper_legs` holds twenty-six stretches and six of them are for the
    * hamstrings; without this, a ten-minute leg routine is six ways to touch
    * your toes. It is never shown on screen — it is a raw RepDB token, not copy.
+   * Empty string where the row names none, which sorts as its own pile and is
+   * the honest answer rather than an invented muscle.
    */
   muscle: string;
-  /** 2 when the stretch is done on each side. It COSTS DOUBLE, and a builder
+  /** 2 when `exercises.is_unilateral` is true. It COSTS DOUBLE, and a builder
    *  that forgets that overruns every routine it makes by half. */
   sides: 1 | 2;
-  /** True for one of the dynamic rows, which move rather than being held. */
+  /** `exercises.force === 'dynamic'` — a stretch that moves rather than one
+   *  that is held. */
   flow: boolean;
 }
 
-const s = (id: string, name: string, area: StretchArea, muscle: string, sides: 1 | 2, flow = false): StretchCandidate =>
-  ({ id, name, area, muscle, sides, flow });
+/**
+ * One catalogue row, as the columns hand it over.
+ *
+ * Named separately from `StretchCandidate` because the two are different
+ * things: this is what the database says, and a candidate is what the builder
+ * can use. `stretchCandidates()` below is the whole of the distance between
+ * them, and it is the only place in the app that reads a `body_part` string.
+ */
+export interface StretchRow {
+  id: string;
+  name: string;
+  /** `body_part`. Null on a row the pack has not classified, and null is
+   *  ordinary — it is a nullable column with no default. */
+  bodyPart: string | null;
+  isUnilateral: boolean;
+  /** `force`, which is RepDB's `force_type`: 'static', 'dynamic', 'push',
+   *  'pull'. Null where the row does not say. */
+  force: string | null;
+  /** `equipment`. Null means the movement needs none, which is the whole of
+   *  the equipment-free test below. */
+  equipment: string | null;
+  primaryMuscles: string[];
+}
+
+const AREAS: readonly StretchArea[] = [
+  'upper_legs', 'lower_legs', 'back', 'core', 'chest',
+  'shoulders', 'upper_arms', 'lower_arms', 'full_body',
+];
+
+const isArea = (v: string | null | undefined): v is StretchArea =>
+  !!v && (AREAS as readonly string[]).includes(v);
 
 /**
- * The stretches a built routine may draw on.
+ * The rows a built routine may draw on, from the rows the catalogue holds.
  *
- * Generated from the RepDB Standard pack and then narrowed twice, both times
- * following a decision already made and written down for the fixed six:
+ * The caller hands over every stretching row it read; this narrows them, and
+ * every narrowing below follows a decision already made and written down for
+ * the fixed six in stretchRoutine.ts:
  *
- *   · EQUIPMENT-FREE ONLY. 76 rows carry `category: 'stretching'`; 55 need no
- *     kit, eleven want a resistance band and ten want a flat bench. A routine
- *     built for somebody's ten spare minutes that opens with "you will need a
- *     band" is a routine most people cannot start. The banded and bench
- *     variants stay in the catalogue and stay reachable from the exercise
- *     library; they are just not what a generated routine may assume.
+ *   · EQUIPMENT-FREE ONLY, which is `equipment is null`. Of the 79 rows
+ *     carrying `category: 'stretching'`, 58 need no kit, eleven want a
+ *     resistance band and ten want a flat bench. A routine built for
+ *     somebody's ten spare minutes that opens with "you will need a band" is a
+ *     routine most people cannot start. The banded and bench variants stay in
+ *     the catalogue and stay reachable from the exercise library; they are
+ *     just not what a generated routine may assume.
  *
- *   · NO PILATES. That removes four of the 55 — Roll Down, Saw, Spine Stretch
- *     Forward and Spine Twist — leaving 51. Pilates is its own entry in
+ *   · NO PILATES. That removes four of the 58 — Roll Down, Saw, Spine Stretch
+ *     Forward and Spine Twist — leaving 54. Pilates is its own entry in
  *     MOBILITY_ACTIVITIES, and a member who chose Stretch over Pilates one
  *     screen earlier should not be handed Pilates Saw. stretchRoutine.ts
  *     excludes the same four from the fixed routines for the same reason, and
  *     the builder disagreeing with it would be the two halves of one feature
- *     answering the same question differently.
+ *     answering the same question differently. Matched on the id prefix, which
+ *     is what the pack actually uses — all four are `pilates-*` and nothing
+ *     else is.
  *
- * Eight of the 51 are flows, and they are exactly eight of RepDB's twelve
- * `force_type: 'dynamic'` rows — the other four are the Pilates ones. Those
- * twelve are also exactly the twelve that ship an animation, which is not a
- * coincidence: a flow is the only kind of stretch that HAS anything to animate.
- * The other 43 here are static holds, and a still with a countdown on it is the
- * complete demonstration of one, not a degraded one.
+ *   · A BODY PART WE RECOGNISE. `body_part` is nullable and the pack's
+ *     vocabulary can grow, and a row this file cannot place is a row no focus
+ *     covers and no ordering can spread out. It is dropped rather than filed
+ *     under a guess: putting an unplaceable stretch in `full_body` would put
+ *     it at the end of every routine we build, for no reason anybody could
+ *     read off the data.
+ *
+ * NOT filtered on `category = 'stretching'` here, deliberately. That is a
+ * question for the query — it is an indexed equality the database can answer
+ * over 615 rows far more cheaply than we can over the ones it sent — and
+ * repeating it here would put the same rule in two places. What this function
+ * owns is everything the query cannot express without becoming unreadable.
+ *
+ * Deterministic and order-preserving: the rows come back in the order they
+ * arrived, and `orderArea` below is the only thing that decides order.
  */
-export const STRETCH_CATALOGUE: readonly StretchCandidate[] = [
-  // upper_legs — 24, the largest area in the pack by a distance
-  s('butterfly-stretch', 'Butterfly Stretch', 'upper_legs', 'adductors', 1),
-  s('downward-dog-to-low-lunge', 'Downward Dog to Low Lunge', 'upper_legs', 'hip_flexors', 2, true),
-  s('easy-pose', 'Easy Pose', 'upper_legs', 'erector_spinae', 1),
-  s('garland-pose', 'Garland Pose', 'upper_legs', 'adductors', 1),
-  s('half-kneeling-hip-flexor-rock', 'Half-Kneeling Hip Flexor Rock', 'upper_legs', 'hip_flexors', 2, true),
-  s('happy-baby-pose', 'Happy Baby Pose', 'upper_legs', 'adductors', 1),
-  s('head-to-knee-pose', 'Head-to-Knee Pose', 'upper_legs', 'erector_spinae', 2),
-  s('hero-pose', 'Hero Pose', 'upper_legs', 'quadriceps', 1),
-  s('knee-to-chest-stretch', 'Knee-to-Chest Stretch', 'upper_legs', 'gluteus_maximus', 2),
-  s('kneeling-hip-flexor-stretch', 'Kneeling Hip Flexor Stretch', 'upper_legs', 'hip_flexors', 2),
-  s('legs-up-the-wall-pose', 'Legs-Up-the-Wall Pose', 'upper_legs', 'hamstrings', 1),
-  s('lizard-stretch', 'Lizard Stretch', 'upper_legs', 'adductors', 2),
-  s('low-lunge', 'Low Lunge', 'upper_legs', 'hip_flexors', 2),
-  s('low-lunge-to-half-split', 'Low Lunge to Half Split', 'upper_legs', 'hamstrings', 2, true),
-  s('pigeon-stretch', 'Pigeon Stretch', 'upper_legs', 'gluteus_maximus', 2),
-  s('pyramid-pose', 'Pyramid Pose', 'upper_legs', 'hamstrings', 2),
-  s('seated-forward-fold', 'Seated Forward Fold', 'upper_legs', 'hamstrings', 1),
-  s('seated-straddle-stretch', 'Seated Straddle Stretch', 'upper_legs', 'adductors', 1),
-  s('standing-forward-fold', 'Standing Forward Fold', 'upper_legs', 'hamstrings', 1),
-  s('standing-forward-fold-to-half-lift', 'Standing Forward Fold to Half Lift', 'upper_legs', 'erector_spinae', 1, true),
-  s('standing-quad-stretch', 'Standing Quad Stretch', 'upper_legs', 'quadriceps', 2),
-  s('standing-split', 'Standing Split', 'upper_legs', 'gluteus_maximus', 2),
-  s('triangle-pose', 'Triangle Pose', 'upper_legs', 'hamstrings', 2),
-  s('wide-legged-forward-fold', 'Wide-Legged Forward Fold', 'upper_legs', 'adductors', 1),
-  // lower_legs — 2
-  s('downward-dog-pedal', 'Downward Dog Pedal', 'lower_legs', 'gastrocnemius', 1, true),
-  s('standing-calf-stretch', 'Standing Calf Stretch', 'lower_legs', 'gastrocnemius', 2),
-  // back — 9. The neck stretch is one of them; see StretchArea.
-  s('cat-cow', 'Cat-Cow', 'back', 'erector_spinae', 1, true),
-  s('cat-stretch', 'Cat Stretch', 'back', 'erector_spinae', 1),
-  s('child-s-pose', "Child's Pose", 'back', 'erector_spinae', 1),
-  s('neck-side-stretch', 'Neck Side Stretch', 'back', 'trapezius', 2),
-  s('plow-pose', 'Plow Pose', 'back', 'erector_spinae', 1),
-  s('seated-spinal-twist', 'Seated Spinal Twist', 'back', 'erector_spinae', 2),
-  s('supine-spinal-twist', 'Supine Spinal Twist', 'back', 'erector_spinae', 2),
-  s('thread-the-needle', 'Thread the Needle', 'back', 'posterior_deltoid', 2),
-  s('thread-the-needle-flow', 'Thread the Needle Flow', 'back', 'obliques', 2, true),
-  // core — 6
-  s('camel-pose', 'Camel Pose', 'core', 'erector_spinae', 1),
-  s('cobra-stretch', 'Cobra Stretch', 'core', 'rectus_abdominis', 1),
-  s('sphinx-pose', 'Sphinx Pose', 'core', 'erector_spinae', 1),
-  s('standing-side-bend', 'Standing Side Bend', 'core', 'obliques', 2),
-  s('standing-side-bend-flow', 'Standing Side Bend Flow', 'core', 'obliques', 1, true),
-  s('upward-facing-dog', 'Upward-Facing Dog', 'core', 'erector_spinae', 1),
-  // chest — 2
-  s('doorway-chest-stretch', 'Doorway Chest Stretch', 'chest', 'pectoralis_major', 1),
-  s('fish-pose', 'Fish Pose', 'chest', 'erector_spinae', 1),
-  // shoulders — 3
-  s('cow-face-pose', 'Cow Face Pose', 'shoulders', 'gluteus_maximus', 2),
-  s('cross-body-shoulder-stretch', 'Cross-Body Shoulder Stretch', 'shoulders', 'posterior_deltoid', 2),
-  s('puppy-pose', 'Puppy Pose', 'shoulders', 'latissimus_dorsi', 1),
-  // upper_arms — 1
-  s('overhead-triceps-stretch', 'Overhead Triceps Stretch', 'upper_arms', 'triceps_brachii', 2),
-  // lower_arms — 1. The whole area, and the reason the thin-pool case below is
-  // real rather than defensive.
-  s('kneeling-wrist-stretch', 'Kneeling Wrist Stretch', 'lower_arms', 'forearm_flexors', 1),
-  // full_body — 3, and last in every ordering: Mountain Pose and Corpse Pose
-  // are a stance and a lie-down, so they belong at the end of a long routine
-  // rather than at the front of a five-minute one.
-  s('downward-facing-dog', 'Downward-Facing Dog', 'full_body', 'gastrocnemius', 1),
-  s('mountain-pose', 'Mountain Pose', 'full_body', 'erector_spinae', 1),
-  s('corpse-pose', 'Corpse Pose', 'full_body', 'erector_spinae', 1),
-];
+export function stretchCandidates(rows: readonly StretchRow[]): StretchCandidate[] {
+  const out: StretchCandidate[] = [];
+  for (const r of rows) {
+    if (!r || typeof r.id !== 'string' || !r.id || typeof r.name !== 'string' || !r.name) continue;
+    if (r.equipment != null) continue;
+    if (r.id.startsWith('pilates-')) continue;
+    if (!isArea(r.bodyPart)) continue;
+    out.push({
+      id: r.id,
+      name: r.name,
+      area: r.bodyPart,
+      muscle: Array.isArray(r.primaryMuscles) && typeof r.primaryMuscles[0] === 'string' ? r.primaryMuscles[0] : '',
+      sides: r.isUnilateral === true ? 2 : 1,
+      flow: r.force === 'dynamic',
+    });
+  }
+  return out;
+}
 
 /* ── what a member can ask for ───────────────────────────────────────────── */
 
@@ -348,9 +361,17 @@ export interface BuildRequest {
   minutes: number;
   /** A `StretchFocus` id. Defaults to the whole body. */
   focus?: string;
-  /** Defaults to `STRETCH_CATALOGUE`. An argument so the test can build from a
-   *  fixture rather than depending on the shipped 51 staying as they are. */
-  catalogue?: readonly StretchCandidate[];
+  /**
+   * The stretches to build from — `stretchCandidates()` over the rows the
+   * catalogue read returned.
+   *
+   * Required, with no default and nothing to fall back on. A default would be a
+   * second copy of the catalogue kept in this file, which is the two-sources
+   * defect the header describes; and a caller that has not read the rows yet
+   * must show its member a loading sentence, not a routine assembled from a
+   * list this module happened to remember.
+   */
+  catalogue: readonly StretchCandidate[];
   /**
    * Which routine of the several possible ones to build. Same seed, same
    * routine, every time.
@@ -380,7 +401,7 @@ function rotate<T>(list: readonly T[], n: number): T[] {
  * One area's stretches, ordered so that taking the first few spreads across
  * muscles instead of piling onto one.
  *
- * `upper_legs` holds six hamstring stretches out of twenty-four. Sorted by name
+ * `upper_legs` holds six hamstring stretches out of twenty-six. Sorted by name
  * they arrive in a run, and a short leg routine is four ways to fold forward.
  * So the list is dealt round-robin from one pile per muscle, biggest pile
  * first — hamstrings, adductors, hip flexors, glutes, quads — which is the
@@ -455,8 +476,8 @@ export function buildRoutine(req: BuildRequest): BuiltRoutine {
   const focus = focusById(focusId);
   if (!focus) return fail('We do not have that part of the body as a stretch focus.');
 
-  const catalogue = req.catalogue ?? STRETCH_CATALOGUE;
-  if (!catalogue.length) return fail('We have no stretches to build a routine from.');
+  const catalogue = req.catalogue;
+  if (!Array.isArray(catalogue) || !catalogue.length) return fail('We have no stretches to build a routine from.');
 
   // Floored rather than rejected: a fractional minute is a caller's arithmetic,
   // not a member's request, and 9.5 plainly means "fit it into nine".
@@ -488,8 +509,8 @@ export function buildRoutine(req: BuildRequest): BuiltRoutine {
 
   // Take everything that fits. `routineTotalSec` is asked rather than a private
   // sum, so the number budgeted against and the number printed on the row can
-  // never come apart. At 51 candidates the repeated walk is a few thousand
-  // additions, once, on a tap.
+  // never come apart. At the fifty-odd candidates a focus can offer, the
+  // repeated walk is a few thousand additions, once, on a tap.
   const picked: { c: StretchCandidate; area: number; pos: number }[] = [];
   const steps: StretchStep[] = [];
   const asRoutine = (ss: StretchStep[]): StretchRoutine => ({ id: 'fit', title: 'Fit', note: 'measured, never shown.', steps: ss });

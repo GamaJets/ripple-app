@@ -48,6 +48,19 @@ import {
 
 const ROOT = process.cwd();
 const args = process.argv.slice(2);
+/*
+ * --only <substring>: upload just the files whose pack path contains it.
+ *
+ * Added because a point release is seven exercises and nineteen files, and
+ * without this the only way to move them was to re-upload all 1,564 — 1.8 GB
+ * over the wire to replace 1,640 objects that were already correct. That is
+ * slow enough that somebody skips it, and skipping it is how a new movement
+ * ends up in the catalogue with no picture.
+ *
+ * Repeatable: --only ski-erg --only heel-flicks. It narrows the UPLOAD only;
+ * the mapping, the staged SQL and --write are unaffected, so a narrowed run
+ * still reports the whole picture and cannot quietly half-link the catalogue.
+ */
 const flag = (n, d = null) => { const i = args.indexOf(`--${n}`); return i === -1 ? d : args[i + 1]; };
 const has = (n) => args.includes(`--${n}`);
 
@@ -62,7 +75,7 @@ const UPLOAD = has('upload');
 const DRY = !WRITE && !UPLOAD;
 
 if (!PACK) {
-  console.error('usage: node scripts/import-repdb.mjs --pack <dir> [--style classic|flat] [--out .repdb-staging] [--write] [--upload]');
+  console.error('usage: node scripts/import-repdb.mjs --pack <dir> [--style classic|flat] [--out .repdb-staging] [--write] [--upload] [--only <substring>]');
   console.error('  default is a dry run: it reports what it would write and writes nothing.');
   process.exit(1);
 }
@@ -70,6 +83,7 @@ if (STYLE !== 'classic' && STYLE !== 'flat') {
   console.error(`--style must be classic or flat, got "${STYLE}".`);
   process.exit(1);
 }
+const ONLY = args.reduce((acc, a, i) => (a === '--only' && args[i + 1] ? [...acc, args[i + 1]] : acc), []);
 if (!existsSync(PACK)) { console.error(`no such pack directory: ${PACK}`); process.exit(1); }
 
 // ── 1 · the licence ────────────────────────────────────────────────────────
@@ -415,14 +429,20 @@ const BUCKET = 'exercise-demos';
 
 if (UPLOAD) {
   console.log(`\nuploading ${uploads.length + sidecarFiles} files (${mb(bytes + sidecarBytes)}) to ${BUCKET}…`);
-  let done = 0; const failed = [];
+  let done = 0; const failed = []; let skipped = 0;
   for (const [key, packPath] of moves) {
+    // Narrowed by --only. Counted and reported rather than silently passed
+    // over: "uploaded 19" under a heading that said 1564 is the kind of number
+    // somebody reads as a failure.
+    if (ONLY.length && !ONLY.some((o) => packPath.includes(o) || key.includes(o))) { skipped += 1; continue; }
     const body = readFileSync(join(PACK, packPath));
     const { error } = await db.storage.from(BUCKET).upload(key, body, { contentType: 'image/webp', upsert: true });
     if (error) { failed.push(`${packPath}: ${error.message}`); continue; }
     if (++done % 100 === 0) console.log(`  ${done}/${uploads.length}`);
   }
-  console.log(`  uploaded ${done}/${uploads.length}`);
+  console.log(ONLY.length
+    ? `  uploaded ${done}, skipped ${skipped} not matching --only ${ONLY.join(' ')}`
+    : `  uploaded ${done}/${uploads.length}`);
   if (failed.length) {
     console.error(`  ${failed.length} failed:`);
     for (const f of failed.slice(0, 8)) console.error('    ' + f);

@@ -264,6 +264,7 @@
     "src/lib/coachChannels.test.ts",
     "src/lib/repdbImport.test.ts",
     "src/lib/catalogueLocale.test.ts",
+    "src/lib/synonymSearch.test.ts",
     "src/lib/bulkActions.test.ts",
     "src/lib/rosterExport.test.ts",
     "src/lib/readiness.test.ts",
@@ -533,6 +534,8 @@
     "src/lib/muscleRanking.ts",
     "src/lib/muscleRanking.test.ts",
     "src/lib/bodyHeat.ts",
-    "src/lib/bodyHeat.test.ts"
+    "src/lib/bodyHeat.test.ts",
+    "src/lib/workoutTemplates.ts",
+    "src/lib/workoutTemplates.test.ts"
   ]
 }

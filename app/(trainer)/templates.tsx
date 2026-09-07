@@ -46,7 +46,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { DateSheet } from '../../src/ui/DateSheet';
-import { MIN_TARGET } from '../../src/lib/a11y';
+import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
@@ -68,7 +68,14 @@ import {
 import { assignCtaLabel } from '../../src/lib/assignPicker';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import type { Injury } from '../../src/lib/injuries';
-import { BACK_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_CHAR } from '../../src/ui/direction';
+import { isWhole } from '../../src/ui/loadStatus';
+import { useProgrammeLibrary } from '../../src/ui/workoutTemplates';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
+import {
+  goalLabel, difficultyLabel, frequencyLabel, restLabel, setsLabel,
+  shapeLine, unreadableNote, exerciseSpoken, localisedText, templateFallbackNote, daysFallBack,
+} from '../../src/lib/workoutTemplates';
 
 export default function Templates() {
   const t = useTheme();
@@ -415,6 +422,9 @@ export default function Templates() {
           ))}
         </Section>
 
+        <Rule />
+        <PlatformProgrammes />
+
       </ScrollView>
 
       {/* ── bulk-assign sheet ────────────────────────────────────────────── */}
@@ -680,5 +690,199 @@ export default function Templates() {
         onPick={(iso) => { setStartsOn(iso); setStartPick(false); }}
       />
     </SafeAreaView>
+  );
+}
+
+/* ── the fifteen that belong to nobody ──────────────────────────────────────
+ *
+ * `public.workout_templates` — the platform's own programme catalogue,
+ * imported from RepDB, readable by every signed-in account and writable through
+ * the API by no one. It is a SECOND table on purpose:
+ * `program_templates.coach_id` is NOT NULL, so filing these there would have
+ * meant inventing an owner and handing one coach the platform's catalogue. See
+ * supabase/parts/2600.
+ *
+ * ── Why a section here and not a second screen ────────────────────────────
+ *
+ * A coach looking for "a push-pull-legs I can crib from" is standing in their
+ * template library when they think it, and a separate screen would be a second
+ * place to look for the same kind of thing — reachable, and reachable only by
+ * someone who already knew it existed.
+ *
+ * ── And why it is kept visibly apart ──────────────────────────────────────
+ *
+ * The section above this one is the coach's own work: private to them, theirs
+ * to edit, theirs to delete, theirs to assign to a client. Not one of those is
+ * true here. So these are not merged into that list, they do not get an Edit or
+ * a Delete they would be refused, and the standing line says what they are.
+ * The one thing worse than not having them would be a coach believing they had
+ * built them — or believing they had deleted one.
+ *
+ * There is no Assign. That is a decision, not an omission: `assignProgramTo`
+ * writes a `Program` (src/lib/programs.ts), and a RepDB day is a different
+ * shape whose reps are strings like "6-8", "AMRAP" and "30s". Converting one to
+ * the other means deciding what those become, and a silent guess at that is a
+ * client doing thirty repetitions of a thirty-second plank. A button that
+ * cannot be honest is not offered, and the section says so instead.
+ */
+function PlatformProgrammes() {
+  const t = useTheme();
+  const router = useRouter();
+  const { templates, status, signedOut, unreadableRows, locale, movements, reload } = useProgrammeLibrary();
+  // The English catalogue name is what /(trainer)/exercise must be opened with;
+  // this is the coach's own language for the line. See src/lib/catalogueLocale.ts.
+  const { nameOf } = useMovementName();
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = useMemo(() => templates.find((x) => x.id === openId) ?? null, [templates, openId]);
+
+  return (
+    <Section>
+      {/* A count over a truncated read is not the size of the catalogue, and a
+          count over a signed-out read measures a permissions refusal. isWhole,
+          not `!== 'error'`. */}
+      <SectionHead
+        title="Platform Programmes"
+        note={isWhole(status) && !signedOut && templates.length ? String(templates.length) : undefined}
+      />
+      <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+        Ready-made plans that ship with the app. They are not yours and they are not in your library — you
+        cannot edit, delete or assign one. They are here to read and to build from.
+      </Text>
+
+      {/* Loading, failed, not-allowed-to-look and genuinely empty are four
+          different things. The third is not theoretical: the read policy is
+          `to authenticated`, so a session that has not been restored yet is
+          handed zero rows and no error at all. */}
+      {status === 'loading' ? (
+        <Text style={{ ...ty.label, color: t.ink3 }}>Reading the platform programmes…</Text>
+      ) : status === 'error' ? (
+        <Notice tone={t.warn} kicker="Platform" title="The platform programmes could not be read"
+          note="This is our end. Nothing has been removed and none of your own templates above are affected — pull down to try again." />
+      ) : signedOut ? (
+        <Notice tone={t.warn} kicker="Platform" title="Sign in to see the platform programmes"
+          note="These are only readable once you are signed in, so this section was not allowed to look them up." />
+      ) : (
+        <>
+          {status === 'partial' ? <PartialRead what="platform programmes" shown={templates.length} onPress={reload} /> : null}
+          {unreadableRows > 0 ? (
+            <Flag tone={t.warn}>
+              {unreadableRows === 1
+                ? 'One platform programme came back in a shape this app could not read and is not listed below.'
+                : `${unreadableRows} platform programmes came back in a shape this app could not read and are not listed below.`}
+            </Flag>
+          ) : null}
+
+          {templates.length === 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              There are no platform programmes yet. They appear here as they are added.
+            </Text>
+          ) : templates.map((x, i) => {
+            const name = localisedText(x.name, locale);
+            const description = localisedText(x.description, locale);
+            const isOpen = open?.id === x.id;
+            const meta = [goalLabel(x.goal), difficultyLabel(x.difficulty), frequencyLabel(x.frequencyPerWeek), shapeLine(x)]
+              .filter(Boolean).join(' · ');
+            const note = templateFallbackNote(name, description, daysFallBack(x.days, locale));
+            const shortfall = unreadableNote(x);
+            return (
+              <View key={x.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <Pressable
+                  onPress={() => setOpenId(isOpen ? null : x.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: isOpen }}
+                  // A label REPLACES the lines beneath it, so the whole row has
+                  // to be in it. See scripts/check-a11y.mjs.
+                  accessibilityLabel={[
+                    name?.text ?? x.id, meta, description?.text,
+                    isOpen ? 'Hide the days' : 'Show the days',
+                  ].filter(Boolean).join('. ')}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.lg, minHeight: MIN_TARGET }}
+                >
+                  <View style={{ width: 38, height: 38, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name="grid" size={18} color={t.ink2} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{name?.text ?? x.id}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{meta}</Text>
+                    {description ? (
+                      <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }} numberOfLines={isOpen ? undefined : 2}>{description.text}</Text>
+                    ) : null}
+                  </View>
+                  <Text style={{ ...ty.label, color: t.ink3 }}>{isOpen ? '–' : '+'}</Text>
+                </Pressable>
+
+                {isOpen ? (
+                  <View style={{ paddingBottom: sp.lg }}>
+                    {note ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{note}</Flag> : null}
+                    {shortfall ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{shortfall}</Flag> : null}
+                    {movements.status === 'error' ? (
+                      <Flag tone={t.warn}>
+                        The catalogue names for these movements could not be read, so each line is listed by its
+                        catalogue id. The sets, reps and rests below are the programme's own and are complete.
+                      </Flag>
+                    ) : null}
+
+                    {x.days.length === 0 ? (
+                      <Text style={{ ...ty.label, color: t.ink3 }}>
+                        This programme lists no days. That is a gap in the programme, not a read that failed.
+                      </Text>
+                    ) : x.days.map((d, di) => {
+                      const dayName = localisedText(d.name, locale);
+                      return (
+                        <View key={`${x.id}-day-${di}`} style={{ marginTop: di === 0 ? 0 : sp.lg }}>
+                          <Text style={{ ...ty.micro, color: t.ink3 }}>{dayName?.text ?? `Day ${di + 1}`}</Text>
+                          {d.exercises.length === 0 ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>This day lists no movements.</Text>
+                          ) : d.exercises.map((e, ei) => {
+                            const english = movements.byId.get(e.exerciseId) ?? null;
+                            const label = english ? nameOf(english).text : e.exerciseId;
+                            const load = setsLabel(e.sets, e.reps);
+                            const rest = restLabel(e.restSeconds);
+                            const cue = localisedText(e.notes, locale);
+                            // exerciseSlug() of a catalogue id is the id itself,
+                            // so the detail screen resolves either and shows the
+                            // real name once the row lands.
+                            const target = english ?? e.exerciseId;
+                            return (
+                              <Pressable
+                                key={`${x.id}-${di}-${ei}-${e.exerciseId}`}
+                                onPress={() => router.push({ pathname: '/(trainer)/exercise', params: { name: target, from: 'trainerTemplates' } })}
+                                accessibilityRole="button"
+                                accessibilityLabel={[
+                                  exerciseSpoken(label, e.sets, e.reps, e.restSeconds),
+                                  cue?.text,
+                                  'Opens the movement',
+                                ].filter(Boolean).join('. ')}
+                                hitSlop={hitSlopFor(MIN_TARGET)}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.sm, minHeight: MIN_TARGET }}
+                              >
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ ...ty.label, color: t.ink }}>{label}</Text>
+                                  {load || rest ? (
+                                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>{[load, rest].filter(Boolean).join(' · ')}</Text>
+                                  ) : null}
+                                  {cue ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>{cue.text}</Text> : null}
+                                </View>
+                                <Text style={{ ...ty.caption, color: t.ink3 }}>{FORWARD_CHAR}</Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      );
+                    })}
+
+                    {/* Whose programmes these are, on the page they are read
+                        from rather than two screens away on a credits card. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>
+                      Programme by RepDB · repdb.co
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+        </>
+      )}
+    </Section>
   );
 }
