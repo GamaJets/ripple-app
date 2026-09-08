@@ -132,5 +132,108 @@ eq(unread.rollup.outstandingCents, null, 'and the KPI above it says so too');
 ok(unread.members![0].settleBlocker == null || unread.members![0].settleBlocker!.length > 0,
   'a blocker on an unread read is either absent or a sentence, never an empty string');
 
+/* ── 6 · a figure in no money at all ──────────────────────────────────────── *
+ *
+ * THE SECOND DEFECT THIS FILE NOW HOLDS
+ *
+ * `settlementAmount` adds `rate_cents` up and has never looked at
+ * `rate_currency`. `staffView` handed the result back as a bare integer and
+ * /staff wrote `tenants.currency` beside it — the gym's code TODAY, over rates
+ * snapshotted whenever they were snapshotted. On a gym that changed its
+ * currency mid-window the sum is a total ACROSS two moneys, and /sessions
+ * already refuses to settle that exact run through `settleCurrencyBlocker`. So
+ * "Payable now" was a confident figure the settle path would not pay, and
+ * neither screen said why they differed.
+ *
+ * The three rules below are ./gymRateCurrency's, not new ones:
+ *   · one currency  → the figure stands and is named;
+ *   · unrecorded    → the figure is REAL and stands, the LABEL is withheld;
+ *   · mixed         → there is no figure.
+ */
+
+const cur = (
+  id: string, daysAgo: number, rateCents: number | null, rateCurrency: string | null,
+  trainerId = 'omar',
+): PtSession => ({
+  ...sess(id, daysAgo, rateCents), trainerId, rateCurrency,
+});
+
+/* one money: the figure stands, and this module — not the screen — names it */
+const oneMoney = build([cur('a', 1, OWN_RATE, 'GBP'), cur('b', 2, OWN_RATE, 'GBP')], FEE);
+const gbp = oneMoney.members![0];
+eq(gbp.outstandingCents, 2 * OWN_RATE, 'a run in one currency still has a total');
+eq(gbp.outstandingCurrency, 'GBP', 'and the total is labelled from the RATES, never from tenants.currency');
+eq(gbp.outstandingMixedCurrency, false, 'nothing is mixed about it');
+eq(gbp.outstandingNote, null, 'so there is no sentence to print where the figure would have gone');
+eq(gbp.owedCurrency, 'GBP', 'the earned side is labelled off the same rows');
+eq(gbp.owedCents, 2 * OWN_RATE, 'and states its figure');
+eq(oneMoney.rollup.outstandingCurrency, 'GBP', 'and the gym-wide KPI carries the code too');
+
+/* two moneys: there is no figure, and the module refuses rather than adds */
+const twoMoneys = build([cur('a', 1, OWN_RATE, 'GBP'), cur('b', 2, OWN_RATE, 'EUR')], FEE);
+const straddle = twoMoneys.members![0];
+eq(straddle.outstandingSessions, 2, 'both sessions are still outstanding — the work happened');
+eq(straddle.outstandingCents, null,
+  'but GBP + EUR is not an amount of anything, so there is no figure to print');
+eq(straddle.outstandingCurrency, null, 'and no single code that could honestly label one');
+eq(straddle.outstandingMixedCurrency, true, 'which is what tells this null from “nothing to settle”');
+ok((straddle.outstandingNote ?? '').includes('GBP') && (straddle.outstandingNote ?? '').includes('EUR'),
+  `the sentence that replaces the figure names both pots (got ${JSON.stringify(straddle.outstandingNote)})`);
+eq(straddle.owedCents, null, 'the earned side refuses identically — one rule, not two');
+eq(straddle.owedMixedCurrency, true, 'and says why');
+ok((straddle.owedNote ?? '').includes('GBP'), 'with the same sentence underneath it');
+ok(straddle.settleBlocker != null,
+  'and settling is refused here exactly as /sessions refuses it, rather than offered on a total nobody can pay');
+eq(straddle.settleable, false, 'so no screen can present this run as ready to hand over');
+eq(twoMoneys.rollup.outstandingCents, null, 'the gym-wide “Payable now” withholds it too');
+eq(twoMoneys.rollup.outstandingMixedCurrency, true, 'and says which kind of null it is');
+
+/* unrecorded: the figure is real, only its label is missing */
+const preHistory = build([cur('a', 1, OWN_RATE, null), cur('b', 2, OWN_RATE, null)], FEE);
+const legacy = preHistory.members![0];
+eq(legacy.outstandingCents, 2 * OWN_RATE,
+  'rates filed before part 1010 are real money — withholding the figure would destroy a true number');
+eq(legacy.outstandingCurrency, null,
+  'what is withheld is the LABEL: nothing on the record says what these were in');
+eq(legacy.outstandingMixedCurrency, false, 'unrecorded is one answer, not two');
+ok((legacy.outstandingNote ?? '').length > 0,
+  'and the reason is a sentence the screen can print beside the unlabelled figure');
+
+/* a roster can straddle two moneys with every coach on exactly one */
+const twoCoaches = buildStaff({
+  trainers: sliceReady([
+    { trainerId: 'omar', name: 'Omar', since: at(300) },
+    { trainerId: 'priya', name: 'Priya', since: at(300) },
+  ]),
+  sessions: sliceReady([
+    cur('a', 1, OWN_RATE, 'GBP'),
+    cur('b', 2, OWN_RATE, 'EUR', 'priya'),
+  ]),
+  shifts: sliceReady([]), clients: sliceReady([]),
+  activity: sliceReady([]), classes: sliceReady([]),
+}, { policy: PAY_DELIVERED_ONLY, fallbackRateCents: FEE, now: NOW, windowDays: 30 });
+const each = (id: string) => twoCoaches.members!.find((m) => m.trainerId === id)!;
+eq(each('omar').outstandingCents, OWN_RATE, 'each coach is on exactly one money, so each row has a figure');
+eq(each('priya').outstandingCurrency, 'EUR', 'and each row names its own');
+eq(twoCoaches.rollup.outstandingCents, null,
+  'the HEADLINE is the case a fold over the rows would miss: two printable figures whose total is in no money');
+eq(twoCoaches.rollup.outstandingMixedCurrency, true, 'and it says so rather than showing a smaller confident sum');
+eq(twoCoaches.rollup.owedCents, null, 'the earned headline is withheld for the same reason');
+
+/* ── 7 · the gym's own code, when the caller states it ────────────────────── */
+
+const withGym = (gymCurrency: string | null | undefined) => buildStaff(
+  recordOf([cur('a', 1, OWN_RATE, 'GBP')]),
+  { policy: PAY_DELIVERED_ONLY, fallbackRateCents: FEE, now: NOW, windowDays: 30, gymCurrency },
+).members![0];
+
+ok((withGym('AED').settleBlocker ?? '').includes('GBP'),
+  'told the gym charges in AED, this refuses to offer a GBP run as settleable — the same refusal /sessions makes');
+eq(withGym('GBP').settleBlocker, null, 'and waves through the run that agrees with the code it would be stamped with');
+eq(withGym(undefined).settleBlocker, null,
+  'told nothing, it does NOT announce that the gym has no currency — that would be a fact about the gym invented from a fact about the caller');
+ok((withGym(undefined).outstandingCurrency) === 'GBP',
+  'while the figure is still labelled from the rates, which need no gym currency at all');
+
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log('staffView: ok (payable is priced by the same fee that admitted the rows, and unpriced is never free)');
+console.log('staffView: ok (payable is priced by the same fee that admitted the rows, unpriced is never free, and a sum across two moneys is never a figure)');
