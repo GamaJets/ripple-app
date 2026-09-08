@@ -101,7 +101,18 @@ import { assertRootFloors } from './gate-floor.mjs';
 
 // The web console writes to the same money columns through the same helpers, so
 // it has the same failure mode and gets the same rule.
-const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/lib'];
+//
+// `studio-web/components` was missing from this list until it was noticed that
+// the sentence above names the console and the array named two of its three
+// directories. Nothing argued the omission; it was the shape check-text.mjs had
+// — `.md` in the extension list and `docs/` absent from the roots, so the gate
+// LOOKED covered and matched none of them. The seven files under it are the
+// console's shared furniture, and `DataTable` and `Kpi` are where a figure is
+// finally rendered, which is exactly where a currency goes missing. Adding it
+// found nothing today, which is the only reason it could be added in one
+// change rather than argued over: the floor is in gate-floor.mjs and a hit
+// from here on is a regression rather than a backlog.
+const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/lib', 'studio-web/components'];
 const ROOT = process.cwd();
 
 /**

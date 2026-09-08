@@ -50,6 +50,7 @@ import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '@lib/sumCurren
 import { noGymNote } from '@lib/gymLink';
 import { Fetched, useFetched } from '@/components/Fetched';
 import { Banner } from '@/components/Banner';
+import { num } from '@/lib/num';
 import {
   buildPassConversion, suppressionSentence,
   CAUSAL_CAVEAT, MONEY_NOTE, CONVERSION_LABEL, CONVERSION_COST,
@@ -966,7 +967,7 @@ function Money({ c, rec, ccy }: {
                      taking money without recording in what. */
                   : m.mixedCurrency ? MIXED_CURRENCY_NOTE
                   : !m.currency
-                    ? `${m.passesPriced} of ${m.passesTotal} passes ${m.passesPriced === 1 ? 'carries' : 'carry'} a recorded price, but not one of those rows says what money it was taken in, so there is no figure to write here. The gym’s own currency is not the answer: it is not evidence about what somebody was charged at the desk.`
+                    ? `${num(m.passesPriced)} of ${num(m.passesTotal)} passes ${m.passesPriced === 1 ? 'carries' : 'carry'} a recorded price, but not one of those rows says what money it was taken in, so there is no figure to write here. The gym’s own currency is not the answer: it is not evidence about what somebody was charged at the desk.`
                     /* The mixed-currency clause that used to trail this line is
                        gone rather than repaired. `mixedCurrency` and a non-null
                        `currency` can no longer both be true — mixed rows are
@@ -977,7 +978,7 @@ function Money({ c, rec, ccy }: {
                        exists to withhold. The state is not lost: it is the
                        MIXED_CURRENCY_NOTE branch above and the red paragraph
                        below. */
-                    : `from ${m.passesPriced} of ${m.passesTotal} passes`
+                    : `from ${num(m.passesPriced)} of ${num(m.passesTotal)} passes`
               }
             />
             <Kpi

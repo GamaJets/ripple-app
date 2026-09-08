@@ -70,6 +70,7 @@ import { goalLabel, sortGoals, GOAL_METRIC, type GoalTarget, type MeasuredKind }
 import { readByIds } from '@lib/idLookup';
 import { readAll } from '@lib/rowCap';
 import { Banner } from '@/components/Banner';
+import { num } from '@/lib/num';
 
 const DAY = 86400000;
 
@@ -1049,7 +1050,7 @@ function Packs({ packs, failed, rows, zone }: {
       // spent; it was never counted in sessions at all.
       render: (p) => p.total == null
         ? <span className="dash">— not sold by the session</span>
-        : `${Math.max(0, p.total - p.used)} of ${p.total}`,
+        : `${num(Math.max(0, p.total - p.used))} of ${num(p.total)}`,
     },
     {
       key: 'paid', header: 'Paid (minor units)', value: (p) => p.amountCents, numeric: true,

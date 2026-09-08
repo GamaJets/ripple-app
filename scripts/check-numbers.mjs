@@ -24,7 +24,19 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-const ROOTS = ['app', 'src/ui'];
+// The console renders the same kind of figure — a member count, a visit tally,
+// a pass total — into the same kind of JSX, and a raw four-digit number is
+// exactly as unreadable in a browser as on a phone. This rule is about the
+// STRING a reader sees and nothing about React Native, so the console gets it.
+//
+// It is the console's own formatters that go in FORMATTED below, not the app's:
+// `studio-web/lib/num.ts` argues at length why it cannot import src/lib/format
+// — every function there asks `appLocale()`, a module-level latch seeded once,
+// which in Next.js resolves on the server during render and again in the
+// browser during hydration, on two machines with two locales. That is a silent
+// hydration error. So the console has `num`, `num1` and `numUpTo` of its own,
+// and `amount` in studio-web/lib/currency.ts for a gym-denominated figure.
+const ROOTS = ['app', 'src/ui', 'studio-web/app', 'studio-web/components', 'studio-web/lib'];
 const ROOT = process.cwd();
 
 /** Field-name fragments whose values pass a thousand in normal use. */
@@ -43,9 +55,30 @@ const SMALL = new Map([
   ['sessions_total', 'the size of a session pack — 5, 10, 20'],
   ['CYCLE_KCAL', 'the fixed carb-cycling step, a constant under 300'],
   ['grams', 'already a formatted range label — "132–165 g" — not a number'],
+  // Added when the console joined ROOTS. Both are the SIZE OF ONE BOOK rather
+  // than a tally across the gym, which is the distinction that matters here:
+  // `passesTotal` on studio-web/app/passes is how many passes the gym has ever
+  // issued and IS formatted, while these two are what is printed on a single
+  // one of them.
+  ['usesTotal', 'visits on one gym pass — a 10- or 20-visit book, or a year of daily entry; never four digits'],
+  ['packTotal', 'sessions in one coaching pack — 5, 10, 20, exactly as sessions_total above'],
+  // Not "cannot reach 999" but "is not a number at all" — the second kind of
+  // entry on this list, which `kcalNote`, `grams` and `setKcal` above already
+  // are. `payrollMoney` in studio-web/app/close/page.tsx is `money()`'s output:
+  // a string with a currency code on the front, grouped by `minorMoney` at the
+  // point it was built. BIG matches it on the bare word `payroll`, so no name
+  // that still says what it holds can get past that; the local was renamed from
+  // `payrollTotal` anyway, because a name ending in Total reads as a figure and
+  // that is the confusion this gate ran into.
+  ['payrollMoney', 'a money() string built where the currency is known — already grouped, and a separator on a string is nothing'],
 ]);
 
-const FORMATTED = /\b(num|num1|money|toLocaleString|toFixed|catalogueValue)\s*[(.]/;
+// `numUpTo` and `amount` are the console's, and both group: `numUpTo` is
+// `toLocaleString` with a decimal cap, `amount` goes through `money()` in
+// src/lib/gymRecord.ts and so through `minorMoney`. Neither matched the
+// alternation before — `numUpTo(` is not `num` followed by a bracket — so a
+// figure the console HAD formatted would have been reported raw.
+const FORMATTED = /\b(num|num1|numUpTo|amount|money|toLocaleString|toFixed|catalogueValue)\s*[(.]/;
 
 function walk(dir, out = []) {
   for (const e of readdirSync(dir)) {

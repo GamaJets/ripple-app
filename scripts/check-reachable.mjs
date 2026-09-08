@@ -40,6 +40,42 @@
 //
 // So passing this does not mean the IA is good. Failing it means a screen is
 // unreachable, which is not a matter of opinion.
+//
+// ── the console, and why it is not in ROOTS ───────────────────────────────
+//
+// Recorded rather than left implicit, after a sweep reported this gate as not
+// walking studio-web.
+//
+// The gap is real: nothing in this repository checks that a console route can
+// be reached. `src/lib/consoleRoutes.test.ts` is the closest thing and it
+// deliberately asks four other questions — 'use client', `loadMe`, a `me.role`
+// decision, and that the page RENDERS `<Shell>`. Rendering the Shell is not
+// being linked from it, which is the exact distinction this file was written
+// about: app/(client)/reminders.tsx rendered perfectly and no row pointed at
+// it.
+//
+// It is not closed by widening ROOTS, because the thing this gate greps for
+// does not occur in the console. GROUPS above is `(client)`, `(trainer)`,
+// `(owner)` and the literal it looks for is `(group)/name` — expo-router's
+// spelling. Next.js's app router names a route by its DIRECTORY: the file is
+// `studio-web/app/payroll/page.tsx` and the link is `href="/payroll"`, and
+// there is no string in either that this file's matcher would find. Adding the
+// root would walk 37 more files and report every one of them clean, which is
+// the failure mode this gate exists to prevent, aimed at itself.
+//
+// The sibling rule is small and well-shaped: enumerate `**/page.tsx` under
+// studio-web/app, turn each into its route by its directory path, and require
+// the literal to appear in some OTHER file under studio-web. Measured by hand
+// while writing this, on 8 September 2026: all 31 routes are named from
+// `components/Shell.tsx`, and eleven are additionally cross-linked from a
+// sibling page. So it would find nothing today — which is why it is described
+// here rather than added in the same change as three widenings that each found
+// real work. Two things it must get right when somebody does write it, both
+// learned from this file: `.next/` is build output and naming a route from
+// `.next/types/routes.d.ts` must not count as an entry point, exactly as a
+// route named only in a COMMENT does not count here; and Shell's nav is
+// role-gated, so "named in Shell.tsx" is the floor and not proof that the
+// reader who needs the page can see the row.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 

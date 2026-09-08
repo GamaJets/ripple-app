@@ -51,6 +51,7 @@
 // answered for them.
 import { resolveUnits, regionFromLocale, type ResolvedUnits } from '@lib/unitPreference';
 import { weightLabel, weightDeltaIn, plain, type WeightUnit } from '@lib/units';
+import { deltaSign } from '@lib/deltaLabel';
 import type { Me } from '@/lib/supabase';
 
 export type { WeightUnit };
@@ -111,7 +112,25 @@ export function weightText(kg: number | null | undefined, unit: WeightUnit): str
 export function deltaText(deltaKg: number | null | undefined, unit: WeightUnit): string | null {
   const d = weightDeltaIn(deltaKg, unit);
   if (d == null) return null;
-  return `${d > 0 ? '+' : ''}${plain(d)}`;
+  // The sign comes from `deltaSign` rather than from `d > 0` here, and the two
+  // are not the same expression. The hand-rolled one wrote a bare `plain(d)`
+  // for anything not above zero, and `plain` spells a negative with an ASCII
+  // HYPHEN — so this column read "-2.1" while every movement on the phone read
+  // "−2.1" (U+2212), which is what `MINUS` in src/lib/deltaLabel.ts is exported
+  // to keep single. It also means a change that rounds to nothing now carries
+  // no sign at all instead of a "+", which is the defect that module was
+  // written for: there is no such thing as negative — or positive — nothing.
+  //
+  // `deltaSign` and not `deltaLabel`: the sign half is pure arithmetic and safe
+  // here, while `deltaLabel` and `deltaMagnitude` reach `plain` -> `appLocale()`,
+  // the module-level latch lib/num.ts refuses for hydration reasons. `plain` is
+  // already imported in this file and that is a separate question, noted below.
+  //
+  // `dp` mirrors `weightDeltaIn`, which has ALREADY rounded — whole pounds, one
+  // decimal place of a kilogram — so the sign is decided on exactly the figure
+  // that is about to be printed rather than on an unrounded one behind it.
+  const dp = unit === 'lb' ? 0 : 1;
+  return `${deltaSign(d, dp)}${plain(Math.abs(d), dp)}`;
 }
 
 /**

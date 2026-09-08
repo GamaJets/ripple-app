@@ -66,7 +66,24 @@ import { join, relative } from 'node:path';
 import { assertRootFloors } from './gate-floor.mjs';
 
 const ROOT = process.cwd();
-const ROOTS = ['app', 'src/ui', 'src/lib'];
+// The console shows movements too — net members this month, revenue against the
+// same month last year, a weight change since a member's first scan — and a
+// sign in front of nothing is wrong in a browser for the same reason it is
+// wrong on a phone. Nothing in this rule is about React Native: it reads a
+// conditional on a comparison against zero whose arm is a sign character, which
+// is the same expression in either tree.
+//
+// One caveat that belongs with the widening, because it decides which helper a
+// console fix may reach for. `deltaSign`, `deltaArrow` and `deltaMoved` are
+// pure arithmetic — `deltaFigure` and a comparison — and the console may import
+// them. `deltaLabel` and `deltaMagnitude` may NOT: both go through `plain` in
+// src/lib/units.ts, which calls `appLocale()`, the module-level latch that
+// studio-web/lib/num.ts exists to avoid. In Next.js that resolves on the server
+// during render and again in the browser during hydration, on two machines with
+// two locales, and the mismatch is a silent hydration error. So a console site
+// takes the SIGN from the helper and spells the figure with the console's own
+// formatter.
+const ROOTS = ['app', 'src/ui', 'src/lib', 'studio-web/app', 'studio-web/components', 'studio-web/lib'];
 
 /**
  * A comparison against zero, and a sign character in one of the arms after it.

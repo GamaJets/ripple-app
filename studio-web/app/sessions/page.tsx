@@ -48,6 +48,7 @@ import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode }
 // What became of a past session, in one vocabulary shared with both phone apps.
 import { pastSessions, pastVerdict, tallyPast, PAST_STATE_LABEL } from '@lib/sessionHistory';
 import { Banner } from '@/components/Banner';
+import { num } from '@/lib/num';
 
 const DAY = 86400000;
 
@@ -1205,8 +1206,8 @@ function History({ rows, error, from, offset, zone, onOffset }: {
               ? 'No one-to-one had finished in this month when it was read.'
               : (
                 <>
-                  {tally.total} finished · {tally.delivered} delivered · {tally.missed} no-show
-                  {' '}· {tally.late_cancelled} late cancel · {tally.cancelled} cancelled
+                  {num(tally.total)} finished · {num(tally.delivered)} delivered · {num(tally.missed)} no-show
+                  {' '}· {num(tally.late_cancelled)} late cancel · {num(tally.cancelled)} cancelled
                   {tally.unmarked > 0
                     ? <> · <span style={{ color: 'var(--warn)' }}>{tally.unmarked} still needing an outcome</span></>
                     : ' · none unmarked'}

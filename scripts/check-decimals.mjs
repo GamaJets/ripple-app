@@ -79,6 +79,39 @@
 // So this holds one rule completely and is silent about four more. The rest are
 // held by src/lib/units.test.ts, by the readers in src/lib (readLift,
 // readNumber, readFoodEdit, parseRate, parseTyped) and by review.
+//
+// ── why studio-web is NOT in ROOTS, written down rather than left as a hole ──
+//
+// A sweep over the gates found this one "does not walk the console" and offered
+// that as a gap to close. It is not one, and widening ROOTS would be the wrong
+// repair: this rule is `keyboardType="numeric"` on a React Native `<TextInput>`,
+// and `keyboardType` DOES NOT EXIST in the DOM. There is no such attribute on
+// an `<input>`, React DOM does not forward it, and a console file could not
+// fail this check however wrong its fields were. Adding `studio-web/app` here
+// buys a bigger scanned-file count and nothing else — which is worse than the
+// gap, because the passing line then says the console was checked.
+//
+// The console's equivalent is a DIFFERENT RULE and would have to be written as
+// one: `inputMode` on an `<input>`, where the fractional fields want
+// `inputMode="decimal"` and the whole ones `inputMode="numeric"`. Two things
+// make it a smaller prize than the phone's. The stakes are lower — `inputMode`
+// only HINTS a touch keyboard and restricts nothing, so a desk user with a
+// physical keyboard can always type the point that the iOS number pad
+// genuinely withheld. And the console already does it by hand: every money
+// field on /money, /costs, /payroll, /staff, /accounting and /settings carries
+// `inputMode="decimal"` today, and the counts carry `inputMode="numeric"`.
+//
+// So the sibling rule is worth having as a ratchet on that existing habit, and
+// it is not worth pretending this file is it. What it must NOT do is take the
+// FRACTIONAL word list below unchanged: `\brate\b`, `\bprice\b`, `\bfee\b`,
+// `\bamount\b` and `\bcost\b` are money, and money in this console is entered
+// and stored in MINOR UNITS, where the right hint depends on the currency —
+// `currencyDecimals()` returns null for one nobody has set, sixteen currencies
+// have no minor unit at all, and five have three. A rule that demanded
+// `inputMode="decimal"` on every money box would be asking a gym in Tokyo for
+// fractional yen. That is the argument that has to be settled before the
+// sibling is written, and it is why this is a description and not an
+// implementation.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 

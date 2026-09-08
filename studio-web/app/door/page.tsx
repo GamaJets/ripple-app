@@ -107,6 +107,7 @@ import { buildRollCall, rollCallHtml, emergencyLine } from '@lib/rollCall';
 import { fetchMemberships, money, type Membership } from '@lib/gymRecord';
 import { fetchClasses, type GymClass } from '@lib/gymSchedule';
 import { isoDate } from '@lib/format';
+import { num } from '@/lib/num';
 
 const DAY = 86400000;
 
@@ -2157,7 +2158,7 @@ function Occupancy({ visits, unread, days, zone, desk }: {
               that recorded an exit is honest only if it says how many that was
               — half of them being open makes the average a sample, not a fact. */}
           {dwell && dwell.minutes != null
-            ? `Average stay ${dwell.minutes} min, measured from the ${dwell.closed} of ${dwell.total} visits that recorded an exit.`
+            ? `Average stay ${dwell.minutes} min, measured from the ${num(dwell.closed)} of ${num(dwell.total)} visits that recorded an exit.`
             : `No visit in this window recorded an exit, so there is no average stay — that is a door with no way out recorded, not a gym nobody stays in.`}
         </p>
       </div>

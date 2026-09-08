@@ -158,6 +158,32 @@
 // `currency-ok:` in check-currency.mjs. It is what a reviewer reads when
 // deciding whether "nothing needed here" is honestly true, and it cannot be
 // written by somebody who has not thought about where the field sits.
+//
+// ── why studio-web is NOT in ROOTS ────────────────────────────────────────
+//
+// Recorded here so the omission is a decision rather than a hole, after a
+// sweep over the gates listed this one as not walking the console.
+//
+// Every noun in the rule above is React Native and has no counterpart in the
+// DOM: `KeyboardAvoidingView`, `automaticallyAdjustKeyboardInsets`,
+// `ScrollView`/`FlatList`/`SectionList`, `TextInput`. There is no wrapper to
+// find in a Next.js page and no inset to adjust, so the walk would flag
+// nothing and prove nothing.
+//
+// It is not merely that the spelling differs — the BUG does not exist in the
+// same form. The defect this file exists for is a soft keyboard occluding the
+// lower half of a viewport that does not resize, on a phone held one-handed on
+// a gym floor. A browser handles the analogous case itself: a focused element
+// is scrolled into view by the user agent, and the console is a desk tool on a
+// hardware keyboard, where nothing overlays the page at all. Widening ROOTS
+// here would assert coverage of a class of failure the console cannot have.
+//
+// There IS a real web sibling to the same underlying concern — a focused
+// control that scrolls out of view behind a `position: sticky` header, which
+// this console has on several tables — but it is a layout question decided by
+// rendered geometry, not by which components enclose which, and nothing in
+// this file's machinery would answer it. It would be a new gate, and it is not
+// pretended to be this one.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 

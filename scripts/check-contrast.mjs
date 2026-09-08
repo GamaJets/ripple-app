@@ -53,6 +53,68 @@
 //
 // It catches the form the mistake actually takes in this codebase, and that is
 // the claim it makes.
+//
+// ── why rule 1's ROOTS stop at the app, and what the console needs instead ──
+//
+// Recorded here because a sweep over the gates reported rule 1 as not walking
+// the console, and offered a reason that is not this file's: that a unitless
+// CSS `line-height` is right on the web and wrong in React Native. That is a
+// true sentence and it belongs to check-a11y.mjs, whose rule 2 is about
+// `lineHeight` and which argues it in its own header. It has nothing to do
+// with colour and nothing to do with this file.
+//
+// The real reason is narrower and it is mechanical. STATUS above is
+// `\bt\.(crit|warn|serious|good|s[1-6])\b` — the React Native theme OBJECT, as
+// `t.crit`. The console has no `t`. It spells the same token as a CSS custom
+// property, `var(--crit)`. So adding `studio-web/app` to ROOTS would scan
+// thirty-odd more files and match nothing, and the passing line would then
+// claim the console holds a rule it was never tested against. A wider root is
+// not the repair.
+//
+// ── the repair, described rather than built, and why ──────────────────────
+//
+// The web-shaped sibling is one regex away in principle: a `color:` property
+// whose value is `var(--crit|--warn|--serious|--good|--s1…--s6)`, over
+// studio-web's .tsx and globals.css. It is NOT built here, and the reason is
+// the finding, not squeamishness about the work.
+//
+// The defect is real and it is measured. Rule 2 below already walks this
+// console's palette and holds its status colours to the 3:1 of WCAG 1.4.11,
+// because that is what a MARK promises. Asked the text question instead, the
+// same arithmetic on the same file says:
+//
+//   dark   --crit #d34646 on --surface3 #1b3229   3.08:1   AA text needs 4.5
+//   dark   --crit          on --surface2          3.57:1
+//   dark   --crit          on --surface           3.80:1
+//   dark   --good #0ca30c on --surface3           4.08:1
+//   light  --crit #cf3737 on --surface3           4.05:1
+//   light  --warn #956703 on --surface3           4.08:1
+//   light  --serious      on --surface3           4.04:1
+//   light  --brand #b45309 on --surface3          4.12:1
+//
+// and the console draws SENTENCES in those colours — `role="alert"` error text
+// on /page.tsx and /settings, blocker paragraphs on /accounting and /close, a
+// "let in and marked present" note on /classes. Same defect as the app's, same
+// cost, in the console's own spelling.
+//
+// It is 244 `color:` sites across 32 files. That is why this is a description.
+// The app's fix is `<Flag>` — the tone in a 6pt dot, the words in ink — and
+// there is no `<Flag>` in this console; introducing one and moving 244 sites
+// onto it is a redesign of every screen a gym owner uses, not a lane's edit.
+// The alternative that must NOT be taken is to write the rule and then paste
+// 244 markers, or seed a KNOWN list with 32 files: a gate whose author
+// annotates other people's code into silence has weakened the rule, and done
+// it from the position least able to judge each site.
+//
+// There is also a second, cheaper repair worth weighing FIRST, and it is why
+// the sibling rule should not be written before somebody decides between them.
+// Every one of those 244 sites becomes correct with no call-site churn at all
+// if the four status hexes in globals.css are walked to clear 4.5:1 on the
+// worst ground they sit on — the same hold-the-hue-move-the-lightness method
+// src/theme/tokens.ts uses, and the same one the print block was fixed by.
+// Raising a mark's contrast never breaks its 3:1 floor, so rule 2 keeps
+// passing. That is a palette decision on a white-label product and it is not
+// this lane's to take unilaterally, but it is one edit against 244.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 

@@ -104,8 +104,33 @@ import { join } from 'node:path';
 
 const errors = [];
 
-/** Where the app's code is. The console (studio-web) is a Next.js program with
- *  its own inlining rules and its own variables; it is not this gate's. */
+/**
+ * Where the app's code is. The console (studio-web) is a Next.js program with
+ * its own inlining rules and its own variables; it is not this gate's.
+ *
+ * Expanded after a sweep offered the console as a root to add, because "its own
+ * inlining rules" was true but too short to act on. Both halves above are
+ * Expo-specific in their MECHANISM and neither transfers by widening ROOTS:
+ * §1 looks for a value in eas.json's build profiles, app.json's `extra`, .env
+ * or .env.example, none of which a Next build reads; §2 is about Expo's Babel
+ * plugin matching the literal `process.env.EXPO_PUBLIC_X` member expression,
+ * and the prefix the console needs is `NEXT_PUBLIC_`.
+ *
+ * The §2 ARGUMENT does transfer exactly, and that is worth writing down: Next
+ * inlines through webpack's DefinePlugin, which also substitutes a literal
+ * member expression and also leaves a destructured, aliased, cast or computed
+ * read untouched — so the Spotify defect (`(process.env as any)?.X` reading
+ * undefined out of a bundle whose process.env is empty) is reproducible in the
+ * console verbatim. The sibling rule is therefore §2 with a different prefix,
+ * plus a §1 that reads studio-web's own .env rather than eas.json.
+ *
+ * It is described and not built because the console reads exactly two variables
+ * — NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, both in
+ * studio-web/lib/supabase.ts, both already the literal member expression — so
+ * there is no §2 offence to find, and §1 over two variables that the console
+ * refuses to start without is a rule the first `npm run dev` enforces louder.
+ * A third variable is what should trigger writing it.
+ */
 const ROOTS = ['src', 'app'];
 const SKIP = new Set(['node_modules', '.git', '.expo', 'dist', 'build', '.next', '.tmp', '$S']);
 

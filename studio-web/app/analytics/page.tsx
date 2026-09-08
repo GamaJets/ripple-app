@@ -110,7 +110,21 @@ import { money, normaliseCurrency } from '@lib/gymRecord';
 // on why two implementations of a calendar rule is how one Sunday's takings end
 // up in two places.
 import { gymHour, parseGymZone, NO_ZONE_NOTE } from '@lib/gymZone';
-import { num1 } from '@/lib/num';
+// `deltaSign` and not `deltaLabel`: the sign half of src/lib/deltaLabel.ts is
+// pure arithmetic (deltaFigure + a comparison) and carries no locale, while
+// `deltaLabel` and `deltaMagnitude` reach `plain` -> `appLocale()`, the
+// module-level latch lib/num.ts refuses because it resolves once on the server
+// and again in the browser. So the SIGN comes from the shared helper and the
+// FIGURE is spelled by the console's own formatter.
+//
+// All three sites below were correct about zero and are changed anyway, which
+// is what check-deltas.mjs asks for: it cannot tell a guarded hand-rolled sign
+// from an unguarded one, so the rule is not to hand-roll one. What actually
+// changes for a reader is the minus: `String(-4)` and `{m.net}` spell a
+// negative with an ASCII HYPHEN, and every movement in the phone app uses
+// U+2212. The console printed "-4" beside the app's "−4" for the same figure.
+import { deltaSign } from '@lib/deltaLabel';
+import { num, num1 } from '@/lib/num';
 
 const DAY = 86400000;
 
@@ -779,7 +793,7 @@ export default function Analytics() {
         />
         <Kpi
           label={`Net change · ${lastFull ? lastFull.label : 'last full month'}`}
-          text={lastFull && lastFull.net != null ? (lastFull.net > 0 ? `+${lastFull.net}` : String(lastFull.net)) : null}
+          text={lastFull && lastFull.net != null ? `${deltaSign(lastFull.net, 0)}${num(Math.abs(lastFull.net))}` : null}
           tone={lastFull && lastFull.net != null ? (lastFull.net > 0 ? 'good' : lastFull.net < 0 ? 'crit' : undefined) : undefined}
           note={
             !months ? (memberships.state === 'failed' ? 'the memberships could not be read' : 'reading the memberships…')
@@ -1026,7 +1040,7 @@ function MoneyTable({ series, named }: { series: MoneySeries; named: boolean }) 
         if (m.yoyPct == null) return <span className="dash">no month to compare</span>;
         return (
           <span style={{ color: m.yoyPct < 0 ? 'var(--crit)' : m.yoyPct > 0 ? 'var(--good)' : undefined }}>
-            {m.yoyPct > 0 ? '+' : ''}{m.yoyPct}%
+            {deltaSign(m.yoyPct, 0)}{num(Math.abs(m.yoyPct))}%
           </span>
         );
       } },
@@ -1160,7 +1174,7 @@ function Joiners({ months, state, undatedJoins }: {
           ? <span className="dash" title="a leaver who joined on no recorded date">— {m.undatedLeavers} left with no start date</span>
           : <span className="dash" title="leavers incomplete">— leavers incomplete</span>
         : <span style={{ color: m.net > 0 ? 'var(--good)' : m.net < 0 ? 'var(--crit)' : 'var(--ink2)' }}>
-            {m.net > 0 ? `+${m.net}` : m.net}
+            {deltaSign(m.net, 0)}{num(Math.abs(m.net))}
           </span> },
     { key: 'shape', header: 'Shape', value: (m) => m.joined - m.left,
       render: (m) => <Bars joined={m.joined} left={m.left} peak={peak} /> },

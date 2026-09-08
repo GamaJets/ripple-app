@@ -1828,7 +1828,13 @@ function Payroll({ c, rec, zone, nowMs, sessionFee, feeCents }: {
   // total would go. `c.payroll.currency` is `runLabel` asked of the sessions
   // this sum is made of, and NOT `tenants.currency`: that was the gym's code
   // today over rates snapshotted whenever they were snapshotted.
-  const payrollTotal = c.payroll ? money(c.payroll.total.cents, c.payroll.currency) : null;
+  // Named `...Money` and not `...Total`: this is `money()`'s output, a
+  // formatted string with a currency code already on the front of it, and
+  // nothing downstream may treat it as a figure. It was `payrollTotal`, which
+  // reads as a number — and check-numbers.mjs, walking the console for the
+  // first time, reported it as a four-digit-capable figure rendered raw. The
+  // gate was wrong about this line and right about the name.
+  const payrollMoney = c.payroll ? money(c.payroll.total.cents, c.payroll.currency) : null;
 
   const cols: Column<PayrollLine>[] = [
     { key: 'trainer', header: 'Trainer', value: (l) => l.trainerName },
@@ -1890,14 +1896,14 @@ function Payroll({ c, rec, zone, nowMs, sessionFee, feeCents }: {
                   as a total nobody can write. */}
               {c.payroll.blocker
                 ? <><strong>Not safe to settle.</strong> {c.payroll.blocker}</>
-                : <>Every session in {c.window.label} is marked and priced. {c.payroll.total.payable} payable session{c.payroll.total.payable === 1 ? '' : 's'}{payrollTotal ? <>, {payrollTotal} in all</> : null}.{
+                : <>Every session in {c.window.label} is marked and priced. {c.payroll.total.payable} payable session{c.payroll.total.payable === 1 ? '' : 's'}{payrollMoney ? <>, {payrollMoney} in all</> : null}.{
                     // Which silence this is, in the words of the module that
                     // decided it. `currencyNote` is `totalNote` — one sentence
                     // for a run that straddles two moneys and a different one
                     // for rates that predate supabase/parts/1010 — and only
                     // where it has nothing to say does the gym-has-no-currency
                     // sentence apply, which is the case it was written for.
-                    payrollTotal ? null
+                    payrollMoney ? null
                       : c.payroll.currencyNote ? ` ${c.payroll.currencyNote}`
                       : ` What they come to cannot be stated because ${NO_CURRENCY_NOTE}.`
                   }</>}
@@ -1944,7 +1950,9 @@ function Passes({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
   // below has a branch for each. `currency` is what the month's PRICED passes
   // agree on, never `tenants.currency`, so none of the three is the gym having
   // left a field unset and none of them says so.
-  const passesTotal = c.passes ? money(c.passes.cents, currency) : null;
+  // `...Money`, not `...Total` — a formatted string, for the reason given
+  // beside `payrollMoney` above.
+  const passesMoney = c.passes ? money(c.passes.cents, currency) : null;
   return (
     <Section
       title="Passes sold"
@@ -1963,8 +1971,8 @@ function Passes({ c, rec, currency }: { c: MonthClose; rec: CloseRecord; currenc
                     with a space where its subject belonged. */}
                 {c.passes.cents == null
                   ? <>and not one carried a recorded price — so the amount is unknown, not nothing.</>
-                  : passesTotal
-                    ? <>{passesTotal} recorded across {c.passes.priced} of them.</>
+                  : passesMoney
+                    ? <>{passesMoney} recorded across {c.passes.priced} of them.</>
                     /* ── two silences, and neither is the gym's currency setting ──
                        This branch used to say the total could not be stated
                        "because this gym has not set its currency". The figure
