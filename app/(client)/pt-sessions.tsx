@@ -82,6 +82,20 @@ import {
   PAST_STATE_LABEL, PAST_STATE_NOTE, CLIENT_CANCELLED_GAP_NOTE,
   type PastState,
 } from '../../src/lib/sessionHistory';
+// The other half of the member's record, and the one this screen used to have
+// to apologise for. `CLIENT_CANCELLED_GAP_NOTE` below still says that a booking
+// you cancelled yourself is not in the list above it — that remains true, and
+// is not fixable, because cancelling nulls `client_id` and the hour goes to
+// somebody else. What IS possible is reading the cancellation itself out of the
+// table a trigger has been writing all along. See src/lib/sessionCancellations.
+import {
+  actorOf, actorLine, actionLine, noticeLine, emptyCancellationsLine,
+  BEST_EFFORT_NOTE, RECORD_START_NOTE, ENDED_SERIES_NOTE, NOT_A_VERDICT_NOTE,
+  type CancelAction,
+} from '../../src/lib/sessionCancellations';
+import { useMyCancellations } from '../../src/ui/cancellations';
+import { useAuth } from '../../src/ui/auth';
+import { num } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
 import type { Theme } from '../../src/theme/tokens';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -150,6 +164,15 @@ export default function PtSessions() {
   const { sessions, status: sessionStatus, approveSession, disputeSession, refresh: refreshSessions } = useSessions();
   const sessionsWhole = isWhole(sessionStatus);
   const c = useClientData();
+  // Read against the signed-in id rather than `useClientData().id`, which falls
+  // back to the literal 'unknown' when Supabase has not answered — a string
+  // that matches no row, so the read would come back empty and the screen would
+  // tell somebody nothing of theirs had ever been cancelled. Null is the honest
+  // value for "we do not know who is signed in", and the hook treats it as
+  // "nothing to read about" rather than as an empty record.
+  const uid = useAuth().user?.id ?? null;
+  const cancels = useMyCancellations(uid);
+  const cancelsWhole = isWhole(cancels.status);
   const [note, setNote] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   // Which session the "what is wrong with it" sheet is open for, or null.
@@ -239,8 +262,8 @@ export default function PtSessions() {
   // them. A session marked delivered while this screen was open is exactly the
   // thing somebody pulls down to see.
   const pull = usePullToRefresh(useCallback(() => {
-    void refreshSessions(); void loadLeft(); c.reload();
-  }, [refreshSessions, loadLeft, c.reload]));
+    void refreshSessions(); void loadLeft(); c.reload(); void cancels.reload();
+  }, [refreshSessions, loadLeft, c.reload, cancels]));
 
   /**
    * The member's sessions that have actually happened — the set the three lists
@@ -690,6 +713,103 @@ export default function PtSessions() {
               themselves stops being theirs and cannot be read back. A list that
               stayed silent about that would be read as complete. */}
           <Flag tone={t.ink3} style={{ marginTop: sp.md }}>{CLIENT_CANCELLED_GAP_NOTE}</Flag>
+        </Section>
+
+        {/* ── sessions you cancelled ───────────────────────────────────────
+            The other half of the record, and the section the Flag directly
+            above now points at.
+
+            ── Why here and not on app/(client)/bookings.tsx ────────────────
+
+            Bookings is the FORWARD half of the member's diary: everything they
+            have booked, classes and PT together, in chronological order, with
+            Cancel and Move on each row. It is the screen somebody opens to do
+            something about an hour that is still coming. A cancellation is a
+            thing that has already happened and can no longer be acted on, and
+            putting a history of them under a list of live bookings would make
+            the two look like the same kind of row — with a Cancel button four
+            lines up from hours that are already gone.
+
+            This screen is the member's RECORD of personal training. It already
+            has "What Already Happened", and it is the screen that has been
+            carrying the apology: `CLIENT_CANCELLED_GAP_NOTE` has said, for as
+            long as the section above has existed, that a session the member
+            cancelled themselves is not listed. The place to answer that is
+            underneath the sentence that admits it.
+
+            ── The list is of ACTIONS, not of hours ─────────────────────────
+
+            A fortnight's pause on a standing appointment is one decision that
+            removed several hours, and it is drawn as one entry with the hours
+            inside it. Why a shared `cancelled_at` is the test for that, and why
+            `was_series` is NOT, is argued in src/lib/sessionCancellations.ts. */}
+        <Rule />
+        <Section>
+          <SectionHead title="Sessions You Cancelled"
+            note={cancelsWhole && cancels.actions.length > 0 ? String(cancels.actions.length) : undefined} />
+
+          <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+            Personal-training hours you had booked that were cancelled — by you, by your coach, or by
+            your gym. {NOT_A_VERDICT_NOTE}
+          </Text>
+
+          {cancels.status === 'partial'
+            ? <PartialRead what="cancelled sessions" shown={cancels.rows.length} onPress={() => { void cancels.reload(); }} />
+            : null}
+
+          {/* Rows under 'error' are whatever this device had before the read
+              failed. The empty case is handled by `emptyCancellationsLine`
+              below; this is the other half of the same rule, and it is the same
+              pair of branches the history section above uses. */}
+          {cancels.status === 'error' && cancels.rows.length > 0 ? (
+            <Flag tone={t.crit}>
+              We couldn&apos;t reach the server, so this list is the copy already on this phone. Anything
+              cancelled since is not on it.
+            </Flag>
+          ) : null}
+
+          {/* Who ended them, split rather than added up. A member reading "4
+              cancelled" would take every one of them as theirs; two of them may
+              have been their coach's, and the record knows which. */}
+          {cancelsWhole && cancels.rows.length > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+              {`You: ${num(cancels.tally.byClient)} · Your coach: ${num(cancels.tally.byCoach)} · Somebody else: ${num(cancels.tally.byOther)} · Not recorded: ${num(cancels.tally.unattributed)}`}
+            </Text>
+          ) : null}
+
+          {cancels.actions.length === 0 ? (
+            /* Four statuses, four sentences, and only 'ready' may state that
+               nothing of yours was ever cancelled. */
+            <Text style={{ ...ty.label, color: t.ink3 }}>{emptyCancellationsLine(cancels.status, 'member')}</Text>
+          ) : cancels.actions.map((a: CancelAction, i: number) => {
+            const said = actorLine(actorOf(a.rows[0]), 'member', '');
+            const together = actionLine(a);
+            return (
+              <View key={a.key}>
+                {i > 0 ? <Rule /> : null}
+                <View accessible accessibilityRole="text"
+                  accessibilityLabel={[`Cancelled ${fmt(a.cancelledAt)}`, said, together ?? '',
+                    ...a.rows.map((row) => `${fmt(row.startsAt)}. ${noticeLine(row)}`)].filter(Boolean).join(' ')}
+                  style={{ paddingVertical: sp.md }}>
+                  <Text style={{ ...ty.micro, ...numeric, color: t.ink3 }}>{fmt(a.cancelledAt)}</Text>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, marginTop: 3 }}>{said}</Text>
+                  {together ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{together}</Text>
+                  ) : null}
+                  {a.rows.map((row) => (
+                    <View key={row.id} style={{ marginTop: sp.sm, paddingStart: sp.lg }}>
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{fmt(row.startsAt)}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{noticeLine(row)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+
+          <Flag tone={t.ink3} style={{ marginTop: sp.md }}>{RECORD_START_NOTE}</Flag>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{ENDED_SERIES_NOTE}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{BEST_EFFORT_NOTE}</Text>
         </Section>
 
         <Rule />

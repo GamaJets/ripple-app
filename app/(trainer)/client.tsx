@@ -2388,6 +2388,23 @@ export default function ClientScreen() {
             tone={trainedStatus === 'error' ? t.warn : undefined}
             onPress={go('/(trainer)/client-training')} />
 
+          {/* Directly under "What They've Actually Done", because these two are
+              the same question asked from either end: the hours that happened
+              and the hours that were booked and then were not. The record
+              behind it — `public.session_cancellations`, supabase/parts/380 —
+              was written by a trigger on every cancellation since that part was
+              applied and read by nothing at all, which left the one person who
+              acts on it unable to see it.
+
+              The note is DESCRIPTIVE and carries no figure. This screen does
+              not read that table, and a count summarised from a read that has
+              not happened is the shape every other row here avoids by owning
+              its own status. The screen behind the row gates its figures on
+              `isWhole` and says which of loading, failed and empty it is. */}
+          <ListRow icon="calendar" title="Sessions They Cancelled"
+            note={`Hours booked with you that were cancelled — who ended each one, and how much notice there was.`}
+            onPress={go('/(trainer)/client-cancellations')} />
+
           <ListRow icon="calendar" title="The Week They've Planned"
             note={unasked ?? weekLine(weekStatus, week, who)}
             tone={weekStatus === 'error' ? t.warn : undefined}

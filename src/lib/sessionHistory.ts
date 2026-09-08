@@ -59,10 +59,18 @@
 // cancels their own booking, `cancel_my_session` (supabase/parts/126) frees the
 // slot by setting `status = 'available'` and `client_id = null`. That row is
 // then no longer the member's in any readable sense, so it cannot appear in
-// their history at all — the only surviving trace is a `charges` row where a
-// late fee was recorded. Nothing in this module can recover it, and no screen
+// their history at all. Nothing in this module can recover it, and no screen
 // built on this module may imply that a member's own cancellations are listed.
 // `CLIENT_CANCELLED_GAP_NOTE` is the sentence that says so.
+//
+// THE GAP IS STILL HERE AND IS NO LONGER THE END OF THE STORY. The session row
+// is unrecoverable, but the CANCELLATION is recorded in its own table —
+// `public.session_cancellations`, written by a trigger since supabase/parts/380
+// — and src/lib/sessionCancellations.ts reads it. So the sentence below now
+// points at that list instead of only at a late fee on a receipt. What it must
+// never do is drop the admission: these rows, the ones this module produces,
+// still do not contain a member's own cancellations, and a reader of a list
+// built from `sessions` is entitled to be told so.
 import type { LoadStatus } from '../ui/loadStatus';
 import { dateParts } from './localDate';
 
@@ -240,11 +248,20 @@ export function tallyPast(rows: HistoryRow[], now: number = Date.now()): PastTal
   return t;
 }
 
-/** Said on every client-facing history, because it cannot be worked around in
- *  code: a booking the member cancelled themselves is not in these rows. */
+/**
+ * Said on every client-facing history, because it cannot be worked around in
+ * code: a booking the member cancelled themselves is not in THESE rows.
+ *
+ * It now names where they are instead. The sentence used to end at the late fee
+ * on a receipt, which was the only surviving trace this module knew about; the
+ * cancellation itself has its own record (see the header) and a note that
+ * stopped short of saying so would send somebody looking for their own history
+ * to a screen that has never had it.
+ */
 export const CLIENT_CANCELLED_GAP_NOTE =
   'A session you cancelled yourself is not listed here. Cancelling hands the hour back to your coach, '
-  + 'so the booking stops being yours; where a late fee was recorded it is on your receipts.';
+  + 'so the booking stops being yours — it is under Sessions You Cancelled, below. Where a late fee was '
+  + 'recorded it is on your receipts.';
 
 /* ── 2. how far back the read reached ──────────────────────────────────────── */
 

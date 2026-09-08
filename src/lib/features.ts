@@ -416,6 +416,22 @@ export const TRAINER_NAV: NavItem[] = [
   // screen exists to tell them that the record cannot answer that question —
   // landing them on the honest answer beats landing them on nothing.
   { key: 'client-attendance', label: 'Their Attendance', note: 'Every time your gym recorded a client coming in', route: '/(trainer)/client-attendance', icon: 'check', keywords: 'attendance attended visits been in came in turned up showed up register door entry swipe scan class register how often do they come missed no show absent stopped coming retention drop off client history' },
+  // Directly under Their Attendance, because the two are read in the same
+  // moment and about the same decision — whether to keep holding a slot for
+  // somebody. That one is the record of them turning up and this is the record
+  // of the hours that were booked and then were not.
+  //
+  // 'cancellation rate' and 'how often do they cancel' are here deliberately,
+  // and they are the searches this screen ANSWERS BY REFUSING: there is no
+  // denominator to compute a rate from, because cancelling recycles the hour,
+  // and the screen says so above the figures rather than leaving a coach to
+  // conclude the app simply has not got round to it. Landing them on the honest
+  // answer beats landing them on nothing — the same argument the row above
+  // makes about 'missed' and 'no show'.
+  //
+  // Takes an optional clientId and falls back to its own roster picker, so a
+  // bare push from search opens something usable.
+  { key: 'client-cancellations', label: 'Sessions They Cancelled', note: 'Hours a client had with you that were cancelled, and how much notice', route: '/(trainer)/client-cancellations', icon: 'calendar', keywords: 'cancel cancelled cancellation cancellations called off pulled out bailed dropped out late cancel short notice no notice how often do they cancel cancellation rate messing me about rearranged again standing appointment paused holiday released slot freed up' },
   // The screen that does something with the drift figure. 'quiet', 'ghosting'
   // and 'churn' are the words a coach uses for this; 'drift' is the word the
   // code uses, and both have to find it.

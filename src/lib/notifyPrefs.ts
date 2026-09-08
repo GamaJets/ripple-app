@@ -102,7 +102,16 @@ export const CATEGORIES: readonly CategoryDef[] = [
   },
   {
     key: 'coach', title: 'From Your Coach And Gym', local: false, quietable: false,
-    note: 'Messages, notices and invoices. These are sent from the server, so they follow the single Push Notifications switch rather than this list.',
+    // "so they follow the single Push Notifications switch rather than this
+    // list" is what this said, and it was true when it was written. Part 530
+    // made it false: `notify_quiet_hours` is keyed on `user_id` and both
+    // senders apply it to whoever the recipient is, so a member's quiet hours
+    // have reached these for as long as the rollout row has been enforced —
+    // and nothing said so, because the sentence described the app rather than
+    // the server. It now points at the control instead of naming an effect,
+    // because whether the server applies it is a fact about the installation
+    // and `quietAvailability` is what reads it.
+    note: 'Messages, notices and invoices. These are sent from the server, so the switches on this list do not reach them. Quiet Hours is stored on your account rather than on this phone, which is why it can.',
   },
 ];
 

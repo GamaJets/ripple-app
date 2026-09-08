@@ -249,6 +249,8 @@
     "src/lib/pushConsent.test.ts",
     "src/lib/historyWindow.test.ts",
     "src/lib/sessionHistory.test.ts",
+    "src/lib/sessionCancellations.ts",
+    "src/lib/sessionCancellations.test.ts",
     "src/lib/notifyCopy.test.ts",
     "src/lib/clipOwner.test.ts",
     "src/lib/gymMoney.test.ts",
