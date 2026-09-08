@@ -666,7 +666,12 @@ export default function FoodLog() {
  let read: { name: string; kcal: number; protein: number | null; carbs: number | null; fat: number | null } | null = null;
  if (outcome === 'send' && visionAvailable() && asset.base64) {
   let mb = asset.base64;
-  try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) mb = mm.base64; } catch {}
+  // The resize is an optimisation, not the read. `mb` already holds the picker's
+  // own base64, so a manipulator that throws costs a larger upload and nothing
+  // else — the same photo is sent and the same meal comes back. Nothing here is
+  // worth a sentence to the member, who asked to log a meal and not to hear
+  // about a compression step.
+  try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) mb = mm.base64; } catch { /* see above: the original base64 is still in `mb` */ }
   read = await analyzeMeal(mb, 'image/jpeg');
  }
  setReading(false);

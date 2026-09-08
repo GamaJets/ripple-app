@@ -11,6 +11,7 @@ import {
 import { VARIANT, VARIANT_ACCENT } from '../lib/variant';
 import { Icon } from './Icon';
 import { passwordRules } from '../lib/passwordRules';
+import { reportError } from '../lib/reportError';
 
 interface ThemeControls {
   /** The palette the member CHOSE. Not necessarily the one on screen — see
@@ -87,7 +88,22 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
       // choice that does not change the app under them on upgrade.
       setFollowState(f != null ? f === '1' : p == null);
       setContrastState(c === '1');
-    } catch {}
+    } catch (e) {
+      // Four preferences, and a read that fails leaves all four at the values
+      // above: the default palette, the accent the build ships with, follow-
+      // the-system on, and high contrast OFF. That last one is the reason this
+      // is reported rather than left silent. A member who turned high contrast
+      // on did so because they could not read the app without it, and this is
+      // the one failure here that hands them back the version they could not
+      // read — with no error to explain it, because there is no honest one to
+      // show: the app cannot say "your settings are missing" when it does not
+      // know whether any were stored.
+      //
+      // Nothing is written back on this path. The setters below only run when a
+      // member changes a setting, so an unreadable store is never overwritten
+      // with these defaults, and the next launch reads the real values again.
+      reportError('theme.prefs', e);
+    }
   })(); }, []);
 
   const setPalette = (k: string) => {

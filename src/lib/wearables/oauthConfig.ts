@@ -57,13 +57,13 @@ const env = (k: string): string => {
     // env-indirect-ok: falls back to Constants.expoConfig.extra, which is baked in by app.config.ts
     const val = (process.env as any)?.[k];
     if (val) return val;
-  } catch { }
-  
+  } catch { /* no process.env on this platform — the Constants read below is the other half of the pair, and '' is what a missing key means either way */ }
+
   try {
     const val = (Constants.expoConfig?.extra as any)?.[k];
     if (val) return val;
-  } catch { }
-  
+  } catch { /* no expoConfig either, so nothing on this device can answer for `k`. '' is the honest answer and the one the callers already handle: `isConfigured` is false without a client id, and the screen says the vendor is not set up rather than opening a consent page with no client. */ }
+
   return '';
 };
 

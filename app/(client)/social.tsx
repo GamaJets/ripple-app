@@ -94,7 +94,13 @@ export default function Social() {
  const msg = measured && bits.length
  ? `My ${BRAND.label} progress — ${bits.join(' and ')} so far. Every rep ripples out.`
  : `I train with ${BRAND.label}. Every rep ripples out.`;
- try { await Share.share({ message: msg }); } catch {}
+ // Closing the sheet without posting rejects on iOS, and it is the commonest
+ // way this call ends: a member opens the sheet, reads the sentence back, and
+ // decides not to post it. That is the feature working. Turning it into "we
+ // could not share" would tell somebody who chose not to post that the app
+ // failed, which is worse than saying nothing — and every other share in the
+ // app (referral.tsx, exportShare.ts, social.ts) reads it the same way.
+ try { await Share.share({ message: msg }); } catch { /* dismissed — see above */ }
  };
 
  const G = layout.gutter;

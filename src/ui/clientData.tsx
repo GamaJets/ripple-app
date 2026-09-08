@@ -270,6 +270,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
    * queue that state is not already holding.
    */
   const [pushTick, setPushTick] = useState(0);
+  /** Whether the boot read of the local cache actually landed. A ref rather
+   *  than state because nothing renders from it and it is set once, before
+   *  `hydrated` unblocks the effect that reads it. */
+  const cacheRead = useRef(true);
 
   // Load the user's saved profile on first mount.
   useEffect(() => { (async () => {
@@ -299,13 +303,48 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           if (typeof p.waterGoalGlasses === 'number') setWaterGoalGlasses(p.waterGoalGlasses);
         }
       }
-    } catch {}
+    } catch (e) {
+      // ── the swallow that could delete a profile ──────────────────────────
+      //
+      // This was `catch {}`, and the two things it caught are not the same
+      // failure. Under USE_SUPABASE it is a `removeItem` that did not happen,
+      // which costs nothing: the server is the source of truth on that path and
+      // the effect below rewrites this key on the next edit anyway. On the
+      // other branch the local store IS the profile — name, height, diet,
+      // allergens, INJURIES — and `getItem` throwing, or a half-written blob
+      // failing `JSON.parse`, left every one of those at the constructed
+      // defaults above with nothing said. The effect below then wrote those
+      // defaults back over the real row, so a storage read that failed for one
+      // second deleted a member's disclosed injuries permanently. This file's
+      // own header describes the same shape happening against the server, and
+      // `nameSynced` is the guard that was put on that write; `cacheRead` is
+      // the same guard for this one.
+      //
+      // Both of those only on the branch that READ a profile. Under
+      // USE_SUPABASE this cache is the OFFLINE copy — it is how a knee
+      // disclosed in a basement gym survives until there is signal, per this
+      // file's own header — so a failed `removeItem` must not stop the effect
+      // below from writing it, and 'error' would be a claim about a server read
+      // that has not run yet and would contradict it a moment later.
+      if (!USE_SUPABASE) {
+        cacheRead.current = false;
+        setProfileStatus('error');
+      }
+      reportError('clientData.cache', e);
+    }
     setHydrated(true);
   })(); }, []);
 
   // Persist edits once hydrated (avoids clobbering saved data with defaults on boot).
   useEffect(() => {
     if (!hydrated) return;
+    // And not at all over a cache that was the profile and could not be read.
+    // `KEY` holds the whole thing as one object, so this line does not merge —
+    // it replaces — and after a failed boot read what it would write is this
+    // provider's constructed defaults. The screens are told rather than shown
+    // those defaults as fact: `profileStatus` is 'error', which is what
+    // `isWhole` gates on.
+    if (!cacheRead.current) return;
     AsyncStorage.setItem(KEY, JSON.stringify({ name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, weightKg: manualWeight, bodyFatPct: manualBodyFat, manualAt, photo })).catch(() => {});
   }, [hydrated, name, dob, heightCm, goal, diet, avoid, injuries, focusAreas, coachingMode, mealsPerDay, stepGoal, sleepGoalHours, waterGoalGlasses, manualWeight, manualBodyFat, manualAt, photo]);
 

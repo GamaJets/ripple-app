@@ -48,8 +48,22 @@ import { join, relative, extname } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 
-/** Where source lives. `scripts/` is included: this file is source too. */
-const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/components', 'studio-web/lib', 'scripts', 'supabase/functions', 'supabase/parts'];
+/**
+ * Where source lives. `scripts/` is included: this file is source too.
+ *
+ * `docs/` is included because it was NOT, and `.md` has been in EXTS since the
+ * day this file was written — so the extension list said the gate covered
+ * markdown and the root list quietly meant it covered none of the markdown
+ * anybody reads. Every planning document this repo runs on lives there:
+ * ROADMAP.md, LAUNCH-CHECKLIST.md, WHITE-LABEL.md, UNBLOCK-RUNBOOK.md and the
+ * rest. check:prose walks only `.tsx?`, so between the two of them the docs
+ * tree had no gate on it at all, and a re-verification of ROADMAP.md against
+ * the code found eleven false status claims sitting in it. This gate cannot
+ * read a claim — scripts/check-doc-paths.mjs is the one that checks the part of
+ * a claim that IS mechanical — but a documentation tree nothing walks is how
+ * that happened, and the first fix is that something walks it.
+ */
+const ROOTS = ['app', 'src', 'studio-web/app', 'studio-web/components', 'studio-web/lib', 'scripts', 'supabase/functions', 'supabase/parts', 'docs'];
 const EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.sql', '.json', '.md', '.css']);
 const SKIP = new Set(['node_modules', '.git', '.next', '.expo', '.tmp', 'dist', 'build', 'ios', 'android']);
 

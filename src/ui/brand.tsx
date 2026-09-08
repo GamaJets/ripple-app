@@ -42,6 +42,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { VARIANT, VARIANT_LABEL } from '../lib/variant';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+import { reportError } from '../lib/reportError';
 
 interface BrandValue {
   appName: string;
@@ -72,7 +73,15 @@ export function BrandProvider({ children }: { children: ReactNode }) {
   // introduces itself as "Repple" reads like the wrong download.
   const [appName, setAppNameState] = useState(VARIANT_LABEL[VARIANT]);
   useEffect(() => { (async () => {
-    try { const n = await AsyncStorage.getItem(KEY); if (n) setAppNameState(n); } catch {}
+    // A cache, not the record. The gym's real name is `tenants.name` and
+    // `adoptGymName` writes it back here on every launch that reaches the
+    // server, so a read that fails leaves this app calling itself by the
+    // build's own name for one launch and correcting itself on the next. There
+    // is nothing to say to the member and nothing to withhold: the fallback IS
+    // a true name for this app. It is still worth a trace, because the same
+    // failure repeating is the difference between a flat battery and a device
+    // whose storage has stopped answering.
+    try { const n = await AsyncStorage.getItem(KEY); if (n) setAppNameState(n); } catch (e) { reportError('brand.cachedName', e); }
   })(); }, []);
   const setAppName = (n: string) => {
     const v = n.trim() || VARIANT_LABEL[VARIANT];

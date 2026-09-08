@@ -551,6 +551,10 @@
     "src/lib/planPrefill.ts",
     "src/lib/planPrefill.test.ts",
     "src/lib/longView.ts",
-    "src/lib/longView.test.ts"
+    "src/lib/longView.test.ts",
+    "src/lib/silentCatch.test.ts",
+    "src/lib/guideContent.ts",
+    "src/lib/guide.ts",
+    "src/lib/guideTabs.test.ts"
   ]
 }

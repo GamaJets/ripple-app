@@ -1183,7 +1183,13 @@ export default function Scans() {
     if (!visionAvailable() || !asset.base64) { Alert.alert('AI not on yet', 'Physique analysis turns on with the AI backend.'); return; }
     setPhys(null); setPhysOpen(true); setPhysBusy(true);
     let pb = asset.base64;
-    try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) pb = mm.base64; } catch {}
+    // The resize is an optimisation, not the read. `pb` already holds the
+    // picker's own base64, so a manipulator that throws costs a larger upload
+    // and nothing else — the same photo reaches `analyzePhysique`. The two
+    // outcomes that DO change what the member sees are handled below: a read
+    // that comes back empty says so, and the save of the photo itself (above)
+    // is told the same truth as any other progress photo.
+    try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) pb = mm.base64; } catch { /* see above: the original base64 is still in `pb` */ }
     const r = await analyzePhysique(pb, 'image/jpeg');
     setPhysBusy(false);
     if (r) setPhys(r); else { setPhysOpen(false); Alert.alert('Could not analyze', 'Try a clearer, well-lit full-body photo.'); }

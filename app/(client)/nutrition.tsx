@@ -481,7 +481,12 @@ export default function Nutrition() {
     // two branches that send nothing, and a spinner over a photo that is going
     // nowhere describes a send that is not happening.
     if (outcome === 'send') setLogBusy(true);
-    let nb = asset.base64; try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) nb = mm.base64; } catch {}
+    // The resize is an optimisation, not the read. `nb` already holds the
+    // picker's own base64, so a manipulator that throws costs a larger upload
+    // and nothing else — the same photo goes to `analyzeMeal` and the same meal
+    // comes back. The member asked to log a meal, not to hear about a
+    // compression step, so there is nothing here to tell them.
+    let nb = asset.base64; try { const mm = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: { width: 1512 } }], { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }); if (mm.base64) nb = mm.base64; } catch { /* see above: the original base64 is still in `nb` */ }
     if (outcome === 'send' && visionAvailable() && nb) {
       const r = await analyzeMeal(nb, 'image/jpeg');
       if (r) {
