@@ -538,6 +538,8 @@
     "src/lib/bodyHeat.ts",
     "src/lib/bodyHeat.test.ts",
     "src/lib/workoutTemplates.ts",
-    "src/lib/workoutTemplates.test.ts"
+    "src/lib/workoutTemplates.test.ts",
+    "src/lib/planPrefill.ts",
+    "src/lib/planPrefill.test.ts"
   ]
 }

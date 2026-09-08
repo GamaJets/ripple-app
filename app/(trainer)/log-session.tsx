@@ -9,7 +9,7 @@
 // What lands is the same shape the client's own log writes, so their progress,
 // PRs, calories, streak and weekly report count it without caring who typed it.
 //
-// Two things this screen refuses to do:
+// Three things this screen refuses to do:
 //
 //   · say "logged" when it is not. The write goes through the floor queue,
 //     which reports the three answers apart — the server took it, the server
@@ -18,6 +18,13 @@
 //   · invent a calorie figure. Strength work records reps and weight, not
 //     energy, and the client's own screens render an absent burn as a dash.
 //     Guessing here would put a fabricated number into somebody else's history.
+//   · turn a PRESCRIPTION into a performed figure. Since the sheet can be
+//     filled from the client's own programme (below), every rep target the
+//     coach wrote passes through this screen — and `parseInt('30s')` is 30,
+//     which is a thirty-second plank hold written into somebody's permanent
+//     record as thirty repetitions. Nothing here parses a target. A row loaded
+//     from '6-8', 'AMRAP' or '30s' shows those words and leaves the box empty.
+//     src/lib/planPrefill.ts holds the rule and the reasoning.
 //
 // ── One send per press of Save ────────────────────────────────────────────
 //
@@ -36,6 +43,33 @@
 // their streak, their weekly report and plan-versus-actual. Writing up at the
 // end of the day is the ordinary case, not the awkward one. src/lib/sessionWhen.ts
 // holds the day arithmetic and the sentence that says what turns on it.
+//
+// ── The session the coach already wrote ───────────────────────────────────
+//
+// "After a coach builds a client a workout template, the coach should be able
+// to tap on the client's name and have an option to log the session by using
+// the workout template they have built for the client."
+//
+// The tap and the option already existed — app/(trainer)/client.tsx pushes
+// here with the client. What this screen then offered was `LIB`, sixteen
+// generic movement names, the same list for everybody on the book. A coach who
+// had spent twenty minutes writing somebody a push day retyped it standing next
+// to them.
+//
+// So the sheet can now be FILLED from the programme this coach assigned this
+// client, for the day being logged. The picker offers the whole week rather
+// than only the day the date falls on, because a coach writing up an hour
+// afterwards is routinely writing up the Friday session they ran on a
+// Wednesday. What comes across is the movement list, the set count and the
+// coach's own target as a caption; what does not is a rep number the plan never
+// stated — see the third refusal above, and src/lib/planPrefill.ts for the
+// whole argument.
+//
+// Nothing about the WRITE changed. `entriesToWrite` still only writes sets with
+// a rep count in the box, so a loaded row whose reps are blank writes nothing
+// at all, and the targets are captions that never leave the screen. A prefilled
+// figure is a suggestion sitting in an editable box above a button the coach
+// has to press.
 //
 // ── Who it is for, and why that is a picker rather than a param ────────────
 //
@@ -95,7 +129,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { readLift, type WeightUnit } from '../../src/lib/units';
+import { liftIn, plain, readLift, type WeightUnit } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
@@ -139,6 +173,13 @@ import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { rateCentsToSnapshot } from '../../src/lib/rateSnapshot';
 import { fetchMyCurrency } from '../../src/lib/myCurrency';
 import type { MyCurrency } from '../../src/lib/currencySource';
+// The programme this coach assigned this client, and the rules for putting it
+// on the sheet. The provider is the one every other coach screen reads, so the
+// block shown here is the block shown on their record; the module beside it
+// owns the one thing that must not be got wrong, which is that a target is not
+// a performed set.
+import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
+import { planOffer, prefillDay, prefillLine, targetLine } from '../../src/lib/planPrefill';
 import { notifySuccess } from '../../src/ui/haptics';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -165,7 +206,17 @@ const LIB = [
  *  mistaken for the whole one. */
 const PICKER_SHOWN = 12;
 
-interface Row { key: string; name: string; sets: { reps: string; kg: string }[] }
+/**
+ * One movement on the sheet.
+ *
+ * `target` is the coach's OWN prescription for that set — '6-8', 'AMRAP',
+ * '30s' — carried across when the row was loaded from the client's programme,
+ * and absent on a row the coach added by hand. It is a caption and nothing
+ * else: it is never parsed, never written, and `entriesToWrite` does not know
+ * it exists. What goes into the client's record is `reps` and `kg`, which are
+ * what the coach typed or confirmed.
+ */
+interface Row { key: string; name: string; sets: { reps: string; kg: string; target?: string | null }[] }
 
 let SEQ = 0;
 const mkKey = () => `ex-${SEQ++}`;
@@ -335,6 +386,35 @@ export default function LogSession() {
   const [markDelivered, setMarkDelivered] = useState(true);
 
   const [rows, setRows] = useState<Row[]>([]);
+  /**
+   * Which days of the client's programme have already been put on this sheet.
+   *
+   * A coach who taps Load twice gets the same six movements twice, and the
+   * second copy is indistinguishable from a genuine second time through the
+   * session — which they would then Save. So a day already loaded says so and
+   * offers nothing, rather than being silently ignored (a control that does
+   * nothing reads as the app having failed) or quietly de-duplicating (which
+   * would refuse a coach who really did run the day twice; they can still add
+   * the movements by hand, which is deliberate work rather than a double tap).
+   *
+   * Keys, not day objects: it is compared against `PlanDayOption.key`, which is
+   * the day's position in the week it came from.
+   */
+  const [loadedDays, setLoadedDays] = useState<string[]>([]);
+  /**
+   * The day of the programme the coach has chosen, or null to follow the one
+   * the date being logged actually schedules.
+   *
+   * Null rather than seeded, so that changing the day at the top of the screen
+   * moves the offer with it. A coach who switches from Tuesday to Monday is
+   * asking about Monday's session, and a pre-selected chip that stayed put
+   * would answer yesterday's question.
+   */
+  const [pickedPlanDay, setPickedPlanDay] = useState<string | null>(null);
+  /** What the last load put on the sheet, and what it left blank. Held rather
+   *  than recomputed, because it is a statement about something that already
+   *  happened — the coach has typed over half of it by now. */
+  const [planNote, setPlanNote] = useState<string | null>(null);
   const [picker, setPicker] = useState(false);
   const [custom, setCustom] = useState('');
   const [busy, setBusy] = useState(false);
@@ -395,6 +475,13 @@ export default function LogSession() {
   if (moved || movedSession) {
     if (movedSession) setSeenSession(sessionParam);
     setRows([]);
+    // With the sheet goes everything said ABOUT the sheet. A note reading "6
+    // exercises and 22 sets added" over an empty form, or a day still marked
+    // loaded when its rows have just been cleared, are both this screen
+    // describing the previous client's session to the next one.
+    setLoadedDays([]);
+    setPickedPlanDay(null);
+    setPlanNote(null);
     setFailure(null);
     setLogDay(isoDay(seededStart ?? new Date()));
     setLogHour((seededStart ?? new Date()).getHours());
@@ -412,6 +499,75 @@ export default function LogSession() {
   const pickedName = pickedRow?.name
     ?? (picked && picked === subjectOf(clientId) ? (typeof name === 'string' ? name : '') || null : null);
   const first = (pickedName || 'your client').split(' ')[0];
+
+  /* ── the session this coach already wrote for them ──────────────────────
+   *
+   * The same provider every other coach screen reads, so the block offered here
+   * is the block on their record rather than a second read that could disagree
+   * with it. `planOffer` is asked for the DAY BEING LOGGED — `logDay`, not
+   * today — because a coach writing Monday up on Tuesday is asking about
+   * Monday, and on a multi-week block the week is counted to the day on screen.
+   *
+   * Nobody chosen means nothing to ask about: `getProgram` takes a client id and
+   * there is no such thing as "the programme" without one.
+   *
+   * No clock is read here. `logDay` is a chosen day, and the whole resolution —
+   * which week of the block, which day of that week — is arithmetic on it.
+   */
+  const assigned = useAssignedPrograms();
+  const offer = picked
+    ? planOffer(assigned.getProgram(picked), assigned.startsOn[picked] ?? null, logDay, assigned.status, first)
+    : null;
+  /** The chip that is on. The coach's own pick when they have made one, and
+   *  otherwise the day this date schedules — falling back to the first day of
+   *  the week, so a coach logging a session on a rest day still lands on
+   *  something rather than on an offer with nothing selected. */
+  const planKey = pickedPlanDay ?? offer?.scheduledKey ?? offer?.days[0]?.key ?? null;
+  const chosenPlanDay = offer && offer.state === 'ready'
+    ? (offer.days.find((d) => d.key === planKey) ?? null)
+    : null;
+
+  /** The prescribed load, in the unit the COACH is typing in, ready for the
+   *  box. Stored figures are kilograms; `liftIn` is the one converter and this
+   *  screen reads it back through `readLift` on the way out, so a pounds coach
+   *  is shown 135 and 61.23 kg is what lands. An absent load is an empty box:
+   *  never a zero, which in this app is a bodyweight set somebody performed. */
+  const loadBox = (kg: number | null): string => {
+    if (kg == null) return '';
+    const v = liftIn(kg, wu);
+    return v == null ? '' : plain(v);
+  };
+
+  /**
+   * Put a day of the programme on the sheet.
+   *
+   * APPENDED, never substituted. Whatever the coach has already typed is
+   * theirs and this screen is the only thing holding it — the same rule
+   * `clearSheet` is written under. A coach who wanted a clean sheet can remove
+   * a row; a coach whose four typed sets vanished because they tapped Load
+   * has lost work no undo can reach.
+   *
+   * Every figure that lands here came through `prefillDay`, which parses no
+   * prescription: a row loaded from '6-8', 'AMRAP' or '30s' arrives with an
+   * empty reps box and the coach's own words underneath it.
+   */
+  const loadPlanDay = (opt: NonNullable<typeof chosenPlanDay>) => {
+    const p = prefillDay(opt.day);
+    setRows((prev) => [
+      ...prev,
+      ...p.exercises.map((e) => ({
+        key: mkKey(),
+        name: e.name,
+        sets: e.sets.map((s) => ({
+          reps: s.reps == null ? '' : String(s.reps),
+          kg: loadBox(s.loadKg),
+          target: s.target,
+        })),
+      })),
+    ]);
+    setLoadedDays((prev) => (prev.includes(opt.key) ? prev : [...prev, opt.key]));
+    setPlanNote(prefillLine(p));
+  };
 
   /* ── the picker ────────────────────────────────────────────────────────────
    *
@@ -461,7 +617,12 @@ export default function LogSession() {
    *  registered `href: null` inside <Tabs> (app/(trainer)/_layout.tsx) and stays
    *  mounted for the life of the app, so a saved session sat in `rows` waiting to
    *  be saved again against whoever was opened next. */
-  const clearSheet = () => { setRows([]); setCustom(''); setPicker(false); };
+  const clearSheet = () => {
+    setRows([]); setCustom(''); setPicker(false);
+    // And what was said about the rows that have just gone. See the same three
+    // setters in the subject-change block above.
+    setLoadedDays([]); setPickedPlanDay(null); setPlanNote(null);
+  };
 
   // Only sets with a rep count are real. A blank row the coach tabbed past is
   // not a set of zero reps, and writing it as one would put a lie in the log.
@@ -953,7 +1114,16 @@ export default function LogSession() {
               {logDayOptions(new Date()).map((d) => {
                 const on = d.day === logDay;
                 return (
-                  <Pressable key={d.day} onPress={() => setLogDay(d.day)}
+                  <Pressable key={d.day} onPress={() => {
+                    setLogDay(d.day);
+                    // And the programme day goes back to following the date. A
+                    // coach who switches from Tuesday to Monday is asking about
+                    // Monday's session; a chip that stayed selected would be
+                    // answering the question they have just changed. What has
+                    // already been LOADED is untouched — those rows are on the
+                    // sheet and are the coach's now.
+                    setPickedPlanDay(null);
+                  }}
                     accessibilityRole="button" accessibilityState={{ selected: on }}
                     accessibilityLabel={on ? `${d.label}, chosen` : `File this session under ${d.label}`}
                     hitSlop={{ top: hitSlopFor(34), bottom: hitSlopFor(34), left: 0, right: 0 }}
@@ -1001,6 +1171,89 @@ export default function LogSession() {
             )}
           </Section>
 
+          {/* ── the session the coach already wrote ────────────────────────
+              Between When and Exercises, because it is an answer to "what did
+              they do" and it depends on the day chosen above it: the offer
+              re-resolves when the coach changes the day, so a session filed
+              under Monday offers Monday's plan.
+
+              Four states, four sentences, and they are not interchangeable —
+              a coach told "they have no programme" when the truth is "the read
+              did not land" will write the session from memory and stop
+              trusting the screen. `planOffer` owns which one is said. */}
+          {picked && offer ? (
+            <Section>
+              <SectionHead title="From Their Programme" note={offer.weekLabel ?? undefined} />
+              {offer.state === 'unreadable' ? (
+                <Flag tone={t.warn}>{offer.line}</Flag>
+              ) : (
+                <Text style={{ ...ty.label, color: t.ink3 }}>{offer.line}</Text>
+              )}
+
+              {/* A plan resolved from a read that did not land is offered WITH
+                  the caveat rather than withheld: the programme is real, it is
+                  simply not known to be the newest one. */}
+              {offer.caveat ? (
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{offer.caveat}</Text>
+              ) : null}
+
+              {offer.state === 'ready' ? (
+                <View>
+                  {/* The whole WEEK, not only the day this date falls on. A
+                      coach writing an hour up afterwards is routinely writing
+                      up the Friday session they ran on a Wednesday. */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                    {offer.days.map((d) => {
+                      const on = d.key === planKey;
+                      return (
+                        <Pressable key={d.key} onPress={() => setPickedPlanDay(d.key)}
+                          accessibilityRole="button" accessibilityState={{ selected: on }}
+                          accessibilityLabel={on
+                            ? `${d.label}, chosen. ${d.exercises} exercise${d.exercises === 1 ? '' : 's'}.`
+                            : `Choose ${d.label}, ${d.exercises} exercise${d.exercises === 1 ? '' : 's'}.`}
+                          hitSlop={{ top: hitSlopFor(34), bottom: hitSlopFor(34), left: 0, right: 0 }}
+                          style={{ paddingHorizontal: sp.lg, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+                          <Text style={{ ...ty.label, fontWeight: '500', color: on ? t.brandInk : t.ink2 }}>
+                            {d.label} · {d.exercises}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {chosenPlanDay ? (
+                    <View style={{ alignItems: 'flex-start', marginTop: sp.md }}>
+                      {loadedDays.includes(chosenPlanDay.key) ? (
+                        // Said rather than a control that does nothing. A
+                        // second tap would put the same six movements on the
+                        // sheet twice, and the copy is indistinguishable from a
+                        // genuine second time through the session.
+                        <Text style={{ ...ty.caption, color: t.ink2 }}>
+                          {chosenPlanDay.label} is already on the sheet below. If they did something else as well,
+                          add it by hand with Add Exercise.
+                        </Text>
+                      ) : (
+                        <Ghost
+                          label={`Load ${chosenPlanDay.exercises} Exercise${chosenPlanDay.exercises === 1 ? '' : 's'}`}
+                          a11yLabel={`Put the ${chosenPlanDay.exercises} exercise${chosenPlanDay.exercises === 1 ? '' : 's'} of ${chosenPlanDay.label} on the sheet, with your targets to edit`}
+                          onPress={() => loadPlanDay(chosenPlanDay)} />
+                      )}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {/* What landed, and every box it left blank, accounted for by
+                  name. A screen that fills eleven boxes and leaves nine empty
+                  without saying why reads as a bug — and a coach who reads it
+                  as one deletes the rows and types the session again, which is
+                  the work this exists to save them. */}
+              {planNote ? (
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{planNote}</Text>
+              ) : null}
+            </Section>
+          ) : null}
+
           <Section>
             <SectionHead title="Exercises" note={rows.length ? `${rows.length}` : undefined} />
             {rows.length === 0 ? (
@@ -1032,14 +1285,36 @@ export default function LogSession() {
                   <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{wu.toUpperCase()}</Text>
                 </View>
                 {r.sets.map((s, i) => (
-                  <View key={i} style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
-                    <Text style={{ ...ty.caption, color: t.ink3, width: 46 }}>Set {i + 1}</Text>
-                    <TextInput value={s.reps} onChangeText={(v) => patchSet(r.key, i, { reps: v })}
-                      keyboardType="numeric"
-                      accessibilityLabel={`${movement(r.name)} set ${i + 1} reps`} style={[inp, { flex: 1 }]} />
-                    <TextInput value={s.kg} onChangeText={(v) => patchSet(r.key, i, { kg: v })}
-                      keyboardType="decimal-pad"
-                      accessibilityLabel={`${movement(r.name)} set ${i + 1} weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}`} style={[inp, { flex: 1 }]} />
+                  <View key={i}>
+                    <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
+                      <Text style={{ ...ty.caption, color: t.ink3, width: 46 }}>Set {i + 1}</Text>
+                      <TextInput value={s.reps} onChangeText={(v) => patchSet(r.key, i, { reps: v })}
+                        keyboardType="numeric"
+                        accessibilityLabel={`${movement(r.name)} set ${i + 1} reps`}
+                        // The prescription, spoken. A coach using VoiceOver
+                        // cannot see the caption below the row, and the box
+                        // being empty under 'AMRAP' is the one thing about
+                        // this screen that has to be explained rather than
+                        // looked at.
+                        accessibilityHint={s.target
+                          ? `You wrote ${s.target} for this set. Type what they actually did.`
+                          : undefined}
+                        style={[inp, { flex: 1 }]} />
+                      <TextInput value={s.kg} onChangeText={(v) => patchSet(r.key, i, { kg: v })}
+                        keyboardType="decimal-pad"
+                        accessibilityLabel={`${movement(r.name)} set ${i + 1} weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}`} style={[inp, { flex: 1 }]} />
+                    </View>
+                    {/* What the coach WROTE for this set, in their own words,
+                        under the boxes they are typing into. It is a caption
+                        and nothing else: never parsed, never written, and the
+                        reason a reps box can legitimately be empty on a row
+                        that was loaded rather than typed. */}
+                    {targetLine(s.target) ? (
+                      <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: 3 }}>
+                        <View style={{ width: 46 }} />
+                        <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{targetLine(s.target)}</Text>
+                      </View>
+                    ) : null}
                   </View>
                 ))}
                 <Pressable onPress={() => addSet(r.key)} hitSlop={8} accessibilityRole="button"

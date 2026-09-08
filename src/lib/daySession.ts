@@ -198,6 +198,33 @@ export interface DayTraining {
   /** The plan day itself, so a caller can draw the exercises. Null unless
    *  'session'. */
   day: ProgramDay | null;
+  /**
+   * EVERY day written in the week this date falls in, in the coach's own order,
+   * or null where no week could be resolved to read them out of.
+   *
+   * `day` above is the one this DATE schedules, which is what a screen asking
+   * "what are they due to train" wants and is all the day sheet ever needed.
+   * This is the whole week, and it exists for the one caller that has to offer
+   * a CHOICE: app/(trainer)/log-session.tsx, where a coach writing an hour up
+   * afterwards is routinely writing up the Friday session they ran on a
+   * Wednesday. An offer that could only load the scheduled day would refuse the
+   * session that actually happened.
+   *
+   * Answered HERE rather than resolved again by the caller, and that is the
+   * whole reason this field exists rather than the screen calling
+   * `programWeeks` itself. The week these days come from is the one
+   * `blockPosition` and `clientWeek` settle four lines below, and the header of
+   * this file says in as many words that there must never be a second answer to
+   * which week it is — two answers is how a coach ends up coaching a session
+   * their client was never shown.
+   *
+   * Null on 'undated', 'unreadable' and 'unassigned', where there is no
+   * programme or no date to resolve a week from. An EMPTY ARRAY on 'unwritten',
+   * which is a week that genuinely has no days written in it — the same
+   * distinction between "none" and "not known" that every other field here
+   * holds.
+   */
+  weekDays: ProgramDay[] | null;
   /** What the coach wrote at the top of that day, trimmed. Null when they left
    *  it blank, which is ordinary. */
   focus: string | null;
@@ -227,6 +254,7 @@ export interface DayTraining {
 
 const EMPTY: Omit<DayTraining, 'state' | 'line' | 'confirmed'> = {
   day: null, focus: null, exercises: null, cardio: null, week: null, weekLabel: null,
+  weekDays: null,
 };
 
 /**
@@ -287,7 +315,7 @@ export function trainingOnDay(
   const days = Array.isArray(wk.days) ? wk.days : [];
   if (!days.length) {
     return {
-      ...EMPTY, state: 'unwritten', confirmed, week: at, weekLabel: label,
+      ...EMPTY, state: 'unwritten', confirmed, week: at, weekLabel: label, weekDays: days,
       line: label
         ? `${who}’s programme has no days written in ${label.toLowerCase()}, so there is nothing planned for this day.`
         : `${who}’s programme has no days written in it, so nothing is planned for this day.`,
@@ -296,7 +324,7 @@ export function trainingOnDay(
   const day = scheduledDay(days, weekday);
   if (!day) {
     return {
-      ...EMPTY, state: 'rest', confirmed, week: at, weekLabel: label,
+      ...EMPTY, state: 'rest', confirmed, week: at, weekLabel: label, weekDays: days,
       line: label
         ? `${who}’s programme schedules nothing on this day of ${label.toLowerCase()}.`
         : `${who}’s programme schedules nothing on this day.`,
@@ -306,7 +334,7 @@ export function trainingOnDay(
   const exercises = Array.isArray(day.exercises) ? day.exercises.length : 0;
   const cardio = String(day.cardio || '').trim() || null;
   return {
-    state: 'session', day, focus, exercises, cardio, week: at, weekLabel: label, confirmed,
+    state: 'session', day, weekDays: days, focus, exercises, cardio, week: at, weekLabel: label, confirmed,
     line: sessionLine(focus, exercises, cardio, label),
   };
 }
