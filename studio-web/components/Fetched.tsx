@@ -41,6 +41,7 @@
 // is showing. Count what the server confirmed, never what you sent.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { agePhrase, isStale, oldestFetch, STALE_MS } from '@lib/freshness';
+import { useLive, liveNote, FALLBACK_MS, type LiveStatus, type LiveSub } from '@/lib/live';
 
 /** Re-exported so a screen combining several reads into one stamp does not have
  *  to know which module the rule lives in. One screen, one claim, and the claim
@@ -206,6 +207,54 @@ export function useFetched(
 }
 
 /**
+ * `useFetched`, plus a socket that asks it to read again.
+ *
+ * For the handful of screens where a stale figure has a consequence while
+ * somebody is looking at it — the board two desks book against, the class fill
+ * the desk sells places from, the one-to-ones a manager settles as coaches mark
+ * them. Everything else in this console is a report over a period that has
+ * already closed, and a subscription there would be a connection and a
+ * re-render bought for a figure nobody expects to move.
+ *
+ * The whole of the live half is `refresh()`. Nothing is read off a payload —
+ * `lib/live.ts` carries the argument at length, and the short version is that a
+ * row arriving over a socket has been through neither the tenant filter in the
+ * screen's own query nor the row caps nor the three load states, so it would
+ * land on screen looking exactly as authoritative as a figure that had.
+ *
+ * ── Why the poll is faster when the socket is DOWN ────────────────────────
+ *
+ * Backwards only if live updates are read as an addition. They are not: they
+ * replace a poll this console never had. A screen that is live re-reads within
+ * a second of a change and needs no timer at all; a screen whose channel has
+ * dropped has no other way of noticing, so it falls back to `FALLBACK_MS` —
+ * and says so, because a desk tablet that quietly stopped updating looks
+ * exactly like a quiet gym.
+ */
+export function useLiveFetched(
+  read: () => Promise<boolean>,
+  opts: { channel: string; subs: LiveSub[]; enabled?: boolean; everyMs?: number },
+): Fetching & { live: LiveStatus } {
+  const { channel, subs, enabled = true, everyMs } = opts;
+
+  // `useLive` is declared before `useFetched` because it is the one that has to
+  // run first for its status to size the poll below, and the refetch it calls
+  // therefore has to be reached indirectly. Assigned during render, exactly as
+  // `refreshRef` above is, and for the same reason: a `useCallback` cannot name
+  // something declared after it.
+  const refreshRef = useRef<() => void>(() => {});
+  const live = useLive({ channel, subs, enabled, onChange: () => refreshRef.current() });
+
+  const fetching = useFetched(read, {
+    enabled,
+    everyMs: live === 'live' ? everyMs : (everyMs ?? FALLBACK_MS),
+  });
+  refreshRef.current = fetching.refresh;
+
+  return { ...fetching, live };
+}
+
+/**
  * The line under a screen's figures: when they were read, and a button.
  *
  * `what` names them, because a console screen shows several things and "Read 4
@@ -217,12 +266,18 @@ export function useFetched(
  * beneath it have been replaced, and says what they now are the age of.
  */
 export function Fetched({
-  at, busy = false, onRefresh, what = 'this screen', style,
+  at, busy = false, onRefresh, what = 'this screen', live, style,
 }: {
   at: number | null;
   busy?: boolean;
   onRefresh?: () => void;
   what?: string;
+  /**
+   * Whether this screen is being told about changes as they happen. Omitted on
+   * the screens that do not subscribe, where the honest answer is that nothing
+   * was claimed — not that something failed.
+   */
+  live?: LiveStatus;
   style?: React.CSSProperties;
 }) {
   const [now, setNow] = useState(() => Date.now());
@@ -232,6 +287,12 @@ export function Fetched({
   }, []);
 
   const stale = isStale(at, now);
+  // The socket's own sentence, and it goes INSIDE the live region rather than
+  // beside it. A person who has just been told the figures are two minutes old
+  // has to be told in the same breath whether anything is still watching them;
+  // announced separately it arrives as an unattached fragment, and the two are
+  // one fact about how much this screen can be trusted right now.
+  const liveLine = live ? liveNote(live) : null;
   const sentence = at == null
     ? (busy ? `Reading ${what}…` : `${what[0].toUpperCase()}${what.slice(1)} has not been read yet.`)
     : `${what[0].toUpperCase()}${what.slice(1)}, read ${agePhrase(Math.max(0, now - at))}.`;
@@ -251,7 +312,7 @@ export function Fetched({
         {/* The mark is a dot beside ink, never a coloured sentence: a status
             colour as 12pt text measures under 4.5:1 on this palette, and the
             same rule is why the phone's version draws a 6pt dot. */}
-        {stale ? (
+        {stale || live === 'dropped' ? (
           <span aria-hidden="true" style={{
             display: 'inline-block', width: 6, height: 6, borderRadius: 3,
             background: 'var(--warn)', marginRight: 6, verticalAlign: 'middle',
@@ -259,6 +320,7 @@ export function Fetched({
         ) : null}
         {sentence}
         {stale ? ' It may have moved since.' : ''}
+        {liveLine ? ` ${liveLine}` : ''}
       </span>
       {onRefresh ? (
         <button

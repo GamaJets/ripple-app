@@ -399,9 +399,20 @@ export default function Door() {
    * midnight rather than UTC's, so the rollover happens when the gym's day
    * does — the same date this screen already compares every visit against.
    *
-   * A poll rather than a realtime channel: nothing else in this console
-   * subscribes, the door log is small, and a thirty-second read that always
-   * arrives is worth more at a front desk than a socket that silently drops.
+   * A poll rather than a realtime channel, and this remains true now that
+   * `lib/live.ts` exists and /timetable, /classes and /sessions subscribe.
+   *
+   * Not a preference — this screen CANNOT be served by a socket. Realtime only
+   * emits `postgres_changes` for tables in the `supabase_realtime` publication,
+   * and the membership is exactly `messages` (supabase/parts/10) plus
+   * `gym_classes`, `class_bookings`, `sessions`, `session_approvals` and
+   * `notifications` (supabase/parts/220). `gym_visits` — the arrivals, which
+   * are the whole point of this screen — is in neither. A subscription to a
+   * table that is not published SUCCEEDS, reports itself subscribed, and
+   * silently never fires; part 220's header is explicit about that, and it is
+   * precisely the failure a front desk could not detect. So the door keeps the
+   * thirty-second read that always arrives, and a socket here would have to
+   * start with a change to the publication.
    */
   /** `tenants.timezone`, or null when the gym has not set one. */
   const [zone, setZone] = useState<string | null>(null);

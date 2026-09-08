@@ -18,7 +18,7 @@ import { parseGymZone } from '@lib/gymZone';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
-import { Fetched, useFetched } from '@/components/Fetched';
+import { Fetched, useLiveFetched } from '@/components/Fetched';
 import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { amount, currencyNote, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
@@ -227,9 +227,30 @@ export default function Sessions() {
    * at the moment of the read, and this screen never said which moment. A
    * console open since Monday still offered to settle a list ending on Monday,
    * and the sessions marked at the desk since were simply not on it.
+   *
+   * ── Why THIS screen gets a socket ─────────────────────────────────────
+   *
+   * The rows are written by other people while this tab is open. A coach marks
+   * a session delivered on their phone at the end of the hour; the manager on
+   * this screen is deciding what to settle and what to chase. Stale, it offers
+   * to settle a session somebody has just marked, and — worse — the Awaiting
+   * queue keeps naming sessions that were signed off an hour ago, which is the
+   * list the gym uses to go and ask a coach a question they have already
+   * answered. `nowMs` below is `readAt`, so a socket-driven read moves the
+   * instant every "has it finished yet" question on this page is asked at, and
+   * the stamp under the heading moves with it.
+   *
+   * One table, filtered on the gym. The settlements and the pay rates beside it
+   * are not subscribed: they change when somebody on this screen presses a
+   * button, and that path already calls `refresh()` itself.
    */
-  const { at: readAt, busy: reading, refresh } = useFetched(
+  const { at: readAt, busy: reading, refresh, live: liveStatus } = useLiveFetched(
     () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    {
+      channel: `console-sessions-${me?.tenantId ?? 'none'}`,
+      subs: me?.tenantId ? [{ table: 'sessions', filter: `tenant_id=eq.${me.tenantId}` }] : [],
+      enabled: !!me?.tenantId,
+    },
   );
 
   /**
@@ -630,7 +651,7 @@ export default function Sessions() {
         One-to-ones delivered on your floor in the last 30 days, and what they are worth.
       </p>
 
-      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+      <Fetched at={readAt} busy={reading} onRefresh={refresh} live={liveStatus}
                what="this month’s sessions" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}

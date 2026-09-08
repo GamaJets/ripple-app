@@ -27,7 +27,7 @@ import { parseGymZone } from '@lib/gymZone';
 import { ConsoleGate, Loading } from '@/components/Gate';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
-import { Fetched, useFetched } from '@/components/Fetched';
+import { Fetched, useLiveFetched } from '@/components/Fetched';
 import { settledLanded } from '@lib/readLanded';
 import { changedFailure } from '@lib/changedRows';
 import { DataTable, type Column } from '@/components/DataTable';
@@ -226,9 +226,34 @@ export default function Timetable() {
    * `range()` closes over the week offset, so changing week is a fresh read;
    * `useFetched` coalesces a second change made while the first is in flight
    * rather than dropping it.
+   *
+   * ── Why THIS screen gets a socket ─────────────────────────────────────
+   *
+   * Because it is the one people book against, from more than one place at
+   * once. The office moves a class, the desk sells a place into the room it was
+   * moved out of, a coach cancels a one-to-one from their phone; and the two
+   * figures this board computes — `clashes()` and floor cover — are claims
+   * about the whole week that go silently wrong the moment one of those writes
+   * lands somewhere this tab cannot see. A stale board does not look stale. It
+   * looks like a week with no clash in it.
+   *
+   * Both tables are the gym's own and both are filtered on `tenant_id` in the
+   * subscription as well as in the read. The filter is narrowing only — realtime
+   * applies row-level security, and `load()` is what scopes what appears — but a
+   * console tab at one gym has no business being woken by another's timetable.
    */
-  const { at: readAt, busy: reading, refresh } = useFetched(
+  const { at: readAt, busy: reading, refresh, live: liveStatus } = useLiveFetched(
     () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    {
+      channel: `console-timetable-${me?.tenantId ?? 'none'}`,
+      subs: me?.tenantId
+        ? [
+            { table: 'gym_classes', filter: `tenant_id=eq.${me.tenantId}` },
+            { table: 'sessions', filter: `tenant_id=eq.${me.tenantId}` },
+          ]
+        : [],
+      enabled: !!me?.tenantId,
+    },
   );
 
   useEffect(() => {
@@ -513,7 +538,7 @@ export default function Timetable() {
             {weekLabel} · classes and one-to-ones on one board
             {owner ? null : ' · take a register from any class here'}
           </p>
-          <Fetched at={readAt} busy={reading} onRefresh={refresh}
+          <Fetched at={readAt} busy={reading} onRefresh={refresh} live={liveStatus}
                    what="this board" style={{ margin: '6px 0 0' }} />
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

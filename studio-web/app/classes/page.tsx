@@ -83,7 +83,7 @@ import { ConsoleGate, Unresolved } from '@/components/Gate';
 import { type Unread, failure } from '@/lib/read';
 import { Kpi } from '@/components/Kpi';
 import { Shell } from '@/components/Shell';
-import { Fetched, useFetched } from '@/components/Fetched';
+import { Fetched, useLiveFetched } from '@/components/Fetched';
 import { settledLanded } from '@lib/readLanded';
 import { Banner as SharedBanner } from '@/components/Banner';
 import { DataTable, type Column } from '@/components/DataTable';
@@ -283,9 +283,37 @@ export default function Classes() {
    * "now" — and this page never said which now. A tab open since the morning
    * reported a fill rate over a window that stopped in the morning, on the
    * screen an owner uses to decide whether to cancel a class this evening.
+   *
+   * ── Why THIS screen gets a socket ─────────────────────────────────────
+   *
+   * The number on it is a decision somebody makes at a counter. "3 places left"
+   * is what the desk sells against while members are booking the same room from
+   * their phones, and it is what the register is taken from while the class is
+   * running. Both of those are minutes-old-matters, and both were a snapshot
+   * from whenever the tab happened to be opened.
+   *
+   * `gym_classes` is filtered on the gym. `class_bookings` is NOT, and cannot
+   * be: the table has no `tenant_id` column — it is scoped through its class,
+   * in the policies at `supabase/parts/30` — so there is no column to filter on
+   * and inventing a client-side one would be a filter that scopes nothing.
+   * Realtime applies row-level security to what it forwards, so the events that
+   * arrive are already the ones this account may read; and the count itself
+   * comes from `fetchClasses(supabase, tenantId, …)`, whose
+   * `.eq('tenant_id', tenantId)` is the only thing here that decides which
+   * gym's classes appear. The payload is a doorbell, never a figure.
    */
-  const { at: readAt, busy: reading, refresh } = useFetched(
+  const { at: readAt, busy: reading, refresh, live: liveStatus } = useLiveFetched(
     () => (me?.tenantId ? load(me.tenantId, days) : Promise.resolve(false)),
+    {
+      channel: `console-classes-${me?.tenantId ?? 'none'}`,
+      subs: me?.tenantId
+        ? [
+            { table: 'gym_classes', filter: `tenant_id=eq.${me.tenantId}` },
+            { table: 'class_bookings', filter: null },
+          ]
+        : [],
+      enabled: !!me?.tenantId,
+    },
   );
 
   useEffect(() => {
@@ -466,7 +494,7 @@ export default function Classes() {
         different problems with opposite fixes, so they are never added together here.
       </p>
 
-      <Fetched at={readAt} busy={reading} onRefresh={refresh}
+      <Fetched at={readAt} busy={reading} onRefresh={refresh} live={liveStatus}
                what="these classes" style={{ margin: '2px 0 14px' }} />
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
