@@ -1,4 +1,4 @@
-// What a six-digit email confirmation can fail with, said in sentences.
+// What an email confirmation code can fail with, said in sentences.
 //
 // ── Why a code and not a link ──────────────────────────────────────────────
 //
@@ -36,8 +36,55 @@
  */
 export type OtpOutcome = { ok: true } | { ok: false; reason: string };
 
-/** How many digits Supabase issues. Its own default, and not ours to choose. */
+/**
+ * How many digits the EMAIL code has.
+ *
+ * This said 6, and called it "Supabase's own default, and not ours to choose".
+ * Both halves were wrong, and together they made signing in by email
+ * impossible: 6 IS the default, but the length is configurable (Auth → Sign In
+ * / Providers → Email → Email OTP length), the project had been set to 8, and
+ * the screen drew six boxes for a code that arrives with eight digits in it.
+ * There was no way to finish typing it. Reported from a real inbox.
+ *
+ * The project setting has since been put back to 6 and verified by reading it
+ * off the dashboard, so this is 6 again — but for a different reason than
+ * before. It is not "what Supabase issues". It is what THIS project is
+ * configured to issue, it can be changed by somebody who never opens this
+ * repository, and everything the app SAYS about the code is derived from it so
+ * the sentence and the boxes cannot disagree again.
+ *
+ * MIN_OTP_SUBMIT below is the belt to this braces: if the setting moves again,
+ * the screen still lets the member try.
+ */
 export const EMAIL_OTP_LENGTH = 6;
+
+/**
+ * The shortest code the screen will accept a submission of.
+ *
+ * The boxes are drawn at EMAIL_OTP_LENGTH, but the input no longer REFUSES a
+ * shorter one, and that is deliberate. The length is a dashboard setting on a
+ * server nobody has to redeploy: the moment it moves from 8 to 6, an app that
+ * only submits at exactly 8 is broken in the other direction, and the member
+ * sees six digits typed into eight boxes with nothing happening.
+ *
+ * So the boxes describe what to EXPECT and the Confirm button decides when to
+ * TRY. Supabase's verifyOtp is the only thing that can say whether a code is
+ * right, and it does not need our help guessing the length first.
+ */
+export const MIN_OTP_SUBMIT = 4;
+
+/**
+ * The length as a WORD, for prose.
+ *
+ * The defect this exists to prevent is not the number, it is the number
+ * written twice. "the six digits we just emailed you" sat three lines above
+ * `length={EMAIL_OTP_LENGTH}`, so the boxes followed the constant and the
+ * sentence did not. Anything that tells a member how long the code is reads
+ * this, never a literal.
+ */
+export const spellDigits = (n: number): string =>
+  ({ 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine' } as Record<number, string>)[n]
+  ?? String(n);
 
 interface Failure { code: string; message: string; status: number | null }
 
@@ -95,7 +142,7 @@ export function emailCodeError(e: unknown): string {
     return 'Too many tries. Wait a moment, then enter the code again.';
   }
   if (f.code === 'invalid_credentials' || f.code === 'validation_failed' || /invalid|incorrect|token/i.test(f.message)) {
-    return 'That code was not right. Check the newest email — the code is six digits, and a new one replaces the old.';
+    return `That code was not right. Check the newest email — the code is ${spellDigits(EMAIL_OTP_LENGTH)} digits, and a new one replaces the old.`;
   }
   if (f.code === 'user_not_found') {
     return 'There is no account waiting on that address. Check the address, or create the account again.';

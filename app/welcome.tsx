@@ -21,7 +21,7 @@ import { USE_SUPABASE } from '../src/lib/config';
 import { VARIANT, VARIANT_LABEL, VARIANT_TILE } from '../src/lib/variant';
 import { recordReferral, stashPendingReferral, flushPendingReferral, peekPendingReferral } from '../src/lib/referrals';
 import { OtpCodeEntry } from '../src/ui/OtpCodeEntry';
-import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH } from '../src/ui/emailOtp';
+import { isUnconfirmedEmailError, EMAIL_OTP_LENGTH, spellDigits } from '../src/ui/emailOtp';
 import { Card, Cta } from '../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../src/theme/scale';
 
@@ -178,16 +178,22 @@ export default function Welcome() {
             <Text style={{ ...ty.title, color: t.ink }}>{appName}</Text>
           </View>
           <Text style={{ ...ty.body, color: t.ink3, marginTop: sp.sm, marginBottom: sp.xl }}>
-            {pendingEmail ? 'One step left — the six digits we just emailed you.'
+            {pendingEmail ? `One step left — the ${spellDigits(EMAIL_OTP_LENGTH)} digits we just emailed you.`
               : mode === 'up' ? 'Create your account to get started.' : 'Welcome back — sign in to continue.'}
           </Text>
 
           {pendingEmail ? (
-            /* The confirmation code, in the same six boxes the phone door uses.
+            /* The confirmation code, in the same boxes the phone door uses —
+               though NOT necessarily the same number of them: the email length
+               is a project setting and the phone length is a different one, so
+               each side reads its own constant. Assuming they matched is what
+               drew six boxes for an eight-digit code and made signing in by
+               email impossible.
+
                A code and not a link on purpose: a link in a confirmation email
                is fetched, and spent, by the recipient's own mail scanner before
                they ever see the message — the failure that had email
-               confirmation switched off in the first place. Six digits give a
+               confirmation switched off in the first place. Digits give a
                scanner nothing to press. See src/ui/emailOtp.ts. */
             <OtpCodeEntry
               title="Confirm Your Email"

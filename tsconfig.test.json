@@ -277,6 +277,8 @@
     "src/lib/setMethods.test.ts",
     "src/lib/dragReorder.test.ts",
     "src/lib/setRows.test.ts",
+    "src/lib/setLadder.test.ts",
+    "src/lib/setTicks.test.ts",
     "src/lib/exerciseHistory.test.ts",
     "src/lib/stretchRoutine.test.ts",
     "src/lib/stretchBuilder.test.ts",

@@ -76,6 +76,29 @@ import { isTimedPrescription, prescribedSeconds, readHold, holdLabel, timedSetLa
 // The set row itself, which used to be a local component and so was reachable
 // from this screen and nowhere else. See src/ui/LogSetRow.tsx.
 import { LogSetRow, SetKindChip, type LoggedSet } from '../../src/ui/LogSetRow';
+// ── ticking a planned set off, rather than typing it out ──────────────────
+//
+// "A tick box to send feedback/log sets been completed." — TestFlight, 8
+// September. There is no completion column on `workouts` and none was added:
+// a set is done in this app because it was LOGGED, and a filled tick here is
+// that logged set read back. src/lib/setTicks.ts holds the whole argument,
+// including the one rule that keeps the control honest — a tap that has to
+// write a rep count may only be offered where the plan names a single figure,
+// which is the same rule `canQuickLog` below already applies to the one-tap
+// button.
+import { setTicks, ticksLine, type TickRecord } from '../../src/lib/setTicks';
+import { SetChecklist, SetLadder } from '../../src/ui/SetTable';
+// ── one row per set in the sheet that adds or corrects a movement ─────────
+//
+// The other half of the same report: "when entering amount of sets there
+// should be a drop down to record with the weight being used per set". The
+// count box opens a row for each set instead of making that many copies of one,
+// and every decision about resizing, reading and refusing those rows is in the
+// tested module rather than in this file.
+import {
+  ladderFromPlan, ladderToPlanRows, patchLadderRow, readSetCount, resizeLadder,
+  type LadderRow,
+} from '../../src/lib/setLadder';
 // A member's own changes to the plan, kept — and sent to their coach. Four
 // `useState`s held all of this and nothing wrote any of them anywhere; see
 // src/lib/planEdits.ts for what that cost, and src/ui/planEdits.tsx for the
@@ -703,9 +726,23 @@ export default function Train() {
   // creating one. Same sheet, because renaming IS replacing for a lift the
   // user typed themselves — it has no catalogue alternatives to swap to.
   const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [cxName, setCxName] = useState(''); const [cxSets, setCxSets] = useState('3'); const [cxReps, setCxReps] = useState('10');
-  // Typed in the MEMBER's unit and converted on the way in, never stored as typed.
-  const [cxWeight, setCxWeight] = useState('');
+  const [cxName, setCxName] = useState(''); const [cxSets, setCxSets] = useState('3');
+  /**
+   * The movement's sets, ONE ROW EACH, in the sheet that adds or corrects one.
+   *
+   * ── what this replaces ───────────────────────────────────────────────────
+   *
+   * "Target Sets", "Target Reps" and one "Weight". Three boxes that could only
+   * ever say "N of the identical set", so a member whose coach wrote a ramp —
+   * or who ramps their own working sets, which is most people who lift — had no
+   * way to write down that set 1 is 60 and sets 2 and 3 are 65. Reported from
+   * TestFlight on the coach app, in the same words that produced the coach's
+   * own table: a set count should open a row per set with its own weight.
+   *
+   * `setRows` — the shape a coach's programme has used for this since it
+   * existed — is what it writes. Nothing about the store changed.
+   */
+  const [cxRows, setCxRows] = useState<LadderRow[]>([]);
   // Seeded from the member's own unit but switchable per entry: a machine in a
   // hotel gym is plated in whatever that gym uses, not in what the member reads.
   const [cxUnit, setCxUnit] = useState<WeightUnit>(wu);
@@ -990,15 +1027,29 @@ export default function Train() {
   const withEdits = (e: ProgramExercise): ProgramExercise => {
     const ed = exEdits[uid(e)];
     if (!ed) return e;
-    // The override DROPS the coach's per-set table, and that is the only
-    // reading that keeps the edit honest. The sheet asks for one count, one rep
-    // target and one load, so saving it is the member saying "I am doing three
-    // of the same set" — and a table left underneath would go on being what the
-    // runner counted, the ring measured and the row displayed, with the numbers
-    // they just typed visible nowhere. A silent no-op is worse than a change
-    // they can see and undo.
+    /**
+     * The override used to DROP the coach's per-set table unconditionally, and
+     * that was the only honest reading at the time: the sheet asked for one
+     * count, one rep target and one load, so saving it meant "I am doing three
+     * of the same set", and a table left underneath would go on being what the
+     * runner counted, the ring measured and the row displayed, with the numbers
+     * they had just typed visible nowhere.
+     *
+     * The sheet now asks for the table itself, so the correction can say what
+     * the plan says and the drop is no longer a refusal to lie — it would be a
+     * refusal to record. `ed.setRows` is what the member typed, one row per set,
+     * and it replaces the coach's rather than being merged into it: this is a
+     * member saying what they are actually doing, not an annotation on what they
+     * were asked to do.
+     *
+     * An edit written before the table existed carries no `setRows` key at all,
+     * and that is the case the `undefined` check is for — those corrections
+     * still drop the coach's table, exactly as they did on the build that wrote
+     * them, because "three of the same set" is still what they meant.
+     */
     return {
-      ...e, setRows: null,
+      ...e,
+      setRows: ed.setRows !== undefined ? ed.setRows : null,
       ...(ed.sets != null ? { sets: ed.sets } : {}),
       ...(ed.reps != null ? { reps: ed.reps } : {}),
       ...(ed.loadKg !== undefined ? { loadKg: ed.loadKg } : {}),
@@ -1132,15 +1183,52 @@ export default function Train() {
   /** The name the plan gives a row, so a rename is only recorded when it IS one. */
   const planNameFor = (key: string) => (exercises.find((x) => x.key === key) || { name: '' }).name;
 
+  /**
+   * Retype the set count, and grow or shrink the table under it.
+   *
+   * The box keeps whatever was typed, including something that is not a count,
+   * because a controlled input that refuses a keystroke is one nobody can
+   * backspace out of. Only a READABLE count moves the table, so clearing the
+   * box mid-edit does not throw away four rows of numbers underneath it.
+   */
+  const retypeCxSets = (v: string) => {
+    setCxSets(v);
+    const read = readSetCount(v);
+    if (read.ok) setCxRows((rows) => resizeLadder(rows, read.n));
+  };
+  /**
+   * Switch the sheet's unit, and CONVERT what is in the boxes.
+   *
+   * The old sheet had one weight box and relabelled it, which meant tapping LB
+   * turned a 60 kg target into a 60 lb one without touching the digits — the
+   * member watched the unit change and the number stay, and saved 27 kg. Here
+   * the rows are read in the unit they were typed in and written back out in
+   * the new one, so the WEIGHT is unchanged and only the way it is written
+   * moves. A row that will not read is left exactly as typed rather than
+   * blanked: it is the only copy of what somebody meant.
+   */
+  const switchCxUnit = () => {
+    const next: WeightUnit = cxUnit === 'kg' ? 'lb' : 'kg';
+    setCxRows((rows) => rows.map((r) => {
+      const read = readLift(r.load, cxUnit);
+      if (!read.ok) return r;
+      return { ...r, load: read.kg == null ? '' : plain(liftIn(read.kg, next) ?? 0) };
+    }));
+    setCxUnit(next);
+  };
+
   const openEditFor = (e: ProgramExercise) => {
     setEditingKey(e.key);
     // `setCount` rather than `e.sets`: on a movement the coach wrote a table
     // for, those two can differ, and the sheet must open on the number of sets
     // the member is actually looking at.
-    setCxName(nameOf(e)); setCxSets(String(setCount(e))); setCxReps(String(e.reps));
-    // Read back out in the unit the sheet is currently set to, so what is shown
-    // is what would be saved.
-    setCxWeight(e.loadKg == null ? '' : String(liftIn(e.loadKg, cxUnit)));
+    setCxName(nameOf(e)); setCxSets(String(setCount(e)));
+    // Every set, one row each, read back out in the unit the sheet is currently
+    // set to — so what is shown is what would be saved. `ladderFromPlan` goes
+    // through `expandSets`, so a coach's table opens as their table and a
+    // movement with no table opens as `sets` copies of its one spec, which is
+    // exactly what this sheet used to show in three boxes.
+    setCxRows(ladderFromPlan(e, cxUnit));
     setAddOpen(true);
   };
 
@@ -1155,35 +1243,44 @@ export default function Train() {
   const commitCx = () => {
     const name = cxName.trim();
     if (!name) return;
-    const sets = parseInt(cxSets, 10) || 3;
-    const reps = String(parseInt(cxReps, 10) || 10);
-    // Blank means "no target", which is a real answer and not zero. A typed
-    // figure goes through `readLift`, which converts from the member's unit and
-    // REFUSES a number it cannot believe — so a typo becomes no target rather
-    // than a load nobody can lift.
-    const read = cxWeight.trim() ? readLift(cxWeight, cxUnit) : null;
-    const loadKg = read && read.ok ? read.kg : null;
+    // The table, one row per set. A load that cannot be believed is REFUSED and
+    // named by its row rather than quietly becoming no target: this sheet used
+    // to fold a rejected `readLift` into `loadKg = null`, so a mistyped 4225
+    // silently erased the target the member was trying to correct.
+    const table = ladderToPlanRows(cxRows, cxUnit);
+    if (!table.ok) { Alert.alert('Check that', table.reason); return; }
+    const setRows = table.setRows;
+    // The two numbers are one fact — see src/lib/setRows.ts. A table of four
+    // rows under `sets: 3` shows the member "3/3 sets" with a fourth row
+    // unlogged underneath it.
+    const sets = setRows.length;
+    // The exercise's own fallback, which is what every reader that has never
+    // heard of a table still reads: the collapsed row's summary line, the
+    // suggestion, the runner's header. Taken from the FIRST row, because that is
+    // the set the movement opens on.
+    const reps = String(setRows[0].reps ?? '') || '10';
+    const loadKg = setRows[0].loadKg ?? null;
     if (editingKey) {
       const isCustom = editingKey.indexOf('custom-') === 0;
       if (isCustom) {
         // Same key, so sets already logged against it survive the rename.
-        setCustomEx((prev) => prev.map((x) => (x.key === editingKey ? { ...x, name, sets, reps, loadKg } : x)));
+        setCustomEx((prev) => prev.map((x) => (x.key === editingKey ? { ...x, name, sets, reps, loadKg, setRows } : x)));
       } else {
-        // A PROGRAMME row. The three numbers are recorded as an override rather
-        // than by rewriting the plan, so the coach's programme stays the
-        // programme and this stays the member's correction to it. A rename on a
-        // planned movement goes through `swaps`, which is what the Swap sheet
-        // already writes and what `nameOf` already reads.
-        setExEdits((prev) => ({ ...prev, [dayIdx + ':' + editingKey]: { sets, reps, loadKg } }));
+        // A PROGRAMME row. The numbers are recorded as an override rather than
+        // by rewriting the plan, so the coach's programme stays the programme
+        // and this stays the member's correction to it. A rename on a planned
+        // movement goes through `swaps`, which is what the Swap sheet already
+        // writes and what `nameOf` already reads.
+        setExEdits((prev) => ({ ...prev, [dayIdx + ':' + editingKey]: { sets, reps, loadKg, setRows } }));
         if (name && name !== planNameFor(editingKey)) setSwaps((prev) => ({ ...prev, [dayIdx + ':' + editingKey]: name }));
       }
     } else {
       const key = 'custom-' + Date.now();
-      setCustomEx((p) => [...p, { key, name, group: 'Added', sets, reps, loadKg, alternatives: [] } as ProgramExercise]);
+      setCustomEx((p) => [...p, { key, name, group: 'Added', sets, reps, loadKg, setRows, alternatives: [] } as ProgramExercise]);
       setExpanded((p) => ({ ...p, [dayIdx + ':' + key]: true }));
     }
     setAddOpen(false); setEditingKey(null);
-    setCxName(''); setCxSets('3'); setCxReps('10'); setCxWeight('');
+    setCxName(''); setCxSets('3'); setCxRows([]);
     tapLight();
   };
   // `setCount` and not `e.sets`, here and below. The two agree for every
@@ -1225,6 +1322,42 @@ export default function Train() {
       ...(set.bw ? { bw: true } : {}),
       ...(set.timed ? { timed: true } : {}),
     }] });
+    tapLight();
+  };
+  /**
+   * Tick a planned set off on the plan screen — which LOGS it, at the figures
+   * the plan asked for.
+   *
+   * The same journey a typed set makes: `logSet` is the one writer of the day's
+   * draft, and it is the one that decides what an empty load box means. A
+   * planned set with no load is a bodyweight set and its `kg` is null, which is
+   * exactly what the row below the movement produces when the box is left
+   * empty. A hold is a hold, in seconds, never a rep count.
+   */
+  const tickPlannedSet = (e: ProgramExercise, rec: TickRecord) => {
+    logSet(e, {
+      value: rec.kind === 'hold' ? rec.secs : rec.value,
+      kg: rec.loadKg,
+      bw: rec.loadKg == null,
+      timed: rec.kind === 'hold',
+    });
+  };
+  /**
+   * Take the most recent set back off this movement.
+   *
+   * The last one, and only the last. The day's draft is a list of sets in the
+   * order they were logged with no set numbers in it, so removing the third of
+   * five would renumber the two after it into sets nobody did — the argument is
+   * written out in full in src/lib/setTicks.ts, which is what decides that only
+   * the most recent tick is undoable.
+   */
+  const untickLastSet = (e: ProgramExercise) => {
+    const _u = uid(e);
+    setLogged((prev) => {
+      const cur = prev[_u] || [];
+      if (!cur.length) return prev;
+      return { ...prev, [_u]: cur.slice(0, -1) };
+    });
     tapLight();
   };
   // One tap records the set the plan is asking for — TF-27, "can't tap an
@@ -1974,41 +2107,63 @@ export default function Train() {
                               <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>Auto-swapped from {movement(e.name)} to protect you</Text>
                             </View>
                           ) : null}
-                          {/* ── what the coach actually wrote, set by set ──
+                          {/* ── what the coach actually wrote, set by set,
+                                 with a box beside each one ────────────────
                               A single "3 × 8-10 at 42.5" cannot say that set
                               one is a warm-up and set three is five kilos
-                              heavier, and until now that is all this row could
-                              say. Shown only where the sets DIFFER: an exercise
-                              of three identical sets is already described by
-                              the line above, and repeating it three times is
-                              noise the client has to read past.
+                              heavier, and for a long time that is all this row
+                              could say. The table was then drawn only where the
+                              sets DIFFERED, on the argument that three
+                              identical rows repeat the line above.
+
+                              That argument held while the rows only described
+                              the plan. It stops holding now they are the
+                              control that logs it — "a tick box to log sets
+                              been completed", from the same TestFlight report
+                              as the per-set weights. A member cannot tick off a
+                              set that is not on screen, so every movement with
+                              a plan gets its rows and the line above them
+                              counts down.
 
                               Loads are converted at this boundary and nowhere
                               earlier — what is stored is kilograms. */}
-                          {varied ? (
+                          {planned.length ? (
                             <View style={{ marginTop: sp.md }}>
-                              {planned.map((r) => {
-                                const rb = badgeFor(r.method);
-                                return (
-                                  <View key={r.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 2 }}>
-                                    <Text style={{ ...ty.caption, ...numeric, color: t.ink3, width: 18 }}>{r.n}</Text>
-                                    <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
-                                      {r.reps}{r.loadKg != null ? ' × ' + fig(liftLabel(r.loadKg, wu)) : ''}
-                                    </Text>
-                                    {rb ? (
-                                      <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
-                                    ) : null}
-                                    {/* This set's own effort, share and tempo.
-                                        A warm-up single at @6 and a top set at
-                                        @9 are two different instructions and
-                                        this is the only row that can hold
-                                        both. */}
-                                    {intensityLine(r.intensity) ? (
-                                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{intensityLine(r.intensity)}</Text>
-                                    ) : null}
-                                  </View>
-                                );
-                              })}
+                              <SetChecklist
+                                t={t} ticks={setTicks(planned, sets.length)} movement={shownName(e)}
+                                line={ticksLine(planned.length, sets.length)}
+                                askFor={(n) => {
+                                  const r = planned[n - 1];
+                                  if (!r) return { text: '', loadText: null };
+                                  return {
+                                    text: `${r.reps}${r.loadKg != null ? ' × ' + fig(liftLabel(r.loadKg, wu)) : ''}`,
+                                    loadText: r.loadKg != null ? liftLabel(r.loadKg, wu) : null,
+                                  };
+                                }}
+                                onTick={(_n, rec) => tickPlannedSet(e, rec)}
+                                onUntick={() => untickLastSet(e)}
+                                extraFor={(n) => {
+                                  const r = planned[n - 1];
+                                  if (!r) return null;
+                                  const rb = badgeFor(r.method);
+                                  const iline = intensityLine(r.intensity);
+                                  if (!rb && !iline) return null;
+                                  return (
+                                    <>
+                                      {rb ? (
+                                        <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
+                                      ) : null}
+                                      {/* This set's own effort, share and tempo.
+                                          A warm-up single at @6 and a top set at
+                                          @9 are two different instructions and
+                                          this is the only row that can hold
+                                          both. */}
+                                      {iline ? (
+                                        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{iline}</Text>
+                                      ) : null}
+                                    </>
+                                  );
+                                }} />
                             </View>
                           ) : null}
                           {/* ── the notations, in words ────────────────────
@@ -2145,7 +2300,10 @@ export default function Train() {
 
               {exercises.length > 0 || customEx.length > 0 ? (
                 <View style={{ marginTop: sp.lg }}>
-                  <Ghost label="Add an Exercise You Did" icon="plus" onPress={() => { setEditingKey(null); setAddOpen(true); }} />
+                  {/* Opened on three rows, which is what the count box has
+                      always defaulted to. Blank rows rather than a copied
+                      prescription: there is no movement yet to take one from. */}
+                  <Ghost label="Add an Exercise You Did" icon="plus" onPress={() => { setEditingKey(null); setCxName(''); setCxSets('3'); setCxRows(resizeLadder([], 3)); setAddOpen(true); }} />
                   {removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length > 0 ? (
                     <Ghost label={`Put back ${removedEx.filter((u) => u.indexOf(dayIdx + ':') === 0).length} removed`} icon="swap" onPress={() => { setRemovedEx((prev) => prev.filter((u) => u.indexOf(dayIdx + ':') !== 0)); tapLight(); }} />
                   ) : null}
@@ -2869,30 +3027,48 @@ export default function Train() {
           <Text style={{ ...ty.head, color: t.ink }}>{editingKey ? 'Edit exercise' : 'Add an exercise'}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{editingKey ? 'Rename it, or change the sets and reps you are aiming for.' : "Log something you did that isn't in today's plan."}</Text>
           <TextInput value={cxName} onChangeText={setCxName} autoFocus returnKeyType="done" onSubmitEditing={commitCx} blurOnSubmit={false} placeholder="Exercise name (e.g. Cable fly)" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, marginBottom: sp.md }} />
-          <View style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.lg }}>
-            <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target Sets</Text><TextInput value={cxSets} onChangeText={setCxSets} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
-            <View style={{ flex: 1 }}><Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target Reps</Text><TextInput value={cxReps} onChangeText={setCxReps} keyboardType="numeric" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} /></View>
-            {/* The third number. Sets and reps were editable and the load was
-                not, so the one figure that changes week to week was the one
-                nobody could type. Blank is allowed and means no target. */}
-            <View style={{ flex: 1 }}>
-              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Weight</Text>
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                <TextInput value={cxWeight} onChangeText={setCxWeight} keyboardType="decimal-pad" placeholder="optional" placeholderTextColor={t.ink3}
-                  style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
-                {/* Switchable per entry rather than read off the profile. A
-                    machine in another gym is plated in whatever that gym uses,
-                    and the figure typed here is the one on the machine — so the
-                    unit has to travel with the number, not with the account.
-                    What is STORED is kilograms either way. */}
-                <Pressable accessibilityRole="button"
-                  accessibilityLabel={`Weight unit: ${cxUnit === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${cxUnit === 'kg' ? 'pounds' : 'kilograms'}`}
-                  onPress={() => { setCxUnit((u) => (u === 'kg' ? 'lb' : 'kg')); tapLight(); }}
-                  style={{ backgroundColor: t.surface3, borderRadius: radius.sm, paddingHorizontal: sp.md, justifyContent: 'center' }}>
-                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{cxUnit.toUpperCase()}</Text>
-                </Pressable>
-              </View>
+          {/* ── how many sets, and then a row for each of them ─────────────
+              "Target Sets", "Target Reps" and one "Weight" is three boxes that
+              can only say "N of the identical set". A member whose coach wrote
+              a ramp, or who ramps their own working sets, had nowhere to put
+              60 / 65 / 65 — which is the exact report this answers.
+
+              The count box still asks how many. What changed is what it does
+              with the answer: it opens a ROW for each set rather than making
+              that many copies of one. The table beneath is the same component
+              the coach's own log uses, without the tick column — a plan is not
+              testimony, and there is nothing to tick about a set that has not
+              happened yet. See `onToggle` in src/ui/SetTable.tsx. */}
+          <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'flex-end' }}>
+            <View style={{ width: 108 }}>
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.xs }}>Target Sets</Text>
+              <TextInput value={cxSets} onChangeText={retypeCxSets} keyboardType="numeric" placeholderTextColor={t.ink3} accessibilityLabel="How many sets" style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11 }} />
             </View>
+            {/* Switchable per entry rather than read off the profile. A machine
+                in another gym is plated in whatever that gym uses, and the
+                figures typed below are the ones on the machine — so the unit has
+                to travel with the numbers, not with the account. What is STORED
+                is kilograms either way, and switching here RE-RENDERS the rows
+                rather than relabelling them: the same weight in the other unit,
+                not the same digits under a different word. */}
+            <Pressable accessibilityRole="button"
+              accessibilityLabel={`Weight unit: ${cxUnit === 'kg' ? 'kilograms' : 'pounds'}. Switch to ${cxUnit === 'kg' ? 'pounds' : 'kilograms'}`}
+              onPress={() => { switchCxUnit(); tapLight(); }}
+              style={{ backgroundColor: t.surface3, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: 11 }}>
+              <Text style={{ ...ty.label, fontWeight: '600', color: t.ink }}>{cxUnit.toUpperCase()}</Text>
+            </Pressable>
+          </View>
+          <View style={{ marginBottom: sp.lg }}>
+            {cxRows.length ? (
+              <SetLadder
+                t={t} unit={cxUnit} rows={cxRows} movement={cxName.trim() || 'this exercise'}
+                onPatch={(at, patch) => setCxRows((rows) => patchLadderRow(rows, at, patch))}
+                note={null} />
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                Say how many sets, and a row appears for each one — its own reps, its own weight. Leave a weight empty for no target.
+              </Text>
+            )}
           </View>
           <Pressable disabled={!cxName.trim()} onPress={commitCx} style={{ backgroundColor: cxName.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginBottom: sp.sm }}>
             <Text style={{ ...ty.label, fontWeight: '600', color: cxName.trim() ? t.brandInk : t.ink3 }}>{editingKey ? 'Save changes' : 'Add to today'}</Text>
@@ -3818,6 +3994,29 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
     // the set away rather than recording what it was told. The toggle carries
     // the case an empty box cannot say: a dip with a belt on.
     const bw = bwOn || read.kg == null;
+    record(r, wkg, bw, timedOn);
+  };
+
+  /**
+   * Everything that happens once a set is KNOWN — the record, the personal-best
+   * check, the coach's notification, the demo offer, the rest timer and the
+   * "how did that feel" prompt.
+   *
+   * Split out of `logSet` above, which is now only the reading of the two boxes
+   * and the two toggles. The reason is the tick: the checklist beside the plan
+   * logs a set at the figures the plan asked for, and it must produce the SAME
+   * set as typing those figures in — the same PR check with the same three
+   * guards, the same rest, the same prompt. Anything less is a second
+   * definition of "a set was logged" that would drift from this one within a
+   * release, and the PR guards are exactly the thing that must not be
+   * reimplemented anywhere: `historyWhole` below is what keeps a failed read
+   * from firing "New PR!" on every set of a session.
+   *
+   * `timed` is a parameter rather than the `timedOn` toggle for the same
+   * reason. A tick on a plank prescribed as '45 sec' records a HOLD whatever
+   * the toggle happens to be showing.
+   */
+  const record = (r: number, wkg: number, bw: boolean, timed: boolean) => {
     const name = nameOf(exercises[idx]);
     // Zero for a bodyweight set, on purpose. The PR banner below is a claim
     // about everything this person has ever lifted, and the thing it is checked
@@ -3829,7 +4028,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
     // …and never for a hold. Epley over seconds returns a strength figure
     // computed from a stopwatch, and it would fire "New PR!" at somebody for
     // holding a plank three seconds longer.
-    const newE1 = wkg && r && !bw && !timedOn ? est1RM(wkg, r) : 0;
+    const newE1 = wkg && r && !bw && !timed ? est1RM(wkg, r) : 0;
     // A personal record is a claim about EVERYTHING this person has ever
     // lifted, so it can only be made when the whole history was read.
     //
@@ -3864,7 +4063,7 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
       // fires is src/lib/prNotify.ts's problem, not this branch's.
       void announcePersonalBest(preferTrainerId, clientId, { movement: name, kg: wkg, reps: r }, clientName);
     }
-    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg, ...(bw ? { bw: true } : {}), ...(timedOn ? { timed: true } : {}) }); return n; });
+    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].push({ reps: r, kg: wkg, ...(bw ? { bw: true } : {}), ...(timed ? { timed: true } : {}) }); return n; });
     // Only after the first set of an exercise. By set three they have done the
     // movement three times and do not need it offered again.
     if (done.length === 0) setDemoOpen(true);
@@ -4320,11 +4519,67 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
   // The set about to be done, or null once the plan is finished and the client
   // is adding sets of their own.
   const nextSet = plan[done.length] ?? null;
-  // Whether the sets of this movement actually differ. Three identical rows
-  // under a line that already reads "3 × 8-10 × 42.5 kg" is the same sentence
-  // four times.
+  // Whether the sets of this movement actually differ. It no longer decides
+  // whether the per-set rows are DRAWN — see `planTicks` — but the two summary
+  // lines still need it: "3 × 8-10 × 42.5 kg" is a true description of three
+  // identical sets and a false one of a ramp, which is why it says "varied"
+  // instead.
   const variedPlan = !!ex && hasSetRows(ex) && plan.some((r) => r.reps !== plan[0].reps || r.loadKg !== plan[0].loadKg || r.method !== plan[0].method
     || intensityLine(r.intensity) !== intensityLine(plan[0].intensity));
+  /**
+   * The plan as a CHECKLIST, and what a tap on each line would write.
+   *
+   * This used to be drawn only where the sets differed from one another, with
+   * the argument that three identical rows under a line already reading
+   * "3 × 8-10 × 42.5 kg" is the same sentence four times. That argument was
+   * right about a table that only described the plan, and it stops being right
+   * the moment the rows are the control that logs them: a member cannot tick
+   * off a set that is not on screen, and "what is left" is the question the
+   * report asked to have answered. So it is drawn for every movement with a
+   * plan, and the sentence above it counts down.
+   */
+  const planTicks = setTicks(plan, done.length);
+  const planLine = ticksLine(plan.length, done.length);
+  /**
+   * Tick one planned set off — which LOGS it, at the figures the plan asked
+   * for, through the same `record` every typed set goes through.
+   *
+   * A prescription in seconds is recorded as a hold and not as a rep count.
+   * That is the whole of `TickRecord`'s reason for having two shapes, and it is
+   * the defect the one-tap button on the plan screen was fixed for: '45 sec'
+   * parsed to 45 and went in as forty-five plank repetitions.
+   *
+   * A planned set with no load is a BODYWEIGHT set. `record` takes 0 for the
+   * load and true for `bw`, which is what typing an empty load box does — see
+   * `logSet` above, where an empty box has always meant exactly this.
+   */
+  const tickPlanned = (rec: TickRecord) => {
+    if (rec.kind === 'hold') record(rec.secs, rec.loadKg ?? 0, rec.loadKg == null, true);
+    else record(rec.value, rec.loadKg ?? 0, rec.loadKg == null, false);
+  };
+  /**
+   * Take the most recent set back out.
+   *
+   * The feel goes with it. `rpes[idx]` is positional against `results[idx]` and
+   * is only ever as long as it — a set logged and not yet answered for leaves
+   * it one short — so the last feel belongs to the last set exactly when the
+   * two are the same length. Popping the set and leaving the feel would slide
+   * every "that was hard" up onto the set before it.
+   *
+   * The rest timer is deliberately left running. A member who mis-tapped is
+   * still standing where they were standing, and cancelling their rest as a
+   * side effect of fixing a tick is the app taking a decision about their
+   * session that they did not ask for.
+   */
+  const untickLast = () => {
+    const had = (results[idx] || []).length;
+    if (!had) return;
+    setResults((prev) => { const n = prev.map((a) => [...a]); n[idx].pop(); return n; });
+    setRpes((prev) => { const n = prev.map((a) => [...a]); if (n[idx].length >= had) n[idx].pop(); return n; });
+    // The prompt asks about a set that no longer exists.
+    setPendingFeel(null);
+    tapLight();
+  };
   /**
    * The effort, share of a max and rep speed of THE SET ABOUT TO BE DONE.
    *
@@ -4434,14 +4689,6 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
         {/* The rest on this line is the rest that will actually run — a drop set
             says nothing here, because there is none. */}
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs }}>{ex.group} · {plan.length} × {variedPlan ? 'varied' : ex.reps}{ex.loadKg != null && !variedPlan ? ' × ' + fig(liftLabel(ex.loadKg, unit)) : ''}{plannedRest > 0 && (ex.restSec != null || restIsMethods) ? ' · ' + restClock(plannedRest) + ' rest' : ''}</Text>
-        {/* ── the coach's table, where they wrote one ────────────────────
-            Only where the sets differ — see `variedPlan`. The set the client
-            is on is the one marked, because in the middle of a ramp "which
-            one am I on" is the question, and counting chips to find out is
-            what the row above was already failing to answer.
-
-            Every load here is stored in kilograms and converted once, at this
-            line, by `liftLabel`. */}
         {/* ── what this set asks for, beyond reps and load ─────────────────
             Drawn for the set that is next, and in words underneath. A client
             reading "@8" for the first time is being asked for something they
@@ -4461,30 +4708,54 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
             ))}
           </View>
         ) : null}
-        {variedPlan ? (
-          <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.md, padding: sp.md }}>
-            {plan.map((r) => {
-              const rb = badgeFor(r.method);
-              const here = r.n === done.length + 1;
-              return (
-                <View key={r.n} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: 3 }}>
-                  <Text style={{ ...ty.caption, ...numeric, color: here ? t.brand : t.ink3, width: 20, fontWeight: here ? '700' : '400' }}>{r.n}</Text>
-                  <Text style={{ ...ty.label, ...numeric, color: here ? t.ink : t.ink2, fontWeight: here ? '600' : '400' }}>
-                    {r.reps}{r.loadKg != null ? ' × ' + fig(liftLabel(r.loadKg, unit)) : ''}
-                  </Text>
-                  {rb ? (
-                    <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
-                  ) : null}
-                  {/* Each row's own effort, share and tempo — the reason this
-                      table can now be open on an exercise whose reps and load
-                      never change. */}
-                  {intensityLine(r.intensity) ? (
-                    <Text style={{ ...ty.caption, ...numeric, color: here ? t.ink2 : t.ink3 }}>{intensityLine(r.intensity)}</Text>
-                  ) : null}
-                  {r.n <= done.length ? <Icon name="check" size={13} color={t.brand} /> : null}
-                </View>
-              );
-            })}
+        {/* ── the plan, ticked off ──────────────────────────────────────
+            One line per planned set, with a box that logs it. The check icon
+            that used to sit at the end of each row said the same thing and did
+            nothing: it reported a set already logged from the keyboard below.
+
+            The keyboard is still there and is still the only way to record a
+            set that did not go to plan — a rep short, a load changed at the
+            rack, an AMRAP. The tick is for the sets that DID go to plan, which
+            is most of them, and it is the difference between four typed numbers
+            and one tap.
+
+            Every load is converted at this line, by `liftLabel`, and nowhere
+            earlier. What is stored is kilograms. */}
+        {plan.length ? (
+          <View style={{ marginTop: sp.md }}>
+            <SetChecklist
+              t={t} ticks={planTicks} movement={shownName(ex)} line={planLine}
+              askFor={(n) => {
+                const r = plan[n - 1];
+                if (!r) return { text: '', loadText: null };
+                const loadText = r.loadKg != null ? liftLabel(r.loadKg, unit) : null;
+                return {
+                  text: `${r.reps}${r.loadKg != null ? ' × ' + fig(liftLabel(r.loadKg, unit)) : ''}`,
+                  loadText,
+                };
+              }}
+              onTick={(_n, rec) => tickPlanned(rec)}
+              onUntick={() => untickLast()}
+              extraFor={(n) => {
+                const r = plan[n - 1];
+                if (!r) return null;
+                const rb = badgeFor(r.method);
+                const line = intensityLine(r.intensity);
+                if (!rb && !line) return null;
+                return (
+                  <>
+                    {rb ? (
+                      <Text accessibilityLabel={rb.label} style={{ ...ty.caption, fontWeight: '600', color: t.ink3 }}>{rb.short}</Text>
+                    ) : null}
+                    {/* Each row's own effort, share and tempo — a warm-up single
+                        at @6 and a top set at @9 are two different instructions
+                        and this is the only row that can hold both. */}
+                    {line ? (
+                      <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{line}</Text>
+                    ) : null}
+                  </>
+                );
+              }} />
           </View>
         ) : null}
         {/* The caution under the movement the member is about to perform, and

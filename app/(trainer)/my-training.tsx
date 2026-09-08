@@ -75,7 +75,19 @@ import { useToday, useNow } from '../../src/ui/today';
 // coach-of-themselves path, nothing here consults the roster, and a coach with
 // no clients at all gets the identical screen.
 import { MuscleWorkPanel } from '../../src/ui/MuscleWorkPanel';
-import { readLift, volumeIn, convertedNote, type WeightUnit } from '../../src/lib/units';
+import { volumeIn, convertedNote, type WeightUnit } from '../../src/lib/units';
+// ── one row per set, and a tick that says it happened ─────────────────────
+//
+// The two TestFlight reports this screen's "Log One Lift" section answers, and
+// the pure module that owns every decision in it. `readLift` is no longer
+// imported here at all: it is reached through `readLadder`, which reads one row
+// at a time and names the set a refusal came from — a coach told "check that
+// load" about a four-row table cannot see which row is wrong.
+import {
+  ladderDone, ladderNote, patchLadderRow, readLadder, readSetCount, resizeLadder,
+  setAllLadderRows, toggleLadderRow, type LadderRow,
+} from '../../src/lib/setLadder';
+import { SetLadder } from '../../src/ui/SetTable';
 import { weekStats } from '../../src/lib/streaks';
 import { num } from '../../src/lib/format';
 import { localDate } from '../../src/lib/localDate';
@@ -245,12 +257,61 @@ export default function MyTraining() {
 
   const [exercise, setExercise] = useState('');
   const [setCount, setSetCount] = useState('');
-  const [reps, setReps] = useState('');
-  const [load, setLoad] = useState('');
+  /**
+   * A ROW PER SET, each with its own reps, its own load and its own tick.
+   *
+   * ── what this replaces, and why it was wrong ─────────────────────────────
+   *
+   * Two boxes: one rep figure and one load, written out `setCount` times as
+   * `Array.from({ length: s }, () => [r, kg])`. Three sets of the identical
+   * number, because two boxes cannot say anything else.
+   *
+   * Reported from TestFlight by a coach on 1.3.0 (20): "when entering amount of
+   * sets there should be a drop down to record with the weight being used per
+   * set". A coach who worked up 60 / 65 / 65 had to pick one of those three
+   * numbers and lose the other two, and whichever they picked, their own
+   * tonnage, their own PR board and their own progression were computed off a
+   * session that had not happened.
+   *
+   * Nothing in the STORE had to change for this. `workouts.sets` has always
+   * been `[reps, kg]` PAIRS — one pair per set, each with its own second number
+   * — and src/lib/workoutRow.ts has always round-tripped them. The per-set load
+   * was in the model the whole time; it was this screen's three boxes that
+   * could not reach it.
+   *
+   * ── and the tick ─────────────────────────────────────────────────────────
+   *
+   * "A tick box to send feedback/log sets been completed", from the same
+   * report. The rows can now go up before the session and be ticked off through
+   * it, and ONLY the ticked rows are saved — see `readLadder`. A row nobody
+   * ticked is a set nobody did, and it does not reach the log as a zero, as an
+   * empty, or at all.
+   *
+   * All of the arithmetic, the resizing and the refusing is in
+   * src/lib/setLadder.ts, tested; the drawing is src/ui/SetTable.tsx, shared
+   * with the client app so the same control means the same thing in both.
+   */
+  const [ladder, setLadder] = useState<LadderRow[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
 
   /**
-   * A single lift, typed in four boxes, for when the sentence parser is not
+   * Retype the set count, and grow or shrink the table under it.
+   *
+   * The box keeps whatever was typed — including something that is not a count
+   * at all — because a controlled input that refuses a keystroke is one nobody
+   * can backspace out of. What the box says and what the table holds are two
+   * different things, and only a READABLE count moves the table.
+   */
+  const retype = (v: string) => {
+    setSetCount(v);
+    const read = readSetCount(v);
+    if (read.ok) setLadder((rows) => resizeLadder(rows, read.n));
+    // Deliberately no `else`. Clearing the box mid-edit must not throw away the
+    // four sets already typed and ticked underneath it.
+  };
+
+  /**
+   * A single lift, typed a row at a time, for when the sentence parser is not
    * what somebody wants.
    *
    * Everything here is refused rather than coerced. `parseInt(x, 10) || 0` is
@@ -291,27 +352,28 @@ export default function MyTraining() {
     setProblem(null);
     const name = exercise.trim();
     if (!name) { setProblem('Give the lift a name.'); return; }
-    const s = Number(setCount.trim());
-    if (!Number.isInteger(s) || s < 1 || s > 30) { setProblem('Sets must be a whole number between 1 and 30.'); return; }
-    const r = Number(reps.trim());
-    if (!Number.isInteger(r) || r < 1 || r > 200) { setProblem('Reps must be a whole number between 1 and 200.'); return; }
-    const read = readLift(load, wu);
+    // The count box is still read, and first, so that somebody who typed a name
+    // and a count and nothing else is told about the count rather than about a
+    // table that was never drawn.
+    const count = readSetCount(setCount);
+    if (!count.ok) { setProblem(count.reason); return; }
+    // Every refusal is `readLadder`'s, named by the set it came from, and the
+    // rule it enforces is the one this screen could not enforce before: only
+    // TICKED rows are read, so a table with two of four ticked writes two sets
+    // and the other two are absent rather than zero.
+    const read = readLadder(ladder, wu);
     if (!read.ok) { setProblem(read.reason); return; }
-    // A blank load is a bodyweight set. Stored as 0, which is what every other
-    // writer in this app stores and what `setsSummary` reads back as "no
-    // external load" rather than as "0 kg".
-    const kg = read.kg ?? 0;
     const entry: WorkoutEntry = {
       t: new Date().toISOString(),
       exercise: name,
-      sets: Array.from({ length: s }, () => [r, kg] as [number, number]),
+      sets: read.sets,
     };
     setBusy(true);
     const out = await logWorkouts([entry]);
     setBusy(false);
     if (out === 'stored') {
       notifySuccess();
-      setExercise(''); setSetCount(''); setReps(''); setLoad('');
+      setExercise(''); setSetCount(''); setLadder([]);
       const minted = await mintAll([name]);
       Alert.alert('Logged', `${name} added to your own training for today.`
         + (minted.length ? '\n\nIt was not in the exercise library, so it has been added to it.' : ''));
@@ -320,7 +382,7 @@ export default function MyTraining() {
       // this phone and in the list — leaving it in the form as well is how the
       // same set gets logged twice. No mint: the library's rows are earned by a
       // workout the server has accepted.
-      setExercise(''); setSetCount(''); setReps(''); setLoad('');
+      setExercise(''); setSetCount(''); setLadder([]);
       Alert.alert('Saved on this phone',
         `No connection, so ${name} has not reached your training log yet — nothing is lost. It is saved here and goes up on its own the next time you have signal.`);
     } else {
@@ -509,7 +571,7 @@ export default function MyTraining() {
           <Section>
             <SectionHead title="Log One Lift" />
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-              For when you would rather not type a sentence. Leave the weight empty for a bodyweight set.
+              For when you would rather not type a sentence. Every set gets its own weight, and only the sets you tick are saved. Leave a weight empty for a bodyweight set.
             </Text>
             {/* Typed OR picked. This field was free text only, which asked a
                 coach to spell from memory a movement the app already holds 604
@@ -543,20 +605,50 @@ export default function MyTraining() {
                 ))}
               </View>
             ) : null}
-            {/* Three numbers in a row with nothing over them once they have been
-                typed — and the third is the only one carrying a unit, which is
-                the coach's own kg/lb setting rather than a constant. */}
-            <View style={{ flexDirection: 'row', gap: sp.sm }}>
-              <Field label="Sets" a11y="Number of sets">
-                <TextInput value={setCount} onChangeText={setSetCount} keyboardType="numeric" style={inp} />
+            {/* ── how many sets, and then a row for each of them ───────────
+                The count box no longer multiplies one pair of numbers. It says
+                HOW MANY ROWS, and each row carries its own reps, its own load
+                and its own tick — which is what the report asked for and what
+                `workouts.sets` has been able to hold all along.
+
+                It is still one box in one row on its own, so a coach who wants
+                three of the same set types 3 and then taps Did on all of them,
+                which is two taps rather than the one it used to be. That is the
+                price of being able to say 60 / 65 / 65, and `All done` is the
+                second tap. */}
+            <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-end' }}>
+              <Field label="Sets" a11y="Number of sets" style={{ flex: 0, width: 96 }}>
+                <TextInput value={setCount} onChangeText={retype} keyboardType="numeric" style={inp} />
               </Field>
-              <Field label="Reps" a11y="Reps per set">
-                <TextInput value={reps} onChangeText={setReps} keyboardType="numeric" style={inp} />
-              </Field>
-              <Field label={wu.toUpperCase()} a11y={wu === 'kg' ? 'Load in kilograms' : 'Load in pounds'}>
-                <TextInput value={load} onChangeText={setLoad} keyboardType="decimal-pad" style={inp} />
-              </Field>
+              {ladder.length ? (
+                <Pressable
+                  onPress={() => setLadder((rows) => setAllLadderRows(rows, ladderDone(rows) < rows.length))}
+                  accessibilityRole="button"
+                  accessibilityLabel={ladderDone(ladder) < ladder.length
+                    ? `Tick all ${ladder.length} sets as done`
+                    : `Take the tick off all ${ladder.length} sets`}
+                  hitSlop={8}
+                  style={{ paddingVertical: 11, paddingHorizontal: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm }}>
+                  <Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>
+                    {ladderDone(ladder) < ladder.length ? 'All done' : 'Clear ticks'}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
+            {ladder.length ? (
+              <SetLadder
+                t={t} unit={wu} rows={ladder} movement={exercise.trim() || 'this lift'}
+                onPatch={(at, patch) => setLadder((rows) => patchLadderRow(rows, at, patch))}
+                onToggle={(at) => setLadder((rows) => toggleLadderRow(rows, at))}
+                note={ladderNote(ladder)} />
+            ) : (
+              // Not an error, and not silence either. An empty count box is
+              // somebody who has not said yet, and the sentence says what
+              // saying it will do rather than telling them off for it.
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                Say how many sets, and a row appears for each one — its own reps, its own weight, ticked off as you do it.
+              </Text>
+            )}
             {problem ? (
               <View style={{ flexDirection: 'row', gap: sp.sm, alignItems: 'flex-start', marginTop: sp.md }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.crit, marginTop: 6 }} />

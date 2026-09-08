@@ -25,6 +25,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, Pressable } from 'react-native';
 import { useTheme } from './components';
+import { MIN_OTP_SUBMIT } from './emailOtp';
 import { Ghost, Card } from './kit';
 import { sp, radius, hairline, type as ty, value } from '../theme/scale';
 import { digitsOnly } from '../lib/phone';
@@ -140,6 +141,10 @@ export function OtpCodeEntry({
         onChangeText={(v) => {
           const d = digitsOnly(v).slice(0, length);
           setCode(d); setError(null); setSent(null);
+          // Auto-submit at the EXPECTED length, so the common path still needs
+          // no button press. Shorter codes are not refused — they wait for
+          // Confirm below. See MIN_OTP_SUBMIT in src/ui/emailOtp.ts for why the
+          // screen must not be the thing that decides a code is too short.
           if (d.length === length) void submit(d);
         }}
         keyboardType="number-pad"
@@ -149,6 +154,22 @@ export function OtpCodeEntry({
         autoFocus
         style={{ position: 'absolute', opacity: 0, height: 1, width: 1 }}
       />
+
+      {/* Confirm, for a code that is not the length these boxes were drawn at.
+          The auto-submit above still handles the ordinary case, so this is
+          usually never pressed — it exists because the code length is a server
+          setting that can move without a release, and a screen that refuses to
+          TRY a six-digit code because it drew eight boxes is broken in exactly
+          the way the eight-digit code broke it in the first place. Only
+          Supabase can say whether a code is right; this button lets it. */}
+      {digitsOnly(code).length >= MIN_OTP_SUBMIT && digitsOnly(code).length !== length ? (
+        <View style={{ alignItems: 'center', marginTop: sp.xl }}>
+          <Ghost
+            label={busy ? 'Checking…' : `Confirm ${digitsOnly(code).length} digits`}
+            onPress={() => { if (!busy) void submit(digitsOnly(code)); }}
+          />
+        </View>
+      ) : null}
 
       {error ? (
         <Card tone={t.warn} style={{ marginTop: sp.xl }}>

@@ -43,6 +43,7 @@
 // no longer matches any exercise is left alone: the coach may put that movement
 // back next week, and a member's correction is not the app's to discard.
 import type { ProgramExercise } from './programs';
+import type { SetRow } from './setRows';
 
 /** Where the edits live on the device. One key for all four, for the reason
  *  above: they are one answer and must not half-arrive. */
@@ -52,8 +53,25 @@ export const PLAN_EDITS_KEY = 'repple.planEdits';
 export interface PlanEdits {
   /** `dayIdx:key` → the movement they do instead. */
   swaps: Record<string, string>;
-  /** `dayIdx:key` → the sets, reps or load they set themselves. */
-  exEdits: Record<string, { sets?: number; reps?: string; loadKg?: number | null }>;
+  /**
+   * `dayIdx:key` → the sets, reps or load they set themselves.
+   *
+   * `setRows` is a TABLE — a row per set, each with its own reps and its own
+   * load — and it is what a member writing 60 / 65 / 65 into their own plan
+   * produces. It was added after the other three and obeys the same rule they
+   * do: a key that is ABSENT is a member who has not said, so every correction
+   * ever written before it round-trips through here and through AsyncStorage
+   * exactly as it did.
+   *
+   * The other three are kept alongside it rather than replaced by it, and that
+   * is not redundancy. `sets` must equal the number of rows — src/lib/setRows.ts
+   * sets out at length why those two numbers are one fact — and `reps`/`loadKg`
+   * are the exercise's own fallback, which is what every reader that has never
+   * heard of a table still reads.
+   */
+  exEdits: Record<string, {
+    sets?: number; reps?: string; loadKg?: number | null; setRows?: SetRow[] | null;
+  }>;
   /** `dayIdx:key` for every movement they have taken off that day. */
   removed: string[];
   /** Movements they added that the programme does not contain. */
@@ -123,6 +141,26 @@ export function readPlanEdits(raw: string | null | undefined): { edits: PlanEdit
     if (typeof v.sets === 'number' && Number.isFinite(v.sets)) row.sets = v.sets;
     if (typeof v.reps === 'string') row.reps = v.reps;
     if ('loadKg' in v) row.loadKg = (typeof v.loadKg === 'number' && Number.isFinite(v.loadKg)) ? v.loadKg : null;
+    // The table. Read row by row rather than trusted wholesale, because this
+    // blob also arrives from the SERVER and a jsonb column will hold anything.
+    // An empty array is dropped for the same reason src/lib/setRows.ts refuses
+    // to create one: `setRows: []` is a movement with no sets to log against,
+    // which is a worse answer than the old fields already give.
+    if (Array.isArray(v.setRows)) {
+      const table: SetRow[] = (v.setRows as unknown[])
+        .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x))
+        .map((x) => {
+          const r: SetRow = {};
+          if (typeof x.reps === 'string') r.reps = x.reps;
+          // Present-with-a-null is a real answer here — "nothing on the bar" —
+          // and is not the same as the key being absent, which is "this row
+          // follows the exercise". Both survive JSON; that is the whole reason
+          // the shape is what it is.
+          if ('loadKg' in x) r.loadKg = (typeof x.loadKg === 'number' && Number.isFinite(x.loadKg)) ? x.loadKg : null;
+          return r;
+        });
+      if (table.length) row.setRows = table;
+    }
     if (Object.keys(row).length) exEdits[k] = row;
   }
   const removed = Array.isArray(p.removed) ? p.removed.filter((x): x is string => typeof x === 'string' && !!x) : [];
