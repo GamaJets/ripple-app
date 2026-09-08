@@ -66,7 +66,7 @@ export default function Progression() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>From your logged lifts</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Next-session Targets</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         <Rule />

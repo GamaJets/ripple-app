@@ -596,6 +596,7 @@ export default function Coach() {
             <Rule />
             <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
               <TextInput value={input} onChangeText={setInput} placeholder="Ask your coach…" placeholderTextColor={t.ink3} multiline
+                accessibilityLabel="Ask your coach"
                 style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120 }} />
               {/* The arrow, and the three things wrong with it.
                   · It was `t.brandInk` in both states, so when the button went

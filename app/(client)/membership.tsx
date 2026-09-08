@@ -266,7 +266,7 @@ export default function Membership() {
                 no idea why. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_NO_CHANGED_NOTE}</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         <Rule />

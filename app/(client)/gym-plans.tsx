@@ -215,7 +215,7 @@ export default function GymPlans() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Plans &amp; Passes</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What your gym sells, and what you are on now.</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {/* ── can the gym take a card at all ──────────────────────────────

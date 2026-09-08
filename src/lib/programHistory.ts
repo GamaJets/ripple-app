@@ -197,6 +197,16 @@ export function historyBoard(
     });
   }
 
+  // whole-ok: 'partial' goes on through the loop below on purpose — the earlier
+  // blocks that came back are real blocks a coach wants to read, each with its
+  // own real dates, and refusing to draw them because there may be more would
+  // hide a client's whole history to avoid mis-stating its length. The length is
+  // what gets refused instead: both returns below read `status === 'ready' ? n :
+  // null` for `earlierCount`, and `historyLine` turns that null into "came back
+  // at the row limit, so how many there are cannot be counted from here. Every
+  // block listed is real." An `isWhole` on this line would send a client with a
+  // long history down the 'unreadable' path and tell their coach the record
+  // could not be read, which is not what happened.
   if (rows == null || status === 'error' || status === 'loading') {
     // The current block is still worth drawing when it read: "this is what they
     // are on, and what came before could not be read" is two true sentences.

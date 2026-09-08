@@ -729,7 +729,7 @@ export default function FoodLog() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+ <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.micro, color: t.ink3 }}>Nutrition</Text>
  <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Food Log</Text>
@@ -896,8 +896,12 @@ export default function FoodLog() {
  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: 6 }}>In your own words — the AI reads it into macros</Text>
  <View style={{ flexDirection: 'row', gap: sp.sm }}>
  <TextInput value={nl} onChangeText={setNl} placeholder='"chicken burrito & a coke"' placeholderTextColor={t.ink3} onSubmitEditing={logNL} returnKeyType="done"
+ accessibilityLabel="Describe what you ate"
  style={{ ...field, flex: 1 }} />
  <Pressable onPress={logNL} disabled={nlBusy || !nl.trim()}
+ accessibilityRole="button"
+ accessibilityLabel={nlBusy ? 'Reading what you typed' : 'Log what you typed'}
+ accessibilityState={{ disabled: nlBusy || !nl.trim(), busy: nlBusy }}
  style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
  {nlBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
  </Pressable>
@@ -917,6 +921,7 @@ export default function FoodLog() {
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md }}>
  <Icon name="search" size={16} color={t.ink3} />
  <TextInput value={q} onChangeText={setQ} placeholder="Chicken, pad thai, a brand…" placeholderTextColor={t.ink3}
+ accessibilityLabel="Search foods"
  style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: 11 }} />
  </View>
  {/* Why every row carries a source. A Common or Restaurant figure is a typical
@@ -1208,7 +1213,8 @@ export default function FoodLog() {
  </Field>
  ))}
  </View>
- <Pressable onPress={saveEdit} disabled={edBusy} accessibilityState={{ disabled: edBusy }} accessibilityRole="button"
+ <Pressable onPress={saveEdit} disabled={edBusy} accessibilityState={{ disabled: edBusy, busy: edBusy }} accessibilityRole="button"
+ accessibilityLabel={edBusy ? 'Saving the correction' : 'Save the correction'}
  style={{ backgroundColor: edBusy ? t.surface2 : t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center' }}>
  {edBusy ? <ActivityIndicator color={t.ink2} /> : <Text style={{ ...ty.body, fontWeight: '600', color: t.brandInk }}>Save the correction</Text>}
  </Pressable>

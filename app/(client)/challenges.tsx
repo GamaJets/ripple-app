@@ -120,7 +120,7 @@ export default function Challenges() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>You, and everyone else in it</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Challenges</Text>
@@ -280,7 +280,11 @@ export default function Challenges() {
 
               {sheet.joined && board.status === 'loading' ? (
                 <View style={{ paddingVertical: sp.lg, alignItems: 'flex-start' }}>
-                  <ActivityIndicator color={t.ink3} />
+                  {/* A spinner is drawn, not spoken. Without a name this View is
+                      not in the accessibility tree at all, so the board reads as
+                      absent rather than pending — and the sentence under it that
+                      says why is only rendered on 'error'. */}
+                  <ActivityIndicator color={t.ink3} accessible accessibilityRole="progressbar" accessibilityLabel="Reading the leaderboard…" />
                 </View>
               ) : null}
 

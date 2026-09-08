@@ -883,9 +883,27 @@ export default function ClientBody() {
                         record" when nobody could ask would be a claim about
                         their record made out of our connection. */}
                     <Text style={{ ...ty.body, color: t.ink2 }}>
-                      {scanStatus === 'error' || scanStatus === 'loading'
-                        ? `${manualFigures(manual, wu, who)} Their scans could not be read just now, so which of the two their own app is showing them cannot be said from here.`
-                        : manualLine(manual, history?.latestScanISO ?? null, wu, who)}
+                      {
+                        // whole-ok: 'partial' falls through to `manualLine` on
+                        // purpose, because the only thing this line asks of the
+                        // scan read is which of two dates is NEWER — the
+                        // client's typed entry, or their latest scan.
+                        // `capped()` hands back the newest rows, so the newest
+                        // scan under a truncated read is the same row it would
+                        // be under a whole one; the truncation eats the OLDEST
+                        // scans, which this comparison never looks at.
+                        // `manualLine`'s one dangerous branch is the
+                        // null-latestScanISO sentence, "there is no scan on
+                        // record", and that is unreachable here: 'partial'
+                        // means the page came back FULL, so there are a
+                        // thousand scans and a newest among them. The section
+                        // that does COUNT scans is a hundred and fifty lines up
+                        // and gated on `isWhole`, and this screen's own
+                        // row-limit note sits at the top of the same block.
+                        scanStatus === 'error' || scanStatus === 'loading'
+                          ? `${manualFigures(manual, wu, who)} Their scans could not be read just now, so which of the two their own app is showing them cannot be said from here.`
+                          : manualLine(manual, history?.latestScanISO ?? null, wu, who)
+                      }
                     </Text>
                     <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.sm }}>
                       Deliberately not a point on any line above. A set of bathroom scales and an

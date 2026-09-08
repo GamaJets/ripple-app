@@ -427,6 +427,16 @@ export type ConnectionState = 'unconfigured' | 'unknown' | 'connected' | 'not-co
 
 export function connectionState(configured: boolean, status: ReadStatus, hasAccount: boolean): ConnectionState {
   if (!configured) return 'unconfigured';
+  // whole-ok: `hasAccount` is not a count over a set, it is one boolean off ONE
+  // row — the coach's own linked account, read by `useInstagram` in
+  // src/ui/instagram.ts, which asks for a single row and therefore never
+  // truncates and never answers 'partial'. It is admitted anyway rather than
+  // being refused, because if it ever did arrive the honest answer is the one
+  // below: a read that came back at a ceiling still returned the row that proves
+  // a connection, and 'connected' off a proven row is right. The reverse
+  // direction is unreachable in the same breath — a truncated read is a FULL
+  // page, so an account row came back, so `hasAccount` is not false because of
+  // the truncation. Pinned by the 'partial' case in instagramPublish.test.ts.
   if (status === 'loading' || status === 'error') return 'unknown';
   return hasAccount ? 'connected' : 'not-connected';
 }

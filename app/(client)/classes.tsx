@@ -212,7 +212,7 @@ export default function Classes() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Classes</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Pick your location and book a spot. Full classes have a waitlist.</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {/* The other half of the same subject, and the half the member has never

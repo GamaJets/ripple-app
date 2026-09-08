@@ -258,7 +258,7 @@ export default function Trends() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>See your training move over time</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Trends</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {/* ── the hero: this week's tonnage ──────────────────────────────── */}

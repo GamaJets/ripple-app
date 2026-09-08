@@ -62574,3 +62574,716 @@ alter table public.exercises
   add column if not exists is_bodyweight boolean not null default false,
   add column if not exists is_unilateral boolean not null default false,
   add column if not exists body_part     text;
+
+-- ▶ a-gym-could-free-a-pt-hour-and-not-hand-it-on.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A gym could free a PT hour and not hand it on
+-- ═══════════════════════════════════════════════════════════════════════════
+-- NOT APPLIED. Written to be applied by hand.
+--
+--
+-- ── What a person suffers ─────────────────────────────────────────────────
+--
+-- Mara joined the waitlist for Tuesday 6:30pm three weeks ago. The app told her
+-- she was first in line and she stopped thinking about it, which is the whole
+-- purpose of a queue.
+--
+-- On Monday the member holding that hour rings the gym rather than opening the
+-- app, and the front desk frees the slot from the owner console. The console
+-- does exactly what it says it does: `updatePtSlot(supabase, slot.id,
+-- { clientId: null })` in src/lib/gymPtSchedule.ts writes the same row an
+-- unbooking writes, `sessions_gym_owner_u` permits it, one row changes, and the
+-- hour is open.
+--
+-- Mara is not told, is not booked, and is not first in line for anything. The
+-- hour sits on the board as spare capacity until somebody with the app open
+-- happens to take it — which is the race the waitlist was built to replace,
+-- except that this time nobody was even invited to it. She finds out by opening
+-- the Classes screen weeks later and seeing the slot gone, or she never finds
+-- out at all.
+--
+-- The coach's own path does not do this. `app/(trainer)/calendar.tsx` frees the
+-- slot, calls `promote_session_waitlist`, and then sends "The slot you were
+-- waiting for is yours". The member's own cancellation does not do it either —
+-- `cancel_my_session` (part 126) promotes inside the transaction that frees the
+-- hour. The gym is the one door with the queue behind it and no handle.
+--
+--
+-- ── Gap, or a boundary somebody drew on purpose ───────────────────────────
+--
+-- Worth establishing before touching anything, because this repository has
+-- deliberately narrow doors and a roadmap calling one of them a bug does not
+-- make it one. Three files have an opinion.
+--
+--   1 · Part 126 itself, on the trainer function:
+--
+--         "The coach freeing a slot themselves. Their cancellation goes through
+--          RLS on `sessions` (they own the row), so the promotion cannot ride
+--          along inside it — this is the explicit second step their screen
+--          takes, and it is authorised on the one fact that matters: the
+--          session is theirs."
+--
+--       That is an argument for why the COACH's route is shaped as a second
+--       call and what authorises it. It is not a sentence about a gym. Nothing
+--       in part 126 mentions an owner, a tenant, or a console; the file was
+--       written before any of them could free a PT hour.
+--
+--   2 · Part 144, which DID consider the gym and left it out — but about a
+--       different verb. It kept `session_waitlist` unreadable to owners:
+--
+--         "waitlist_gym_r on session_waitlist — DELIBERATE, left alone. …
+--          Re-adding the arm would widen who can see which named members are
+--          queueing for a PT slot, on live data, to satisfy a comment in a
+--          superseded file rather than a screen. A narrowing nobody is hitting
+--          is left narrow."
+--
+--       That decision is about READING the queue — which named members are
+--       waiting — and it is a privacy decision this part does not disturb. Its
+--       stated ground is "nothing asks for it" and "no owner screen reads the
+--       table", and both are still true of reading. Neither was ever a claim
+--       that the gym may not RESOLVE a queue it cannot see.
+--
+--   3 · Part 142, recording the same narrowing without endorsing it:
+--
+--         "Recording is not agreeing — if either narrowing was accidental it is
+--          now visible enough to argue about."
+--
+-- And the console says out loud that it is a gap, in
+-- studio-web/app/timetable/page.tsx above `BookTo`:
+--
+--     "ONE THING IT DELIBERATELY DOES NOT DO … it does not promote the
+--      waitlist. … Freeing an hour here therefore opens it for anyone rather
+--      than handing it to whoever was first in the queue. Claiming otherwise
+--      would be worse than saying it."
+--
+-- So: a gap. Part 33 settled the principle when it gave `sessions` a tenant at
+-- all — "A gym cannot see the one-to-one sessions its own trainers deliver on
+-- its floor … the data is missing rather than over-shared" — and gave the owner
+-- `sessions_gym_owner_u`, an UPDATE on every session in their tenant. The gym
+-- has held the power to free the hour since part 33 and has never held the
+-- power to hand it on. That asymmetry is the defect, and it is one function.
+--
+--
+-- ── The owner arm is the predicate the console already runs on ─────────────
+--
+-- `promote_session_waitlist` gains a second arm and loses nothing:
+--
+--     s.trainer_id = v_uid                                  ← part 126, intact
+--     s.tenant_id is not null and public.is_owner_of(s.tenant_id)   ← new
+--
+-- The second is character for character the USING clause of `sessions_gym_owner_r`
+-- and `sessions_gym_owner_u` (part 33). It is therefore not a new authority: it
+-- is the same fact that already let this caller empty the slot, asked again by
+-- the function that has to hand it on. An owner who cannot free the hour cannot
+-- promote for it either, and an owner who can, can.
+--
+-- `is_owner_of` was read before it was used rather than assumed:
+--
+--     select exists (select 1 from profiles p
+--                     where p.id = auth.uid() and p.role = 'owner'
+--                       and p.tenant_id = t);
+--
+-- Three conjuncts, and all three matter here. `p.role = 'owner'` is why a
+-- trainer cannot reach the new arm at all — a coach's profile row says
+-- 'trainer' and the predicate is false for them on every tenant in the
+-- database, including their own gym's. `p.tenant_id = t` is why the owner of
+-- gym B cannot promote for gym A. And `p.id = auth.uid()` is why this is not a
+-- role check in the abstract: it is a check on the caller of THIS request.
+--
+-- `tenant_id is not null` is kept even though `is_owner_of(null)` is already
+-- false (`p.tenant_id = null` is never true), because the two policies that
+-- decide the same question write it, and a reader comparing them should find
+-- the same expression rather than a shorter one they have to reason about.
+--
+-- It is not an `or true` in disguise. The negative cases were enumerated and
+-- every one of them still raises 42501: an authenticated member of the gym
+-- (role 'client'), a coach on the gym's staff (role 'trainer'), the owner of a
+-- different tenant, an owner over a session whose `tenant_id` is null, and
+-- anon (which holds no execute grant on this function at all). The one caller
+-- the arm admits is a profile whose role is 'owner' in the session's own
+-- tenant.
+--
+-- `sessions.tenant_id` is safe to authorise on. It is not a label a caller can
+-- choose: part 1062's `guard_session_tenant()` refuses an UPDATE of that column
+-- from `authenticated` and `anon` precisely because it is "the left-hand side
+-- of the owner policies", and names this exact shape — "a coach who points a
+-- session's tenant_id at another gym hands that gym's owner the ability to
+-- alter or delete it".
+--
+--
+-- ── What this part does NOT do ────────────────────────────────────────────
+--
+-- No RLS policy is added or changed, on any table. `promote_session_waitlist`
+-- and `_promote_session_waitlist` are both SECURITY DEFINER and neither reads
+-- `session_waitlist` through a policy, so the gym gets the ANSWER — one member
+-- was promoted, or nobody was — without ever being able to read the queue. Part
+-- 144's narrowing stands exactly as it was written: an owner still cannot see
+-- which named members are waiting for a PT slot, and a gap in promotion was
+-- never a reason to widen that.
+--
+-- The absence of a policy is also the absence of this codebase's recurring
+-- policy defect. A `for all` whose USING is looser than its WITH CHECK reads as
+-- a read-widening and ships as a DELETE — `session_waitlist`'s own first policy
+-- was that shape, `for all using (auth.uid() = client_id)` with no WITH CHECK,
+-- and part 126 records what it allowed. There is no `for all` here to get wrong.
+--
+-- The trainer arm is not touched, not reworded and not re-ordered. It is
+-- evaluated first, so the ordinary path costs one index lookup on `sessions`
+-- and never calls `is_owner_of` at all.
+--
+--
+-- ── Whoever is promoted has to be told, and by whom ───────────────────────
+--
+-- The promotion is worth nothing to Mara if nobody tells her, and this is the
+-- one push in the product that reports a booking the recipient did not make
+-- (src/lib/notifyInbox.ts says so, above `KNOWN_PUSHES`).
+--
+-- Today that sentence is sent by a HANDSET, from both paths that can free a PT
+-- hour: `app/(trainer)/calendar.tsx` after `promoteWaitlist`, and
+-- `src/ui/sessions.tsx` on the member's own cancellation. Part 159 names them —
+-- "an app that sends 'The slot you were waiting for is yours' — twice, once
+-- from each side that can free a slot".
+--
+-- The console is a third side and it is not a handset. So the row is written
+-- here, in the same transaction as the promotion, and ONLY on the owner arm:
+--
+--   · not on the trainer arm, because `sendPushChecked` in the coach's calendar
+--     already sends it and a second would arrive twice, in two wordings,
+--     seconds apart — which is the exact defect `KNOWN_PUSHES` rule 1 and part
+--     2392 were both written about.
+--   · not as a trigger on `sessions`, for the same reason doubled: a trigger
+--     would fire under the coach's cancellation AND the member's, and would
+--     duplicate both existing senders. Part 159 put the class promotion on a
+--     trigger because the class path had no sender at all. This one has two.
+--
+-- `push_by` is left at its column default of 'server', which is what makes this
+-- reach a phone: `notifications_dispatch_push` (part 900) claims exactly the
+-- rows a handset has not already pushed. `notify_users()` would have been the
+-- wrong call — it stamps `push_by = 'caller'` on purpose, for callers that send
+-- their own push, and the console does not.
+--
+-- Its authorisation would have permitted it — `notify_users` allows
+-- `is_owner_of(c.tenant_id)` over a member of the caller's gym — and the direct
+-- insert is deliberately no wider: the recipient is the client id
+-- `_promote_session_waitlist` just booked into a session in the caller's own
+-- tenant, which is a strictly narrower set than that arm allows.
+--
+-- Route `/(client)/calendar`, which `notification_channel` maps to 'bookings' —
+-- the same switch that governs the handset push of the same sentence, so a
+-- member who has muted booking notifications is not reached by the back door.
+-- The title is the same title, because it is the same event and the gym freeing
+-- the hour instead of the coach is not news to the person being told.
+--
+-- The join to `profiles` is not defensive noise. `notifications.user_id` is
+-- `references profiles(id)`, and `notify_users` carries the same join with the
+-- reason on it: a coach's roster merges real `clients` with hand-added
+-- `coach_clients` whose ids have no profile behind them. A promotion must never
+-- fail because the person promoted has no account — the booking is the
+-- important half and it is already done.
+--
+-- The "when" is a DURATION and never a clock time. `sessions` has no zone on it
+-- and the server has no idea what the member's phone reads, so part 159's bands
+-- are reproduced here — the same bands `classStartsIn()` in src/lib/notifyCopy.ts
+-- computes on the handset. Change one and change both. The already-started band
+-- is unreachable today, because `_promote_session_waitlist` returns null for a
+-- session whose `starts_at` has passed; it is kept so the copy is still true if
+-- that guard ever moves.
+--
+--
+-- ── A promotion that promoted nobody must not read as one that did ────────
+--
+-- The whole consequence here is a place in a gym: somebody gets Tuesday 6:30
+-- and somebody else does not. The worst outcome is not a refusal — it is an
+-- owner told "handed to the queue" over a call that handed it to nobody, who
+-- then does not re-offer the hour.
+--
+-- The function keeps its three distinguishable answers and adds none:
+--
+--     a uuid    one named person was booked, and the row proving it was written
+--               in the same transaction. Promoted implies told.
+--     null      the server ran and promoted nobody — the queue was empty, or
+--               the slot was no longer available, or it had already started.
+--     42501     refused. NOTHING is known about the queue.
+--
+-- That is deliberately the same three `PromoteResult` in src/ui/sessions.tsx
+-- already draws for the coach's screen, and its header holds the argument for
+-- why the third must never collapse into the second: a caller that reads a
+-- failed call as a proven-empty queue broadcasts the hour to the whole roster,
+-- which is the race the waitlist exists to replace, run against somebody who
+-- may already own the slot. src/lib/waitlistPromotion.ts is the pure half of
+-- that reading for the console, which cannot import a React Native module.
+--
+-- Idempotent. Safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ── The arm ───────────────────────────────────────────────────────────────
+--
+-- Re-emitted whole from part 126 rather than patched, because a function is
+-- replaced whole or not at all. Every line except the authorisation block and
+-- the notification is part 126's, unchanged.
+create or replace function public.promote_session_waitlist(p_session uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+declare
+  v_uid      uuid := auth.uid();
+  v_mine     boolean;
+  v_as_owner boolean;
+  v_promoted uuid;
+  v_starts   timestamptz;
+  v_secs     numeric;
+  v_hours    numeric;
+  v_days     numeric;
+  v_when     text;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in.' using errcode = '42501';
+  end if;
+
+  -- The coach's own session. Part 126's check, character for character, and
+  -- evaluated first so the ordinary path never asks the second question.
+  select exists (
+    select 1 from sessions s where s.id = p_session and s.trainer_id = v_uid
+  ) into v_mine;
+
+  -- The gym the session is delivered in. The USING clause of
+  -- `sessions_gym_owner_u`, which is what let this caller empty the slot.
+  if v_mine then
+    v_as_owner := false;
+  else
+    select exists (
+      select 1 from sessions s
+       where s.id = p_session
+         and s.tenant_id is not null
+         and public.is_owner_of(s.tenant_id)
+    ) into v_as_owner;
+  end if;
+
+  if not (v_mine or v_as_owner) then
+    raise exception 'That session is not yours.' using errcode = '42501';
+  end if;
+
+  v_promoted := public._promote_session_waitlist(p_session);
+
+  -- The sentence, on the owner arm ONLY.
+  --
+  -- The two handset paths send their own; see the header. Guarded on
+  -- `v_as_owner` and not on "did the caller send one", because whether a push
+  -- happened is not a fact the database can read.
+  if v_as_owner and v_promoted is not null then
+    select s.starts_at into v_starts from sessions s where s.id = p_session;
+
+    -- classStartsIn(), band for band. src/lib/notifyCopy.ts and part 159.
+    v_secs := extract(epoch from (v_starts - now()));
+    if v_starts is null then
+      v_when := '';
+    elsif v_secs <= 0 then
+      v_when := 'It has already started.';
+    elsif v_secs < 3600 then
+      v_when := 'It starts in under an hour.';
+    else
+      v_hours := round(v_secs / 3600.0);
+      if v_hours = 1 then
+        v_when := 'It starts in about an hour.';
+      elsif v_hours < 24 then
+        v_when := 'It starts in about ' || v_hours || ' hours.';
+      else
+        v_days := round(v_secs / 86400.0);
+        if v_days <= 1 then
+          v_when := 'It starts in about a day.';
+        else
+          v_when := 'It starts in about ' || v_days || ' days.';
+        end if;
+      end if;
+    end if;
+
+    -- One row, for one person, and only if that person has an account to read
+    -- it with. `push_by` takes its default of 'server' so part 900 dispatches
+    -- it; `channel` is derived from the route by `notifications_set_channel`.
+    insert into public.notifications (user_id, title, body, icon, route, session_id)
+    select v_promoted,
+           'The slot you were waiting for is yours',
+           -- `v_when` is empty only in the branch that cannot happen, and the
+           -- case is here so that branch does not print two spaces if it does.
+           left('The session you were on the waiting list for just freed up, and you were'
+                || ' next on the list — it is booked for you. '
+                || case when v_when = '' then '' else v_when || ' ' end
+                || 'Your calendar has the time on your own clock, and is where to cancel if you'
+                || ' can no longer make it.', 500),
+           'calendar',
+           '/(client)/calendar',
+           p_session
+     where exists (select 1 from profiles p where p.id = v_promoted);
+  end if;
+
+  return v_promoted;
+end $fn$;
+
+-- Part 126's grants, re-stated. `create or replace` keeps an existing function's
+-- ACL, but on a database built from these parts in order this statement is the
+-- CREATE — and a newly created function is executable by PUBLIC, which in a
+-- Supabase project includes `anon`. The standing rule, and part 126's own two
+-- lines.
+revoke all on function public.promote_session_waitlist(uuid) from public, anon;
+grant execute on function public.promote_session_waitlist(uuid) to authenticated;
+
+comment on function public.promote_session_waitlist(uuid) is
+  'Hands a freed one-to-one slot to the head of its waitlist. Authorised for the coach who owns the session (part 126) or the owner of the gym it is delivered in — is_owner_of(sessions.tenant_id), the same predicate as sessions_gym_owner_u, which is what lets a gym free the hour in the first place. Returns the promoted client id, or null when nobody was promoted; raises 42501 when the caller is neither. On the owner arm it also writes the promoted member their notification, because the console is not a handset and the two app paths send their own. See part 2610.';
+
+
+-- ── verify, after applying ────────────────────────────────────────────────
+--
+-- 1. The arm exists and the trainer arm is intact:
+--
+--      select pg_get_functiondef('public.promote_session_waitlist(uuid)'::regprocedure);
+--
+--    Expect both `s.trainer_id = v_uid` and `public.is_owner_of(s.tenant_id)`.
+--
+-- 2. The grant did not widen. Expect `authenticated` true, `anon` false:
+--
+--      select has_function_privilege('authenticated',
+--               'public.promote_session_waitlist(uuid)', 'EXECUTE') as auth_ok,
+--             has_function_privilege('anon',
+--               'public.promote_session_waitlist(uuid)', 'EXECUTE') as anon_ok;
+--
+-- 3. No policy moved. Expect the four `session_waitlist` policies part 142 and
+--    145 left — _client_r, _client_d, _trainer_r, _service_rw — and no owner
+--    arm among them:
+--
+--      select polname, polcmd from pg_policy p
+--        join pg_class c on c.oid = p.polrelid
+--       where c.relname = 'session_waitlist' order by 1;
+--
+-- 4. The refusal still refuses. As a signed-in TRAINER of the gym, against a
+--    session belonging to a DIFFERENT coach in that same gym, expect 42501
+--    'That session is not yours.':
+--
+--      select public.promote_session_waitlist('<a peer coach''s session uuid>');
+--
+-- 5. The arm admits the owner. As the gym's owner, over one of their own
+--    trainers' freed slots with somebody waiting, expect the waiting member's
+--    uuid back, `sessions.client_id` set to it, one `session_waitlist` row
+--    gone, and exactly ONE new `notifications` row:
+--
+--      select public.promote_session_waitlist('<that session uuid>');
+--      select user_id, title, channel, push_by, pushed_at
+--        from notifications where session_id = '<that session uuid>';
+--
+--    Expect channel 'bookings' and push_by 'server'.
+--
+-- 6. `select public.get_advisors('security')` is clean, and the count of
+--    anon-executable SECURITY DEFINER functions still holds at 2.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ▶ a-coach-could-post-a-class-onto-another-gyms-timetable.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A coach could post a class onto another gym's timetable
+-- ═══════════════════════════════════════════════════════════════════════════
+-- NOT APPLIED. Written to be applied by hand, and the advisors must be re-run
+-- afterwards — applying SQL is not finished until get_advisors is clean.
+--
+-- Every fact below was read out of the LIVE database on 8 Sep 2026 with
+-- pg_policies, pg_class, pg_attribute, pg_constraint, pg_trigger, pg_proc,
+-- has_table_privilege, has_column_privilege and information_schema.column_
+-- privileges — not out of the parts, which are a build log rather than the
+-- truth. Nothing here was written; the whole audit was read-only.
+--
+--
+-- ── What a person suffers ─────────────────────────────────────────────────
+--
+-- A gym owner opens the timetable and there is a 06:00 class on it that
+-- nobody at the gym put there. It has a title, a room, a capacity and a
+-- start time, all typed by somebody who does not work at that gym. Members
+-- see it — `gym_classes_read` is `tenant_id = my_tenant()`, so every member
+-- and every member of staff at that gym reads it — and they can book it.
+-- The owner cannot take it down from the coach app either, because
+-- `gym_classes_write` is scoped to `trainer_id`, not to the gym: the class
+-- belongs, as far as the row policies are concerned, to the person who
+-- injected it. `gym_classes_owner_rw` does let the owner delete it, so the
+-- damage is repairable — but it is repairable one row at a time, by hand,
+-- after somebody has already turned up at 06:00.
+--
+-- The same hole in the other direction is quieter and worse. A trainer who
+-- really does work at the gym can take one of their own classes OFF the
+-- board by pointing its `tenant_id` at some other tenant. The class stops
+-- being visible to the gym, its bookings stop being visible to the gym
+-- (`class_bookings_staff_r` and `class_bookings_owner_r` both join through
+-- `gym_classes.tenant_id`), and the gym's own attendance and class-pay
+-- reads stop counting it. That is the shape part 30's `tenant_id` was added
+-- to prevent, arriving through the write side instead of the read side.
+--
+-- ── The chain, exactly as it stands live ──────────────────────────────────
+--
+-- `public.gym_classes` carries four permissive policies. Two are the gym's:
+--
+--     gym_classes_owner_rw   FOR ALL     USING/CHECK is_owner_of(tenant_id)
+--     gym_classes_read       FOR SELECT  USING      (tenant_id = my_tenant())
+--     gym_classes_mine_r     FOR SELECT  USING      (id IN (my_class_history()))
+--
+-- and one is the coach's, and it is the one that does not mention the gym:
+--
+--     gym_classes_write      FOR ALL     USING      (trainer_id = auth.uid())
+--                                        WITH CHECK (trainer_id = auth.uid())
+--
+-- `authenticated` holds column-level INSERT and UPDATE on `gym_classes`, and
+-- `tenant_id` is one of the granted columns — verified, not assumed:
+--
+--   select has_column_privilege('authenticated','public.gym_classes','tenant_id','INSERT'),
+--          has_column_privilege('authenticated','public.gym_classes','tenant_id','UPDATE');
+--   -- t, t
+--
+-- So `tenant_id` is a caller-supplied field on a row whose only check is
+-- "the trainer is me". Nothing in the WITH CHECK, and nothing in the CHECK
+-- constraints (`gym_classes_status_check` is the only one, and it is about
+-- `status`), asks whether the caller has anything to do with that gym. The
+-- foreign key `gym_classes_tenant_id_fkey` asks only that the tenant exist.
+--
+-- ── Why the trigger does not save it ──────────────────────────────────────
+--
+-- There IS a BEFORE INSERT OR UPDATE trigger on the table, and it is the
+-- reason this reads as safe at a glance. It is not a guard. Read live:
+--
+--   CREATE FUNCTION public.gym_classes_fill_tenant() ... SECURITY DEFINER AS $$
+--   begin
+--     if new.tenant_id is null and new.trainer_id is not null then
+--       select p.tenant_id into new.tenant_id from public.profiles p
+--        where p.id = new.trainer_id;
+--     end if;
+--     return new;
+--   end $$;
+--
+-- `if new.tenant_id is null` — it FILLS a blank, it does not OVERRIDE a
+-- value. A caller who sends a tenant_id keeps the tenant_id they sent.
+--
+-- Every sibling table in this schema got the other kind of trigger, and the
+-- contrast is the whole finding. All four were read live:
+--
+--   guard_session_tenant()  on sessions  — INSERT: `new.tenant_id :=
+--       staff_tenant_of(new.trainer_id)`, unconditionally, for authenticated
+--       and anon. UPDATE: raises 42501 on any change to tenant_id.
+--   guard_trainer_tenant()  on trainers  — INSERT: raises unless
+--       new.tenant_id = my_tenant(). UPDATE: raises on any change.
+--   guard_client_tenant()   on clients   — INSERT: raises unless null.
+--       UPDATE: raises on any change.
+--   guard_profile_identity() on profiles — INSERT: raises unless null, and
+--       raises on any self-chosen role. UPDATE: raises on role or tenant.
+--
+-- Four hard guards and one fill. `gym_classes` is the one that was missed.
+--
+-- ── How far the reach goes ────────────────────────────────────────────────
+--
+-- `gym_classes.trainer_id` is a foreign key to `trainers(id)`, so a caller
+-- needs a `trainers` row before they can use `gym_classes_write` at all.
+-- That is a smaller obstacle than it sounds, and section 2 below is about
+-- why: `trainers_self_rw` is FOR ALL on `(select auth.uid()) = id` with no
+-- WITH CHECK of its own, `authenticated` holds column-level INSERT on
+-- `trainers` including `id`, `tenant_id` and `listed`, and no code in this
+-- repository ever inserts into `trainers` from a client session. So any
+-- signed-in account can make itself one and then write classes.
+--
+-- Reachability, stated plainly rather than blurred together:
+--
+--   Exploitable today, by a real gym trainer: yes. Insert with any
+--     `tenant_id`, or PATCH `tenant_id` on a class they already own.
+--   Exploitable today, by an ordinary member: yes, in two calls — POST
+--     /rest/v1/trainers {"id":"<me>","tenant_id":"<my own gym>"} passes
+--     `guard_trainer_tenant`, then POST /rest/v1/gym_classes with
+--     `trainer_id = me` and any `tenant_id` they like.
+--   Exploitable by `anon`: no. `auth.uid()` is null, `trainer_id = null` is
+--     null rather than true, and every helper this table's policies call is
+--     SECURITY DEFINER with EXECUTE revoked from anon.
+--
+--   `public.gym_classes` holds 0 rows and `public.class_bookings` holds 0
+--   rows on the day this was written. That changes the urgency and not the
+--   correctness: the timetable ships, `src/ui/classes.tsx` and
+--   `src/lib/gymSchedule.ts` both write to it, and 22 tenants exist.
+--
+-- ── The fix ───────────────────────────────────────────────────────────────
+--
+-- 1 · A guard trigger beside the fill trigger, exactly as `sessions` has one
+--     beside `sessions_fill_tenant`. Not a replacement for
+--     `gym_classes_fill_tenant`: that function is SECURITY DEFINER and fills
+--     blanks for the service role too, and it stays as it is. BEFORE row
+--     triggers fire in name order, so `guard_gym_class_tenant_t` runs first
+--     and the fill then finds nothing left to do — the same ordering
+--     `guard_session_tenant_t` and `trg_sessions_fill_tenant` already have.
+--
+--     The guard has to know about the owner, because the owner is the one
+--     legitimate caller who names a tenant explicitly:
+--     `createClass`/`createSeries` in src/lib/gymSchedule.ts send
+--     `row(tenantId, c)` from the studio. So: if the caller owns the tenant
+--     they sent, it stands; otherwise it is replaced by the gym the trainer
+--     actually works at. The coach app's own insert
+--     (src/ui/classes.tsx:447) sends no tenant_id at all and is unaffected.
+--
+--     `updateClass`/`patchRow` in src/lib/gymSchedule.ts never send
+--     tenant_id, so refusing to move a class between gyms breaks no caller.
+--
+-- 2 · The write grants on `public.trainers` that nobody uses.
+--
+--     `trainers` rows are created in exactly three places, all of them
+--     SECURITY DEFINER functions owned by `postgres`, which table grants do
+--     not touch: `provision_profile()` (on profile insert, when role =
+--     'trainer'), `accept_trainer_invite()` and `grant_staff_role()`.
+--     Grepped across src/, app/, studio-web/src/ and supabase/functions/:
+--     there is no insert into `trainers` and no delete from `trainers`
+--     anywhere in this repository, and no SQL function contains `delete from
+--     trainers` either. The verbs are open at the REST endpoint and nobody
+--     asked for them.
+--
+--     What they buy an attacker: the `trainers` row that `gym_classes`'
+--     foreign key wants (section 1), and a listing in the in-app coach
+--     directory — `trainers_public_directory_r` is `USING (listed = true)`,
+--     `listed` is in the authenticated INSERT column grant, and
+--     app/(client)/trainers.tsx reads the directory as
+--     `.from('trainers').select(...).eq('listed', true)` without ever asking
+--     what `profiles.role` says. The public web page is out of reach —
+--     `public_handle` and `public_page` are not in any grant the app role
+--     holds, and `public_page_follows_listing()` forces `public_page` false
+--     without a handle — so this stops at the in-app directory.
+--
+--     UPDATE stays: it is column-granted and it is how a coach edits their
+--     own bio, brand, fee and logo (src/ui/coachProfile.tsx, coachBrand.ts,
+--     coachLogo.ts, coachDelivery.ts, sessions.tsx). INSERT and DELETE go.
+--
+--     `anon` additionally holds TABLE-level INSERT, UPDATE and DELETE on
+--     `trainers` — table-level, not the column-level grants `authenticated`
+--     has, which is the fingerprint of a revoke that took SELECT away and
+--     left the write verbs behind. It is not exploitable today, because
+--     `trainers_self_rw` is `(select auth.uid()) = id` and that is null for
+--     anon. It is revoked here so it cannot become exploitable the day
+--     somebody writes a policy that does not think about anon.
+--
+-- Idempotent. Safe to re-run.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1 · a class's gym follows the coach, or the owner who put it up ────────
+
+create or replace function public.guard_gym_class_tenant()
+returns trigger
+language plpgsql
+-- Fixed search_path, not the default: this function's whole job is to be the
+-- thing that says no, and one that resolves `public.is_owner_of` through a
+-- mutable path can be pointed at a shadowing object by whoever controls the
+-- caller's search_path. get_advisors raises `function_search_path_mutable`
+-- on the alternative.
+set search_path = public, pg_temp
+as $$
+begin
+  -- SECURITY DEFINER callers run as `postgres`, so provisioning, imports and
+  -- every service-role write pass untouched. A direct write from the app does
+  -- not. The same test `guard_session_tenant`, `guard_trainer_tenant`,
+  -- `guard_client_tenant` and `guard_profile_identity` already use.
+  if current_user in ('authenticated', 'anon') then
+
+    if tg_op = 'INSERT' then
+      -- The owner is the one caller who names a gym on purpose: the studio's
+      -- createClass/createSeries send row(tenantId, c). If the tenant they
+      -- sent is theirs, it stands. Everybody else gets the gym their staff
+      -- record says they work at, whatever they sent — which for the coach
+      -- app, sending no tenant_id at all, is the same answer it gets today.
+      if not public.is_owner_of(new.tenant_id) then
+        new.tenant_id := public.staff_tenant_of(new.trainer_id);
+      end if;
+
+    elsif new.tenant_id is distinct from old.tenant_id then
+      raise exception
+        'A class''s gym is set when the class is created and does not move afterwards.'
+        using errcode = '42501';
+    end if;
+
+  end if;
+  return new;
+end;
+$$;
+
+-- SECURITY INVOKER (the default), like the four guards it copies: it needs no
+-- privilege of its own, and the two helpers it calls are already SECURITY
+-- DEFINER with EXECUTE held by `authenticated` and revoked from `anon`.
+revoke all on function public.guard_gym_class_tenant() from public, anon;
+
+comment on function public.guard_gym_class_tenant() is
+  'A class belongs to the gym its coach works at, or to the gym of the owner who put it on the board. Before part 2611 gym_classes.tenant_id was a caller-supplied column checked by nothing: gym_classes_write asks only that trainer_id = auth.uid(), and gym_classes_fill_tenant fills a blank rather than overriding a value, so any account with a trainers row could post a class onto any gym''s timetable, or move one of its own off its gym''s board.';
+
+drop trigger if exists guard_gym_class_tenant_t on public.gym_classes;
+-- Named to sort before trg_gym_classes_fill_tenant: BEFORE row triggers fire
+-- in name order, the guard settles the tenant, and the fill then finds it set.
+create trigger guard_gym_class_tenant_t
+  before insert or update on public.gym_classes
+  for each row execute function public.guard_gym_class_tenant();
+
+-- ── 2 · the write verbs on `trainers` that no caller asked for ────────────
+
+revoke insert, delete on public.trainers from authenticated;
+revoke insert, update, delete on public.trainers from anon;
+
+comment on table public.trainers is
+  'A coach''s own record. Rows are created ONLY by provision_profile(), accept_trainer_invite() and grant_staff_role(), all SECURITY DEFINER and owned by postgres, so table grants do not reach them. No app role holds INSERT or DELETE. Before part 2611 `authenticated` held both, and trainers_self_rw is FOR ALL on auth.uid() = id, so any signed-in member could file themselves as a coach — which put them in the in-app directory (trainers_public_directory_r is USING (listed = true), and listed is grantable) and satisfied the foreign key gym_classes.trainer_id needs. `anon` additionally held table-level INSERT, UPDATE and DELETE left behind by the revoke that column-granted SELECT.';
+
+-- ── verify, after applying ────────────────────────────────────────────────
+--
+-- The advisors first, because this part creates a function and applying SQL
+-- is not finished until they are clean:
+--
+--   get_advisors(type: 'security')   -- expect no new finding, and in
+--   get_advisors(type: 'performance')-- particular no anon_security_definer_
+--                                    -- function_executable and no
+--                                    -- function_search_path_mutable
+--
+-- Expect two BEFORE row triggers on gym_classes, the guard sorting first:
+--
+--   select tgname from pg_trigger
+--    where tgrelid = 'public.gym_classes'::regclass
+--      and not tgisinternal and (tgtype & 2) > 0
+--    order by tgname;
+--   -- guard_gym_class_tenant_t, trg_gym_classes_fill_tenant
+--
+-- Expect SELECT and UPDATE for authenticated on trainers and nothing at all
+-- for anon:
+--
+--   select grantee, string_agg(distinct privilege_type, ',' order by privilege_type)
+--     from information_schema.role_table_grants
+--    where table_schema = 'public' and table_name = 'trainers'
+--      and grantee in ('anon', 'authenticated')
+--    group by grantee;
+--   -- authenticated | SELECT,UPDATE      (both column-level)
+--   -- anon          | (no row)
+--
+-- Then prove the guard fires rather than assume it. As a real gym trainer,
+-- against /rest/v1, with <other> any tenant that is not theirs:
+--
+--   post  gym_classes {"trainer_id":"<me>","title":"probe",
+--                      "starts_at":"2026-12-01T06:00:00Z",
+--                      "tenant_id":"<other>"}
+--   -- expect the row to come back with tenant_id = the trainer's OWN gym,
+--   -- not <other>. It is not refused, it is corrected: an insert whose only
+--   -- fault is a field the caller should never have been sending is better
+--   -- corrected than bounced, and the studio's own inserts rely on it.
+--
+--   patch gym_classes?id=eq.<a class of mine> {"tenant_id":"<other>"}
+--   -- expect 42501: A class's gym is set when the class is created and does
+--   -- not move afterwards.
+--
+-- And prove the two paths that must still work still do:
+--
+--   -- coach app, src/ui/classes.tsx:447 — no tenant_id sent
+--   post  gym_classes {"trainer_id":"<me>","title":"t",
+--                      "starts_at":"2026-12-01T07:00:00Z"}
+--   -- expect tenant_id filled with the trainer's gym, as before.
+--
+--   -- studio, src/lib/gymSchedule.ts createClass — owner names their own gym
+--   post  gym_classes {"tenant_id":"<my gym>","title":"t",
+--                      "starts_at":"2026-12-01T08:00:00Z","trainer_id":null}
+--   -- expect tenant_id = <my gym>, kept rather than blanked. This is the one
+--   -- the guard would break if is_owner_of were left out of it, because
+--   -- staff_tenant_of(null) is null and the class would fall off the board.
+--
+-- Finally, that a member can no longer make themselves a coach:
+--
+--   post  trainers {"id":"<me>","tenant_id":"<my gym>"}
+--   -- expect 42501 permission denied for table trainers.

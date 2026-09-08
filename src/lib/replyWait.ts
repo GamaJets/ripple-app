@@ -175,7 +175,14 @@ function seenBy(peerReadAt: string | null, at: number): boolean {
  */
 export function replyWait(i: ReplyWaitInput): ReplyWait {
   if (!i.canSend) return { kind: 'silent' };
-  // 'partial' speaks; the other two do not. See the header.
+  // whole-ok: 'partial' speaks; the other two do not. Everything this function
+  // says rests on ONE message — `newestDelivered` picks the most recent, and
+  // `capped()` returns the newest rows, so the newest message in a truncated
+  // thread is the newest message full stop. The truncation drops the oldest
+  // messages, and nothing here reads them: no count of the conversation, no
+  // total, no "you have never heard back". A thread long enough to hit the row
+  // cap is exactly the conversation where "you wrote three days ago and nothing
+  // has come back" is worth saying, and `isWhole` would silence it.
   if (i.status === 'loading' || i.status === 'error') return { kind: 'silent' };
 
   const last = newestDelivered(i.messages);

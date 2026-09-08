@@ -399,7 +399,7 @@ export default function PtSessions() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal Training</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Sessions your trainer has delivered. Approving confirms it with them, and any comment you add goes with it.</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {/* ── what is left, and where it comes from ───────────────────────
@@ -505,6 +505,7 @@ export default function PtSessions() {
               ) : null}
               <TextInput value={note[s.id] || ''} onChangeText={(v) => setNote((p) => ({ ...p, [s.id]: v }))}
                 placeholder="Add a comment for your trainer (optional)…" placeholderTextColor={t.ink3}
+                accessibilityLabel="A comment for your trainer, optional"
                 editable={busy !== s.id} multiline
                 style={{ ...ty.label, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginTop: sp.md, marginBottom: sp.md }} />
               <Cta label={busy === s.id ? 'Approving…' : 'Approve Session'} wide disabled={busy === s.id}

@@ -87,6 +87,41 @@
 // correct call site on the standing list beside the defects, which is how a
 // list stops being read.
 //
+// ── Rule 4: an icon that MIRRORS cannot be named by its icon ──────────────
+//
+// `Ghost` in src/ui/kit.tsx names an icon-only button from its icon when the
+// call site gives it nothing else:
+//
+//     const spoken = a11yLabel || label || (icon ? ICON_NAMES[icon] ?? icon : undefined);
+//
+// That table is a good answer for a fixed glyph — 'search' is Search, 'bell' is
+// Notifications — and the comment above it says it exists because 57 back
+// buttons were announcing themselves as an unnamed "button".
+//
+// It cannot be a good answer for BACK_ICON, because BACK_ICON is not a glyph.
+// src/lib/direction.ts:
+//
+//     export function backIcon(rtl: boolean): Chevron { return rtl ? 'chevron' : 'back'; }
+//
+// So the SAME call site resolves to 'back' for a left-to-right reader and
+// 'chevron' for a right-to-left one, and ICON_NAMES has both: 'back' is "Back"
+// and 'chevron' is "More". One hundred back buttons across the three apps
+// therefore announced "Back" in English and "More" in Arabic — the same button,
+// the same file, a different and confidently WRONG word, in the direction
+// nobody develops in. A missing label is silence; this is a label that lies,
+// and no amount of reading the screen in English would ever show it.
+//
+// The rule is the whole of that shape and nothing else: a `<Ghost>` whose icon
+// is one of the two mirroring constants and which passes neither `a11yLabel`
+// nor a visible `label`. It is one prop to fix — `a11yLabel="Back"` — which is
+// what every call site in src/ui already does (FeedbackScreen, EndReasonSheet,
+// notifications) and what the 58 in app/(client) now do too.
+//
+// A Ghost with a visible `label` is NOT flagged: its words are the name, and
+// the icon beside them is decoration. `<Icon name={BACK_ICON}>` inside a
+// Pressable that names itself is not flagged either — the icon there is not
+// the thing being named.
+//
 // ── What this deliberately CANNOT see ─────────────────────────────────────
 //
 // It is a lint over source text. It does not render, does not resolve a
@@ -160,6 +195,52 @@ const KNOWN = new Set([
   'app/(trainer)/settings.tsx|scrim',
   'app/(trainer)/templates-messages.tsx|scrim',
   'app/(trainer)/templates.tsx|scrim',
+  /* Rule 4. Every one of these is a back button that says "More" to a
+   * right-to-left reader. They are in app/(trainer) and app/(owner), which the
+   * lane that added this rule does not write; the fix is one prop each and is
+   * spelled out in the Rule 4 note above. Keyed by file, so a file with two of
+   * them clears when both are fixed. */
+  'app/(owner)/class-analytics.tsx|backicon',
+  'app/(owner)/explore.tsx|backicon',
+  'app/(owner)/feedback.tsx|backicon',
+  'app/(owner)/financials.tsx|backicon',
+  'app/(owner)/library.tsx|backicon',
+  'app/(owner)/promotions.tsx|backicon',
+  'app/(owner)/revenue.tsx|backicon',
+  'app/(owner)/settings.tsx|backicon',
+  'app/(trainer)/account.tsx|backicon',
+  'app/(trainer)/billing.tsx|backicon',
+  'app/(trainer)/broadcast-session.tsx|backicon',
+  'app/(trainer)/broadcast.tsx|backicon',
+  'app/(trainer)/calendar.tsx|backicon',
+  'app/(trainer)/chat.tsx|backicon',
+  'app/(trainer)/checklists.tsx|backicon',
+  'app/(trainer)/client-attendance.tsx|backicon',
+  'app/(trainer)/client-body.tsx|backicon',
+  'app/(trainer)/client-cancellations.tsx|backicon',
+  'app/(trainer)/client-goals.tsx|backicon',
+  'app/(trainer)/client-intake.tsx|backicon',
+  'app/(trainer)/client-nutrition.tsx|backicon',
+  'app/(trainer)/client-photos.tsx|backicon',
+  'app/(trainer)/client-training.tsx|backicon',
+  'app/(trainer)/client-week.tsx|backicon',
+  'app/(trainer)/client.tsx|backicon',
+  'app/(trainer)/credentials.tsx|backicon',
+  'app/(trainer)/devices.tsx|backicon',
+  'app/(trainer)/documents.tsx|backicon',
+  'app/(trainer)/explore.tsx|backicon',
+  'app/(trainer)/getting-started.tsx|backicon',
+  'app/(trainer)/join-code.tsx|backicon',
+  'app/(trainer)/library.tsx|backicon',
+  'app/(trainer)/my-nutrition.tsx|backicon',
+  'app/(trainer)/my-progress.tsx|backicon',
+  'app/(trainer)/my-register.tsx|backicon',
+  'app/(trainer)/my-training.tsx|backicon',
+  'app/(trainer)/nudges.tsx|backicon',
+  'app/(trainer)/payments.tsx|backicon',
+  'app/(trainer)/referrals.tsx|backicon',
+  'app/(trainer)/settings.tsx|backicon',
+  'app/(trainer)/share-kit.tsx|backicon',
 ]);
 
 /* ── walking ──────────────────────────────────────────────────────────────── */
@@ -240,6 +321,13 @@ function blankComments(src) {
 }
 
 const TOUCHABLE = /<(Pressable|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback)\b/g;
+/**
+ * The two direction-dependent icon constants. Both resolve to a DIFFERENT
+ * member of ICON_NAMES depending on the reader's writing direction, so neither
+ * can be named by the table. See Rule 4 in the header.
+ */
+const MIRRORING_ICON = /icon=\{(BACK_ICON|FORWARD_ICON)\}/;
+
 /** A literal `lineHeight: 18`. `lineHeight: grown(18)` and `lineHeight: h` pass. */
 const PINNED_LINE_HEIGHT = /\blineHeight\s*:\s*\d+(\.\d+)?\s*[,}]/g;
 
@@ -313,6 +401,21 @@ for (const file of ROOTS.flatMap((r) => walk(join(ROOT, r)))) {
     });
   }
 
+  // Rule 4
+  const GHOST = /<Ghost\b/g;
+  while ((m = GHOST.exec(src))) {
+    const end = tagEnd(src, m.index);
+    if (end < 0) continue;
+    const tag = src.slice(m.index, end + 1);
+    if (!MIRRORING_ICON.test(tag)) continue;
+    if (/\ba11yLabel\s*=/.test(tag)) continue;   // named outright
+    if (/\blabel\s*=/.test(tag)) continue;       // named by the words it draws
+    found.push({
+      key: `${rel}|backicon`, file: rel, line: lineOf(m.index), rule: 'mirroring',
+      text: tag.replace(/\s+/g, ' ').slice(0, 96),
+    });
+  }
+
   // Rule 3
   ELEMENT.lastIndex = 0;
   while ((m = ELEMENT.exec(src))) {
@@ -372,6 +475,13 @@ if (fresh.length) {
       console.error('    → React Native merges the children into one element and this label');
       console.error('      REPLACES them, so every other line on this row goes silent. Compose the');
       console.error('      sentence — see mealRowSpoken in src/lib/meals.ts, or the header here.\n');
+    } else if (f.rule === 'mirroring') {
+      console.error(`  ${f.file}:${f.line}  an icon-only button named by a MIRRORING icon`);
+      console.error(`    ${f.text}`);
+      console.error('    → BACK_ICON is \'back\' left-to-right and \'chevron\' right-to-left, and');
+      console.error('      ICON_NAMES in src/ui/kit.tsx calls the second one "More". This button');
+      console.error('      therefore says "Back" in English and "More" in Arabic. Give it the');
+      console.error('      action: a11yLabel="Back".\n');
     } else if (f.rule === 'unnamed') {
       console.error(`  ${f.file}:${f.line}  a touchable with no children and no name`);
       console.error(`    ${f.text}`);
@@ -393,6 +503,6 @@ if (stale.length) {
   console.log(`a11y: ${stale.length} standing offence${stale.length === 1 ? '' : 's'} on the list no longer present — run with --prune to reprint the list.`);
 }
 console.log(
-  `a11y: ok — no new unnamed touchables, pinned line heights or field-only labels`
+  `a11y: ok — no new unnamed touchables, pinned line heights, field-only labels or mirroring-icon buttons`
   + (standing.length ? `, ${standing.length} standing (in ${new Set(standing.map((s) => s.file)).size} files, all listed in the gate)` : ''),
 );

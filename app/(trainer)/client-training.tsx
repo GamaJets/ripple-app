@@ -479,6 +479,16 @@ export default function ClientTraining() {
    *  recent window in full — the same reasoning `planVsActual` applies with
    *  `oldestDay`, and the reason a long-history client is not simply refused. */
   const muscleWindowRead = useMemo(() => {
+    // whole-ok: 'partial' is the case the next four lines exist for, and this
+    // guard is deliberately only the first of two. It answers "did anything come
+    // back"; the return below answers "did what came back reach the start of the
+    // window", which is the question 'partial' actually raises and which
+    // `isWhole` would refuse to ask. `capped()` hands back the NEWEST rows, so a
+    // client with four thousand logged sets still has their last 28 days in
+    // full — `oldestDay <= fromDay` lets them have a muscle board, and refuses
+    // only the client whose truncation ate into the window itself. Answering
+    // false for every truncated read would take the board away from exactly the
+    // clients who train the most.
     if (status === 'error' || status === 'loading' || !log) return false;
     if (status === 'ready') return true;
     const from = new Date(nowMs - muscleDays * 86_400_000);
@@ -888,6 +898,28 @@ export default function ClientTraining() {
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="What they are on could not be read"
                       note={`Nothing below compares their training against a plan, because the plan did not come back. That is not the same as ${who} being on no programme.`} />
+                  </Section>
+                ) : !program && assigned.status === 'partial' ? (
+                  /* The third way `getProgram` returns null, and the one this
+                     chain went eleven months without. `useAssignedPrograms`
+                     reads every client's assignment in ONE page ordered by
+                     `client_id`, so at a gym past the row cap the clients whose
+                     ids sort last simply are not in the map — and the null they
+                     produce is indistinguishable from the null of a client on
+                     nothing. "The read came back and they are on no programme"
+                     was the sentence a coach then got about a client they had
+                     written a block for, with "Writing one in the Program
+                     Builder" underneath it as the suggested fix.
+
+                     Kept separate from the 'error' branch above rather than
+                     folded into it: that one says the plan did not come back at
+                     all, and this one says the plan for THIS client was past the
+                     end of what one request returns, which is a different thing
+                     to do about it. */
+                  <Section>
+                    <SectionHead title="Their Programme" note="not in this read" />
+                    <Notice tone={t.warn} kicker="Row limit" title="We could not tell what they are on"
+                      note={`Your clients' programmes came back at the row limit and ${who} was past the end of it, so whether ${who} is on a programme is unknown rather than no. Nothing below compares their training against a plan. Pull down to read again.`} />
                   </Section>
                 ) : !program ? (
                   <Section>

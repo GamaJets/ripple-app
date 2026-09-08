@@ -621,6 +621,7 @@ export default function Messages() {
           </Pressable>
           <TextInput value={text} onChangeText={setText} editable={canSend}
             placeholder={canSend ? 'Message your coach…' : 'This conversation is closed'} placeholderTextColor={t.ink3}
+            accessibilityLabel={canSend ? 'Message your coach' : 'This conversation is closed'}
             style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, opacity: canSend ? 1 : 0.6 }} />
           {/* Disabled while a send is in flight: tapping twice would put the
               same photo in the bucket twice and the thread twice with it. And

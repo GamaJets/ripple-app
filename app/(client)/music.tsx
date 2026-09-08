@@ -327,7 +327,7 @@ export default function Music() {
  <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
- <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+ <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
  <View style={{ flex: 1 }}>
  <Text style={{ ...ty.micro, color: t.ink3 }}>Your session soundtrack</Text>
  <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Music</Text>
@@ -380,7 +380,7 @@ export default function Music() {
  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
  {DURATIONS.map((d) => <Chip key={d} on={minutes === d} label={`${d} min`} onPress={() => setMinutes(d)} />)}
  </View>
- <Pressable onPress={() => generate(salt + 1)} disabled={genBusy} accessibilityState={{ disabled: genBusy }} accessibilityRole="button"
+ <Pressable onPress={() => generate(salt + 1)} disabled={genBusy} accessibilityState={{ disabled: genBusy, busy: genBusy }} accessibilityRole="button"
  style={{ backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: 13, alignItems: 'center', marginTop: sp.xl, opacity: genBusy ? 0.7 : 1, flexDirection: 'row', justifyContent: 'center', gap: sp.sm }}>
  {genBusy ? <ActivityIndicator color={t.brandInk} size="small" /> : null}
  <Text style={{ ...ty.label, fontWeight: '600', color: t.brandInk }}>{genBusy ? 'Finding songs…' : pl ? 'Regenerate Playlist' : 'Generate Workout Playlist'}</Text>
@@ -473,7 +473,7 @@ export default function Music() {
  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{s.name}</Text>
  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{s.note}</Text>
  </View>
- <Pressable onPress={() => toggleService(s.id)} disabled={s.id === 'spotify' && spotifyBusy} accessibilityState={{ disabled: !!(s.id === 'spotify' && spotifyBusy) }}
+ <Pressable onPress={() => toggleService(s.id)} disabled={s.id === 'spotify' && spotifyBusy} accessibilityState={{ disabled: !!(s.id === 'spotify' && spotifyBusy), busy: !!(s.id === 'spotify' && spotifyBusy) }}
  accessibilityRole="button" accessibilityLabel={(conn[s.id] ? 'Disconnect ' : 'Connect ') + s.name}
  style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.sm, minWidth: 92, alignItems: 'center', backgroundColor: conn[s.id] ? t.surface2 : (s.id === 'spotify' ? t.brand : t.surface2) }}>
  {s.id === 'spotify' && spotifyBusy

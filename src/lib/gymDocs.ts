@@ -232,6 +232,10 @@ export async function publishAgreement(
   // retiring would be refused with 23505 — and the owner would be told their
   // new terms could not be published because their old terms exist, which is
   // true and useless.
+  // no-count-ok: zero rows retired is the FIRST publish of this kind, where
+  // there is no live version to retire — the common case, not a failure. A
+  // refusal cannot hide behind it either: the same policy governs the insert
+  // three lines down, whose error is read and thrown.
   const off = await sb.from('gym_agreements')
     .update({ active: false })
     .eq('tenant_id', tenantId)

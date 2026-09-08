@@ -135,6 +135,14 @@ function describeMonth(c: MonthCell, unit: WeightUnit): string {
   return `${volumeIn(c.volumeKg, unit)!.toLocaleString()} ${unit} over ${c.days} day${c.days === 1 ? '' : 's'}`;
 }
 
+/** One column of "Then and Now" as a sentence: the month, then the tonnage in
+ *  the reader's own unit. `fig` draws an em dash where the volume is unknown,
+ *  and an em dash read out on its own is not an answer — so this says so. */
+function monthSpoken(month: string, volumeKg: number | null | undefined, unit: WeightUnit): string {
+  const v = volumeIn(volumeKg, unit);
+  return v == null ? `${month}, not known` : `${month}, ${v.toLocaleString()} ${unit}`;
+}
+
 /**
  * Monthly tonnage. Bars, deliberately: see the header on why this is not a line.
  * An untrained month gets a short mark ON the baseline — visible, so the break
@@ -364,7 +372,7 @@ export default function History() {
         <Text style={{ ...ty.micro, color: t.ink3 }}>How far you have come</Text>
         <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your History</Text>
       </View>
-      <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+      <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
     </View>
   );
   const frame = (children: ReactNode) => (
@@ -649,18 +657,30 @@ export default function History() {
       <Rule />
       <Section>
         <SectionHead title="Then and Now" note={`${arc.months} months apart`} />
+        {/* Each column is one FACT and is marked as one. Drawn, these are a
+            month over a figure over a unit, read in that order by the eye in
+            about a second. Left as three sibling <Text>s they are three
+            separate stops for a screen reader — "March", then "1,240", then
+            "kg" — and the figure, which is the only one of the three worth
+            anything, is the one that arrives on its own. `monthSpoken` is the
+            same sentence the chart above already speaks (see `label` at the
+            top of this file): figure, unit, in that order, with "not known"
+            where `fig` would draw a dash. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: sp.lg }}>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }} accessible accessibilityRole="text"
+            accessibilityLabel={monthSpoken(monthLabel(arc.fromKey), arc.fromVolumeKg, wu)}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(arc.fromKey)}</Text>
             <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{fig(volumeIn(arc.fromVolumeKg, wu)?.toLocaleString())}</Text>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{wu}</Text>
           </View>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }} accessible accessibilityRole="text"
+            accessibilityLabel={monthSpoken(monthLabel(arc.toKey), arc.toVolumeKg, wu)}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{monthLabel(arc.toKey)}</Text>
             <Text style={{ ...value(22), color: t.ink, marginTop: 4 }}>{fig(volumeIn(arc.toVolumeKg, wu)?.toLocaleString())}</Text>
             <Text style={{ ...ty.caption, color: t.ink3 }}>{wu}</Text>
           </View>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }} accessible accessibilityRole="text"
+            accessibilityLabel={arc.pct == null ? 'Change, not known' : `Change, ${arc.pct}%`}>
             <Text style={{ ...ty.caption, color: t.ink3 }}>Change</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
               <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: arc.deltaKg >= 0 ? t.brand : t.ink3 }} />

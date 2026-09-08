@@ -177,7 +177,7 @@ export default function Muscles() {
         <Text style={{ ...ty.micro, color: t.ink3 }}>What you have actually worked</Text>
         <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your Muscles</Text>
       </View>
-      <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+      <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
     </View>
   );
 

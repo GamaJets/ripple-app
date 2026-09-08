@@ -888,7 +888,7 @@ export default function Calendar() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.push('/(client)/dashboard')} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.push('/(client)/dashboard')} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Personal training</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Book Sessions</Text>

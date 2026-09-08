@@ -201,6 +201,18 @@ eq(planVsActual({ days: null, programStatus: 'ready', log, logStatus: 'ready', t
   'no-programme', 'a client on nothing is a real state');
 eq(planVsActual({ days: null, programStatus: 'error', log, logStatus: 'ready', todayISO: TODAY }).state,
   'unreadable', 'and a programme that could not be read is a different one');
+// The third, which used to answer as the first. `useAssignedPrograms` reads
+// every client's assignment in one page ordered by `client_id`, so under a
+// truncated read the clients sorting last have no row and `getProgram` hands
+// back the same null it hands back for a client on nothing. This said "on no
+// coach-assigned programme" to their coach and "No coach has written you a
+// programme yet" to them.
+eq(planVsActual({ days: null, programStatus: 'partial', log, logStatus: 'ready', todayISO: TODAY }).state,
+  'unreadable', 'a client missing from a TRUNCATED assignment read is unknown, never "on nothing"');
+// And the direction that must not have been broken to fix it: a client whose
+// row WAS inside the page has a whole programme and gets a whole comparison.
+eq(run({ programStatus: 'partial' }).state,
+  'ready', 'and a client whose row was inside the page is still compared normally');
 
 /* ── refusal 3: counts of MOVEMENTS, never a percentage ─────────────────── */
 

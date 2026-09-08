@@ -348,6 +348,10 @@ export async function disconnectVendor(id: ProviderId): Promise<void> {
     // here: a member who connected on another handset and disconnects on this
     // one has no row of their own to delete. What must not pass silently is a
     // REFUSAL, which is what `error` carries.
+    // no-count-ok: the paragraph above is the reason — a member who connected
+    // on another handset has no row of their own here, so zero matched rows is
+    // the honest answer and only a REFUSAL, which arrives in `error`, may pass
+    // for a disconnection.
     ({ error } = await supabase.from('wearable_tokens').delete().eq('provider', id));
   } catch (e) {
     error = e;

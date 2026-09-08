@@ -122,7 +122,7 @@ export default function Standards() {
     <Text style={{ ...ty.micro, color: t.ink3 }}>Best lifts vs bodyweight · approximate</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Strength Standards</Text>
    </View>
-   <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
   </View>
 
   <Rule />

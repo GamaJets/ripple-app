@@ -423,6 +423,7 @@ export default function ScanMachine() {
               <Section>
                 <SectionHead title="Machine Catalogue" note={`${list.length}`} />
                 <TextInput value={q} onChangeText={setQ} placeholder="Search machines (rower, leg press, lat…)" placeholderTextColor={t.ink3}
+                  accessibilityLabel="Search the machine catalogue"
                   style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, marginBottom: sp.md }} />
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                   {list.map((m) => {

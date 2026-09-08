@@ -583,7 +583,7 @@ export default function Devices() {
     <Text style={{ ...ty.micro, color: t.ink3 }}>Wearables</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; Devices</Text>
    </View>
-   <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
   </View>
 
   {/* ── the hero: today's live burn, when a device is feeding it ─────── */}
@@ -685,7 +685,7 @@ export default function Devices() {
     </View>
     {wk == null ? (
      wkBusy
-      ? <View style={{ alignSelf: 'flex-start', paddingVertical: sp.md }}><ActivityIndicator color={t.brand} /></View>
+      ? <View style={{ alignSelf: 'flex-start', paddingVertical: sp.md }}><ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Looking for your workouts…" /></View>
       : <View style={{ alignSelf: 'flex-start' }}><Cta label="Find My Workouts" onPress={findWorkouts} /></View>
     ) : wk.length === 0 ? (
      <Text style={{ ...ty.label, color: t.ink3 }}>No workouts found in the last {lookbackLabel(lookback)}.</Text>
@@ -828,7 +828,7 @@ export default function Devices() {
     ) : hkPlan == null ? (
      <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
       {hkBusy
-       ? <ActivityIndicator color={t.brand} />
+       ? <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Working out what is ready to write…" />
        : <Cta label="See What's Ready" onPress={reviewHk} />}
      </View>
     ) : hkPlan.writable.length === 0 && hkPlan.skipped.length === 0 ? (
@@ -899,7 +899,7 @@ export default function Devices() {
      ) : null}
 
      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.xl }}>
-      {hkBusy ? <ActivityIndicator color={t.brand} /> : (<>
+      {hkBusy ? <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Writing to Apple Health…" /> : (<>
        <Cta
         label={hkPlan.writable.length
          ? `Write ${hkPlan.writable.length} ${hkPlan.writable.length === 1 ? 'session' : 'sessions'}`
@@ -995,7 +995,7 @@ export default function Devices() {
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.meta.blurb}</Text>
        </View>
        {busy ? (
-        <ActivityIndicator color={t.brand} />
+        <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel={`Working on ${p.meta.name}…`} />
        ) : link.action === 'reconnect' ? (
         // Offered as the primary control, because it is the one thing that
         // fixes this and the client has to be able to find it. It is offered

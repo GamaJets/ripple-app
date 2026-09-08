@@ -414,7 +414,7 @@ export default function StandingAppointments() {
               The same hour every week, booked for you without either of you asking again.
             </Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         <Rule />

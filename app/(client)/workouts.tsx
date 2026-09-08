@@ -2515,8 +2515,14 @@ export default function Train() {
               </View>
               {mode !== 'recovery' ? (
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                  <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="Avg watts (optional)" placeholderTextColor={t.ink3} style={inp} />
-                  <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="Calories (optional)" placeholderTextColor={t.ink3} style={inp} />
+                  {/* The unit lives only in the placeholder, and a placeholder is
+                      drawn only while the box is EMPTY — so on a correction opened
+                      over typed values these are two bare numerals, and 141 is a
+                      heart rate as readily as it is a wattage. See Field in
+                      src/ui/kit.tsx, which is the fix where there is room for a
+                      visible label; these two have none. */}
+                  <TextInput value={watts} onChangeText={setWatts} keyboardType="numeric" placeholder="Avg watts (optional)" placeholderTextColor={t.ink3} accessibilityLabel="Average watts, optional" style={inp} />
+                  <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" placeholder="Calories (optional)" placeholderTextColor={t.ink3} accessibilityLabel="Calories, optional" style={inp} />
                 </View>
               ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
@@ -2635,6 +2641,7 @@ export default function Train() {
                 Showing a pounds member an example that carries "lb" is what
                 stops a 135 lb bench being recorded as a 135 kg one. */}
             <TextInput value={nlw} onChangeText={setNlw} placeholder={wu === 'lb' ? '"bench 3x8 135lb, squat 5 5 5 225lb"' : '"bench 3x8 60kg, squat 5 5 5 100kg"'} placeholderTextColor={t.ink3}
+              accessibilityLabel="Describe the workout you did"
               onFocus={() => { setTimeout(() => pageScroll.current?.scrollToEnd({ animated: true }), 120); }}
               onSubmitEditing={logWorkoutNL} returnKeyType="done" style={inp} />
             {/* `accessibilityState` as well as `disabled`. The refusal here was
@@ -3026,7 +3033,7 @@ export default function Train() {
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>{editingKey ? 'Edit exercise' : 'Add an exercise'}</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>{editingKey ? 'Rename it, or change the sets and reps you are aiming for.' : "Log something you did that isn't in today's plan."}</Text>
-          <TextInput value={cxName} onChangeText={setCxName} autoFocus returnKeyType="done" onSubmitEditing={commitCx} blurOnSubmit={false} placeholder="Exercise name (e.g. Cable fly)" placeholderTextColor={t.ink3} style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, marginBottom: sp.md }} />
+          <TextInput value={cxName} onChangeText={setCxName} autoFocus returnKeyType="done" onSubmitEditing={commitCx} blurOnSubmit={false} placeholder="Exercise name (e.g. Cable fly)" placeholderTextColor={t.ink3} accessibilityLabel="Exercise name" style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 12, marginBottom: sp.md }} />
           {/* ── how many sets, and then a row for each of them ─────────────
               "Target Sets", "Target Reps" and one "Weight" is three boxes that
               can only say "N of the identical set". A member whose coach wrote

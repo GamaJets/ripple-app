@@ -170,7 +170,7 @@ export default function BodyTrends() {
             </Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Composition Trends</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {/* Said once, at the top, and only when the figures below genuinely do

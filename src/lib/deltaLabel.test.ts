@@ -25,6 +25,13 @@ import {
   MINUS, deltaLabel, deltaSign, deltaArrow, deltaMoved, deltaFigure,
   deltaMagnitude, goalWants, movementIsProgress, pctChange,
 } from './deltaLabel';
+// The magnitude is now printed through `plain` from ./units, which writes the
+// READER's decimal separator — so every assertion below that names a figure is
+// an assertion about a locale. Stated here rather than inherited from the
+// runner, which would be whichever machine this happens to run on. THE
+// SEPARATOR block at the bottom re-seeds and puts this back.
+import { setAppLocale } from './locale';
+setAppLocale('en-GB');
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -206,6 +213,35 @@ const eq = (a: unknown, b: unknown, msg: string) =>
     'the no-change wording does not leak into a line that did change');
   eq(deltaLabel(0, { since: 'Aug 25', unit: 'kg', noChange: 'Same weight' }), 'Same weight since Aug 25',
     'and is used when it did not');
+}
+
+/* ── THE SEPARATOR ────────────────────────────────────────────────────────
+ *
+ * The magnitude was `${Math.abs(f)}`, a bare interpolation, which writes a full
+ * stop in every locale there has ever been. A member whose language writes 1,2
+ * read "−1.2 kg" — and read it on the same ROW as the figure it moved, which
+ * `plain` in ./units prints. Two formatters on one row is how a row comes to
+ * show two decimal conventions, so this uses that one.
+ *
+ * `decimals` is passed through, so the figure is spelled at the same precision
+ * the sign was judged at. A delta printed to three places beside a sign decided
+ * at one is the "0.0 with a plus on it" defect this whole file exists for,
+ * arriving from the other end.
+ */
+{
+  setAppLocale('de-DE');
+  eq(deltaLabel(-1.2, { since: null, unit: 'kg' }), `${MINUS}1,2 kg`, 'a comma-decimal reader gets a comma');
+  eq(deltaLabel(1.2, { since: 'Aug 25', unit: 'kg' }), '+1,2 kg since Aug 25', 'and so does a gain, in the whole sentence');
+  eq(deltaLabel(-2, { since: null, unit: '%' }), `${MINUS}2%`, 'a whole number has nothing to separate');
+  eq(deltaMagnitude(-2.5), '2,5', 'the magnitude on its own follows the reader too');
+  eq(deltaLabel(0.04, { since: 'Aug 25', unit: 'kg' }), 'No change since Aug 25',
+    'and the zero test still runs on the rounded figure, not on the spelling of it');
+  eq(deltaLabel(-1.25, { since: null, unit: 'kg', decimals: 2 }), `${MINUS}1,25 kg`,
+    'two places where two were asked for');
+  eq(deltaLabel(-1.5, { since: null, unit: 'kg', decimals: 0 }), `${MINUS}2 kg`,
+    'and none where none were — the spelling may not print a place the rounding did not judge');
+  setAppLocale('en-GB');
+  eq(deltaLabel(-1.2, { since: null, unit: 'kg' }), `${MINUS}1.2 kg`, 'a full-stop reader is unaffected by any of it');
 }
 
 if (errors.length) {

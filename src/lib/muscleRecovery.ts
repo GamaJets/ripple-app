@@ -178,6 +178,17 @@ export function restBand(days: number): RestBand {
  */
 function restOf(board: MuscleWorkBoard, muscle: string, effort: MuscleEffort | null): MuscleRest {
   const drawn = effort?.drawn ?? false;
+  // whole-ok: 'partial' does not travel in `board.status` here, it travels in
+  // `board.isFloor` — and every branch below that could be wrong under it
+  // consults that instead. The two questions this function asks are answered
+  // separately: "how long since this muscle was trained" is safe under a
+  // truncated read, because `capped()` returns the NEWEST sets and the newest
+  // set is what a rest gap is measured from, so the gap is reported with
+  // `bound: 'atMost'` rather than refused; "has this muscle not been trained at
+  // all" is not safe, and `unusable || board.isFloor` refuses it outright and
+  // returns 'unknown'. `restMap` below adds untouched muscles only under
+  // `isWhole`. Folding 'partial' into `unusable` would throw away every rest gap
+  // for a heavy trainer, which is the reader this map is drawn for.
   const unusable = board.status === 'error' || board.status === 'loading';
   if (!effort || effort.lastTrainedMs == null) {
     // No set found. Either the window genuinely contains none, or the page we

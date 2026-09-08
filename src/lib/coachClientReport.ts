@@ -220,6 +220,14 @@ export function sessionTally(rows: readonly CoachSessionRow[] | null, status: Lo
     state: 'unreadable', booked: null, completed: null, noShow: null,
     cancelled: null, lateCancelled: null, unrecorded: null, firstDay: null, lastDay: null,
   };
+  // whole-ok: this guard is the "nothing came back" half and 'partial' is
+  // answered fifteen lines below with its own return, because it is a different
+  // answer rather than a worse one. A truncated sessions read still has two real
+  // sessions at its ends, so `firstDay` and `lastDay` are stated — those are
+  // facts about rows that exist. Every TALLY is left null under it: booked,
+  // completed, no-shows, cancellations. Sending an `isWhole` here instead would
+  // collapse 'partial' onto 'unreadable' and lose the span with it, telling the
+  // coach nothing about a client whose history is merely longer than one page.
   if (rows == null || status === 'error' || status === 'loading') return empty;
 
   const days = rows.map((r) => dayOf(r.startsAt)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();

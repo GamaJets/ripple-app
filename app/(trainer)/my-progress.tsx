@@ -444,7 +444,12 @@ export default function MyProgress() {
               already rounded to the grain the unit can carry — whole pounds, a
               tenth of a kilogram — and a fixed decimal would print a
               whole-pound reading as "180.0". Neither can reach four digits, so
-              no thousands separator is due. */}
+              no thousands separator is due — which is the whole reason `plain`
+              is a separate formatter and not `numUpTo`: it writes the reader's
+              own decimal separator on ASCII digits and never groups, so the
+              same figures can go straight back into the boxes below. The
+              movement in the note beside it prints through the same function,
+              so this row cannot show a comma and a full stop at once. */}
           <Hero
             label="Your Latest Weight"
             figure={shownWeight == null ? fig(null) : plain(shownWeight)}

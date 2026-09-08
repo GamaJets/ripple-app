@@ -73,6 +73,47 @@
 //     … under it a scan that fell off the end of a truncated read". If you are
 //     going to enumerate, the enumeration is `isWhole`.
 //
+//     Both spellings, because the enumeration has two and this rule only ever
+//     matched one of them. `status === 'error' || status === 'loading'` is the
+//     same enumeration written from the other side — the guard clause, rather
+//     than the permission — and it is the spelling people actually reach for
+//     when they are bailing out at the top of a function. It went unseen from
+//     the day this gate was written until app/(trainer)/videos.tsx was found by
+//     hand: two sections there were gated on `status === 'error' || status ===
+//     'loading'`, both providers genuinely answered 'partial'
+//     (src/lib/templateLibrary.ts:153, src/ui/exerciseVideos.ts:244), and the
+//     consequence was a coach being told a movement they had already filmed was
+//     still to film — counted into "N to film", printed under "nothing to show".
+//     The note forty-five lines below it in the same file already made that
+//     argument about the same rows. The gate simply could not read the line.
+//
+//     The positive spelling is matched ONLY as a `||`-joined pair on the same
+//     identifier, in either operand order and adjacent. That is not fussiness,
+//     it is the difference between this rule and an unusable one. Roughly fifty
+//     places in this tree dispatch a rendering per status —
+//
+//         status === 'loading' ? 'Reading your log…'
+//           : status === 'error' ? 'We couldn’t read your log…'
+//           : <the normal thing>
+//
+//     — and there 'error' and 'loading' are not being enumerated as a class at
+//     all. They are two answers each getting their own sentence, with 'partial'
+//     falling through to the render 'ready' gets, which is the house pattern and
+//     is usually right. A rule that treated any co-occurrence of the two
+//     comparisons as an enumeration would fire on every one of those on its
+//     first run and be deleted within the week. The `||` is what says the author
+//     wrote ONE predicate meaning "unusable" — and a predicate meaning
+//     "unusable" that omits 'partial' is the claim this rule exists to doubt.
+//
+//     What it therefore cannot see: the ternary chain that ends in a branch
+//     asserting an absence. app/(trainer)/client-training.tsx had exactly that
+//     — `assigned.status === 'loading' ? … : assigned.status === 'error' ? … :
+//     !program ? "The read came back and they are on no coach-assigned
+//     programme"` — where under 'partial' a client whose row fell off a page
+//     ordered by `client_id` produced that sentence about a client who had one.
+//     It was found by reading, not by this rule, and it is fixed; the rule still
+//     cannot reach its shape. See "what this cannot catch", below.
+//
 // ── why a gate and not a fix ──────────────────────────────────────────────
 //
 // Fourteen hand-fixes did not hold the line, and the reason is structural: the
@@ -93,6 +134,54 @@
 // and `rtl-ok:` in check-rtl.mjs. Writing it means naming what 'loading' and
 // 'partial' would do to the sentence on the screen, which is the thought that
 // was skipped all fourteen times.
+//
+// Widening rule 2 to the positive spelling surfaced thirteen further sites and
+// every one of them took a written reason rather than an edit — which reads,
+// fairly, like a rule that needs thirteen exemptions on day one. Two things
+// about that are worth recording, because the next person will want to soften
+// the rule and one of the two ways of doing it is a trap.
+//
+// The first is that the sentences did the work. They were written by reading
+// each site and arguing, in its own terms, why 'partial' is admissible there —
+// and two of the thirteen turned out not to be admissible at all. `planVsActual`
+// said "on no coach-assigned programme" off a truncated assignment read, on both
+// the coach's screen and the member's; `publishConsentOf` said a client had not
+// agreed to a photo when the row proving they had was on the other side of a
+// page. Both are fixed. A survey that had trusted the sites and skipped the
+// sentences would have annotated both as fine.
+//
+// The second is the trap. The obvious way to make thirteen exemptions go away is
+// to add `didNotLand(s)` to src/ui/loadStatus.ts — one blessed helper for
+// `s === 'loading' || s === 'error'`, with the argument for excluding 'partial'
+// written once instead of thirteen times. Do not. That expression is the exact
+// text this rule exists to look at, and a blessed spelling of it is a spelling
+// the rule can never fire on. app/(trainer)/videos.tsx would have read
+// `if (didNotLand(status)) return null;` and been just as wrong and completely
+// invisible. The cost of this rule is that a correct guard has to say why it is
+// correct. That cost IS the rule.
+//
+// ── what this cannot catch ────────────────────────────────────────────────
+//
+// It is line-local and it is meant to be. A tempting third option was to let a
+// site off when the same identifier is compared against 'partial' somewhere
+// nearby — the author has plainly thought about it, so why fire? Because
+// app/(trainer)/videos.tsx, at the revision that carried the bug, already had
+// `status === 'partial' ? 'Your library came back at the row limit…'` forty-five
+// lines below the two gates that were wrong. Any lookahead wide enough to be
+// useful would have cleared the one case this widening exists for. So: no
+// lookahead, and the sites that handle 'partial' on the very next line —
+// src/lib/injuryGate.ts and src/lib/coachClientReport.ts do — carry a marker
+// saying so. That is the trade, made deliberately.
+//
+// It also cannot see:
+//   · the ternary chain (above), which is where the client-training.tsx defect
+//     lived. Catching it means asking what the fall-through branch CLAIMS, which
+//     is a question about English and not about the expression.
+//   · a disjunction whose two halves are not adjacent —
+//     `s === 'error' || !rows || s === 'loading'`. None exists in this tree
+//     today; the check is a substring match and would need a real parse.
+//   · a status crossing a function boundary. `restOf` in src/lib/muscleRecovery.ts
+//     answers 'partial' through `board.isFloor`, three files from the read.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { assertRootFloors } from './gate-floor.mjs';
@@ -168,6 +257,11 @@ const isComment = (l) => /^\s*(\/\/|\*|\/\*)/.test(l);
 /** `<something> !== 'error'`, capturing what is being compared. */
 const NOT_ERROR = /([A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*)\s*!==\s*'error'/g;
 
+/** The same, positively: `<something> === 'error'`. Only a starting point — a
+ *  bare `=== 'error'` is the most ordinary line in this tree and means nothing
+ *  on its own. What makes it rule 2 is the `||` pair below. */
+const EQ_ERROR = /([A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*)\s*===\s*'error'/g;
+
 /**
  * An assertion that a list is EMPTY. Only these three: `=== 0`, `< 1`, and a
  * bare `!list.length`. Deliberately not `!== 0` or a bare `.length` — those
@@ -201,24 +295,52 @@ for (const f of files) {
   const lines = readFileSync(f, 'utf8').split('\n');
   lines.forEach((line, i) => {
     if (isComment(line)) return;
-    NOT_ERROR.lastIndex = 0;
-    let m;
+    /* Both spellings of the enumeration reach the same rule, so both feed the
+     * same candidate list — and each identifier is judged once, whichever
+     * pattern put it there. */
+    const ids = [];
+    for (const re of [NOT_ERROR, EQ_ERROR]) {
+      re.lastIndex = 0;
+      let x;
+      while ((x = re.exec(line))) ids.push(x[1]);
+    }
     const seen = new Set();
-    while ((m = NOT_ERROR.exec(line))) {
-      const id = m[1];
+    for (const id of ids) {
       if (seen.has(id)) continue;
       seen.add(id);
       const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const rulesOutLoading = new RegExp(esc + "\\s*!==\\s*'loading'").test(line);
       const rulesOutPartial = new RegExp(esc + "\\s*!==\\s*'partial'").test(line);
+      const rulesOutError = new RegExp(esc + "\\s*!==\\s*'error'").test(line);
+      /* The positive spelling, and ONLY as one `||`-joined pair on one
+       * identifier: `s === 'error' || s === 'loading'`, or the same written the
+       * other way round. Adjacent and `||`-joined is what separates a single
+       * predicate meaning "unusable" from a ternary chain giving each of the two
+       * its own sentence — see the header. `!(…)` around it still matches, and
+       * should: negating an enumeration that is missing a case does not supply
+       * the case. */
+      const eqPair = new RegExp(
+        `${esc}\\s*===\\s*'error'\\s*\\|\\|\\s*${esc}\\s*===\\s*'loading'`
+        + `|${esc}\\s*===\\s*'loading'\\s*\\|\\|\\s*${esc}\\s*===\\s*'error'`,
+      ).test(line);
+      /* `s === 'partial'` on the same line is the author naming the third
+       * answer in the same breath, which is the whole of what this rule asks
+       * for. Anything further away is not something a line-local rule may
+       * assume — the header says why, and names the file that proves it. */
+      const namesPartial = new RegExp(esc + "\\s*===\\s*'partial'").test(line);
 
       let rule = null;
-      if (rulesOutLoading && !rulesOutPartial) {
+      if (rulesOutError && rulesOutLoading && !rulesOutPartial) {
         rule = {
           n: 2,
           wrong: `\`${id}\` is ruled out of 'error' and 'loading' and left free to be 'partial' — a read that came back at PostgREST's 1000-row ceiling, whose rows are real and whose SET is a prefix`,
         };
-      } else if (!rulesOutLoading && CLAIMS_EMPTY.test(line)) {
+      } else if (eqPair && !namesPartial) {
+        rule = {
+          n: 2,
+          wrong: `\`${id}\` is caught for 'error' and for 'loading' by one predicate, and 'partial' falls straight through it — a read that came back at PostgREST's 1000-row ceiling, whose rows are real and whose SET is a prefix. This is the enumeration written as a guard clause rather than as a permission; it is the same omission either way`,
+        };
+      } else if (rulesOutError && !rulesOutLoading && CLAIMS_EMPTY.test(line)) {
         rule = {
           n: 1,
           wrong: `an assertion that a list is EMPTY, gated on \`${id} !== 'error'\` — which is true while the read is still in flight, so the list is \`[]\` because nothing has arrived and the screen says so out loud`,

@@ -475,10 +475,10 @@ export default function ClientPackages() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Memberships &amp; Packs</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What you've bought from your coach and what's left.</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
-        {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} /> : (
+        {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading what you have bought…" /> : (
           <>
             {/* ── how old this screen is, before any of it is read ──────────
                 This banner was a hundred lines down, below the subscriptions

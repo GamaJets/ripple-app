@@ -65,6 +65,59 @@
 // already covers that destructure, and a second gate guessing at the same line
 // from a different angle would double-report it. Narrow and quiet, on purpose.
 //
+// ── the second rule: an update or a delete that matched nothing ──────────
+//
+// The paragraph above defers the bound case to check-reads.mjs, and for the
+// `error` question that is the right call: check-reads flags
+// `const { data } = await …` with no `error` on the line, so a second gate on
+// that shape would only double-report it. But read what check-reads does when
+// `error` IS on the line — `if (/\berror\b/.test(line)) return;`. It stops
+// there. And src/lib/wroteRows.ts opens by explaining, at length, that on an
+// UPDATE or a DELETE reading `error` is not the check:
+//
+//     const { error } = await sb.from('memberships').update({ status }).eq('id', id);
+//     if (error) throw error;          // never throws
+//
+// A PostgREST update or delete that matches zero rows is a 204 with a null
+// error. An RLS policy refused it, or the row is gone, or the id is stale from
+// a list drawn before a refresh — all three arrive as success. So "result
+// bound, `error` read, count never read" is not covered by check-reads, which
+// stops at `error`; is not covered by the rule above, because the value is
+// bound; and is the shape that has shipped here twice. A settlement write
+// returned 204-with-null-error having stamped zero sessions, and a payroll run
+// showed as paid while every session stayed payable.
+//
+// This is not the second angle on the same line that the paragraph above
+// refuses. It is a different rule over a DISJOINT population — no site can be
+// reported by both, and the loop enforces that by reporting the first rule and
+// moving on — asking a question no gate in this repo asks. Its narrowness is
+// bought with scope rather than with omission:
+//
+//   · UPDATE and DELETE only. An insert cannot silently affect zero rows, and
+//     neither can an upsert's ON CONFLICT DO UPDATE path: a conflicting row
+//     that fails the UPDATE policy's USING clause RAISES rather than being
+//     skipped. There are 130 inserts and upserts in these roots, and a rule
+//     that flagged them would be wrong 130 times on the day it landed, which
+//     is how a gate gets deleted rather than fixed. The one upsert shape that
+//     CAN come back empty on purpose — `ignoreDuplicates: true`, where the
+//     ignored duplicate returns no rows — is the shape where counting would be
+//     actively wrong: src/ui/messaging.ts says so above its own block-thread
+//     upsert, and it is right.
+//   · The chain, not the statement, and not a window. `{ count: 'exact' }` can
+//     sit a long way from the `.update(` it belongs to — in src/ui/clientData.tsx
+//     it is 19 lines and about 1,050 characters below it — so any rule measured
+//     in lines or characters reports that counted write as an uncounted one.
+//     `chainText` walks brackets to the end of the chain however long it is, and
+//     stops at a depth-zero comma so that one element of a `Promise.all([…])`
+//     cannot borrow its sibling's count.
+//   · A builder passed as an ARGUMENT is skipped, on the same
+//     false-negative-by-choice rule `exprStart` already states below. In
+//     src/ui/workoutLog.tsx the builder goes into `matchRow(…)` and the
+//     `.select('id')` is chained onto what comes back, where this cannot see
+//     it. Two false positives, both declined. `enclosingOpener` tells a call's
+//     parenthesis from a grouping one, so the `({ error } = await …)` form in
+//     src/lib/wearables/oauth.ts is still reached.
+//
 // ── the escape hatch, which is the one that already exists ────────────────
 //
 // `no-error-ok:` with a reason, the same marker check-reads.mjs reads and in
@@ -80,6 +133,30 @@
 // already written keep working, and there is one marker to remember instead of
 // two. The reason is what a reviewer reads when deciding whether a write that
 // silently did nothing is honestly survivable here.
+//
+// The count rule gets its OWN marker, `no-count-ok:`, and that is this repo's
+// precedent rather than a departure from it. There are twenty-one `…-ok:`
+// markers in this tree — `rtl-ok:`, `utc-day-ok:`, `grant-ok:`, `unit-ok:`,
+// `whole-ok:` — one per rule, and this file reuses `no-error-ok:` for its first
+// rule precisely because that rule asks check-reads.mjs's question. The count
+// rule asks a different one, so it says a different sentence.
+//
+// The distinction is not decorative. `no-error-ok:` claims a FAILED write is
+// survivable. Every site the count rule can reach already reads `error` and
+// reports it — its author does not think a failure is survivable, they think
+// ZERO ROWS is a legitimate outcome, which is a narrower and quite separate
+// claim. Writing `no-error-ok:` there would put a false sentence in the source
+// AND switch off the first rule, so a later edit deleting the `if (error)`
+// branch would pass unnoticed. Two markers, two blast radii.
+//
+//     // no-count-ok: the member asked for no quiet hours and there are none;
+//     // a delete that matched nothing is the outcome here, not a failure
+//
+// Both markers go through `markedAbove`, so a reason wrapped onto a second line
+// must carry a comment prefix. A sibling gate matched `/-ok:\s*\S/` inside an
+// HTML comment, where a wrapped reason has no `//` or `*` in front of it and the
+// comment-run test walks straight past it; that cannot happen here, because
+// these roots hold only .ts and .tsx.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { assertRootFloors } from './gate-floor.mjs';
@@ -152,6 +229,39 @@ function markedAbove(lines, line, re) {
  * and the next lane adding an entry has the shape and this note in front of it.
  */
 const KNOWN = new Map([]);
+
+/**
+ * The count rule's own ratchet, kept SEPARATE from `KNOWN` above rather than
+ * folded into it.
+ *
+ * A shared map would let an allowance granted for one rule absorb an offence
+ * against the other: a file listed here at 1 for an uncounted delete would then
+ * hide a brand-new unlooked-at write, because the two would be counted into the
+ * same total. `KNOWN` stays at zero and means what it says.
+ *
+ * Both entries are CORRECT code. Each is a delete where zero matched rows is
+ * the outcome the member asked for, and each already carries its author's
+ * paragraph saying exactly that — src/ui/wearables.tsx even names
+ * src/lib/wroteRows.ts and explains why the rule there does not apply. All that
+ * is missing is the marker, and the marker is a one-line edit sitting on top of
+ * the sentence that justifies it.
+ *
+ * They are ratcheted rather than marked because src/ui/ belongs to another
+ * lane, and the header above `KNOWN` gives the reason: a gate's author
+ * annotating other people's code is how a rule gets weakened by the person
+ * least placed to judge it. The three sites in src/lib that this rule also
+ * reached WERE marked, because this lane can answer for them.
+ */
+const KNOWN_COUNT = new Map([
+  ['src/ui/quietHours.ts', {
+    count: 1,
+    fix: "The delete in `saveQuietHours` when `q` is null. The comment under it already says \"A delete that matched nothing is a success here and only here\" — put that in a `no-count-ok:` above the write and this entry goes away.",
+  }],
+  ['src/ui/wearables.tsx', {
+    count: 1,
+    fix: "The `device_sleep_nights` delete in `forgetSleep`. Its comment already reads \"Zero rows is success here, not silence\" and names src/lib/wroteRows.ts as the rule it is departing from; that sentence is the `no-count-ok:` reason, it just needs the marker in front of it.",
+  }],
+]);
 
 const isTest = (f) => /\.test\.[jt]sx?$/.test(f) || f.includes('__tests__');
 
@@ -260,6 +370,68 @@ function statementText(src, start) {
   return src.slice(start);
 }
 
+/**
+ * The single CHAIN from `start` — `sb.from(…).update(…).eq(…)` — and nothing
+ * that follows it.
+ *
+ * `statementText` above is right for the first rule, which asks a question about
+ * the statement as a whole. The count rule asks about one mutation, so it needs
+ * one mutation's worth of text: a comma at depth zero ENDS the chain, which
+ * `statementText` runs straight through. Without that, the two updates inside
+ * the `Promise.all([…])` in src/ui/clientData.tsx are one span, and either one
+ * carrying `{ count: 'exact' }` would excuse the other.
+ *
+ * Everything else is deliberately the same walk, brackets and all, because the
+ * count that guards a write is not at any fixed distance from it. That same
+ * clientData update carries its `{ count: 'exact' }` 19 lines and about 1,050
+ * characters below the `.update(`, so a rule with a line or character window
+ * would report the best-guarded write in the tree as an unguarded one.
+ */
+function chainText(src, start) {
+  let depth = 0;
+  for (let j = start; j < src.length; j++) {
+    const c = src[j];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') { if (depth === 0) return src.slice(start, j); depth--; }
+    else if ((c === ';' || c === ',') && depth === 0) return src.slice(start, j);
+  }
+  return src.slice(start);
+}
+
+/**
+ * The innermost bracket still open at `start`: `'call'`, `'('`, `'['`, `'{'` or
+ * `''`.
+ *
+ * `'call'` means the mutation is an ARGUMENT to a function, and the count rule
+ * then declines to judge it — whatever that function returns can be chained on
+ * where this cannot see it, which is exactly what src/ui/workoutLog.tsx does
+ * with `matchRow(sb.from('workouts').update(patch), …).select('id')`. Same
+ * false-negative-over-false-positive trade `exprStart` makes for a call
+ * receiver, for the same reason.
+ *
+ * Which is why a bare `(` is not enough to decide. `({ error } = await sb
+ * .from('wearable_tokens').delete()…)` in src/lib/wearables/oauth.ts is wrapped
+ * in a GROUPING parenthesis — the house form for destructuring into an
+ * already-declared binding — and treating that as an argument would lose a real
+ * call site. A parenthesis is a call's only when something callable sits
+ * immediately in front of it.
+ */
+function enclosingOpener(src, start) {
+  let depth = 0;
+  for (let j = start - 1; j >= 0; j--) {
+    const c = src[j];
+    if (c === ')' || c === ']' || c === '}') depth++;
+    else if (c === '(' || c === '[' || c === '{') {
+      if (depth > 0) { depth--; continue; }
+      if (c !== '(') return c;
+      let k = j - 1;
+      while (k >= 0 && /\s/.test(src[k])) k--;
+      return k >= 0 && /[A-Za-z0-9_$\])]/.test(src[k]) ? 'call' : '(';
+    }
+  }
+  return '';
+}
+
 const files = [];
 /* Counted per ROOT, not just in total. A single total threshold cannot notice a
  * root going missing, because the other roots cover for it — see
@@ -281,6 +453,12 @@ if (files.length < 150) {
 }
 
 const found = [];
+/* What the gate actually looked at, so the success line reports a size rather
+ * than only a verdict. A gate that says "ok" without saying over what is one
+ * bad glob away from saying "ok" over nothing — the same failure the file-count
+ * floor above exists to prevent, one level down. */
+let examined = 0;
+let updateOrDelete = 0;
 for (const f of files) {
   const raw = readFileSync(f, 'utf8');
   const src = blank(raw);
@@ -297,81 +475,181 @@ for (const f of files) {
     // every counted write in the tree as an uncounted one.
     const rawStmt = raw.slice(start, start + stmt.length);
 
+    const line = src.slice(0, start).split('\n').length;
+    const text = rawLines[line - 1].trim().slice(0, 110);
+
+    /* ── rule one: nobody can read `error`, because nobody holds the result ── */
+
     // Is the value going anywhere? Anything that binds, returns, or passes it
     // along means somebody downstream can read `error`.
     const head = before(src, start);
     const w = head.word;
-    if (w === 'return' || w === 'yield') continue;
-    if (head.two === '=>' || head.two === '&&' || head.two === '||' || head.two === '??') continue;
-    if ('=(,[:?+'.includes(head.ch)) continue;
+    const held =
+      w === 'return' || w === 'yield'
+      || head.two === '=>' || head.two === '&&' || head.two === '||' || head.two === '??'
+      || '=(,[:?+'.includes(head.ch)
+      // Is it being inspected in place?
+      || /\.then\s*\(/.test(stmt)
+      || /\.select\s*\(/.test(stmt)
+      || /count\s*:\s*['"]exact['"]/.test(rawStmt)
+      || markedAbove(rawLines, line, /no-error-ok:\s*\S/);
 
-    // Is it being inspected in place?
-    if (/\.then\s*\(/.test(stmt)) continue;
-    if (/\.select\s*\(/.test(stmt)) continue;
-    if (/count\s*:\s*['"]exact['"]/.test(rawStmt)) continue;
+    if (!held) {
+      found.push({ kind: 'error', rel, line, text, verb: (MUTATES.exec(stmt) || [, 'write'])[1] });
+      // One report per site. A statement that fails rule one would fail rule
+      // two as well — it has no count either — and two paragraphs about one
+      // line is the double-reporting the header refuses. Rule one's remedy
+      // already names the count for an update or a delete.
+      continue;
+    }
 
-    const line = src.slice(0, start).split('\n').length;
-    if (markedAbove(rawLines, line, /no-error-ok:\s*\S/)) continue;
+    /* ── rule two: the result is held, but the ROW COUNT is not read, and on
+     *    an update or a delete that is the whole question ─────────────────── */
 
-    const verb = (MUTATES.exec(stmt) || [, 'write'])[1];
-    found.push({
-      rel, line,
-      text: rawLines[line - 1].trim().slice(0, 110),
-      verb,
-    });
+    // The chain rather than the statement, so a sibling's count cannot be
+    // borrowed and a count 19 lines down is still found. See `chainText`.
+    const chain = chainText(src, start);
+    const rawChain = raw.slice(start, start + chain.length);
+    const m = MUTATES.exec(chain);
+    if (m) { examined++; if (m[1] === 'update' || m[1] === 'delete') updateOrDelete++; }
+
+    // Insert and upsert are outside the class: neither can silently affect zero
+    // rows. The header sets out why, and why a rule that flagged them would be
+    // wrong 130 times on the day it landed.
+    if (!m || (m[1] !== 'update' && m[1] !== 'delete')) continue;
+
+    // Passed to a function, which may chain a `.select(…)` onto what it returns
+    // where this cannot see it. Declined rather than guessed.
+    if (enclosingOpener(src, start) === 'call') continue;
+
+    // The two guard forms that answer the question. `{ count: 'exact' }` has to
+    // be read out of the RAW text for the reason given above: `blank()` empties
+    // `'exact'` along with every other string body.
+    if (/count\s*:\s*['"]exact['"]/.test(rawChain)) continue;
+    if (/\.select\s*\(/.test(chain)) continue;
+    // `.single()` turns zero rows into PGRST116, so it is a count guard in its
+    // own right. `.maybeSingle()` deliberately is NOT — it resolves zero rows to
+    // null data with no error, which is the very shape this rule is about.
+    if (/\.single\s*\(/.test(chain)) continue;
+
+    if (markedAbove(rawLines, line, /no-count-ok:\s*\S/)) continue;
+
+    found.push({ kind: 'count', rel, line, text, verb: m[1] });
   }
 }
 
-/* ── the ratchet ──────────────────────────────────────────────────────────── */
 
-const byFile = new Map();
-for (const h of found) {
-  if (!byFile.has(h.rel)) byFile.set(h.rel, []);
-  byFile.get(h.rel).push(h);
-}
 
-const fresh = [];
-for (const [rel, hits] of byFile) {
-  const allowed = KNOWN.get(rel)?.count ?? 0;
-  if (hits.length > allowed) fresh.push(...hits.map((h) => ({ ...h, allowed, total: hits.length })));
-}
-
-const drifted = [];
-for (const [rel, entry] of KNOWN) {
-  const n = byFile.get(rel)?.length ?? 0;
-  if (n < entry.count) drifted.push({ rel, was: entry.count, now: n, fix: entry.fix });
-}
-
-if (fresh.length) {
+/**
+ * Two populations, two ratchets, the same arithmetic. `kind` decides which, and
+ * because the loop reports at most one kind per site the two totals never
+ * overlap.
+ */
+function ratchet(hits, known) {
+  const byFile = new Map();
+  for (const h of hits) {
+    if (!byFile.has(h.rel)) byFile.set(h.rel, []);
+    byFile.get(h.rel).push(h);
+  }
+  const fresh = [];
+  for (const [rel, list] of byFile) {
+    const allowed = known.get(rel)?.count ?? 0;
+    if (list.length > allowed) fresh.push(...list.map((h) => ({ ...h, allowed, total: list.length })));
+  }
+  const drifted = [];
+  for (const [rel, entry] of known) {
+    const n = byFile.get(rel)?.length ?? 0;
+    if (n < entry.count) drifted.push({ rel, was: entry.count, now: n, fix: entry.fix });
+  }
   fresh.sort((a, b) => (a.rel === b.rel ? a.line - b.line : a.rel < b.rel ? -1 : 1));
-  console.error(`\n${fresh.length} write${fresh.length === 1 ? '' : 's'} whose success is inferred rather than counted:\n`);
-  for (const h of fresh) {
+  return { fresh, drifted };
+}
+
+const one = ratchet(found.filter((h) => h.kind === 'error'), KNOWN);
+const two = ratchet(found.filter((h) => h.kind === 'count'), KNOWN_COUNT);
+
+let failed = false;
+
+if (one.fresh.length) {
+  failed = true;
+  const n = one.fresh.length;
+  console.error(`\n${n} write${n === 1 ? '' : 's'} whose success is inferred rather than counted:\n`);
+  for (const h of one.fresh) {
     console.error(`  ${h.rel}:${h.line}`);
     console.error(`    ${h.text}`);
     console.error(`    wrong: the ${h.verb} resolves whether or not the database accepted it — supabase-js sets \`error\` and does NOT throw, so this statement cannot tell a saved row from a refused one, and neither can the screen above it`);
-    console.error('    right: bind it and read `error` (`const { error } = await …`), or count it');
-    console.error("           (`{ count: 'exact' }`, `.select('id')`), or inspect it in place");
-    console.error('           (`.then(({ error }) => …)`) — see src/ui/coachProfile.tsx for a two-write');
-    console.error('           save that names WHICH half did not land\n');
+    if (h.verb === 'update' || h.verb === 'delete') {
+      // Reading `error` is the remedy for an insert and is NOT the remedy here,
+      // and saying so used to be this message's one inaccuracy: a zero-row
+      // update is a 204 with a null error, so the suggested fix would have left
+      // the site passing both rules and still unable to tell.
+      console.error(`    right: COUNT it — a ${h.verb} that matches no rows is a 204 with a null`);
+      console.error("           error, so reading `error` alone cannot see it. Either");
+      console.error("           `{ count: 'exact' }` and read the count (src/lib/wroteRows.ts turns it");
+      console.error("           into a sentence), or `.select('id')` and check the length");
+    } else {
+      console.error('    right: bind it and read `error` (`const { error } = await …`), or count it');
+      console.error("           (`{ count: 'exact' }`, `.select('id')`), or inspect it in place");
+      console.error('           (`.then(({ error }) => …)`) — see src/ui/coachProfile.tsx for a two-write');
+      console.error('           save that names WHICH half did not land');
+    }
+    console.error('');
     if (h.allowed) console.error(`    (${h.rel} is on the ratchet at ${h.allowed}; it now has ${h.total})\n`);
   }
   console.error('A read that fails shows the reader nothing. A write that fails shows them exactly');
   console.error('what they typed, sitting there, apparently saved. If the failure genuinely does');
   console.error('not matter, say so with the marker check-reads.mjs already uses:');
   console.error('`no-error-ok: <why a write that did nothing is survivable here>`.\n');
-  process.exit(1);
 }
 
-if (drifted.length) {
-  console.error(`\n${drifted.length} ratchet entr${drifted.length === 1 ? 'y is' : 'ies are'} out of date — the backlog has shrunk and the list has not:\n`);
-  for (const d of drifted) {
-    console.error(`  ${d.rel}: listed at ${d.was}, now ${d.now}. ${d.now === 0 ? 'Delete the entry.' : `Lower the count to ${d.now}.`}`);
-    console.error(`    ${d.fix}\n`);
+if (two.fresh.length) {
+  failed = true;
+  const n = two.fresh.length;
+  console.error(`\n${n} update${n === 1 ? '' : 's'}/delete${n === 1 ? '' : 's'} whose ROW COUNT is never read:\n`);
+  for (const h of two.fresh) {
+    console.error(`  ${h.rel}:${h.line}`);
+    console.error(`    ${h.text}`);
+    const an = h.verb === 'update' ? 'an' : 'a';
+    console.error(`    wrong: \`error\` is read here, and on ${an} ${h.verb} that is not the question.`);
+    console.error(`           ${an.replace(/^a/, 'A')} ${h.verb} that matches ZERO rows is not an error — it is a 204 with a`);
+    console.error('           null error and a null body, identical to one that changed everything');
+    console.error('           it was asked to. An RLS policy refusing it, the row having been');
+    console.error('           removed by somebody else, or a stale id from a list drawn before the');
+    console.error('           last refresh all arrive here as success');
+    console.error("    right: `{ count: 'exact' }` in the options and read the count — pass the");
+    console.error('           result to `writeFailure`/`assertWrote` in src/lib/wroteRows.ts, which');
+    console.error('           already distinguishes refused, matched-nothing and never-counted and');
+    console.error("           says each in words — or `.select('id')` and test the length");
+    console.error('');
+    if (h.allowed) console.error(`    (${h.rel} is on the count ratchet at ${h.allowed}; it now has ${h.total})\n`);
+  }
+  console.error('This is the bug src/lib/wroteRows.ts was written for, and it has shipped twice.');
+  console.error('A settlement write returned 204 with a null error having stamped zero sessions,');
+  console.error('and the payroll run reported itself paid while every session stayed payable.');
+  console.error('If matching nothing is genuinely the outcome somebody asked for — clearing a');
+  console.error('mark that was never set, deleting nights a device never recorded — say so:');
+  console.error('`no-count-ok: <why zero rows is the right answer here>`.\n');
+}
+
+for (const [label, d] of [['', one.drifted], ['count ', two.drifted]]) {
+  if (!d.length) continue;
+  failed = true;
+  console.error(`\n${d.length} ${label}ratchet entr${d.length === 1 ? 'y is' : 'ies are'} out of date — the backlog has shrunk and the list has not:\n`);
+  for (const e of d) {
+    console.error(`  ${e.rel}: listed at ${e.was}, now ${e.now}. ${e.now === 0 ? 'Delete the entry.' : `Lower the count to ${e.now}.`}`);
+    console.error(`    ${e.fix}\n`);
   }
   console.error('A list that over-states what is wrong is how a ratchet turns into an ignore');
   console.error('list. The number comes down with the work.\n');
-  process.exit(1);
 }
 
+if (failed) process.exit(1);
+
 const backlog = [...KNOWN.values()].reduce((n, e) => n + e.count, 0);
-console.log(`check-writes — ok, ${files.length} files across the apps and the console; no new uncounted write${backlog ? `, ${backlog} known and ratcheted` : ''}`);
+const counted = [...KNOWN_COUNT.values()].reduce((n, e) => n + e.count, 0);
+console.log(
+  `check-writes — ok, ${files.length} files across the apps and the console; `
+  + `${examined} supabase mutation chains examined, of which ${updateOrDelete} are updates or deletes; `
+  + `no new uncounted write${backlog ? `, ${backlog} known and ratcheted` : ''}`
+  + `${counted ? `, ${counted} uncounted update${counted === 1 ? '' : 's'}/delete${counted === 1 ? '' : 's'} ratcheted in another lane's files` : ''}`,
+);

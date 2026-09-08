@@ -23,6 +23,15 @@ import {
 // checked is the conversion, not the prose: a report and a summary that print
 // kilograms to a pounds reader, and a CSV that must not follow them.
 import { progressChangeLines, progressSummary, progressCsv, PROGRESS_CSV_HEADER, type ProgressRow } from './progressExport';
+// `plain` now writes the READER's decimal separator, so every assertion below
+// that names a figure is an assertion about a locale. Stated here rather than
+// inherited from the runner: `appLocale()` falls back to whatever
+// `Intl.DateTimeFormat().resolvedOptions().locale` says, which is the machine
+// this happens to run on, and a suite that asserts "82.4" while passing on a
+// British laptop and failing on a German one is testing the laptop. The
+// comma-decimal block near the bottom re-seeds and puts this back.
+import { setAppLocale } from './locale';
+setAppLocale('en-GB');
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -487,6 +496,69 @@ ok(readNumber('16,') === 16, 'including on a comma keyboard');
   ok(!readBodyWeight('-80', 'kg').ok, 'and so is a negative');
 }
 
+
+/* ── the decimal separator, which is a DISPLAY question and a TYPING one ──── */
+//
+// A reader whose language writes 3,42 was shown 3.42, because `plain` was
+// `String(roundTo(n, 3))` and `String` writes a full stop in every locale there
+// has ever been. That is the same defect `num2` in src/lib/format.ts was
+// written against, and this app already treats it as one.
+//
+// Both halves are asserted, because the fix is only correct if BOTH hold: the
+// separator has to follow the reader, and the figure has to survive being typed
+// back. `plain` fills <TextInput value=…> on the log sheet, the check-in, the
+// tape boxes and the profile sheet, and `readNumber` reads every one of them
+// out again — so a thousands separator or a non-ASCII digit here is not a
+// cosmetic difference, it is a saved weight going null or moving by a factor of
+// a thousand.
+//
+// One thing here is NOT proved, and saying so is the point: the shape guard
+// inside `spell` covers a runtime that accepts `numberingSystem` and then
+// ignores it — an older Hermes without full ICU — and this suite runs on a node
+// that honours it, so removing the guard does not turn any assertion below red.
+// It is a belt beside the braces, and a mutation of it is invisible here. What
+// IS proved is the claim it exists to hold: nothing this function returns is
+// ever anything but ASCII digits and one separator.
+{
+  setAppLocale('de-DE');
+  ok(plain(82.4) === '82,4', `a comma-decimal reader is shown a comma, got "${plain(82.4)}"`);
+  ok(plain(82) === '82', `a whole number still has nothing to separate, got "${plain(82)}"`);
+  ok(plain(102.06) === '102,06', `and a hundredth of a kilogram keeps both places, got "${plain(102.06)}"`);
+  ok(weightLabel(82.4, 'kg') === '82,4 kg', `the label carries it too, got "${weightLabel(82.4, 'kg')}"`);
+  ok(liftLabel(102.06, 'kg') === '102,06 kg', `and so does a lifted load, got "${liftLabel(102.06, 'kg')}"`);
+  ok(lengthLabel(84.5, 'cm') === '84,5 cm', `and a tape measurement, got "${lengthLabel(84.5, 'cm')}"`);
+  // The half that must NOT follow the reader.
+  ok(plain(1204.5) === '1204,5', `no thousands separator, ever — got "${plain(1204.5)}"`);
+  ok(readNumber(plain(1204.5)) === 1204.5, 'a four-figure load written out reads back as itself');
+  ok(readNumber(plain(82.4)) === 82.4, 'and so does the weight in the profile box');
+  // The sign, which Intl writes as U+2212 in some locales and parseFloat does
+  // not read as one. `plain` puts it back by hand for that reason.
+  ok(plain(-1.5) === '-1,5', `a negative keeps an ASCII sign, got "${plain(-1.5)}"`);
+  ok(readNumber(plain(-1.5)) === -1.5, 'and reads back as a negative rather than as null');
+
+  // A handset whose locale writes its own digits. `Intl` would spell 16.5 as
+  // "١٦٫٥" here, and `readNumber` is parseFloat — a member who opened Edit
+  // profile on this phone would find their weight had become nothing.
+  setAppLocale('ar-EG');
+  ok(plain(16.5) === '16.5', `Arabic-Indic digits are refused in a typeable figure, got "${plain(16.5)}"`);
+  ok(readNumber(plain(16.5)) === 16.5, 'because this is a number the app is handed back');
+
+  // Pashto is the case that shows why the Latin numbering system is ASKED for
+  // rather than left to the shape guard alone. This handset's own spelling of
+  // 16.5 is ۱۶٬۵ — digits `readNumber` cannot parse — and its Latin-digit
+  // spelling is "16,5". The guard on its own would refuse the native digits and
+  // fall back to `String`, which hands a Pashto reader the ENGLISH separator;
+  // asking for latn keeps their own. Skipped where ICU has never heard of the
+  // locale, because that is a fact about the runner and not about this module.
+  if (Intl.NumberFormat.supportedLocalesOf(['ps-AF']).length) {
+    setAppLocale('ps-AF');
+    ok(plain(16.5) === '16,5', `their own separator on ASCII digits, got "${plain(16.5)}"`);
+    ok(readNumber(plain(16.5)) === 16.5, 'and it still reads back out of the box it was typed in');
+  }
+
+  setAppLocale('en-GB');
+  ok(plain(82.4) === '82.4', 'and a full-stop reader is unaffected by any of it');
+}
 
 // The exit-on-failure epilogue belongs LAST. It used to sit further up this
 // file, and everything appended below it ran with its failures collected into

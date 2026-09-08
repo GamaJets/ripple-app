@@ -154,7 +154,7 @@ export default function Records() {
     <Text style={{ ...ty.micro, color: t.ink3 }}>Best estimated 1-rep max per lift</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal Records</Text>
    </View>
-   <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
   </View>
 
   {/* An empty PR board has three causes and only one of them is "you have not

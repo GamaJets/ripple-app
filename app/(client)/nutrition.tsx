@@ -784,7 +784,7 @@ export default function Nutrition() {
                 ? 'Reading your diet and the foods you asked to avoid…'
                 : 'Your diet and the foods you asked to avoid could not be read, so there is no plan to build from them. A week of meals put together without your exclusions is not a caveat on your plan — it is the wrong food — so it is not shown. Pull down to try again.'}</Text>
             </View>
-            <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+            <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           </View>
           <Rule />
           <Section>
@@ -801,10 +801,10 @@ export default function Nutrition() {
                 provider whose write is disarmed while the read is failing. */}
             {adjustUnknown ? null
               : !hasBody
-                ? (looking ? <ActivityIndicator color={t.brand} />
+                ? (looking ? <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your measurements…" />
                   : c.status === 'error' ? null
                   : <Cta label="Add Your Measurements" wide onPress={() => router.push('/(client)/scans')} />)
-              : c.profileStatus === 'loading' ? <ActivityIndicator color={t.brand} />
+              : c.profileStatus === 'loading' ? <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your profile…" />
               : null}
           </Section>
         </ScrollView>
@@ -974,9 +974,13 @@ export default function Nutrition() {
             </View>
             <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
               <TextInput value={nl} onChangeText={setNl} placeholder='Describe it — "chicken burrito & a coke"' placeholderTextColor={t.ink3}
+                accessibilityLabel="Describe what you ate"
                 onSubmitEditing={describeLog} returnKeyType="done"
                 style={{ ...ty.body, flex: 1, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 10 }} />
               <Pressable onPress={describeLog} disabled={logBusy || !nl.trim()}
+                accessibilityRole="button"
+                accessibilityLabel={logBusy ? 'Reading what you typed' : 'Log what you typed'}
+                accessibilityState={{ disabled: logBusy || !nl.trim(), busy: logBusy }}
                 style={{ backgroundColor: nl.trim() ? t.brand : t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, justifyContent: 'center' }}>
                 {logBusy ? <ActivityIndicator color={t.brandInk} /> : <Text style={{ ...ty.label, fontWeight: '600', color: nl.trim() ? t.brandInk : t.ink3 }}>Log</Text>}
               </Pressable>

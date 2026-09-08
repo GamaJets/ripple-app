@@ -45,7 +45,7 @@ export default function Explore() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Everything, in two taps</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Explore</Text>
@@ -56,6 +56,7 @@ export default function Explore() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, marginTop: sp.lg }}>
           <Icon name="search" size={16} color={t.ink3} />
           <TextInput value={q} onChangeText={setQ} placeholder="Search features…" placeholderTextColor={t.ink3} autoCapitalize="none"
+            accessibilityLabel="Search features"
             style={{ flex: 1, ...ty.body, color: t.ink, paddingVertical: sp.md }} />
           {q ? <Pressable onPress={() => setQ('')} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear search"><Text style={{ ...ty.head, color: t.ink3 }}>×</Text></Pressable> : null}
         </View>

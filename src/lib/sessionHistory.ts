@@ -331,6 +331,15 @@ export function monthCoverage(
   boundary: ReadBoundary,
   status: LoadStatus,
 ): MonthCoverage {
+  // whole-ok: 'partial' is the entire reason this function exists, and it
+  // arrives through `boundary` rather than through `status`. `readBoundary` is
+  // built with `truncated`, so under a truncated read `boundary.bounded` is true
+  // and carries the oldest day that actually came back — which is what turns
+  // this month into 'edge' or 'beyond' rather than 'covered'. That is a strictly
+  // better answer than `isWhole` could give: a member whose read was capped in
+  // 2023 still gets a truthful 'covered' for last month, and only the months the
+  // truncation genuinely reached are marked. 'loading' and 'error' have no
+  // boundary to reason from at all, which is why they and only they stop here.
   if (status === 'loading' || status === 'error') return 'unknown';
   if (!boundary.bounded || boundary.oldestISO == null) return 'covered';
   const oldest = Date.parse(boundary.oldestISO);
@@ -352,6 +361,14 @@ export function rangeCoverage(
   boundary: ReadBoundary,
   status: LoadStatus,
 ): MonthCoverage {
+  // whole-ok: the same trade as `monthCoverage` above, for an arbitrary run of
+  // days instead of a calendar month, and it matters more here because the runs
+  // asked about are short. A week or a fortnight sits at the newest end of the
+  // read, and `capped()` keeps the newest rows — so under a truncated read the
+  // honest answer for almost every window this is called with is 'covered', and
+  // `boundary.oldestISO` is what proves it rather than assumes it. Refusing on
+  // 'partial' would mark a fully-read week as half-known for every member with
+  // more than a thousand sessions behind them.
   if (status === 'loading' || status === 'error') return 'unknown';
   if (!boundary.bounded || boundary.oldestISO == null) return 'covered';
   const oldest = Date.parse(boundary.oldestISO);

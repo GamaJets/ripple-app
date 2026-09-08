@@ -181,7 +181,7 @@ export default function Referral() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Training is easier with company</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Invite Friends</Text>
@@ -196,7 +196,7 @@ export default function Referral() {
             {code ? (
               <Text style={{ ...value(30), color: t.ink, letterSpacing: 1.5, marginTop: 6 }}>{code}</Text>
             ) : status === 'loading' ? (
-              <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}><ActivityIndicator color={t.ink3} /></View>
+              <View style={{ marginTop: sp.md, alignItems: 'flex-start' }}><ActivityIndicator color={t.ink3} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your referral code…" /></View>
             ) : (
               // No invented fallback. A code this screen made up is a code the
               // server has not registered, so anything a friend did with it

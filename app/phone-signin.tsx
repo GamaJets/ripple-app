@@ -104,7 +104,7 @@ export default function PhoneSignIn() {
         keyboardDismissMode="interactive">
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginBottom: sp.xxl }}>
-          <Ghost icon={BACK_ICON} onPress={() => (stage === 'code' ? setStage('number') : router.back())} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => (stage === 'code' ? setStage('number') : router.back())} />
           <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
         </View>
 

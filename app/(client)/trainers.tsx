@@ -860,7 +860,7 @@ export default function FindTrainer() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Find a Trainer</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>Enter your coach's code, or browse everyone coaching on {BRAND.label}.</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {/* ── your coach, and the way out ─────────────────────────────────
@@ -1035,7 +1035,7 @@ export default function FindTrainer() {
           ) : null}
 
           {status === 'loading' ? (
-            <View style={{ paddingVertical: sp.huge, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
+            <View style={{ paddingVertical: sp.huge, alignItems: 'center' }}><ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Reading the coach directory…" /></View>
           ) : status === 'error' ? null : coaches.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: sp.xl }}>
               <View style={{ width: 52, height: 52, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center', marginBottom: sp.md }}>

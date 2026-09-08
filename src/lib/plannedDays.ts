@@ -193,6 +193,9 @@ export async function savePlannedDay(
 export async function clearPlannedDay(dateISO: string): Promise<{ ok: boolean; error?: string }> {
   const uid = await myId();
   if (!uid) return { ok: false, error: 'Not signed in.' };
+  // no-count-ok: taking a mark off a date that was never marked is the
+  // outcome the member asked for. The screen shows no mark either way, so
+  // there is nothing a row count could tell them that they cannot already see.
   const { error } = await supabase
     .from('planned_days')
     .delete()

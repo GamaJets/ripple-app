@@ -263,13 +263,31 @@ export function planVsActual(input: PlanVsActualInput): PlanVsActual {
   const toDay = input.todayISO;
   const fromDay = backDays(toDay, windowDays - 1);
 
-  // No programme is one of three different answers and only one of them is
+  // No programme is one of FOUR different answers and only one of them is
   // 'no-programme'. A null under a read that has not landed is "we did not find
   // out what they are on", which is exactly the confusion
   // src/ui/assignedPrograms.tsx exists to prevent.
+  //
+  // whole-ok: this line is the "did not land" half and it is right to stop at
+  // two — a truncated assignment read still hands back whole programmes for the
+  // clients it reached, and refusing those a comparison would withhold a true
+  // answer from every client whose row was inside the page. What 'partial'
+  // cannot do is support the ABSENCE, and that is refused two lines down rather
+  // than here, because the two questions have different answers.
   if (input.programStatus === 'loading' || input.programStatus === 'error') return UNREADABLE;
   if (!input.days || !input.days.length) {
-    return { ...UNREADABLE, state: 'no-programme', fromDay, toDay };
+    // The fourth answer, and the one that was missing. `useAssignedPrograms`
+    // reads every client's assignment in one page ordered by `client_id`, so
+    // under 'partial' a client near the end of that ordering has no row here —
+    // and `getProgram` returns the same null it returns for a client genuinely
+    // on nothing. Saying 'no-programme' off that told a coach, on
+    // app/(trainer)/client-training.tsx, that a client they had written a block
+    // for was on none, and told the member the same thing in their own words on
+    // app/(client)/week.tsx: "No coach has written you a programme yet." A
+    // prefix of the assignments cannot say a client is absent from them.
+    return input.programStatus === 'partial'
+      ? { ...UNREADABLE, fromDay, toDay }
+      : { ...UNREADABLE, state: 'no-programme', fromDay, toDay };
   }
 
   // Whether the record may be used to say a movement was NOT logged.

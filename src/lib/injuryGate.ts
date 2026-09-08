@@ -101,6 +101,14 @@ export function ackState(
 export type ChoiceState = 'unknown' | 'none' | 'some' | 'partial';
 
 export function programmeChoiceState(status: LoadStatus, count: number): ChoiceState {
+  // whole-ok: 'partial' is a value of this function's own return type and it is
+  // produced on the very next line — the type comment above lists all four
+  // answers precisely so 'partial' would not have to hide inside one of the
+  // others. This guard means "the read did not land", and a truncated read did
+  // land: some programmes assigned over a disclosure are known to exist, which
+  // is not 'unknown' and is not "these are all of them" either. Note that a
+  // truncated read with a zero count still goes to 'unknown' below, because a
+  // count of zero off a prefix is the one number a prefix cannot supply.
   if (status === 'error' || status === 'loading') return 'unknown';
   if (status === 'partial') return count > 0 ? 'partial' : 'unknown';
   return count > 0 ? 'some' : 'none';
