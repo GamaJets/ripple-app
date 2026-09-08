@@ -56,18 +56,47 @@
   --brand: #e0912f;
   --brand-ink: #2a1503;
 
-  /* The dark status set, lifted from `darkSem` in src/theme/tokens.ts. These
-   * are MARKS beside ink-coloured text, never coloured text, so 3:1 is the bar
-   * (WCAG 1.4.11) rather than 4.5:1.
+  /* The dark status set, and it is INK here, not only a mark.
    *
-   * --crit was #d03b3b, which measured 2.79:1 against the darkest grounds in
-   * the app and 2.85:1 against --surface3 here: the one dot that means "this is
-   * broken" was the one dot you could not see. tokens.ts held the hue and
-   * walked lightness to #d34646 (3.08:1 here) and this file had not followed. */
-  --good: #0ca30c;
+   * It started as `darkSem` from src/theme/tokens.ts, where the rule is that a
+   * status colour is a mark beside ink-coloured text and 3:1 (WCAG 1.4.11) is
+   * therefore the whole of what it promises. That rule holds in the phone apps,
+   * which have `<Flag>` — the tone in a 6pt dot, the words in ink. This console
+   * has no Flag and never had one: it draws 220 `color: var(--…)` sites across
+   * 32 files in these four tokens, and they are sentences. The `role="alert"`
+   * line on /page.tsx, the blocker paragraphs on /accounting and /close, the
+   * "not seen" cell on /retention, "overdue" on /close. Words, at 12–13px.
+   *
+   * So on the web these are held to the 4.5:1 small text needs, not to 3:1, and
+   * scripts/check-contrast.mjs enforces exactly that: a token this console
+   * spells in a `color:` property is measured as text on every ground. The
+   * alternative was 220 call sites and a component that does not exist.
+   *
+   * What moved, and why only two of the four:
+   *
+   *   --good  #0ca30c  4.08:1 on --surface3  ->  #0dae0d  4.61:1
+   *   --crit  #d34646  3.08:1 on --surface3  ->  #ff6060  4.62:1
+   *   --warn  #fab219  7.46:1 already        ->  unchanged
+   *   --serious #ec835a 5.19:1 already       ->  unchanged
+   *
+   * --good holds hue (120) and saturation (86%) and walks lightness, which is
+   * tokens.ts's method and moves it 5.6 dE76 — a shade, not a colour.
+   *
+   * --crit could not. --surface3 #1b3229 is the lightest ground here, and no
+   * red at 62% saturation reaches 4.5:1 on it without becoming #de7575 — a
+   * dusty rose that has stopped reading as "this is broken", which is a worse
+   * regression than low contrast because it is silent. Hue is held at 0 exactly
+   * and saturation taken to 100% instead: at the same luminance a fully
+   * saturated red carries more chroma, so #ff6060 is both legible and still
+   * unmistakably the critical colour. Its distance from --serious is 25.0 dE76
+   * against the old value's 25.5 — the set is no closer together than it was.
+   *
+   * These now exceed the 3:1 a mark needs by a wide margin, which is free:
+   * 4.5 implies 3, so every dot, bar and border drawn in them still passes. */
+  --good: #0dae0d;
   --warn: #fab219;
   --serious: #ec835a;
-  --crit: #d34646;
+  --crit: #ff6060;
 
   --sans: var(--font-sans), ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: var(--font-mono), ui-monospace, "SF Mono", Menlo, monospace;
@@ -98,8 +127,24 @@
   --ring2: rgba(15, 24, 48, 0.07);
   --rail: #eaeef6;
   /* The daylight palette takes the darker amber: on white, #e0912f is 2.0:1
-   * and unreadable, while #b45309 is 5.02:1 and carries white ink at the same. */
-  --brand: #b45309;
+   * and unreadable.
+   *
+   * #b45309 — the launcher tile's amber — was the value here, and on white it
+   * is 5.02:1. But white is not the only ground: --surface3 #e3e9f4 is, and
+   * every panel on /close and /accounting is one. There it measured 4.12:1, and
+   * --brand is text on this console 70 times over plus the `a` rule below, so
+   * it is held to 4.5:1 like any other ink. Hue held at 26 and saturation at
+   * 91%, lightness walked from 37% to 35%: 4.62:1 on the worst of the five
+   * grounds, 4.5 dE76 from the tile, and white ink on it improves from 5.02 to
+   * 5.63. The dark block's #e0912f is untouched — it clears 5.38:1 already, and
+   * it is the value the marketing site agreed with.
+   *
+   * web/styles.css keeps #b45309 in its own light block and is right to: its
+   * grounds are that site's, not this console's, and it argues the figure on
+   * them in its own file. Two palettes, two sets of grounds, each measured
+   * against what it is actually drawn on — which is the same reason rule 2 of
+   * scripts/check-contrast.mjs does not require this file to equal tokens.ts. */
+  --brand: #a84d08;
   --brand-ink: #ffffff;
 
   /* `lightSem` from src/theme/tokens.ts, and this block is the one that was
@@ -112,12 +157,29 @@
    * pale yellow dot on white saying a membership was about to lapse.
    *
    * The light values below hold each hue exactly and walk lightness down until
-   * the worst of these four grounds clears the 3:1 a non-text mark needs; all
-   * four now sit around 4.0:1. */
-  --good: #0a820a;
-  --warn: #956703;
-  --serious: #c44717;
-  --crit: #cf3737;
+   * the worst of these four grounds clears its floor.
+   *
+   * That floor is now 4.5:1, not the 3:1 they were first walked to. The reason
+   * is in the dark block above: this console draws these four as SENTENCES, 220
+   * times, and 3:1 is what a dot promises rather than what a paragraph needs.
+   * They all sat at 4.04–4.09:1 against --surface3 #e3e9f4 — close enough to
+   * look deliberate and still under the bar. Each moved by 4–6 dE76, hue held
+   * to within 0.2 degrees and saturation held exactly, so the set reads exactly
+   * as it did:
+   *
+   *   --good     #0a820a  4.09  ->  #097809  4.65
+   *   --warn     #956703  4.08  ->  #8a5f03  4.63
+   *   --serious  #c44717  4.04  ->  #b54115  4.62
+   *   --crit     #cf3737  4.05  ->  #c22f2f  4.60
+   *
+   * --serious is not used as `color:` anywhere today, so the gate holds it at
+   * the 3:1 a mark needs; it is walked with the others anyway, because leaving
+   * one member of a semantic set below the bar is how the next lane reaches for
+   * it and reintroduces the defect. */
+  --good: #097809;
+  --warn: #8a5f03;
+  --serious: #b54115;
+  --crit: #c22f2f;
 }
 
 * { box-sizing: border-box; }
@@ -214,9 +276,12 @@ h3 { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
        printed clean, which is why this went unseen: it depended on the theme
        the reader happened to be in when they hit Print.
 
-       Taken verbatim from the light block above, which clears both floors. */
+       Taken verbatim from the light block above, which clears both floors —
+       and they must stay verbatim: this block is measured merged over BOTH
+       screen palettes, so a status colour left behind here is a defect that
+       only appears on paper. */
     --surface3: #e3e9f4;
-    --good: #0a820a; --warn: #956703; --serious: #c44717; --crit: #cf3737;
+    --good: #097809; --warn: #8a5f03; --serious: #b54115; --crit: #c22f2f;
   }
   /* ink-hex-ok: the print ground is paper, not --bg, and this block exists to
      say so — every token above it is redefined for the same reason. 18.88:1 on

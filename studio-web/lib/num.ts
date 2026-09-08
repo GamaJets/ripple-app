@@ -57,3 +57,43 @@ export function numUpTo(n: number | null | undefined, places: number): string {
   const dp = Math.min(20, Math.max(0, Math.trunc(places) || 0));
   return n.toLocaleString(undefined, { maximumFractionDigits: dp });
 }
+
+/**
+ * The same, with NO thousands separator — the console's copy of `plain` in
+ * src/lib/units.ts.
+ *
+ * ── why this exists rather than importing `plain` ─────────────────────────
+ *
+ * It is the same argument the header of this file makes about `format.ts`, one
+ * module further along. `plain` spells through `new Intl.NumberFormat(appLocale())`,
+ * and `appLocale()` is the module-level latch in src/lib/locale.ts that resolves
+ * on the SERVER during render and again in the BROWSER during hydration, on two
+ * machines with two locales. scripts/check-deltas.mjs already writes the rule
+ * down for exactly this case — "a console site takes the SIGN from the helper
+ * and spells the figure with the console's own formatter" — and lib/units.ts
+ * was taking the sign from `deltaSign` and then spelling with `plain` anyway.
+ *
+ * That did not show up as a hydration error, and the reason is a property of
+ * the ONE call site rather than of anything here: /coach/roster loads its rows
+ * in an effect, so `ranked` is null on the server pass and no weight reaches
+ * the prerendered HTML. One `initialData` and it would.
+ *
+ * ── why no grouping ──────────────────────────────────────────────────────
+ *
+ * `plain`'s own header: it "may never grow a thousands separator". These are
+ * body weights and weight deltas, and in pounds a heavy client is a four-digit
+ * figure only in the sense that 1000 lb is four digits — nobody is. Grouping a
+ * measurement that will never need it buys nothing and would make this column
+ * disagree with the same figure in the phone app.
+ *
+ * Digits are the reader's own, like `num` and `num1` above: `undefined` locale,
+ * no `numberingSystem` forced. `plain` forces `latn` because Hermes may report
+ * an `Intl` it does not fully implement and `readNumber` has to parse the
+ * result back; neither is true here — this is a browser, and nothing reads
+ * these strings but a person.
+ */
+export function numPlain(n: number | null | undefined, places = 3): string {
+  if (n == null || !Number.isFinite(n)) return '—';
+  const dp = Math.min(20, Math.max(0, Math.trunc(places) || 0));
+  return n.toLocaleString(undefined, { maximumFractionDigits: dp, useGrouping: false });
+}

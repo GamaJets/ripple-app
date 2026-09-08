@@ -97,24 +97,53 @@
 // "let in and marked present" note on /classes. Same defect as the app's, same
 // cost, in the console's own spelling.
 //
-// It is 244 `color:` sites across 32 files. That is why this is a description.
-// The app's fix is `<Flag>` — the tone in a 6pt dot, the words in ink — and
-// there is no `<Flag>` in this console; introducing one and moving 244 sites
-// onto it is a redesign of every screen a gym owner uses, not a lane's edit.
-// The alternative that must NOT be taken is to write the rule and then paste
-// 244 markers, or seed a KNOWN list with 32 files: a gate whose author
-// annotates other people's code into silence has weakened the rule, and done
-// it from the position least able to judge each site.
+// The count above was re-derived before anything was done about it and comes
+// out at 220 sites in 32 files, by `color:` declaration rather than by token
+// occurrence — 66 --crit, 80 --warn, 16 --good, 70 --brand, no --serious.
+// Either way it is 32 files. The app's fix is `<Flag>` — the tone in a 6pt dot,
+// the words in ink — and there is no `<Flag>` in this console; introducing one
+// and moving 220 sites onto it is a redesign of every screen a gym owner uses,
+// not a lane's edit. The thing that must NOT be done is to write the sibling
+// lint and then paste 220 markers, or seed a KNOWN list with 32 files: a gate
+// whose author annotates other people's code into silence has weakened the
+// rule, and done it from the position least able to judge each site.
 //
-// There is also a second, cheaper repair worth weighing FIRST, and it is why
-// the sibling rule should not be written before somebody decides between them.
-// Every one of those 244 sites becomes correct with no call-site churn at all
-// if the four status hexes in globals.css are walked to clear 4.5:1 on the
-// worst ground they sit on — the same hold-the-hue-move-the-lightness method
-// src/theme/tokens.ts uses, and the same one the print block was fixed by.
-// Raising a mark's contrast never breaks its 3:1 floor, so rule 2 keeps
-// passing. That is a palette decision on a white-label product and it is not
-// this lane's to take unilaterally, but it is one edit against 244.
+// ── which of the two repairs was taken ────────────────────────────────────
+//
+// The second one: the palette. Every one of those 220 sites became correct with
+// no call-site churn by walking the hexes in globals.css until each clears
+// 4.5:1 on the worst ground it sits on, in both themes and under `@media print`
+// — the hold-the-hue-move-the-lightness method src/theme/tokens.ts uses. What
+// moved, measured on all five grounds of all four palettes rule 2 builds:
+//
+//   dark   --good  #0ca30c -> #0dae0d   4.08 -> 4.61   hue and saturation held
+//   dark   --crit  #d34646 -> #ff6060   3.08 -> 4.62   hue held, saturation 62%
+//                                                      -> 100%: see globals.css,
+//                                                      no 62%-saturated red
+//                                                      reaches 4.5 on --surface3
+//                                                      without going dusty rose
+//   light  --good  #0a820a -> #097809   4.09 -> 4.65
+//   light  --warn  #956703 -> #8a5f03   4.08 -> 4.63
+//   light  --serious #c44717 -> #b54115 4.04 -> 4.62
+//   light  --crit  #cf3737 -> #c22f2f   4.05 -> 4.60
+//   light  --brand #b45309 -> #a84d08   4.12 -> 4.62
+//   print  the four status colours re-taken from the light block, as before
+//
+//   dark --warn #fab219 (7.46), dark --serious #ec835a (5.19) and dark --brand
+//   #e0912f (5.38) already cleared and were not touched.
+//
+// Every hue is held to within 0.2 degrees and every saturation exactly, except
+// --crit's in the dark, so the set is no less distinguishable than it was:
+// crit/serious is 25.0 dE76 against the old 25.5, and each colour's own move is
+// 4–6 dE76 (12.9 for dark --crit, the one that had furthest to go).
+//
+// Raising a mark's contrast never breaks its 3:1 floor, so nothing regressed.
+// And because the sites are now correct rather than tolerated, the sibling LINT
+// described above would be wrong to build: it would fail 220 lines for doing the
+// right thing. What holds the repair instead is rule 3 below, which reads those
+// same call sites and raises the PALETTE's floor for every token it finds in a
+// `color:` — the usage decides the floor, so the next token drawn as ink is
+// caught the day it is written.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -341,12 +370,126 @@ function rootBlocks(css) {
 const GROUNDS = ['bg', 'surface', 'surface2', 'surface3', 'rail'];
 /** 4.5:1. These are words, at 8–13px, and none of them is large text. */
 const INKS = ['ink', 'ink2', 'ink3'];
-/** 3:1, WCAG 1.4.11 — a dot, a bar, a 3px border on a banner. Never words:
- *  rule 1 above is what keeps them out of `color:`. */
+/** 3:1, WCAG 1.4.11 — a dot, a bar, a 3px border on a banner. In the phone apps
+ *  rule 1 above is what keeps them out of `color:`; on the console rule 3 below
+ *  finds the ones that are in it anyway and raises their floor to 4.5. */
 const MARKS_CSS = ['good', 'warn', 'serious', 'crit', 'brand'];
 
 const AA_TEXT = 4.5;
 const AA_MARK = 3;
+
+/* ── rule 3: a token this console spells in `color:` is measured as TEXT ───
+ *
+ * The header at the top of this file describes a web-shaped sibling to rule 1
+ * — a lint banning `color: var(--crit)` under studio-web — and says why it was
+ * not built: 244 sites across 32 files, no `<Flag>` on the web to move them
+ * onto, and a gate whose author annotates 32 files into silence has weakened
+ * the rule. It also names the cheaper repair, "one edit against 244": walk the
+ * status hexes until they clear the 4.5:1 text needs on every ground.
+ *
+ * That repair is the one that was taken, and this is the gate that holds it.
+ * Which makes the sibling lint not merely expensive but WRONG: with the palette
+ * repaired, `color: var(--crit)` is a correct line, and a rule forbidding it
+ * would be failing 220 sites for doing the right thing.
+ *
+ * So this is not a ban. It is a PROMOTION. It reads studio-web for `color:`
+ * properties naming a token, and every token it finds there is measured at
+ * AA_TEXT rather than AA_MARK for the rest of this run. The floor follows the
+ * usage instead of being asserted: write `color: var(--s3)` tomorrow and --s3
+ * is held to 4.5:1 tomorrow, in both themes, on all five grounds, with no
+ * edit here.
+ *
+ * ── text or mark: what is decidable, and what is not ──────────────────────
+ *
+ * Both are `color: var(--crit)`, and the question "is this line words or a
+ * dot?" is NOT decidable from the source. On the web `color` is inherited text
+ * ink, but it also drives `currentColor`, so the same declaration can be
+ * painting an inline SVG's `fill`, a `border-color: currentColor`, or a `::before`
+ * bullet. Nothing in the CSS or the JSX distinguishes those from a sentence.
+ * scripts/check-console-ink.mjs makes the same narrowing and says the same
+ * thing about `fill` and `stroke`: "this gate has no way to tell a mark from a
+ * glyph".
+ *
+ * This rule does not need to decide it, because it never fails a call site. It
+ * only raises a floor in the palette, and that is safe in both directions: a
+ * mark drawn at 4.5:1 is still a legal mark, since 4.5 implies the 3:1 of WCAG
+ * 1.4.11, whereas a sentence drawn at 3:1 is not legal text. The undecidable
+ * case costs a little more contrast on a dot. Guessing the other way costs the
+ * gym owner the sentence saying the month cannot close.
+ *
+ * What it genuinely cannot see, and must not be read as claiming:
+ *
+ *   · A token reached through a name. `const tone = 'var(--crit)'`, a helper
+ *     returning one, a `tone` prop threaded through a component, or a class in
+ *     globals.css applied by a component whose declaration is `color: var(--crit)`
+ *     — the last of these it does catch, because the declaration is still in a
+ *     file it reads, but a token assembled at runtime is invisible. Such a
+ *     token keeps the 3:1 mark floor, which is the honest answer: the rule
+ *     holds the line where the line is decidable and claims nothing past it.
+ *   · A literal hex. `color: '#d34646'` names no token and promotes nothing.
+ *     check-console-ink.mjs is the gate for that form and exists for it.
+ *   · `background`, `border-color`, `fill`, `stroke`. Those take a mark's
+ *     colour by definition and keep the 3:1 floor, deliberately.
+ *   · One line at a time, like every other lint here. A `color:` whose value
+ *     is on the next line is a miss.
+ */
+const WEB_ROOT = 'studio-web';
+/** `color:` and not `background-color:` / `border-color:` / `borderColor:` /
+ *  `-webkit-text-fill-color:`. The hyphen is in the exclusion because CSS
+ *  spells its compound properties with one and JSX spells them with a capital. */
+const WEB_COLOR_PROP = /(^|[^A-Za-z-])color\s*:/g;
+const WEB_NEXT_COLOR_PROP = /[A-Za-z-]color\s*:/i;
+
+function webWalk(dir, out = []) {
+  for (const e of readdirSync(dir)) {
+    if (e === 'node_modules' || e === '.next' || e === 'out' || e.startsWith('.')) continue;
+    const p = join(dir, e);
+    if (statSync(p).isDirectory()) webWalk(p, out);
+    else if (/\.(tsx?|css)$/.test(p) && !/\.test\.tsx?$/.test(p)) out.push(p);
+  }
+  return out;
+}
+
+/** token name -> one `file:line` that draws it as ink, for the failure message. */
+const drawnAsInk = new Map();
+let webScanned = 0, webColorSites = 0;
+try {
+  for (const file of webWalk(join(ROOT, WEB_ROOT))) {
+    webScanned++;
+    const rel = relative(ROOT, file);
+    readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+      WEB_COLOR_PROP.lastIndex = 0;
+      let m;
+      while ((m = WEB_COLOR_PROP.exec(line))) {
+        let val = line.slice(line.indexOf(':', m.index + m[0].length - 1) + 1);
+        const next = val.search(WEB_NEXT_COLOR_PROP);
+        if (next >= 0) val = val.slice(0, next);
+        let found = false;
+        for (const v of val.matchAll(/var\(\s*--([a-z0-9-]+)\s*\)/g)) {
+          found = true;
+          if (!drawnAsInk.has(v[1])) drawnAsInk.set(v[1], `${rel}:${i + 1}`);
+        }
+        if (found) webColorSites++;
+      }
+    });
+  }
+} catch (e) {
+  findings.push(`${WEB_ROOT}  could not be walked (${e.code ?? e.message}) — no token was promoted to the text floor`);
+}
+
+/* The empty-set guard, in the shape rule 1's already has and for the same
+ * reason. This rule's whole output is "which tokens are ink", and a run that
+ * reads nothing answers "none" — which then measures every status colour at 3:1
+ * and prints a pass. A silent downgrade of the floor is the one failure mode a
+ * promotion rule has, so it is spelled out rather than trusted. The console held
+ * 47 source files and 880 `color:` sites naming a token the day this was added. */
+if (webScanned < 30 || webColorSites < 100) {
+  findings.push(`${WEB_ROOT}  only ${webScanned} source file(s) and ${webColorSites} \`color: var(--…)\` site(s) — `
+    + 'that cannot be the console. Every status colour would fall back to the 3:1 mark floor and pass. Refusing.');
+}
+
+/** The tokens this console draws as words, held to AA_TEXT below. */
+const PROMOTED = MARKS_CSS.filter((n) => drawnAsInk.has(n));
 
 /**
  * The backlog in the console's stylesheet, and why each is still standing.
@@ -407,14 +550,19 @@ if (css == null) {
 
   for (const p of palettes) {
     const v = p.vars;
-    for (const [names, floor, kind] of [[INKS, AA_TEXT, 'as text'], [MARKS_CSS, AA_MARK, 'as a mark']]) {
+    for (const [names, floor, kind] of [
+      [INKS, AA_TEXT, 'as text'],
+      [PROMOTED, AA_TEXT, 'as text'],
+      [MARKS_CSS.filter((n) => !PROMOTED.includes(n)), AA_MARK, 'as a mark'],
+    ]) {
       for (const name of names) {
         if (!v[name]) continue;
         for (const g of GROUNDS) {
           if (!v[g]) continue;
           const r = ratio(v[name], v[g]);
           if (r == null || r >= floor) continue;
-          const what = `${p.name}: --${name} ${v[name]} on --${g} ${v[g]} is ${r.toFixed(2)}:1 ${kind}, under ${floor}`;
+          const why = PROMOTED.includes(name) ? ` — text because ${drawnAsInk.get(name)} draws it in a \`color:\`` : '';
+          const what = `${p.name}: --${name} ${v[name]} on --${g} ${v[g]} is ${r.toFixed(2)}:1 ${kind}, under ${floor}${why}`;
           if (KNOWN_CSS.has(what)) { cssStanding.add(what); continue; }
           findings.push(`${CSS}:${p.line}  ${what}`);
         }
@@ -464,7 +612,19 @@ if (findings.length) {
     + `\nA measured line above is a colour in ${CSS} that does not clear its floor`
     + '\non a ground it is actually drawn on. Hold the hue, walk the lightness until'
     + '\nthe WORST ground clears, and move no further than that — which is the method'
-    + '\nsrc/theme/tokens.ts uses and the value to take it from.',
+    + '\nsrc/theme/tokens.ts uses and the value to take it from.'
+    + '\n'
+    + '\nA line ending "text because <file:line> draws it in a `color:`" is a status'
+    + '\ncolour the CONSOLE spells as ink, so it is measured at 4.5:1 rather than the'
+    + '\n3:1 a mark needs. There is no <Flag> on the web and 220 sites already draw'
+    + '\nsentences in these tokens, so the repair is the palette, not the call sites:'
+    + `\nwalk that hex in ${CSS} until the worst ground clears 4.5:1. Do NOT silence it`
+    + '\nby moving the site off the token — a hex typed in its place fails'
+    + '\nscripts/check-console-ink.mjs, and rightly.'
+    + '\n'
+    + '\nThe other way to see this line is that somebody has just written the first'
+    + '\n`color: var(--…)` for a token that was only ever a dot. That is allowed; it'
+    + '\nis what promotes the token. The palette then owes it 4.5:1.',
   );
   process.exit(1);
 }
@@ -472,6 +632,17 @@ console.log(
   `contrast ok — ${scanned} source files under ${ROOTS.join(' and ')} use no status colour as text`
   + `\nink, and every ink and mark in ${CSS} clears its floor on all ${GROUNDS.length} grounds`
   + `${cssStanding.size ? `, except the ${cssStanding.size} on the ratchet below` : ''}`,
+);
+console.log(
+  `\n${webScanned} source files under ${WEB_ROOT}/ draw ${webColorSites} \`color: var(--…)\` sites.`
+  + `${PROMOTED.length
+    ? `\n${PROMOTED.map((n) => `--${n}`).join(', ')} ${PROMOTED.length === 1 ? 'is' : 'are'} among them, so ${PROMOTED.length === 1 ? 'it is' : 'they are'} measured`
+      + ` at ${AA_TEXT}:1 as text\nrather than the ${AA_MARK}:1 a mark needs — e.g. --${PROMOTED[0]} at ${drawnAsInk.get(PROMOTED[0])}.`
+      + `${MARKS_CSS.some((n) => !PROMOTED.includes(n))
+        ? ` ${MARKS_CSS.filter((n) => !PROMOTED.includes(n)).map((n) => `--${n}`).join(', ')} `
+          + `${MARKS_CSS.filter((n) => !PROMOTED.includes(n)).length === 1 ? 'is' : 'are'}\nnot drawn as ink anywhere the source shows, and keep${MARKS_CSS.filter((n) => !PROMOTED.includes(n)).length === 1 ? 's' : ''} the mark floor.`
+        : ''}`
+    : `\nNone of them names a status colour, so all ${MARKS_CSS.length} keep the ${AA_MARK}:1 mark floor.`}`,
 );
 if (cssStanding.size) {
   console.log('\nStanding offences (ratcheted, they may not grow):');

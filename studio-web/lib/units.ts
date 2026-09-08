@@ -49,9 +49,35 @@
 // somebody taps a unit in the phone app, so a coach who signs in from a
 // borrowed laptop in another country has not silently had their account
 // answered for them.
+// ── which halves of src/lib/units.ts this console may take ────────────────
+//
+// The ROUNDING, not the SPELLING.
+//
+// `weightIn` and `weightDeltaIn` are arithmetic and nothing else — a conversion
+// and a rounding to the grain the record holds — so they come straight across,
+// and that is what keeps a figure here identical to the same figure in the app
+// the same coach had open five minutes ago. That is the whole point of reaching
+// into the shared module at all.
+//
+// `weightLabel` and `plain` do NOT come across, and they used to. Both spell
+// through `new Intl.NumberFormat(appLocale())`, and `appLocale()` is the
+// module-level latch in src/lib/locale.ts that resolves on the SERVER during
+// render and again in the BROWSER during hydration — two machines, two
+// locales, one silent hydration error. lib/num.ts exists to keep this console
+// out of that latch, and scripts/check-deltas.mjs already writes the rule down
+// in its own header: "a console site takes the SIGN from the helper and spells
+// the figure with the console's own formatter". This file took the sign from
+// `deltaSign` and then spelled with `plain`, which is half the rule.
+//
+// It had not produced a mismatch, and the reason was luck of the call site
+// rather than anything in here: /coach/roster fills its rows in an effect, so
+// there is no weight in the prerendered HTML to disagree with. `numPlain` in
+// lib/num.ts is the console's own spelling of `plain` — same rounding in front
+// of it, same refusal to group, the reader's own separator on both passes.
 import { resolveUnits, regionFromLocale, type ResolvedUnits } from '@lib/unitPreference';
-import { weightLabel, weightDeltaIn, plain, type WeightUnit } from '@lib/units';
+import { weightIn, weightDeltaIn, type WeightUnit } from '@lib/units';
 import { deltaSign } from '@lib/deltaLabel';
+import { numPlain } from '@/lib/num';
 import type { Me } from '@/lib/supabase';
 
 export type { WeightUnit };
@@ -90,13 +116,20 @@ export function unitsFor(me: Pick<Me, 'weightUnit'> | null | undefined): Resolve
 /**
  * A stored kilogram figure, written in the reader's unit with the unit named.
  *
- * Straight through to `weightLabel` in src/lib/units.ts — the same function
- * thirty phone screens use — so the console cannot round or spell a weight
- * differently from the app the same coach had open five minutes ago. Null in,
- * null out: a weight nobody logged is a dash, never "0 kg".
+ * `weightIn` in src/lib/units.ts does the conversion and the rounding — the
+ * same arithmetic thirty phone screens use — so the console cannot round a
+ * weight differently from the app the same coach had open five minutes ago.
+ * This is `weightLabel` with its spelling swapped for the console's, and
+ * nothing else: see the note at the top of this file for why the spelling
+ * cannot come across too. Null in, null out: a weight nobody logged is a dash,
+ * never "0 kg".
  */
 export function weightText(kg: number | null | undefined, unit: WeightUnit): string | null {
-  return weightLabel(kg, unit);
+  const v = weightIn(kg, unit);
+  // `weightIn` has already rounded — whole pounds, one decimal of a kilogram —
+  // so three places here can only ever spell what it decided, never add one.
+  // That is `plain`'s own default and `weightLabel` passed it too.
+  return v == null ? null : `${numPlain(v)} ${unit}`;
 }
 
 /**
@@ -123,14 +156,16 @@ export function deltaText(deltaKg: number | null | undefined, unit: WeightUnit):
   //
   // `deltaSign` and not `deltaLabel`: the sign half is pure arithmetic and safe
   // here, while `deltaLabel` and `deltaMagnitude` reach `plain` -> `appLocale()`,
-  // the module-level latch lib/num.ts refuses for hydration reasons. `plain` is
-  // already imported in this file and that is a separate question, noted below.
+  // the module-level latch lib/num.ts refuses for hydration reasons. That is
+  // the rule scripts/check-deltas.mjs states, and the magnitude now keeps its
+  // half of it: `numPlain`, not `plain`. See the note at the top of this file.
   //
   // `dp` mirrors `weightDeltaIn`, which has ALREADY rounded — whole pounds, one
   // decimal place of a kilogram — so the sign is decided on exactly the figure
-  // that is about to be printed rather than on an unrounded one behind it.
+  // that is about to be printed rather than on an unrounded one behind it, and
+  // the spelling can print no place the rounding did not judge.
   const dp = unit === 'lb' ? 0 : 1;
-  return `${deltaSign(d, dp)}${plain(Math.abs(d), dp)}`;
+  return `${deltaSign(d, dp)}${numPlain(Math.abs(d), dp)}`;
 }
 
 /**
