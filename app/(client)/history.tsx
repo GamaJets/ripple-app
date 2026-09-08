@@ -331,12 +331,36 @@ export default function History() {
       // The oldest month of a truncated read is a part-month and is dropped
       // rather than charted short. See src/lib/historyWindow.ts.
       const whole = wholeMonths(entries, page.truncated);
+      // ── the month the banner is allowed to name ──────────────────────────
+      //
+      // The oldest month the page can honestly claim to reach, which is the
+      // oldest month STILL IN `whole.log` — `entries` is ascending, so that is
+      // the first of them with a parseable timestamp.
+      //
+      // This was `whole.droppedMonth`, and `droppedMonth` is the month
+      // `wholeMonths` REMOVED. Naming it here put the banner one month early in
+      // both of its sentences: "Read back as far as Mar 2024" about a chart
+      // whose first bar is Apr 2024, and "anything before Mar 2024 is on record
+      // and not counted here" while March itself was not counted either — a
+      // whole month of somebody's training disowned by the sentence that exists
+      // to account for it. The Hero below, off `cells[0].key`, said "Lifted
+      // since Apr 2024, at least" three inches underneath it.
+      //
+      // The other arm of the old expression is now unnecessary rather than
+      // wrong: `droppedMonth` is null when the truncated page is all ONE month,
+      // which `wholeMonths` keeps whole deliberately — and then the oldest kept
+      // month IS that month, which is what the fallback was reaching for.
+      let oldestKept: string | null = null;
+      for (const e of whole.log) {
+        const k = monthKey(e.t);
+        if (k != null) { oldestKept = k; break; }
+      }
       // No rows is a genuinely empty history. It is not a failure, and it is
       // not the same render as one.
       setLoad({
         state: 'ready',
         log: whole.log,
-        partialBefore: page.truncated ? whole.droppedMonth ?? monthKey(entries[0]?.t ?? '') : null,
+        partialBefore: page.truncated ? oldestKept : null,
       });
     } catch (e) {
       reportError('history.read', e);
@@ -513,13 +537,36 @@ export default function History() {
             thin bar is a picture of failure drawn for somebody who has done
             nothing wrong — so this says what is actually true instead. */}
         <SectionHead title="The start of your history" note={`Day ${span.days}`} />
+        {/* `life.days` is a lifetime count and is NOT gated on `whole` here,
+            unlike the Days Trained column further down. That is deliberate
+            rather than missed: this branch is `stage === 'starting'`, which
+            needs `span.days < 28` over the KEPT log, and the kept log under
+            truncation is a thousand-odd rows minus the oldest month. Reaching
+            it therefore takes about 26 exercise-rows a day, every day, for the
+            five weeks the window can stretch to — three or four full sessions
+            a day without a rest day. There is no import path that writes a
+            member's history into a single recent month either. So the branch
+            and the truncation cannot both be true, and gating this would print
+            an em dash into the middle of a sentence for nobody. */}
         <Text style={{ ...ty.body, color: t.ink2 }}>
           You started on {dstr(span.firstAt)} and have trained on {fig(life.days)} day
           {life.days === 1 ? '' : 's'} since. There is not a year to look at yet — there will be,
           and this page is where it goes.
         </Text>
       </>) : (<>
-        <SectionHead title="Your Years" note={`${active} month${active === 1 ? '' : 's'} trained`} />
+        {/* `active` is `trainedMonths(cells).length`, and `cells` is built from
+            `log` — which under truncation is the newest thousand `workouts`
+            rows and not the member's training. One row is one EXERCISE, so at
+            four sessions a week of six lifts the cap is reached inside ten
+            months: a member of five years' standing was told "9 months
+            trained" under a heading called Your Years, and a floor printed
+            without a qualifier reads as a total.
+            The line at the foot of this section already refuses `earlier` on
+            exactly this reasoning, in those words. Withheld rather than
+            qualified, because the Notice at the top of the screen already says
+            how far back the read reached and says it better than a four-word
+            note could. */}
+        <SectionHead title="Your Years" note={whole ? `${active} month${active === 1 ? '' : 's'} trained` : undefined} />
         <YearGrid rows={rows} peak={peak} t={t} unit={wu} />
         <GridLegend t={t} />
       </>)}

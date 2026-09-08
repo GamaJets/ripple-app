@@ -511,7 +511,32 @@ export default function FoodLog() {
  const histWhole = isWhole(hist.status);
  // Today is drawn by everything above and does not need a row of its own down
  // here repeating it.
- const pastDays = hist.days.filter((d) => d.day !== todayKey());
+ //
+ // ── and why the oldest day goes with it under 'partial' ──────────────────
+ //
+ // Each row below prints that day's macros and a count of meals, which are
+ // sums over `FoodDay.entries`. The doc on `FoodDay` in src/ui/foodLog.tsx
+ // states the contract those sums need — "a day that could not be read whole
+ // has no day object at all rather than a short one" — and the read does not
+ // keep it. It is `.order('logged_at', descending).limit(capLimit())`, so what
+ // falls off a truncated read is the OLDEST rows, and the oldest day that did
+ // come back is cut somewhere in the middle of itself. Its macros are a floor
+ // and its "3 meals" is a floor, and neither reads as one: a day showing two
+ // meals and 900 kcal is a light day, which is a specific and checkable claim
+ // about somebody's eating that this screen is in no position to make.
+ //
+ // So it is dropped rather than shown short — the same answer the average
+ // above gives, and the one the library's own doc asks for. `hist.days` is
+ // newest-first, so the last element is that day.
+ //
+ // Gated on 'partial' alone: 'ready' must not lose anybody a real day, and
+ // under 'loading' and 'error' there is nothing here to drop. `hist.status` is
+ // the worse of the two reads, so a 'partial' TODAY would drop the oldest day
+ // as well — that needs a thousand meals logged inside one day, and erring
+ // towards the honest side of a case nobody can reach is the cheap half of the
+ // trade.
+ const dayCut = hist.status === 'partial' && hist.days.length > 0;
+ const pastDays = (dayCut ? hist.days.slice(0, -1) : hist.days).filter((d) => d.day !== todayKey());
 
  // ── the yogurt somebody eats every morning ──────────────────────────────
  //
@@ -1064,7 +1089,7 @@ export default function FoodLog() {
  </>) : (
   <Text style={{ ...ty.label, color: t.ink3 }}>
    {hist.status === 'loading' ? 'Reading the last fortnight…'
-    : hist.status === 'partial' ? 'You have logged more in the last fortnight than this screen can read in one go, so there is no honest average to take over it. The days below are real.'
+    : hist.status === 'partial' ? 'You have logged more in the last fortnight than this screen can read in one go, so there is no honest average to take over it. The days below are real, and the earliest one this read reached is left out rather than shown half-counted.'
     : hist.status === 'error' ? 'We couldn’t read the last fortnight, so we can’t say what you have been eating. Nothing has been lost.'
     : 'Nothing logged in the last fortnight yet — a few days of meals and your average shows up here.'}
   </Text>

@@ -79,6 +79,10 @@ import type { TrainingSession } from '../../src/lib/types';
 import type { CancellationPolicy } from '../../src/lib/booking';
 import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 import { BACK_ICON } from '../../src/ui/direction';
+// Whether this phone can reach us. It decides the second half of the sentence
+// printed when a cancellation does not land — see `cancelOne`.
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
 
 // The reader's own clock, deliberately. `nextAt` is an instant — the moment the
 // session starts — and the member is being told when to turn up, which is a
@@ -96,6 +100,7 @@ const dayLabel = (iso: string) => fmtRelativeDay(iso);
 export default function StandingAppointments() {
   const t = useTheme();
   const router = useRouter();
+  const reach = useReachability();
 
   // One hook, both apps. `my_session_series()` is scoped by auth.uid() and
   // answers for whichever party is asking, so the arrangement this member sees
@@ -352,9 +357,17 @@ export default function StandingAppointments() {
     const doCancel = async () => {
       const out = await cancelBookedSession(one, cancelMyBooking, asked, readPolicy);
       if (!out.freed) {
+        // The second half used to be "Check your connection and try again"
+        // whatever had happened, and one of the two things that can happen here
+        // is the server reading the request and REFUSING it — a notice window
+        // that has closed, a policy, a seat somebody else already took. Sending
+        // that member to their wifi settings hides the actual answer and wastes
+        // the minutes before their session. `retryLine` says which —
+        // src/lib/reachability.ts — and app/(client)/bookings.tsx and
+        // app/(client)/classes.tsx already replaced this exact sentence with it.
         Alert.alert(
           'Not cancelled',
-          `Your ${dayLabel(one.startsAt)} ${timeLabel(one.startsAt)} session is still booked — that did not save, so nothing has changed and you are still expected. Check your connection and try again.`,
+          `Your ${dayLabel(one.startsAt)} ${timeLabel(one.startsAt)} session is still booked — that did not save, so nothing has changed and you are still expected. ${retryLine(reach)}`,
           [{ text: 'OK' }],
         );
         return;

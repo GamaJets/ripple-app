@@ -108,6 +108,26 @@ export default function Membership() {
   // gym's name beside the number, so a chain's member read their gym's name and
   // their gym's supplier's initials in one string. See src/lib/membership.ts.
   const memberNo = memberNoFrom(c.name, c.id, appName);
+  // ── and whether it may be printed at all ─────────────────────────────────
+  //
+  // `memberNoFrom` seeds on `id || name`, and `useClientData` publishes
+  // `id: sbUid ?? 'unknown'` (src/ui/clientData.tsx). `sbUid` is null until an
+  // `await supabase.auth.getUser()` inside an effect resolves — and stays null
+  // for the whole session when that request never settles, which the same
+  // provider's header records happening on captive-portal wifi. So the seed is
+  // the literal string 'unknown' and the derivation is a pure function of it:
+  // every member of a brand is shown the SAME number, on the screen whose whole
+  // job is to name them, and one who reads it off here and gives it to
+  // reception has handed over somebody else's.
+  //
+  // app/(client)/access.tsx — the barcode built from this exact call — already
+  // refuses to draw on precisely this test and says why. It was the only one of
+  // the two that did, so a member could be refused the card on Access and read
+  // the placeholder number off Membership one tap earlier, then walk to the
+  // desk with it.
+  const idKnown = !!c.id && c.id !== 'unknown';
+  const nameKnown = !!c.name.trim();
+  const memberNoKnown = idKnown && nameKnown;
 
   // The day this screen is being read on. Declared here rather than beside the
   // membership standing further down, because the memo below needs it too and
@@ -260,11 +280,23 @@ export default function Membership() {
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>{appName}</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Membership</Text>
-            <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>{c.name || 'Member'} · {memberNo}</Text>
-            {/* The number widened, so it changed. Somebody who gave reception
-                the old one and says nothing would be refused at the door with
-                no idea why. */}
-            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_NO_CHANGED_NOTE}</Text>
+            <Text style={{ ...ty.label, ...numeric, color: t.ink3, marginTop: 3 }}>
+              {memberNoKnown ? `${c.name || 'Member'} · ${memberNo}` : (c.name || 'Member')}
+            </Text>
+            {memberNoKnown ? (
+              /* The number widened, so it changed. Somebody who gave reception
+                 the old one and says nothing would be refused at the door with
+                 no idea why. */
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_NO_CHANGED_NOTE}</Text>
+            ) : (
+              /* No number, and the reason for it. Loading and failed are two
+                 different sentences: one of them will end on its own. */
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {c.profileStatus === 'loading'
+                  ? 'Your member number is built from your account, so it appears here once that has been read.'
+                  : 'Your member number is built from your account, and that could not be read just now — so it is left out rather than shown as a number that is not yours. Pull down to try again.'}
+              </Text>
+            )}
           </View>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
@@ -422,7 +454,7 @@ export default function Membership() {
           <Section>
             <ActionCard
               title="Show Entry Barcode"
-              note={`Member ${memberNo} · ${heroAction.note}`}
+              note={memberNoKnown ? `Member ${memberNo} · ${heroAction.note}` : heroAction.note}
               cta="Show"
               onPress={() => router.push(heroAction.route as any)}
             />

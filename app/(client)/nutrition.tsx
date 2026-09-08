@@ -1069,6 +1069,33 @@ export default function Nutrition() {
             </View>
             </View>
           ) : null}
+          {/* ── the one write on this screen that can fail in silence ────────
+              Tapping a pill above calls `c.setAvoid`, which is state plus the
+              debounced profile push in src/ui/clientData.tsx. That push counts
+              its rows and reports the outcome through `saveFailed` — and this
+              screen was the only one holding one of its controls that never
+              read it. injuries, habits, profile and injury-doc all render it;
+              here it was argued about in a comment and never put on the glass.
+
+              What that costs is the worst of the set. A member taps Peanuts,
+              the update is refused or matches no rows, and the pill still
+              shows selected — while `c.avoid` is what `mealAllergens` filters
+              this week by and what `gapNote` is computed from, so the plan
+              goes on reading as though the exclusion had landed. Somebody who
+              believes they have excluded an allergen and has not is the one
+              silent write in this app that can put the food in front of them.
+
+              OUTSIDE the `showAvoid` disclosure, deliberately. The pills are
+              collapsed by default, and a failure hidden behind the control
+              that caused it is a failure nobody sees.
+
+              `t.crit`, not the `t.warn` habits.tsx uses: that one is about a
+              step goal. */}
+          {c.saveFailed ? (
+            <Flag tone={t.crit} style={{ marginTop: sp.lg }}>
+              Your last change to your diet and exclusions has not reached the server, so what is set here may not be what your plan is built from. It keeps retrying — check this list again before you rely on it, and do not treat a meal as safe on the strength of it.
+            </Flag>
+          ) : null}
         </Section>
 
         <Rule />
