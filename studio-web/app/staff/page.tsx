@@ -30,10 +30,25 @@ import { Fetched, useFetched } from '@/components/Fetched';
 import { sliceLanded, slicesLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { Banner as SharedBanner, Announce } from '@/components/Banner';
-import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
-// `money()` is reached through lib/currency's `amount()` here: every figure on
-// this page is priced from the gym's session fee and has no currency of its own,
-// so none of them may be written without `tenants.currency`.
+import { type TenantCurrency } from '@/lib/currency';
+// Money on this page is written with `money(cents, that figure's OWN currency)`,
+// never with the gym's code laid over the top.
+//
+// The comment that stood here said every figure on this page was priced from
+// the gym's session fee, had no currency of its own, and therefore had to go
+// through `amount(…, ccy)`. That was false, and it is why the wrong label
+// looked safe: a payable figure is a sum of `sessions.rate_cents`, every one of
+// which has carried its own `rate_currency` since supabase/parts/1010, and a
+// gym that changed `tenants.currency` had its whole PT history relabelled by
+// these tiles in one write. src/lib/staffView.ts now hands each total the unit
+// it was actually summed in — `…Currency` names it, `…MixedCurrency` says the
+// run straddles two moneys and so has no total at all, and `…Note` is the
+// sentence that goes where the figure would have been.
+//
+// `tenants.currency` is still read and still passed down, because two things
+// here genuinely are denominated in it: the gym's standard session fee, which
+// prices a session carrying no snapshot, and a rota shift's cost. It is simply
+// not the label for a rate snapshotted last March.
 import { fetchSessions, PAY_DELIVERED_ONLY, type PayPolicy, type PayrollLine } from '@lib/gymSessions';
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
 // The gym's own clock, as of supabase/parts/710. Every date and time on this
@@ -77,6 +92,27 @@ import {
 const DAY = 86_400_000;
 /** How far back the sessions, the rota and the timetable are read. */
 const WINDOW_DAYS = 30;
+
+/* ── the three things a money figure can be ────────────────────────────────
+ *
+ * src/lib/staffView.ts answers this question once, for every total on this
+ * page, and hands back the same three companions `monthEnd.PayrollView` hands
+ * /close: `…Cents`, `…Currency`, `…MixedCurrency`, `…Note`. These two strings
+ * are the dashes /close already prints for the two silences, word for word —
+ * see the `Pay` column of its payroll table — so the console cannot hold two
+ * vocabularies for one fact.
+ *
+ * Why the unrecorded figure is a dash and not a bare number: minor units are
+ * not an amount until something says how many decimal places they have.
+ * `currencyDecimals` returns null for a currency it does not know, sixteen
+ * currencies have none and five have three, so 630000 is 6,300.00 in EUR,
+ * 630,000 in JPY and 630.000 in KWD. There is no unlabelled figure to print,
+ * only a raw integer, and `amount()`'s own note in studio-web/lib/currency.ts
+ * says what a reader does with one of those. The number is real, which is why
+ * `staffView` keeps it rather than nulling it, and `…Note` is what says so.
+ */
+const MIXED_DASH = 'more than one currency';
+const UNRECORDED_DASH = 'no currency recorded';
 
 const EMPTY: StaffRecord = {
   trainers: sliceLoading(),
@@ -286,8 +322,22 @@ export default function Staff() {
     // mended for, where a ¥6,000 fee became 600,000 minor units. This is the
     // figure every unpriced session on this screen is costed at.
     fallbackRateCents: minorFromWhole(sessionFee, ccy),
+    // What `recordSettlement` would stamp on the payment row today. Without it
+    // `settleCurrencyBlocker` can only catch the run priced in two moneys; with
+    // it this page also refuses — in the same words as /sessions and /payroll —
+    // the run whose rates positively disagree with the label the row would
+    // carry.
+    //
+    // `undefined` until the tenant row has actually landed, and NOT `ccy`. The
+    // two nulls are different facts: `ccy` is null both while the read is in
+    // flight and when the gym has genuinely set no currency, and passing the
+    // first as the second would put "this gym has not set a currency" under
+    // every coach's figure for the moment before the row arrives. The module
+    // documents that absence is not read as "no currency", which is exactly the
+    // branch an unfinished read wants.
+    gymCurrency: feeRead === 'ok' ? ccy : undefined,
     windowDays: WINDOW_DAYS,
-  }), [rec, policy, sessionFee, ccy]);
+  }), [rec, policy, sessionFee, ccy, feeRead]);
 
   // Four states, not two: still reading, nobody signed in, a question this
   // console could not ask, and a person. See components/Gate.tsx — this
@@ -365,11 +415,21 @@ export default function Staff() {
       {/* Beside the fee banner because it is the same shape of gap: a number
           this page cannot state. A figure with no currency is not a figure —
           "6,300.00" beside a trainer's name is read in whatever money the
-          reader happens to be thinking in. */}
+          reader happens to be thinking in.
+          
+          Narrowed, because it used to say NO amount here could be written and
+          that is no longer true: a payable total is labelled from the rates it
+          was summed from, so a gym with no currency set still gets real figures
+          wherever its sessions carry one. What genuinely needs the gym's code is
+          the standard session fee, a rota shift's cost, and the settlement row
+          a payment would be filed on — which is what this now says. */}
       {feeRead === 'ok' && !ccy ? (
         <Banner tone="crit">
-          This gym has not set its currency, so no amount on this page can be
-          written down. Set it on the gym record and every figure below fills in.
+          This gym has not set its currency. Sessions carrying their own rate are
+          still priced in it below, but the standard session fee cannot be stated
+          as an amount, a shift cannot be costed, and no payroll settlement can be
+          recorded, because there would be nothing to say what the payment is in.
+          Set it on the gym record and those fill in.
         </Banner>
       ) : null}
       {view.caveat ? <Banner tone="crit">{view.caveat}</Banner> : null}
@@ -423,23 +483,32 @@ export default function Staff() {
               : 'every finished session has an outcome'
           }
         />
+        {/* The roster's own money, not the gym's code. `outstandingCents` is
+            null for two entirely different reasons and this tile used to print
+            one sentence for both: nothing is outstanding, or the roster's
+            outstanding rows straddle two currencies and there is a great deal
+            outstanding that simply has no single total. One coach on EUR and
+            another on GBP is enough — no individual line has to be mixed. */}
         <Kpi
           label="Payable now"
-          text={amount(view.rollup.outstandingCents, ccy)}
+          text={money(view.rollup.outstandingCents, view.rollup.outstandingCurrency)}
           note={
             rec.sessions.state !== 'ready' ? stateNote(rec.sessions, 'the one-to-ones')
+              : view.rollup.outstandingMixedCurrency
+                ? (view.rollup.outstandingNote ?? MIXED_DASH)
               : view.rollup.outstandingCents == null
                 ? 'nothing marked, priced and unsettled'
-                : !ccy ? NO_CURRENCY_NOTE
-                : 'settle it under Sessions'
+              : view.rollup.outstandingCurrency == null
+                ? (view.rollup.outstandingNote ?? UNRECORDED_DASH)
+              : 'settle it under Sessions'
           }
         />
       </div>
 
-      <Roster view={view} rec={rec} sel={sel} onPick={setSel} ccy={ccy} query={q} onQuery={setQ} />
+      <Roster view={view} rec={rec} sel={sel} onPick={setSel} query={q} onQuery={setQ} />
 
       {chosen ? (
-        <Person m={chosen} rec={rec} onClose={() => setSel(null)} ccy={ccy} zone={zone} />
+        <Person m={chosen} rec={rec} onClose={() => setSel(null)} zone={zone} />
       ) : (
         <Section title="One person" sub="Pick somebody above to open their record.">
           <p style={{ padding: '26px 20px', margin: 0, color: 'var(--ink3)', fontSize: 13.5 }}>
@@ -462,16 +531,16 @@ export default function Staff() {
 
       <Rota tenantId={me.tenantId!} trainers={rec.trainers} ccy={ccy} zone={zone} zoneRead={zoneRead} />
 
-      <OffRoster view={view} ccy={ccy} />
+      <OffRoster view={view} />
     </Shell>
   );
 }
 
 /* ── the roster ────────────────────────────────────────────────────────────── */
 
-function Roster({ view, rec, sel, onPick, ccy, query, onQuery }: {
+function Roster({ view, rec, sel, onPick, query, onQuery }: {
   view: StaffView; rec: StaffRecord; sel: string | null; onPick: (id: string) => void;
-  ccy: TenantCurrency; query: string; onQuery: (q: string) => void;
+  query: string; onQuery: (q: string) => void;
 }) {
   const cols: Column<StaffMember>[] = [
     {
@@ -516,11 +585,19 @@ function Roster({ view, rec, sel, onPick, ccy, query, onQuery }: {
       key: 'owed', header: 'Payable now', value: (m) => m.outstandingCents, numeric: true,
       render: (m) => {
         if (rec.sessions.state !== 'ready') return <span className="dash">not read</span>;
+        // Mixed FIRST, because it is the case this cell got backwards. A run
+        // priced in two moneys has a null `outstandingCents` and read here as
+        // "nothing to settle" — on a coach with a fortnight of unpaid work.
+        // There is plenty to settle; there is no one figure for it, and
+        // /sessions refuses the same run for the same reason. Their row opens
+        // the record beside this table, which is where the sentence fits.
+        if (m.outstandingMixedCurrency) return <span className="dash">{MIXED_DASH}</span>;
         if (m.outstandingCents == null) return <span className="dash">nothing to settle</span>;
-        if (!ccy) return <span className="dash">{NO_CURRENCY_NOTE}</span>;
+        const owed = money(m.outstandingCents, m.outstandingCurrency);
+        if (owed == null) return <span className="dash">{UNRECORDED_DASH}</span>;
         return (
           <span style={{ color: m.settleable ? 'var(--ink2)' : 'var(--warn)' }}>
-            {amount(m.outstandingCents, ccy)}
+            {owed}
           </span>
         );
       },
@@ -613,8 +690,8 @@ function StatusDot({ m }: { m: StaffMember }) {
 
 /* ── one person ────────────────────────────────────────────────────────────── */
 
-function Person({ m, rec, onClose, ccy, zone }: {
-  m: StaffMember; rec: StaffRecord; onClose: () => void; ccy: TenantCurrency;
+function Person({ m, rec, onClose, zone }: {
+  m: StaffMember; rec: StaffRecord; onClose: () => void;
   /** The gym's own zone, or null. Only one figure here is a calendar date, and
    *  it is the one below. */
   zone: string | null;
@@ -677,23 +754,42 @@ function Person({ m, rec, onClose, ccy, zone }: {
               : 'nothing waiting'
           }
         />
+        {/* `settleBlocker` still leads: it is the same reader /sessions and
+            /payroll ask, and on a mixed run it is already the sentence naming
+            the pots. What follows it is the narrower question — whether the
+            figure may be PRINTED — which a run of pre-part-1010 rates fails
+            even at a gym whose settle path is perfectly happy. */}
         <Kpi
           label="Payable now"
-          text={amount(m.outstandingCents, ccy)}
+          text={money(m.outstandingCents, m.outstandingCurrency)}
           note={
             rec.sessions.state !== 'ready' ? stateNote(rec.sessions, 'the one-to-ones')
               : m.settleBlocker
-                ?? (m.outstandingCents != null && !ccy ? NO_CURRENCY_NOTE : null)
+                ?? (m.outstandingMixedCurrency ? m.outstandingNote : null)
+                ?? (m.outstandingCents != null && m.outstandingCurrency == null
+                  ? m.outstandingNote : null)
                 ?? `${m.outstandingSessions} session${m.outstandingSessions === 1 ? '' : 's'} ready to settle`
           }
         />
+        {/* `owedCents` is null in two cases and 'no payable session carried a
+            rate' was printed for both. It is plainly wrong for the second: a
+            mixed window has rates on everything and no single total to state,
+            so the mixed branch is asked first and answers in `owedNote`'s
+            words, which name the pots.
+
+            `owedNote` is derived from ALL of this coach's rows, not only the
+            payable ones, so it can describe a second currency that never
+            reached `owedCents`. It is therefore printed only where it is the
+            explanation for THIS figure — the mixed line, and the priced-but-
+            unlabelled one — never as a general footnote. */}
         <Kpi
           label={`Earned · ${WINDOW_DAYS}d`}
-          text={amount(m.owedCents, ccy)}
+          text={money(m.owedCents, m.owedCurrency)}
           note={
             rec.sessions.state !== 'ready' ? stateNote(rec.sessions, 'the one-to-ones')
+              : m.owedMixedCurrency ? (m.owedNote ?? MIXED_DASH)
               : m.owedCents == null ? 'no payable session carried a rate'
-              : !ccy ? NO_CURRENCY_NOTE
+              : m.owedCurrency == null ? (m.owedNote ?? UNRECORDED_DASH)
               : m.priced != null && m.payable != null && m.priced < m.payable
                 ? `${m.payable - m.priced} payable session${m.payable - m.priced === 1 ? '' : 's'} carry no rate and are NOT in this`
                 : `${m.payable} payable session${m.payable === 1 ? '' : 's'}, all priced`
@@ -1646,7 +1742,7 @@ function EditShift({ shift, ccy, zone, onClose }: {
 
 /* ── money owed to somebody who is not on the roster ───────────────────────── */
 
-function OffRoster({ view, ccy }: { view: StaffView; ccy: TenantCurrency }) {
+function OffRoster({ view }: { view: StaffView }) {
   const rows = view.offRoster;
   if (!rows || !rows.length) return null;
 
@@ -1655,10 +1751,18 @@ function OffRoster({ view, ccy }: { view: StaffView; ccy: TenantCurrency }) {
       render: (l) => l.trainerName ?? <span className="mono" style={{ fontSize: 11.5 }}>{l.trainerId}</span> },
     { key: 'delivered', header: 'Delivered', value: (l) => l.delivered, numeric: true },
     { key: 'unmarked', header: 'Unmarked', value: (l) => l.unmarked, numeric: true },
+    // `PayrollLine` has carried `currency` and `mixedCurrency` since
+    // supabase/parts/1010 and this column never read either, printing the gym's
+    // code over a departed coach's own rates. Identical to the Pay column of
+    // /close's payroll table, deliberately: same row type, same three answers.
+    // `cents` is a raw sum here — `payrollByTrainer` does not withhold it the
+    // way `staffView` does — so a mixed line must be caught by the label being
+    // null, which is exactly what `money()` returning null does.
     { key: 'cents', header: 'Pay', value: (l) => l.cents, numeric: true,
       render: (l) => l.cents == null
         ? <span className="dash">no rate</span>
-        : (amount(l.cents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
+        : money(l.cents, l.currency)
+          ?? <span className="dash">{l.mixedCurrency ? MIXED_DASH : UNRECORDED_DASH}</span> },
   ];
 
   return (

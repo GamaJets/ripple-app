@@ -74,6 +74,11 @@ import { useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy,
 // Moving costs nothing and cancelling can cost a credit and a fee, so the
 // cheaper answer is offered first. See src/lib/reschedule.ts.
 import { useClientReminders } from '../../src/ui/clientReminders';
+// Whether this phone can reach us. It decides the second half of the sentence
+// a member reads when a cancellation does not land — see `retryLine`, and
+// app/(client)/bookings.tsx and standing.tsx, which say it the same way.
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
 import { canOfferMove } from '../../src/lib/reschedule';
 import { feeAmountLine } from '../../src/lib/booking';
 import { isUpcoming } from '../../src/lib/upcomingWindow';
@@ -258,6 +263,7 @@ export default function Calendar() {
   // policy could not be read, which is a different sentence and a different
   // thing to do about it.
   const { policy: cancelPolicy, status: policyStatus, reload: reloadPolicy } = useCancellationPolicy();
+  const reach = useReachability();
   // Slots of this coach that somebody ELSE holds. They are invisible to the
   // sessions store by design (RLS shows a client their own sessions and their
   // coach's open ones), so waiting for one was not previously expressible.
@@ -810,7 +816,15 @@ export default function Calendar() {
       if (!out.freed) {
         Alert.alert(
           'Not cancelled',
-          `Your ${timeLabel(s.startsAt)} session is still booked — that did not save, so nothing has changed and nobody has been told. Check your connection and try again.`,
+          // "Check your connection and try again" was said here whatever had
+          // happened, and one of the two things that happens is the server
+          // reading the cancellation and declining it — a policy, a lapsed
+          // membership, a slot already closed. Sending that member to their
+          // wifi settings wastes their time and hides the answer. `retryLine`
+          // says which — src/lib/reachability.ts — and it is appended to this
+          // screen's own specific first half, exactly as My Bookings and
+          // Standing do it.
+          `Your ${timeLabel(s.startsAt)} session is still booked — that did not save, so nothing has changed and nobody has been told. ${retryLine(reach)}`,
           [{ text: 'OK' }],
         );
         return;
