@@ -470,11 +470,20 @@ async function attach(service: any, trainerId: string, a: Acct): Promise<string 
   // Separate from choose_ad_account() because only Google has a manager, and
   // widening a function every other provider calls to carry a field only one of
   // them uses is how the field comes to be set wrongly by the other two.
-  const { error: mErr } = await service
+  //
+  // Counted, because the failure this guards against is the one the sentence
+  // below already describes and nothing was detecting. `choose_ad_account` has
+  // just written the row this update is keyed on, so zero rows means it did not
+  // land where this expects it — and the manager id is then missing on exactly
+  // the row the next spend read uses, which refuses without it. Same outcome as
+  // a refused write, so the same sentence: an error and a zero match are one
+  // thing to the coach, who has to choose the account again either way.
+  const { error: mErr, count } = await service
     .from('coach_ad_accounts')
-    .update({ manager_account_id: a.manager })
+    .update({ manager_account_id: a.manager }, { count: 'exact' })
     .eq('trainer_id', trainerId).eq('provider', PROVIDER);
   if (mErr) return `That ad account was saved but the manager account it sits under was not (${mErr.message}), so the next check will be refused. Choose it again.`;
+  if (!count) return 'That ad account was saved but the manager account it sits under was not — the saved account could not be found to write it onto, so the next check will be refused. Choose it again.';
   return null;
 }
 

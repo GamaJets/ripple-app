@@ -416,15 +416,23 @@ Deno.serve(async (req) => {
       return fail('That Page has no Instagram Business or Creator account linked to it, so there is nowhere for a post to go. Link one in Meta Business Suite and connect again.');
     }
 
-    const { error } = await service.from('instagram_accounts').update({
+    // Counted. The response below names the Page back to the coach as the one
+    // they are now posting from, and that sentence is only true if a row took
+    // the choice. This runs under the service role, so nothing filters it: zero
+    // rows means the connection was removed between the read a few lines above
+    // and this write. Left unchecked the coach is shown a chosen Page, posts
+    // against a connection that is not there, and finds out at the first
+    // publish — by which time they have written the caption.
+    const { error, count } = await service.from('instagram_accounts').update({
       page_id: chosen.id,
       page_name: chosen.name,
       ig_user_id: chosen.igUserId,
       ig_username: chosen.igUsername,
       access_token: chosen.token || token,
       updated_at: new Date().toISOString(),
-    }).eq('trainer_id', trainerId);
+    }, { count: 'exact' }).eq('trainer_id', trainerId);
     if (error) return fail(`That account was verified but not saved: ${error.message}`);
+    if (!count) return fail('That account was verified, but the Instagram connection it belongs to is no longer there to save it onto. Connect Instagram again.');
 
     return json({ ok: true, chosen: { id: chosen.id, name: chosen.name, igUsername: chosen.igUsername } });
   }

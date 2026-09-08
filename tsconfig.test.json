@@ -558,6 +558,7 @@
     "src/lib/guideTabs.test.ts",
     "src/lib/waitlistPromotion.ts",
     "src/lib/waitlistPromotion.test.ts",
-    "src/lib/edgeWrites.test.ts"
+    "src/lib/edgeWrites.test.ts",
+    "src/lib/reverseExtras.test.ts"
   ]
 }

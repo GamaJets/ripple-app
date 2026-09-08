@@ -308,6 +308,12 @@ Deno.serve(async (req) => {
         try { await fetch(`${REVOKE_URL}?token=${encodeURIComponent(row.refresh_token)}`, { method: 'POST' }); } catch { /* revoked or already gone */ }
       }
     }
+    // no-count-ok: zero rows deleted IS disconnected. This runs under the
+    // service role, so nothing is filtered away — the only way the delete
+    // matches nothing is that there was no stored credential to remove, which
+    // is the state the coach asked for. The block above already treats that as
+    // ordinary (`if (row)`), because the connect handler can leave a coach
+    // holding a Google grant and no row.
     const { error } = await service.from('calendar_links').delete()
       .eq('user_id', userId).eq('provider', PROVIDER);
     if (error) return fail(`Could not remove the stored connection: ${error.message}`);
@@ -373,6 +379,17 @@ Deno.serve(async (req) => {
       // removing somebody's past from their diary because they moved a switch
       // is not a thing a switch should do. Disconnecting removes the calendar,
       // and it says so where the coach reads it.
+      // no-count-ok: under the service role this update is filtered by nothing,
+      // and it is reached only when the link row was read a few lines above, so
+      // zero rows means the row has since been deleted — a disconnect from
+      // another device, or the account going away. Writing is then off in the
+      // only sense that matters: there is no credential left to write with, so
+      // `{ writeEnabled: false }` is true and not a claim about a row.
+      //
+      // Reported as a failure it would be worse than silent. src/ui/calendarSync.ts
+      // turns any error on this path into "Repple could not turn writing off.
+      // Try again, or disconnect Google entirely" — advice about a connection
+      // that no longer exists, and a retry that would fail identically for ever.
       const { error } = await service.from('calendar_links')
         .update({ write_enabled: false, updated_at: new Date().toISOString() })
         .eq('user_id', userId).eq('provider', PROVIDER);
@@ -386,10 +403,30 @@ Deno.serve(async (req) => {
       if (!made.ok) return json({ ok: false, connected: true, reason: `calendar_create_http_${made.status}` });
       calendarId = made.id;
     }
-    const { error } = await service.from('calendar_links')
-      .update({ write_calendar_id: calendarId, write_enabled: true, updated_at: new Date().toISOString() })
+    // Counted, and this is the one of the three where zero rows is a real loss.
+    // A calendar has just been CREATED in the coach's Google account; if its id
+    // is not recorded, the coach is told two-way sync is on, nothing is ever
+    // pushed to it, and an empty "Repple" calendar sits in their account with
+    // nothing in the product pointing at it. The same sentence the error path
+    // uses, because it is the same outcome: the calendar exists and Repple does
+    // not know about it.
+    const { error, count } = await service.from('calendar_links')
+      .update(
+        { write_calendar_id: calendarId, write_enabled: true, updated_at: new Date().toISOString() },
+        { count: 'exact' },
+      )
       .eq('user_id', userId).eq('provider', PROVIDER);
     if (error) return fail(`Made the calendar, but could not record it: ${error.message}`);
+    if (!count) {
+      console.error(
+        'calendar-sync: created calendar ' + calendarId + ' for ' + userId +
+        ' and the connection row it belongs on was not there to record it.',
+      );
+      return fail(
+        'Made the calendar in your Google account, but the connection it belongs to is no longer '
+        + 'stored here, so nothing will be written to it. Connect Google again.',
+      );
+    }
     return json({ ok: true, writeEnabled: true, hasWriteCalendar: true });
   }
 

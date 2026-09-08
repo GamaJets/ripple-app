@@ -969,6 +969,14 @@ export function runCurrencyBlocker(parts: Array<string | null>): string | null {
  *
  * The settlement row is never deleted. It is a statement somebody made that
  * money went out; deleting it leaves neither the statement nor the withdrawal.
+ *
+ * Each of the four is checked for having touched anything, and the four checks
+ * are deliberately not the same check, because zero rows means something
+ * different at each one. The sessions have a recorded number to be measured
+ * against (`unstampBlocker`); the settlement must match exactly one row
+ * (`assertWrote`); and the class pay lines and the adjustments may legitimately
+ * be none at all, so what is checked there is the postcondition rather than the
+ * count — see `strandedLineBlocker`.
  */
 export async function reverseSettlement(
   sb: Queryable, settlementId: string, reason: string, by: string | null,
@@ -1015,11 +1023,13 @@ export async function reverseSettlement(
     .update({ settlement_id: null }, { count: 'exact' })
     .eq('settlement_id', settlementId);
   if (c.error) throw c.error;
+  await refuseIfStillStamped(sb, 'gym_class_pay', settlementId, 'class pay lines', c.count ?? null);
 
   const a = await sb.from('payroll_adjustments')
     .update({ settlement_id: null }, { count: 'exact' })
     .eq('settlement_id', settlementId);
   if (a.error) throw a.error;
+  await refuseIfStillStamped(sb, 'payroll_adjustments', settlementId, 'adjustments', a.count ?? null);
 
   const r = await sb.from('payroll_settlements')
     .update({
@@ -1035,6 +1045,91 @@ export async function reverseSettlement(
   // error — and the screen would say the run was taken back while it still
   // stands, with its sessions now unstamped and payable a SECOND time.
   assertWrote('Reversing that settlement', r);
+}
+
+/**
+ * Why the reversal must stop after unstamping one of the two extra tables, or
+ * null when it may go on.
+ *
+ * ── Why the row COUNT cannot decide this on its own ────────────────────────
+ *
+ * The two updates above ask PostgREST for `{ count: 'exact' }`, and for a long
+ * time nothing read it. The obvious repair — `assertWrote`, as the settlement
+ * write below does — is wrong here, and wrong in the expensive direction: it
+ * would refuse every reversal of a run that has no class pay lines and no
+ * adjustments. `stampRunExtras` returns without writing when the id list is
+ * empty, so a run of sessions only is the ordinary case at most gyms, and zero
+ * rows there is not a failure, it is the correct answer to "unstamp nothing".
+ *
+ * `payroll_settlements` carries `sessions_count` and nothing equivalent for
+ * these two tables, so there is no recorded number to measure the count
+ * against, the way src/lib/unstampCheck.ts measures the sessions.
+ *
+ * ── What IS decidable, exactly ─────────────────────────────────────────────
+ *
+ * The postcondition, rather than the count: after the unstamp, NO row may still
+ * carry this settlement id. That is checkable with one read, it is true whether
+ * the run had forty class lines or none, and it is the thing that actually
+ * matters — a line left stamped against a reversed run is filtered out of every
+ * "unsettled" read in this file (`idx_gym_class_pay_unsettled` is literally
+ * `where settlement_id is null`), so it joins no future run and the coach is
+ * never paid for it.
+ *
+ * ── Why a read can see what the update could not change ────────────────────
+ *
+ * Both tables carry a second, SELECT-only policy — `gym_class_pay_self_r` and
+ * `payroll_adjustments_self_r`, each `trainer_id = auth.uid()` — on top of the
+ * owner policy that governs the update. At an owner-operated gym, where the
+ * person pressing "take this run back" is also the coach on it, that widening
+ * is real: rows the UPDATE's `is_owner_of(tenant_id)` filtered away are still
+ * readable, and this is the check that notices them.
+ *
+ * Where the two policies coincide the read is exactly as blind as the write,
+ * and this cannot see such a row. Said plainly rather than left implied: this
+ * closes the gap it can reach and does not pretend to close the other one.
+ *
+ * ── What state a refusal leaves ────────────────────────────────────────────
+ *
+ * The sessions have already come loose by the time this runs, and the
+ * settlement has not been touched — the same state the two `throw r.error`
+ * lines above it have always left, and the reason the sentence says so. It is
+ * not a tidy state and the owner has to know about it: the run still reads as
+ * paid while its sessions are payable again, so recording a NEW run before this
+ * is sorted out pays them twice.
+ */
+export function strandedLineBlocker(
+  what: string, unstamped: number | null | undefined, stillStamped: boolean,
+): string | null {
+  if (!stillStamped) return null;
+  const came = unstamped == null
+    ? 'The server did not say how many came loose'
+    : `${unstamped} came loose`;
+  return `This run was not taken back. Its ${what} were unstamped — ${came} — and at least one is `
+    + `still attached to it. Marking the run reversed now would leave that line settled against a `
+    + `run that no longer paid for it, which takes it out of what the coach is owed permanently. `
+    + `The settlement still stands and still reads as paid, and the run's sessions have already `
+    + `been unstamped, so do not record another run for this coach until this one is reversed.`;
+}
+
+/** The read behind `strandedLineBlocker`: is anything still carrying this
+ *  settlement id? `.limit(1)` because the question is "any", not "how many" —
+ *  a run with ten thousand class lines must not pull ten thousand rows across
+ *  to answer it. A read that ERRORS is a refusal too: an unanswered "is
+ *  anything stranded?" is not a no. */
+async function refuseIfStillStamped(
+  sb: Queryable, table: string, settlementId: string, what: string, unstamped: number | null,
+): Promise<void> {
+  const left = await sb.from(table).select('id').eq('settlement_id', settlementId).limit(1);
+  if (left.error) {
+    throw new Error(
+      `This run was not taken back. Its ${what} were unstamped, but whether any are still attached `
+      + `to it could not be read (${(left.error as { message?: string }).message ?? 'the read was refused'}), `
+      + `and going ahead on an unanswered question is how a coach stops being paid for work they did. `
+      + `The settlement still stands and still reads as paid.`,
+    );
+  }
+  const why = strandedLineBlocker(what, unstamped, ((left.data as unknown[]) ?? []).length > 0);
+  if (why) throw new Error(why);
 }
 
 /** Why a reversal cannot be recorded, or null. */

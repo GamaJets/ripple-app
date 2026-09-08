@@ -419,20 +419,16 @@ ok(sampleLines.includes(35), "and it does NOT lend its count to the uncounted el
  */
 const KNOWN = new Map<string, { count: number; why: string }>([
   ['instagram-publish/index.ts', {
-    count: 3,
-    why: "`markRemoval` and the failed-upload cleanup do not bind the result at all, so neither `error` nor `count` is read. A removal that did not happen is recorded as one that did, on the one table that says what has been public.",
+    count: 2,
+    why: "`markRemoval` and the failed-upload cleanup do not bind the result at all, so neither `error` nor `count` is read. A removal that did not happen is recorded as one that did, on the one table that says what has been public. The chosen-Page write that used to make this 3 is counted now: the connection can be removed between the read and the write, and a coach shown a Page they no longer have finds out at the first publish, after writing the caption.",
   }],
   ['calendar-sync/index.ts', {
-    count: 6,
-    why: "Disconnect, the write-enable toggle and the token-refresh stores. A coach is shown 'disconnected' or 'writing off' on the strength of an update that may have matched no row.",
+    count: 3,
+    why: "The token-refresh stores. Three of the six came off: the write-calendar id is counted, because a calendar has by then been CREATED in the coach's Google account and losing the id reports two-way sync on while nothing is ever pushed; and the disconnect delete and the write-enable-off toggle are now marked no-count-ok rather than counted, because zero rows there means the credential had already gone, which is the state both were asking for. Reporting those two would be worse than silent — calendarSync.ts turns any error into advice to retry or disconnect a connection that no longer exists.",
   }],
   ['gym-checkout/index.ts', {
-    count: 2,
-    why: 'Closing an abandoned order and stamping the Stripe session id onto it. Both are keyed on an order read moments earlier under the service role, so a zero match means the row went away mid-flight.',
-  }],
-  ['ads-google/index.ts', {
     count: 1,
-    why: 'The manager-account id write, whose own failure message tells the coach the next check will be refused — which is exactly what a zero-row match causes, silently.',
+    why: 'Closing an abandoned order, keyed on an order read moments earlier under the service role, so a zero match means the row went away mid-flight. The session-id stamp that used to make this 2 now logs: fulfilment does not depend on it, because the webhook stamps the same column off metadata.order_id, so what a zero match actually loses is the ability to reconcile an order that is never paid — a report to read rather than an error to show somebody with a live payment page open.',
   }],
   ['connect-onboard/index.ts', {
     count: 1,

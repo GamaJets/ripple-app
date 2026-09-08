@@ -386,8 +386,8 @@ Deno.serve(async (req) => {
     return stripeError('checkout', e);
   }
 
-  const { error: linkErr } = await service.from('gym_orders')
-    .update({ stripe_session_id: session.id, updated_at: new Date().toISOString() })
+  const { error: linkErr, count: linked } = await service.from('gym_orders')
+    .update({ stripe_session_id: session.id, updated_at: new Date().toISOString() }, { count: 'exact' })
     .eq('id', orderId);
   // The session exists and the member is about to be sent to it. Answering with
   // an error now would tell somebody nothing was charged while a live checkout
@@ -396,6 +396,38 @@ Deno.serve(async (req) => {
   // up by, and the session id here is a convenience for reconciliation rather
   // than the key.
   if (linkErr) console.error('gym-checkout: created session ' + session.id + ' for order ' + orderId + ' but could not record it:', linkErr.message);
+  // ── and the same for a write that was accepted and changed nothing ────────
+  //
+  // COUNTED but deliberately NOT returned, and the two halves of that need
+  // saying separately.
+  //
+  // Why it is counted: the row was inserted moments earlier under the service
+  // role and its id came back, so nothing filters this update and zero rows can
+  // only mean the order row has gone — cascaded away by a member deletion
+  // mid-flight is the reachable one. `linkErr` is null in that case, so before
+  // this the single most alarming state in the file wrote NOTHING anywhere: a
+  // live Stripe checkout page in front of a member, with no order row behind
+  // it. This is the only place that can notice it, because it is the only code
+  // that holds the session id and the order id at once.
+  //
+  // Why it is not returned: nothing changes for the member, and nothing about
+  // fulfilment depends on this write. `checkout.session.completed` looks the
+  // order up by `metadata.order_id` and stamps `stripe_session_id` and
+  // `stripe_payment_intent` onto it itself, so an order that IS still there
+  // gets its session id from the webhook regardless of this line. And an order
+  // that is NOT still there fails visibly at the webhook, which already logs
+  // "PAID gym order … has no row in gym_orders … Nothing was fulfilled." What
+  // is lost meanwhile is reconciliation of an order that is never paid: an
+  // abandoned checkout leaves a pending row with no session id and no intent,
+  // and matching it back to a Stripe session by hand is the job this stamp
+  // exists to save. That is a report to read, not an error to show a member.
+  if (!linkErr && !linked) {
+    console.error(
+      'gym-checkout: created session ' + session.id + ' for order ' + orderId +
+      ' and the order row was not there to record it on. The member has been sent to a live ' +
+      'checkout page for an order this database has no row for.',
+    );
+  }
 
   return json({ url: session.url, order_id: orderId });
 });
