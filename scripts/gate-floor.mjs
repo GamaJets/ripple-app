@@ -50,6 +50,13 @@ const FLOORS = {
   // identical — a gate that walked the wrong directory reporting the whole site
   // correct — and one floor per root beats a second convention.
   'web': 10,                        // 21
+  // Also not source files: the count is the *.md planning documents under
+  // docs/, including docs/history/. Here for the same reason `web` is — the
+  // failure a floor prevents is identical whatever the tree holds — and
+  // because this root going unwalked is not hypothetical: `.md` was in
+  // check-text's extension list from the day it was written and `docs` was
+  // never in its ROOTS, so the gate looked covered and read none of them.
+  'docs': 5,                        // 10
 };
 
 /**

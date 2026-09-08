@@ -8,7 +8,7 @@ card. Each item is ~5–15 minutes. Do them in order.
 ## What's already in this repo
 - `src/lib/` — the **real business logic**, ported and unit-tested (nutrition
   engine, 24-hour cancellation rules, age-from-DOB). Run `npm run test:logic`.
-- `supabase/schema.sql` — the full database (tenants, clients, scans, sessions,
+- `supabase/schema.sql` — the full database (tenants, clients, scans, sessions, <!-- path-ok: archived Phase-0 checklist, accurate when written; the schema is now supabase/setup.sql, generated from supabase/parts/ -->
   waitlist, charges, notifications…) with row-level-security starters.
 - `app/` — Expo Router app shell + a wired client dashboard showing the pattern.
 - `src/theme/tokens.ts` — the dark/light design tokens from the prototype.
@@ -24,7 +24,7 @@ card. Each item is ~5–15 minutes. Do them in order.
 ### 2. Supabase (database + auth + storage) — ~10 min
 - [ ] Create a free account at supabase.com and a new project (region: closest
       to your users; UAE → Frankfurt or Mumbai).
-- [ ] Open the SQL editor, paste `supabase/schema.sql`, run it.
+- [ ] Open the SQL editor, paste `supabase/schema.sql`, run it. <!-- path-ok: archived Phase-0 checklist; the file is supabase/setup.sql today and this records the step as it was -->
 - [ ] Project Settings → API: copy the Project URL and the `anon` public key.
 - [ ] Create `.env` from `.env.example` and paste them in.
 - [ ] Create two Storage buckets: `scans` and `photos` (private).

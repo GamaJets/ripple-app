@@ -50,7 +50,7 @@ This proves the whole thing runs before we add a backend.
    - Database password: let it generate one, save it in your password manager.
    - Region: **Frankfurt** (eu-central) or **Mumbai** — both are close to the UAE.
 2. Wait ~2 min for it to provision.
-3. Left sidebar → **SQL Editor** → **New query**. Open `supabase/schema.sql` from
+3. Left sidebar → **SQL Editor** → **New query**. Open `supabase/schema.sql` from <!-- path-ok: archived Phase-0 document, accurate when written; the bundle is now generated to supabase/setup.sql from supabase/parts/ and the record of the old name stands -->
    this repo, copy **all** of it, paste, and click **Run**. You should see
    "Success. No rows returned." That just built every table (clients, scans,
    sessions, meal plans, messages, food logs, notifications…) with the multi-tenant
@@ -78,7 +78,7 @@ This proves the whole thing runs before we add a backend.
 3. Stop Expo (Ctrl-C) and re-run `npx expo start`.
 
 That `EXPO_PUBLIC_USE_SUPABASE=1` flag is the single switch that flips the app
-from mock data to your real database (it's read in `src/data/repo.ts`). Flip it
+from mock data to your real database (it's read in `src/data/repo.ts`). Flip it <!-- path-ok: archived Phase-0 document; src/data/repo.ts was the mock/live switch at the time and has since been removed -->
 back to `0` any time to demo offline.
 
 ✅ **Checkpoint:** app still boots. It'll show empty/real data now instead of the
