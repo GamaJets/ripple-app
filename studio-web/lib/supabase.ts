@@ -88,7 +88,30 @@ export const supabase = createClient(url, key, {
   global: { fetch: withRequestTimeout((input, init) => fetch(input, init)) },
 });
 
-export type Role = 'client' | 'trainer' | 'owner';
+/**
+ * What `profiles.role` may hold. Four values since supabase/parts/711.
+ *
+ * `receptionist` is the person on the gym's front desk, and adding it here
+ * grants nothing on its own — exactly as adding it to the CHECK constraint
+ * granted nothing. Every staff policy in that schema spells its roles out, and
+ * only two were widened to admit this one: `gym_visits` (select, insert,
+ * update) and `gym_member_records` (select). A receptionist reading anything
+ * else gets a refusal or no rows.
+ *
+ * That is narrower than part 711's own footer says. The footer has the desk
+ * reading the gym's own row — "`tenants_read`, which is role-agnostic" — and
+ * `tenants_read` was dropped by part 142 and replaced by `tenants_owner_rw`,
+ * `tenants_trainer_r` and `tenants_client_r`. A receptionist matches none of
+ * the three: they are not the owner, they have no `trainers` row (part 711
+ * refuses them one on purpose) and they are nobody's coaching client. So the
+ * gym's name, currency and timezone are unreadable to this role, and the
+ * screens below have to say so rather than print a fallback that looks like a
+ * setting nobody made.
+ *
+ * The console offers a receptionist ONE screen, /door, and offers it the half
+ * of that screen the policies above actually cover. See components/Shell.tsx.
+ */
+export type Role = 'client' | 'trainer' | 'owner' | 'receptionist';
 
 export interface Me {
   id: string;

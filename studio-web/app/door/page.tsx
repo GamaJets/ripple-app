@@ -8,6 +8,54 @@
 // reporting one: until visits are recorded, attendance is only ever the subset
 // of people who booked a class, and retention is inferred from a number that
 // is missing most of its input.
+//
+// ── And it is the only screen the gym's receptionist has ──────────────────
+//
+// supabase/parts/711 gave the front desk a role of its own and widened two
+// policies for it: `gym_visits` for select, insert and update, and
+// `gym_member_records` for select. This screen is what those two are for, and
+// it is now drawn for `receptionist` as well as for the two roles above.
+//
+// It is drawn NARROWER for them, and every omission below is a policy rather
+// than a preference. What a reception account can read here:
+//
+//   · the door log, in full — every visit, the head count, who is still open;
+//   · the gym's own record of a member: next of kin, the operational medical
+//     note, the desk's note (`gym_member_records`, part 197);
+//   · the classes running now (`gym_classes_read` names no role).
+//
+// What it cannot read, and what this screen therefore does not draw for them:
+//
+//   · `gym_passes` and `gym_pass_redemptions` — `my_role() in
+//     ('trainer','owner')`. The whole Passes section is withheld. An empty
+//     pass table shown to somebody who may not know is worse than no table.
+//   · `memberships` — `is_owner_of` or the member themselves. This is the one
+//     that costs the desk something real: the member picker is built from that
+//     list, and `doorAdmission` reads the same table to decide whether somebody
+//     may come in. Row-level security filters rather than raising, so a
+//     receptionist picking a member would be told the gym has no record of
+//     them — about every member, one at a time. The picker is withheld and the
+//     bar records the head count it can honestly record.
+//   · a member's NAME. Of the eight policies on `profiles` a receptionist
+//     matches two — `profiles_self`, their own row, and
+//     `profiles_public_directory_r`, coaches who have listed themselves — and
+//     no member of a gym is either. Row-level security applies to a PostgREST
+//     embed the way it applies to a table, so `fetchVisits`'s embedded
+//     `profiles(full_name)` comes back null on every row: the log says a member
+//     came in and cannot say which. The Who column below says exactly that
+//     rather than "not identified", which is a different fact and is already
+//     what a genuinely unattributed visit is called.
+//   · the gym's own row. Part 711's footer has the desk reading it through
+//     `tenants_read`; part 142 dropped `tenants_read` and replaced it with
+//     owner, trainer and client policies, and a receptionist has no `trainers`
+//     row by design. So the gym's name and TIMEZONE are unreadable to them, the
+//     read is not made, and every clock on this screen falls back to the
+//     machine at the desk — which is the right clock at a front desk and is
+//     said out loud rather than assumed.
+//
+// The rule this shape obeys is part 530's: a console that offers somebody a
+// control the database will refuse, or a list it has silently emptied, is worse
+// than one that says what it does not have.
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { supabase, writeFailed, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 // The reader's locale, the GYM's zone. This screen lives at a front desk, where
@@ -181,37 +229,65 @@ export default function Door() {
   const [records, setRecords] = useState<Map<string, GymMemberRecord> | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string): Promise<boolean> => {
+  /**
+   * The reads, in two groups, because two roles may not make the second group.
+   *
+   * `desk` is a receptionist. Three of the six queries below have owner or
+   * trainer in their policy and would come back either refused or — worse, and
+   * this is why they are not simply left to fail — filtered to nothing without
+   * an error, which draws as a gym with no passes and no members. So they are
+   * not asked for at all, and nothing on the screen renders their state.
+   */
+  const load = useCallback(async (tenantId: string, desk: boolean): Promise<boolean> => {
     // allSettled, not all: one failing read must not take the others with it.
     // Under Promise.all a refused gym_passes query also emptied the other three
     // — the visits table said "No visits logged today" on a morning that had
     // visits, and the check-in dropdown lost every member — so one broken query
     // produced three wrong facts and the banner named none of them.
     const now = Date.now();
-    const [vRes, pRes, tRes, mRes, cRes, rRes] = await Promise.allSettled([
-      fetchVisits(supabase, tenantId, { sinceIso: new Date(now - 30 * DAY).toISOString() }),
-      fetchPasses(supabase, tenantId),
-      fetchPassTypes(supabase, tenantId),
-      fetchMemberships(supabase, tenantId),
-      fetchClasses(
-        supabase, tenantId,
-        new Date(now - CLASS_WINDOW_MIN * 60_000).toISOString(),
-        new Date(now + CLASS_WINDOW_MIN * 60_000).toISOString(),
-      ),
-      // Sixth, and settled beside the others rather than after them: a gym that
-      // has not applied supabase/parts/197 has no such table, and one refused
-      // read must take nothing else down with it.
-      fetchMemberRecords(supabase, tenantId),
+    // The two groups run together rather than one after the other: the desk
+    // polls every thirty seconds and a second round trip for the same screen is
+    // latency nobody asked for.
+    const [staff, gymSide] = await Promise.all([
+      Promise.allSettled([
+        fetchVisits(supabase, tenantId, { sinceIso: new Date(now - 30 * DAY).toISOString() }),
+        fetchClasses(
+          supabase, tenantId,
+          new Date(now - CLASS_WINDOW_MIN * 60_000).toISOString(),
+          new Date(now + CLASS_WINDOW_MIN * 60_000).toISOString(),
+        ),
+        // Third, and settled beside the others rather than after them: a gym
+        // that has not applied supabase/parts/197 has no such table, and one
+        // refused read must take nothing else down with it.
+        fetchMemberRecords(supabase, tenantId),
+      ]),
+      desk ? null : Promise.allSettled([
+        fetchPasses(supabase, tenantId),
+        fetchPassTypes(supabase, tenantId),
+        fetchMemberships(supabase, tenantId),
+      ]),
     ]);
+    const [vRes, cRes, rRes] = staff;
 
     // A read that failed is null, never []. [] is the gym saying it has none;
     // null is nobody knowing. Staff act differently on the two.
     setVisits(vRes.status === 'fulfilled' ? vRes.value : null);
-    setPasses(pRes.status === 'fulfilled' ? pRes.value : null);
-    setTypes(tRes.status === 'fulfilled' ? tRes.value : null);
-    setMembers(mRes.status === 'fulfilled' ? mRes.value : null);
     setClasses(cRes.status === 'fulfilled' ? cRes.value : null);
     setRecords(rRes.status === 'fulfilled' ? byMember(rRes.value) : null);
+
+    if (gymSide) {
+      const [pRes, tRes, mRes] = gymSide;
+      setPasses(pRes.status === 'fulfilled' ? pRes.value : null);
+      setTypes(tRes.status === 'fulfilled' ? tRes.value : null);
+      setMembers(mRes.status === 'fulfilled' ? mRes.value : null);
+    } else {
+      // Empty rather than null, and neither is shown to anybody: the Passes
+      // section and the member picker are not rendered for a desk, so these
+      // three exist only to keep the components below holding a value. null
+      // here would mean "this read did not come back", which would be a claim
+      // about a query nobody made.
+      setPasses([]); setTypes([]); setMembers([]);
+    }
 
     // Surfaced rather than swallowed: a door screen that silently fails to read
     // is worse than one that says so, because staff will keep using it. Each
@@ -219,23 +295,26 @@ export default function Door() {
     // broke leaves the desk unable to tell the owner what is down.
     const trouble = [
       failure(vRes, 'the door log'),
-      failure(pRes, 'the passes'),
-      failure(tRes, 'the pass types'),
-      failure(mRes, 'the member list'),
       failure(cRes, 'the classes running now'),
       // Named apart from the rest, because the consequence is not a figure: a
       // desk that cannot read this has no next-of-kin number for anybody in the
       // building and has to be told so rather than shown a blank column.
       failure(rRes, 'the gym’s notes on your members — no next of kin and no medical note can be shown'),
+      ...(gymSide ? [
+        failure(gymSide[0], 'the passes'),
+        failure(gymSide[1], 'the pass types'),
+        failure(gymSide[2], 'the member list'),
+      ] : []),
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
 
-    // Whole means all six came back. The poll below stamps only on a whole
-    // read, so a pass that would not read leaves the stamp where it was — and
-    // on a desk that reads "Inside now" out loud during an evacuation, the
-    // difference between "read 8 seconds ago" and "read 40 minutes ago, and it
-    // may have moved since" is the whole value of the line.
-    return settledLanded([vRes, pRes, tRes, mRes, cRes, rRes]);
+    // Whole means every read this role actually made came back. The poll below
+    // stamps only on a whole read, so a pass that would not read leaves the
+    // stamp where it was — and on a desk that reads "Inside now" out loud
+    // during an evacuation, the difference between "read 8 seconds ago" and
+    // "read 40 minutes ago, and it may have moved since" is the whole value of
+    // the line.
+    return settledLanded([vRes, cRes, rRes, ...(gymSide ?? [])]);
   }, []);
 
   useEffect(() => {
@@ -268,6 +347,24 @@ export default function Door() {
       // because that is what a gym which has set no zone already gets and the
       // screen says so in as many words. What changes is that the failure is now
       // distinguishable from the setting being absent.
+      //
+      // Not asked for at all by the front desk, and this is the correction to
+      // supabase/parts/711's own footer rather than a choice. That table has a
+      // receptionist reading the gym's row through `tenants_read`, "which is
+      // role-agnostic"; `tenants_read` was dropped by part 142 and replaced by
+      // `tenants_owner_rw`, `tenants_trainer_r` and `tenants_client_r`. A
+      // receptionist is not the owner, has no `trainers` row — part 711 refuses
+      // them one on purpose — and is nobody's coaching client, so all three are
+      // false and the row comes back empty. Making the read anyway would put a
+      // refusal in the banner on a screen that is left open all day, about a
+      // thing nothing on it can do anything about; not making it and reporting
+      // the name as absent would tell the rail this account has no gym. So the
+      // name is UNREAD, which is what it is, and the zone falls back to the
+      // machine at the desk, which the note under the clocks already explains.
+      if (who.role === 'receptionist') {
+        if (live) { setGymName(null); setGymNameUnread(true); setZone(null); }
+        return;
+      }
       const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
       if (live) {
         setGymName(tErr ? null : t?.name ?? null);
@@ -332,10 +429,11 @@ export default function Door() {
    * cost attached.
    */
   const { at: readAt, busy: reading, refresh } = useFetched(
-    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    () => (me?.tenantId ? load(me.tenantId, me.role === 'receptionist') : Promise.resolve(false)),
     {
       everyMs: REFRESH_MS,
-      enabled: !!me?.tenantId && (me?.role === 'owner' || me?.role === 'trainer'),
+      enabled: !!me?.tenantId
+        && (me?.role === 'owner' || me?.role === 'trainer' || me?.role === 'receptionist'),
     },
   );
 
@@ -415,7 +513,11 @@ export default function Door() {
     );
   }
 
-  if (me.role !== 'owner' && me.role !== 'trainer') {
+  // Three roles, matching `gym_visits_staff_rw` and `gmr_staff_r` exactly —
+  // both are `my_role() in ('trainer','owner','receptionist')` since
+  // supabase/parts/711. A member of the gym still gets the sentence below: they
+  // may read their own visits and nobody else's, which is not a door log.
+  if (me.role !== 'owner' && me.role !== 'trainer' && me.role !== 'receptionist') {
     return (
       <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/door">
         <h1>Not your console</h1>
@@ -423,6 +525,16 @@ export default function Door() {
       </Shell>
     );
   }
+
+  /**
+   * The front desk, as against the two roles that also run the rest of the gym.
+   *
+   * Every place this is read withholds something the database would refuse this
+   * account, or says something the other two roles do not need said. It is
+   * never used to withhold something a receptionist could actually do — the
+   * whole point of the role is that the door works.
+   */
+  const desk = me.role === 'receptionist';
 
   const tenantId = me.tenantId!;
 
@@ -519,6 +631,32 @@ export default function Door() {
 
       {err ? <Banner tone="crit">{err}</Banner> : null}
 
+      {/* What this screen is missing for the person on the desk, said once, at
+          the top, instead of six empty panels further down.
+          It is not an apology and it is not a fault report: these are the
+          policies working. The one sentence that matters operationally is the
+          second — the counts are complete, so "Inside now" is the right number
+          to read out during an alarm even though the names beside it are not
+          there. */}
+      {desk ? (
+        <p style={{
+          margin: '0 0 18px', padding: '11px 13px', maxWidth: '84ch',
+          background: 'var(--surface2)', border: '1px solid var(--ring)',
+          borderLeft: '3px solid var(--brand)',
+          fontSize: 12.5, color: 'var(--ink2)',
+        }}>
+          A reception account reads the door log and the gym&rsquo;s notes on its
+          members, and nothing else. Members&rsquo; names, their memberships and the
+          passes are the gym&rsquo;s own records and are not open to this login, so
+          this screen leaves them out rather than showing you blanks.{' '}
+          <strong style={{ color: 'var(--ink)' }}>The counts below are complete</strong> —
+          every visit is here, named or not — and each person still in the
+          building carries their next of kin and anything the floor was told.
+          Times are on this machine&rsquo;s clock, because the gym&rsquo;s own
+          timezone is one of the things this login may not read.
+        </p>
+      ) : null}
+
       <div
         style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
@@ -552,7 +690,7 @@ export default function Door() {
 
       <CheckInBar
         members={members} passes={passes} classes={classes} visits={visits}
-        records={records} tenantId={tenantId}
+        records={records} tenantId={tenantId} desk={desk}
         membersUnread={unread(members)} classesUnread={unread(classes)}
         recordsUnread={recordsUnread}
         today={today} zone={zone} queue={queue} gymName={gymName} onChange={refresh}
@@ -568,12 +706,21 @@ export default function Door() {
       {/* Thirty days rather than today, because "when is my gym busy" is not a
           question about today. The window is the same one `load()` reads, so
           nothing here needs a second query. */}
-      <Occupancy visits={visits} unread={unread(visits)} days={30} zone={zone} />
-      <Passes
-        passes={passes} types={types} members={members} summary={pSum}
-        passesUnread={unread(passes)} typesUnread={unread(types)}
-        tenantId={tenantId} today={today} zone={zone} me={me} gymName={gymName} onChange={refresh}
-      />
+      <Occupancy visits={visits} unread={unread(visits)} days={30} zone={zone} desk={desk} />
+      {/* Not rendered for the front desk, and not rendered as an explanation
+          either. `gym_passes` and `gym_pass_redemptions` are both `my_role() in
+          ('trainer','owner')` and issuing a pass is the owner's alone, so every
+          control in here would be refused and the ledger would read as a gym
+          that has never sold a pass. The note at the top of the page says the
+          passes are not on this login; a section that says "no passes" to
+          somebody who is not allowed to know is the worse answer. */}
+      {desk ? null : (
+        <Passes
+          passes={passes} types={types} members={members} summary={pSum}
+          passesUnread={unread(passes)} typesUnread={unread(types)}
+          tenantId={tenantId} today={today} zone={zone} me={me} gymName={gymName} onChange={refresh}
+        />
+      )}
     </Shell>
   );
 }
@@ -744,11 +891,25 @@ function useDoorQueue(tenantId: string, zone: string | null, onChange: () => voi
 
 /* ── check-in ──────────────────────────────────────────────────────────────── */
 
-function CheckInBar({ members, passes, classes, visits, records, tenantId, membersUnread, classesUnread, recordsUnread, today, zone, queue, gymName, onChange }: {
+function CheckInBar({ members, passes, classes, visits, records, tenantId, desk, membersUnread, classesUnread, recordsUnread, today, zone, queue, gymName, onChange }: {
   members: Membership[] | null; passes: GymPass[] | null; classes: GymClass[] | null;
   visits: Visit[] | null;
   records: Map<string, GymMemberRecord> | null;
   tenantId: string;
+  /**
+   * True for a reception account, which may write a visit and may not read the
+   * membership list the picker is built from.
+   *
+   * The picker is withheld rather than shown empty, and the reason is not
+   * tidiness: `memberships` is filtered to nothing for this role rather than
+   * refused, so an empty picker would be indistinguishable from a gym with no
+   * members — and `doorAdmission`, which `checkIn` calls before it writes,
+   * reads the same table and would answer "this person has no membership"
+   * about every member in the building. The head count this leaves is a real
+   * record and the screen's own text has always said so: an unattributable
+   * visit still counts toward the day.
+   */
+  desk: boolean;
   membersUnread: Unread; classesUnread: Unread; recordsUnread: Unread;
   /** `tenants.name`, for drawing a member's own number beside their name in
    *  the picker. Never used to match one. */
@@ -941,7 +1102,12 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
   };
 
   return (
-    <Section title="Check someone in" sub="Leave the member blank to record a visit you cannot attribute — it still counts toward the day. Say what the visit was for and it reconciles against the class or the pass instead of counting twice.">
+    <Section
+      title="Check someone in"
+      sub={desk
+        ? 'Every visit recorded here counts toward the day, the head count and the busiest hour. Say which class it is for and it reconciles against the register instead of counting twice.'
+        : 'Leave the member blank to record a visit you cannot attribute — it still counts toward the day. Say what the visit was for and it reconciles against the class or the pass instead of counting twice.'}
+    >
       {/* Mounted for as long as this section is on screen, so a later `msg` is a
           CHANGE to an existing region rather than a node inserted at the same
           instant as its text. This is the desk: whoever is on it is looking at
@@ -949,10 +1115,12 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
           studio-web/components/Banner.tsx. */}
       <Announce say={sayText(msg)} tone={sayTone(msg)} />
       <form onSubmit={go} style={formRow}>
-        <MemberPicker
-          members={members} value={memberId} onPick={pickMember}
-          unread={membersUnread} gymName={gymName}
-        />
+        {desk ? null : (
+          <MemberPicker
+            members={members} value={memberId} onPick={pickMember}
+            unread={membersUnread} gymName={gymName}
+          />
+        )}
         <select value={reason} onChange={(e) => setReason(e.target.value)} style={{ ...field, flex: 2 }}
                 aria-label="What this visit was for">
           <option value="">Gym floor</option>
@@ -971,6 +1139,20 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, membe
           {busy ? 'Recording…' : 'Check in'}
         </button>
       </form>
+      {/* Said under the form rather than left for somebody to notice: the
+          control that is missing is the one this section is named after, and a
+          person who is not told why will assume the console is broken and stop
+          using it — which takes attendance, fill rate and the retention reading
+          with it, exactly as the header of this file says. */}
+      {desk ? (
+        <p style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '80ch' }}>
+          There is no member to pick on this login. The membership list belongs to
+          the gym&rsquo;s own records and a reception account may not read it, so a
+          visit recorded here is counted and not named — which is a true record of
+          somebody coming in, and the only one this login can honestly write. Ask
+          the owner to put the names on afterwards if a particular visit needs one.
+        </p>
+      ) : null}
       {/* What the record says, before anybody presses anything. `ok` is silent:
           a green line against every member who may come in is a line the desk
           stops reading, and then the one that matters is invisible too. */}
@@ -1507,6 +1689,36 @@ function MemberPicker({ members, value, onPick, unread, gymName }: {
 
 /* ── who is inside ─────────────────────────────────────────────────────────── */
 
+/**
+ * The Who column, and the two different silences behind an empty one.
+ *
+ * This was `v.memberName ?? 'not identified'` in both tables, and that sentence
+ * is only true of one of the two ways a name goes missing. `gym_visits` holds
+ * no name; `fetchVisits` embeds `profiles(full_name)` beside every row, and
+ * row-level security applies to an embedded resource the same way it applies to
+ * a table — a profile the reader may not see comes back as null rather than as
+ * an error. So a row with a member on it and no name is a row this account is
+ * not allowed to read the name of, which is not the same fact as a visit
+ * nobody attributed at the desk.
+ *
+ * It matters for two roles and it always did. A receptionist may read no
+ * member's profile at all, so every named visit in the gym would have drawn as
+ * anonymous; a trainer may read only their own clients', so every other coach's
+ * member already did. In both cases the tile directly above these tables
+ * disagrees — "Visits today" counts `member_id`, and it counts these — so the
+ * screen was telling the desk a visit was unattributed and counting it as
+ * attributed in the same view.
+ *
+ * The emergency column beside this one has always got it right: it branches on
+ * `v.memberId` and says "not identified at the desk" only when there is nobody
+ * on the row. This is the same branch, in the column people actually read.
+ */
+function whoCame(v: Visit): React.ReactNode {
+  if (v.memberName) return v.memberName;
+  if (v.memberId) return <span className="dash">a member this console may not name</span>;
+  return <span className="dash">not identified</span>;
+}
+
 function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread, gymName, unread, tenantId, isOwner, queue, zone, onChange }: {
   inside: Visit[]; openBefore: number; swept: number; duplicates: number; unread: Unread;
   records: Map<string, GymMemberRecord> | null;
@@ -1559,8 +1771,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
   };
 
   const cols: Column<Visit>[] = [
-    { key: 'who', header: 'Who', value: (v) => v.memberName ?? 'zzz',
-      render: (v) => v.memberName ?? <span className="dash">not identified</span> },
+    { key: 'who', header: 'Who', value: (v) => v.memberName ?? 'zzz', render: whoCame },
     { key: 'in', header: 'In since', value: (v) => v.enteredAt,
       render: (v) => gymTimeText(v.enteredAt, zone, { hour: '2-digit', minute: '2-digit' }) ?? <span className="dash">—</span> },
     { key: 'for', header: 'For', value: (v) => Date.now() - Date.parse(v.enteredAt), numeric: true,
@@ -1725,8 +1936,7 @@ function Inside({ inside, openBefore, swept, duplicates, records, recordsUnread,
 
 function Today({ visits, unread, zone }: { visits: Visit[]; unread: Unread; zone: string | null }) {
   const cols: Column<Visit>[] = [
-    { key: 'who', header: 'Who', value: (v) => v.memberName ?? 'zzz',
-      render: (v) => v.memberName ?? <span className="dash">not identified</span> },
+    { key: 'who', header: 'Who', value: (v) => v.memberName ?? 'zzz', render: whoCame },
     { key: 'in', header: 'In', value: (v) => v.enteredAt,
       render: (v) => gymTimeText(v.enteredAt, zone, { hour: '2-digit', minute: '2-digit' }) ?? <span className="dash">—</span> },
     { key: 'out', header: 'Out', value: (v) => v.exitedAt ?? '',
@@ -1780,8 +1990,20 @@ function Today({ visits, unread, zone }: { visits: Visit[]; unread: Unread; zone
  * over so a 30-day window's five Mondays and four Fridays are not compared as
  * though they were the same sample.
  */
-function Occupancy({ visits, unread, days, zone }: {
+function Occupancy({ visits, unread, days, zone, desk }: {
   visits: Visit[] | null; unread: Unread; days: number;
+  /**
+   * True for a reception account, which cannot read `tenants` at all.
+   *
+   * The no-zone branch below says the gym has not set one and offers a link to
+   * Gym settings. Both halves are wrong for this role and wrong in the way that
+   * costs somebody time: the gym may well have set a timezone, this login
+   * simply may not read the row it is on, and /settings is a screen the rail
+   * does not offer them and the database would refuse. So they get the same
+   * fact — these buckets are on your device's clock — with the true reason and
+   * no dead end.
+   */
+  desk: boolean;
   /**
    * `tenants.timezone`. This section had no zone at all, and every bucket in it
    * came off `getHours()` and `getDay()` — the READER's clock.
@@ -1840,6 +2062,14 @@ function Occupancy({ visits, unread, days, zone }: {
       <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '80ch' }}>
         {zone ? (
           <>Hours and days below are <span className="mono">{zone}</span>, this gym&rsquo;s own clock.</>
+        ) : desk ? (
+          <>
+            Hours and days below are <strong style={{ color: 'var(--ink2)' }}>your own device&rsquo;s</strong>.
+            This login cannot read the gym&rsquo;s own row, so whether it has a timezone set is not
+            something this screen can find out — which is a different thing from the gym not having
+            one. At the desk the two clocks are usually the same; read from anywhere else they are
+            not, and nothing here can tell you by how much.
+          </>
         ) : (
           <>
             Hours and days below are <strong style={{ color: 'var(--ink2)' }}>your own device&rsquo;s</strong>{' '}

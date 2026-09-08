@@ -143,8 +143,8 @@ export const STAFF_ROLE_REACH: Reach[] = [
   },
   {
     what: 'Gym settings',
-    owner: 'Read and write', trainer: 'Read', receptionist: 'Read',
-    note: 'The gym’s name, brand, currency and timezone. Read by everybody inside the gym; changed by the owner alone.',
+    owner: 'Read and write', trainer: 'Read', receptionist: 'No',
+    note: 'The gym’s name, brand, currency and timezone. Part 711’s footer has reception reading this row through `tenants_read`, "which is role-agnostic" — and part 142 dropped `tenants_read` and replaced it with an owner policy, a trainer policy and a client policy. Reception is none of the three: no ownership, no `trainers` row (part 711 refuses them one on purpose) and nobody’s coaching client. So the gym’s own row is closed to them, and the console says the name is unread rather than printing a fallback.',
   },
 ];
 
@@ -153,7 +153,7 @@ export const STAFF_ROLE_REACH: Reach[] = [
  * read as a description of the product and it is a description of the database.
  */
 export const CONSOLE_LAG_NOTE =
-  'This is what the database allows. The console has not caught up: every screen here still refuses anybody who is not an owner or a coach, so a receptionist added today is recorded and enforced and has no screen to sign in to yet.';
+  'This is what the database allows, and the console offers a receptionist one screen of it: Door — the log, the head count, checking people out, and the next of kin and medical note for whoever is in the building. Members is not offered to them, and not because of the money on it: that roster is built from the membership rows, which no policy opens to this role, so the page would load without error and draw a gym with nobody in it. Everything else here stays with the owner and the coaches.';
 
 /* ── before the button is pressed ──────────────────────────────────────────── */
 

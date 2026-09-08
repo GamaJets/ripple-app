@@ -194,6 +194,13 @@ export default function Members() {
    */
   const { at: readAt, busy: reading, refresh } = useFetched(
     () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    // Eight owner-only reads, so they are not made for anybody the gate below
+    // refuses. A receptionist who types this URL used to fire all eight and
+    // have every one of them come back filtered to nothing before the refusal
+    // rendered over the top — the same wrong query the Door screen declines to
+    // keep re-asking, with the added cost that a filtered read looks exactly
+    // like an empty gym.
+    { enabled: me?.role === 'owner' },
   );
 
   useEffect(() => {
@@ -303,13 +310,68 @@ export default function Members() {
     );
   }
 
+  /*
+   * Owner only, and the receptionist is the case worth writing down.
+   *
+   * ── What was expected here, and why it is not what shipped ───────────────
+   *
+   * supabase/parts/711 gave the gym's front desk a role and named four files
+   * the console had to change to honour it. This is one of them, and the note
+   * against it reads: "owner-only today; the member RECORD is what the desk
+   * needs, and the money on that screen is what it must not have."
+   *
+   * The money is not the obstacle. It could be withheld — the payment tiles,
+   * the paid total, the invoices, the plan price and the passes are each their
+   * own section and each has an owner-only read behind it, so a version of this
+   * page with every priced thing removed is straightforward to draw.
+   *
+   * The ROSTER is the obstacle. Every person on this screen comes from
+   * `memberIds()` in src/lib/memberView.ts, which reads the `memberships`
+   * slice and nothing else — deliberately, and its own comment says why:
+   * inventing a roster from whoever appears in the door log would quietly drop
+   * every member who has not been in this month. `memberships` has exactly two
+   * policies, `is_owner_of(tenant_id)` and `member_id = auth.uid()`. A
+   * receptionist matches neither.
+   *
+   * A refused SELECT and a filtered SELECT are not the same event. Row-level
+   * security does not raise here; it returns no rows. So this page would not
+   * fail for a receptionist, it would load — every read landing, no banner, no
+   * stated failure — and draw a gym with no members at all. That is the worst
+   * available answer, and it is the one part 530 spends forty lines refusing:
+   * a screen that says something false to somebody who has no way to tell.
+   *
+   * ── What the desk gets instead, and what would change this ───────────────
+   *
+   * /door, which is the screen the two widened policies actually cover, and
+   * which draws only the halves of itself that a receptionist can read. It
+   * carries the next of kin and the gym's medical note out of
+   * `gym_member_records` — the part of this page part 711 wanted the desk to
+   * have — for anybody in the building.
+   *
+   * Opening this screen needs a policy, not a gate: a staff SELECT on
+   * `memberships` and a staff read of members' names, which today live in
+   * `profiles` and are visible to a receptionist for nobody. Both are decisions
+   * for a part file, with the disclosure written out, in the shape part 711
+   * used for the two it did widen. Until one exists, this sentence is the
+   * honest version of this screen for the desk.
+   */
   if (me.role !== 'owner') {
     return (
       <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/members">
         <h1>Not your console</h1>
-        <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '68ch' }}>
           The member record carries payments, so it is owner-only.
         </p>
+        {me.role === 'receptionist' ? (
+          <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '68ch' }}>
+            The desk is not refused here because of the money, which could be left
+            out. It is refused because the roster on this screen is built from the
+            membership rows, and a reception account may not read those — so this
+            page would load without error and show a gym with nobody in it. The
+            door screen has the next of kin and the gym&rsquo;s note for everybody in
+            the building, which is the part of this record the desk is for.
+          </p>
+        ) : null}
       </Shell>
     );
   }

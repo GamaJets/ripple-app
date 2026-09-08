@@ -78,8 +78,16 @@ eq(pay?.receptionist, 'No', 'and nothing about what anybody is paid');
 ok(!!pay?.note && /session fee/i.test(pay.note),
   'while saying out loud that the gym’s headline session fee is a different thing and is readable by everybody inside the gym — an assurance that overstated itself would be worse than none');
 
-ok(/console has not caught up|no screen/i.test(CONSOLE_LAG_NOTE),
-  'and the table is introduced as what the DATABASE allows, not what the console does');
+const settings = byWhat('gym settings');
+eq(settings?.receptionist, 'No',
+  'reception cannot read the gym’s own row — part 711’s footer says they can, through a `tenants_read` policy part 142 dropped, and the table an owner reads has to be right rather than consistent with a comment');
+ok(!!settings?.note && /142/.test(settings.note),
+  'and it names the part that dropped it, so the next person does not have to rediscover the same thing');
+
+ok(/what the database allows/i.test(CONSOLE_LAG_NOTE),
+  'the table is introduced as what the DATABASE allows, not what the console does');
+ok(/Door/.test(CONSOLE_LAG_NOTE) && /Members/.test(CONSOLE_LAG_NOTE),
+  'and it names both the screen a receptionist is offered and the one they are not — an owner granting this is entitled to know what the person will actually see');
 
 /* ── who may be granted what ───────────────────────────────────────────── */
 

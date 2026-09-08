@@ -7,6 +7,10 @@
 // not see a Payroll link they cannot open. The database enforces the same thing
 // independently, so a hand-typed URL gets an empty result, not a leak.
 //
+// That sentence named a role this file did not have. `receptionist` is a real
+// value of `profiles.role` (supabase/parts/711) and it now reaches exactly one
+// entry in the list below, for the reasons written against it.
+//
 // It is also split by CONTEXT, which is a different question from role. Most of
 // this console is the gym: its members, its timetable, its books. Three screens
 // are not — /coach and its children are scoped to the signed-in trainer, so an
@@ -26,7 +30,17 @@ export type NavContext = 'gym' | 'mine';
 export interface NavItem {
   href: string;
   label: string;
-  roles: Array<'owner' | 'trainer'>;
+  /**
+   * Which roles are OFFERED this link. Not which roles the database admits —
+   * that is `supabase/parts`, and it refuses independently — but the two are
+   * kept in step deliberately, because a rail that offers a screen the page or
+   * the policies will refuse is the failure part 530 spends forty lines
+   * declining to ship.
+   *
+   * `receptionist` reaches exactly one entry, /door, and the note beside it
+   * says why it reaches no others.
+   */
+  roles: Array<'owner' | 'trainer' | 'receptionist'>;
   context: NavContext;
   /** The rail's heading this sits under. Eighteen ungrouped links is a wall. */
   group: string;
@@ -139,9 +153,37 @@ export const NAV: NavItem[] = [
   // every trainer's pay for the month on one screen.
   { href: '/close', label: 'Close', roles: ['owner'], context: 'gym' , group: 'Money' },
   // Staff work the door, so this is the one operational screen a trainer sees.
-  // It stays in the gym context for both roles: the front desk belongs to the
-  // building, not to whoever happens to be standing at it.
-  { href: '/door', label: 'Door', roles: ['owner', 'trainer'], context: 'gym' , group: 'Floor' },
+  // It stays in the gym context for all three roles: the front desk belongs to
+  // the building, not to whoever happens to be standing at it.
+  //
+  // ── And it is the WHOLE of a receptionist's console ───────────────────────
+  //
+  // supabase/parts/711 gave the gym's front desk a role of its own and widened
+  // exactly two policies for it: `gym_visits` (select, insert, update) and
+  // `gym_member_records` (select). This is the screen those two are for. Every
+  // other entry above is withheld, and each is withheld because the database
+  // would refuse it rather than because a rail felt tidier that way:
+  //
+  //   · Members, Retention, Passes, Money, Orders, Revenue, Costs, Accounting,
+  //     Tax, Payroll, Close, Analytics — all read tables whose only policy is
+  //     `is_owner_of(tenant_id)`. A receptionist opening any of them reads
+  //     nothing, which draws as a gym with no members, no passes and no money.
+  //   · Members in particular, which part 711's own footer names as the desk's
+  //     screen: its roster is built from `memberships`, and `memberships` has
+  //     two policies, `is_owner_of` and `member_id = auth.uid()`. The page's
+  //     spine therefore comes back empty rather than refused, and an empty
+  //     roster is this console telling the desk their gym has no members. The
+  //     refusal on that page says so in full.
+  //   · Timetable and Equipment admit a trainer and gate on `my_role() in
+  //     ('trainer','owner')`; neither was widened.
+  //   · My day, My clients, Their checklists, My earnings are a coach's own
+  //     book. A receptionist has no `trainers` row by design — part 711 refuses
+  //     to create one — so there is no book for these to be about.
+  //
+  // One entry means `contexts` below has one member, so the Gym/Mine switch is
+  // not drawn for this role at all. That is the existing rule doing its job
+  // rather than a special case: a role with one context gets no switch.
+  { href: '/door', label: 'Door', roles: ['owner', 'trainer', 'receptionist'], context: 'gym' , group: 'Floor' },
   // A coach's own book — the whole of the "mine" context. Scoped to the signed-in
   // trainer, not the tenant, which is exactly why it is not in the list above.
   { href: '/coach', label: 'My day', roles: ['owner', 'trainer'], context: 'mine' , group: 'My book' },

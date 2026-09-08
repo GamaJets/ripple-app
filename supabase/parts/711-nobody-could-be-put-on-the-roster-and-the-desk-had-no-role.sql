@@ -45,9 +45,13 @@
 --    It is worth being precise about what that does on its own: NOTHING. Every
 --    policy in this schema that admits staff spells the roles out —
 --    `my_role() in ('trainer','owner')` — so a new value reaches no table by
---    default and a receptionist created today can read the gym's own row (that
---    is `tenants_read`, which is role-agnostic) and their own profile and
---    nothing else at all. That is the right default and it is why the role can
+--    default and a receptionist created today can read their own profile and
+--    nothing else at all. This paragraph used to add "and the gym's own row
+--    (that is `tenants_read`, which is role-agnostic)". There is no
+--    `tenants_read`: part 142 dropped it, saying so in its own comment, and
+--    `tenants` now carries `tenants_owner_rw`, `tenants_trainer_r` (which wants
+--    a `trainers` row) and `tenants_client_r`. A receptionist matches none of
+--    the three. That is the right default and it is why the role can
 --    be added before every screen that should honour it exists.
 --
 --    Two policies are widened here, and only two. They are listed below with
@@ -502,12 +506,18 @@ create policy gmr_staff_r on public.gym_member_records
 -- console's own gates are narrower and are listed at the foot.
 --
 --                                     owner  trainer  receptionist  client
---   the gym's own row (tenants)         rw     r        r             r
---     — name, brand, currency, TIMEZONE, plan and session_fee. `tenants_read`
---       is `id = my_tenant()` and names no role, so the gym's headline session
---       fee is visible to everybody inside the gym and always has been. "No pay
---       rates" below means no PER-PERSON pay, which is the thing a receptionist
---       must not see and does not.
+--   the gym's own row (tenants)         rw     r        NO            r
+--     — name, brand, currency, TIMEZONE, plan and session_fee. This row said
+--       `r` for reception and explained it by `tenants_read`, "which is
+--       role-agnostic". That policy does not exist and had already been dropped
+--       by part 142 when this table was written; the three that do exist want
+--       ownership, a `trainers` row, or a coaching relationship, and a
+--       receptionist has none of them. So the gym's NAME, CURRENCY and TIMEZONE
+--       are closed to the desk, which is why studio-web/app/door/page.tsx does
+--       not make that read and says whose clock its times are on instead of
+--       blaming a gym that may well have set one.
+--       "No pay rates" below still means no PER-PERSON pay, which a
+--       receptionist must not see and does not.
 --   door log (gym_visits)               rw     rw       rw            own only
 --   member records (gym_member_records) rw     r        r             own only
 --   passes, drop-ins (gym_passes)       rw     rw       —             own only
