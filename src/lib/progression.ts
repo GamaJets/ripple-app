@@ -16,6 +16,45 @@ import { liftLabel, liftDeltaIn, plain, type WeightUnit } from './units';
 
 export type ProgressAction = 'increase' | 'reps' | 'hold' | 'deload';
 
+/**
+ * The four verdicts as a member reads them.
+ *
+ * The same four words app/(client)/progression.tsx has always shown beside its
+ * icons, lifted out so a second screen cannot invent a fifth vocabulary for the
+ * same four states. That screen keeps its own map because it pairs each with an
+ * icon and a theme colour, which are UI and have no business in a pure module.
+ */
+export const ACTION_LABEL: Record<ProgressAction, string> = {
+  increase: 'Add Load',
+  reps: 'Chase Reps',
+  hold: 'Hold',
+  deload: 'Ease Back',
+};
+
+/**
+ * What the rule ACTUALLY observed, with the prescription taken off.
+ *
+ * `rationale` is a sentence about the next session — "add 5.5 lb and reset to
+ * 8" — and belongs on the screen that tells somebody what to load. These are
+ * the same four readings without the instruction, for a screen whose question
+ * is "which lift is where" rather than "what do I put on the bar".
+ *
+ * Every one of them is deliberately about ONE SESSION, in those words, because
+ * that is all `suggestProgression` looks at: `latestByExercise` keeps the most
+ * recent entry per movement and nothing before it. None of these is a
+ * trajectory and none of them may be worded as one — "stalled", "plateaued" and
+ * "regressing" are all claims about a run of sessions that this rule has never
+ * seen. A member whose last set felt heavy is not a member who has stopped
+ * progressing, and the difference matters most to the people most likely to
+ * believe it.
+ */
+export const ACTION_READING: Record<ProgressAction, string> = {
+  increase: 'cleared the top of the rep range on every top set',
+  reps: 'landed inside the rep range',
+  hold: 'came in just under the rep range',
+  deload: 'reps fell away from the range',
+};
+
 export interface ProgressionTip {
   exercise: string;
   lastWeight: number;   // heaviest working weight last session

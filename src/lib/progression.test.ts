@@ -20,7 +20,8 @@
 // here is the wording and only the wording. The assertions below hold both
 // halves of that: the reason must read in the member's unit, and the weight
 // must come back in kilograms whatever the member reads.
-import { suggestNextWeight, suggestForExercise, suggestProgression, parseRepRange, priorBest1RM } from './progression';
+import { suggestNextWeight, suggestForExercise, suggestProgression, parseRepRange, priorBest1RM,
+  ACTION_LABEL, ACTION_READING, type ProgressAction } from './progression';
 import type { WorkoutEntry } from './mockData';
 
 const errors: string[] = [];
@@ -215,6 +216,51 @@ const eq = (a: unknown, b: unknown, msg: string) => ok(a === b, `${msg} — got 
   eq(tip!.lastWeight, 20, 'and the hold’s heavier load is not read as the top working weight');
   ok(priorBest1RM(log, 'Farmer Carry') === Math.max(0, Math.round(20 * (1 + 12 / 30))),
     'the record is computed from the repeated sets only');
+}
+
+// ── the words the verdict is read out in ───────────────────────────────────
+//
+// `ACTION_LABEL` and `ACTION_READING` are what app/(client)/trends.tsx prints
+// per lift. The danger there is not arithmetic, it is vocabulary: a screen
+// called Trends invites "stalled", "plateaued" and "regressing", and this rule
+// has seen nothing that could support any of them. `latestByExercise` keeps the
+// MOST RECENT entry per movement and reads that one entry, so every verdict is
+// a reading of a single session. One session is not a trend and the words used
+// for it may not imply one — least of all to the member most likely to believe
+// it about themselves.
+{
+  const actions: ProgressAction[] = ['increase', 'reps', 'hold', 'deload'];
+  for (const a of actions) {
+    ok(!!ACTION_LABEL[a], `every action has a label — ${a} does not`);
+    ok(!!ACTION_READING[a], `and a reading — ${a} does not`);
+  }
+  eq(Object.keys(ACTION_LABEL).length, actions.length, 'the label map covers the four actions and no more');
+  eq(Object.keys(ACTION_READING).length, actions.length, 'and so does the reading map');
+
+  // A claim about a RUN of sessions, made from one.
+  const trendWords = /stall|plateau|regress|declin|slipping|going backwards|losing/i;
+  for (const a of actions) {
+    ok(!trendWords.test(ACTION_READING[a]),
+      `"${ACTION_READING[a]}" reads as a trajectory, and this rule has only ever seen one session`);
+    ok(!trendWords.test(ACTION_LABEL[a]),
+      `"${ACTION_LABEL[a]}" reads as a trajectory, and this rule has only ever seen one session`);
+  }
+}
+
+// ── and a verdict really is one session's worth ────────────────────────────
+{
+  // Two sessions of the same lift, the older one far heavier. The answer is
+  // about the LATEST, which is exactly why it may not be worded as a direction:
+  // nothing here looked at the session before it.
+  const log: WorkoutEntry[] = [
+    { t: '2026-08-01T10:00:00.000Z', exercise: 'Back Squat', sets: [[5, 120], [5, 120]] },
+    { t: '2026-08-08T10:00:00.000Z', exercise: 'Back Squat', sets: [[12, 60], [12, 60]] },
+  ];
+  const tip = suggestProgression(log, 'kg').find((x) => x.exercise === 'Back Squat');
+  ok(!!tip, 'a verdict comes back');
+  eq(tip!.lastWeight, 60, 'and it reads the most recent session, not the heaviest one on record');
+  eq(tip!.at, '2026-08-08T10:00:00.000Z',
+    'the session it was drawn from travels with it, so a screen can name the day rather than imply a span');
 }
 
 if (errors.length) {

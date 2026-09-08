@@ -271,6 +271,8 @@
     "src/lib/rosterExport.test.ts",
     "src/lib/readiness.test.ts",
     "src/lib/readinessBreakdown.test.ts",
+    "src/lib/restAdvice.ts",
+    "src/lib/restAdvice.test.ts",
     "src/lib/coachBrand.test.ts",
     "src/lib/coachStatement.test.ts",
     "src/lib/assignPicker.test.ts",
@@ -547,6 +549,8 @@
     "src/lib/workoutTemplates.ts",
     "src/lib/workoutTemplates.test.ts",
     "src/lib/planPrefill.ts",
-    "src/lib/planPrefill.test.ts"
+    "src/lib/planPrefill.test.ts",
+    "src/lib/longView.ts",
+    "src/lib/longView.test.ts"
   ]
 }

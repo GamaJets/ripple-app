@@ -88,7 +88,7 @@ import type { WorkoutEntry } from '../../src/lib/mockData';
 import {
   monthlyHistory, monthKey, monthLabel, yearRows, peakVolume, intensity, bestMonth, trainedMonths,
   gaps, longestGap, monthsSinceLast, historySpan, stageOf, historyNote, lifetimeTotals,
-  prTimeline, volumeArc, MAX_MONTHS, monthLabels,
+  prTimeline, volumeArc, peakEstimateMonth, MAX_MONTHS, monthLabels,
   type MonthCell, type YearRow,
 } from '../../src/lib/longView';
 import { tonnageNote } from '../../src/lib/bodyweightSets';
@@ -429,6 +429,11 @@ export default function History() {
   const life = lifetimeTotals(log, weightSeries)!;
   const peak = peakVolume(cells);
   const best = bestMonth(cells);
+  // A separate pick from `best`, not a field off it: the heaviest month by
+  // tonnage and the month holding the best estimated single are answers to two
+  // different questions and are routinely two different months. See
+  // `peakEstimateMonth` in src/lib/longView.ts.
+  const peakEst = peakEstimateMonth(cells);
   const active = trainedMonths(cells).length;
   const breaks = gaps(cells);
   const worstGap = longestGap(cells);
@@ -549,6 +554,84 @@ export default function History() {
         { label: 'Best Month', value: fig(volumeIn(best?.volumeKg, wu)?.toLocaleString()), unit: best?.volumeKg != null ? wu : undefined, delta: best ? monthLabel(best.key) : undefined },
         { label: 'Lifts', value: whole ? fig(life.lifts) : fig(null), delta: whole ? 'with weights' : 'not all read' },
       ]} />
+
+      {/* ── the three figures the library already returned and nothing drew ──
+          `topLift`, `best1RM` and `kcal` are computed for every month in
+          `cellFrom` (src/lib/longView.ts) and a lifetime `kcal` in
+          `lifetimeTotals`. Only the coach's screen rendered any of them —
+          app/(trainer)/client-training.tsx names the top lift of the biggest
+          month — so a member's own history threw all three away. Nothing below
+          recomputes anything: each figure is read straight off the MonthCell or
+          Lifetime the calls above already returned.
+
+          The month named is the heaviest ON THIS CHART, which is what the KPI
+          above already says, and it survives a truncated read: `wholeMonths`
+          drops the part-month the read stopped inside, so every month left is a
+          whole month and its figures are totals rather than floors. */}
+      {best && best.volumeKg != null && best.days != null ? (
+        <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg }}>
+          Your heaviest month on this chart is {monthLabel(best.key)}: {num(volumeIn(best.volumeKg, wu))} {wu} over{' '}
+          {best.days} day{best.days === 1 ? '' : 's'}
+          {best.topLift ? `, most of it ${movement(best.topLift)}` : ''}.
+        </Text>
+      ) : null}
+
+      <View style={{ height: sp.lg }} />
+      <KpiRow items={[
+        {
+          // The wording the coach's panel uses for the same arithmetic —
+          // "Best Est. 1RM", and `set` / `best read` beneath it — because
+          // src/ui/ExerciseHistoryPanel renders that on
+          // app/(trainer)/client-training.tsx and it is at the bottom of THIS
+          // screen too. One estimate, one name for it.
+          label: 'Best Est. 1RM',
+          value: fig(est1RMIn(peakEst?.best1RM, wu)),
+          unit: peakEst?.best1RM != null ? wu : undefined,
+          // "set" claims this is the best there has ever been, which only a
+          // whole read supports; under truncation it is the best of the months
+          // this page could reach, and that is a different sentence.
+          delta: peakEst ? `${whole ? 'set' : 'best read'} ${monthLabel(peakEst.key)}` : undefined,
+        },
+        {
+          // A lifetime sum, so it goes blank with the hero and the two lifetime
+          // counts above it for the same reason they do: a total added up over
+          // the part of a lifetime that fitted in one query is not a smaller
+          // truth, it is a wrong number.
+          label: 'Energy Logged',
+          value: whole ? num(life.kcal) : fig(null),
+          unit: whole && life.kcal != null ? 'kcal' : undefined,
+          delta: whole ? 'where a figure was recorded' : 'not all read',
+        },
+      ]} />
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+        {/* An estimate, and it says so — the same thing src/ui/ExerciseHistory.tsx
+            says beside its own copy of this figure. This app holds no tested
+            max anywhere: `est1RM` in src/lib/streaks.ts is Epley over a set
+            somebody actually logged, and `MonthCell.best1RM` is the best single
+            such set in the month across every movement — so the lift behind it
+            is whichever one is loaded heaviest, and it is not necessarily the
+            top lift named above, which is picked by volume. */}
+        Worked out from your best single set of that month, across every lift — an estimate from the reps
+        you logged and never a max you tested. It is not always the movement named above: that one carried
+        the most volume, this one was the heaviest single effort.
+      </Text>
+      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+        {/* Deliberately weaker than the tonnage beside it, and the weakest
+            sentence on the page. `cellFrom` sums `e.kcal` and nothing else: a
+            session with no figure adds nothing rather than a zero (see the note
+            on MonthCell.kcal), which keeps "no watch" apart from "no effort"
+            and makes the total a floor. Where the figures come from is written
+            in app/(client)/workouts.tsx: a watch's, a machine's, one typed in,
+            or MET × bodyweight × hours from `cardioKcal` — a model, not a
+            measurement — and the strength runner writes none at all, because
+            the expression that used to invent one had no bodyweight, no heart
+            rate and no measurement of any kind in it. */}
+        Energy adds up only the sessions that carried a calorie figure — from a watch, from a machine, one
+        you typed in, or one worked out from your weight and how long the activity ran. A session without
+        one adds nothing rather than a zero, and lifting records reps and weight rather than a burn, so
+        this is less than you have burned and not a measurement of it.
+      </Text>
+
       {/* `earlier` is derived from `span`, which under truncation is the span
           of what was READ rather than of the member's training — so the count
           would be wrong and the notice at the top already says more than this

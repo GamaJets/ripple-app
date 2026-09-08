@@ -609,3 +609,27 @@ export function volumeArc(cells: MonthCell[]): Arc | null {
 export function tonnes(kg: number | null): number | null {
   return kg == null ? null : Math.round(kg / 100) / 10;
 }
+
+/**
+ * The month whose best single-set estimate is the highest in the series.
+ *
+ * Sibling of `bestMonth`, and deliberately a SEPARATE pick rather than a field
+ * read off the one it returns. The heaviest month by tonnage and the month
+ * holding the best estimated single are answers to two different questions and
+ * are routinely different months: a deload block of high-rep work can carry a
+ * member's biggest tonnage of the year while their best single sits in a peak
+ * week that was half the volume. Reading `bestMonth(cells).best1RM` would print
+ * the second question's answer off the first question's month.
+ *
+ * Null when no month carries an estimate at all — a history of cardio,
+ * bodyweight work nobody has been weighed for, or holds, none of which produce
+ * one. Never 0: there is no estimate, and "0 kg" is a lift nobody did.
+ */
+export function peakEstimateMonth(cells: MonthCell[]): MonthCell | null {
+  let best: MonthCell | null = null;
+  for (const c of cells) {
+    if (c.best1RM == null) continue;
+    if (best == null || c.best1RM > (best.best1RM ?? -1)) best = c;
+  }
+  return best;
+}

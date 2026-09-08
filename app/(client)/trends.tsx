@@ -19,7 +19,11 @@ import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
-import { volumeIn, est1RMIn, weightDeltaIn, convertedNote } from '../../src/lib/units';
+import { volumeIn, est1RMIn, weightDeltaIn, liftLabel, convertedNote } from '../../src/lib/units';
+// The verdict this app already produces for every lift, and the two vocabularies
+// it is read out in. See the section at the bottom of this screen for why the
+// verdict is a reading of ONE session and is never worded as a trend.
+import { suggestProgression, ACTION_LABEL, ACTION_READING } from '../../src/lib/progression';
 import { deltaLabel, deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { shortDayLabel } from '../../src/lib/bodyFigures';
 import { est1RM } from '../../src/lib/streaks';
@@ -27,7 +31,7 @@ import { entryTonnage, setLoadKg, tonnageNote, type BodyweightHistory, type Tonn
 import { useClientData } from '../../src/ui/clientData';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { startOfWeek } from '../../src/lib/weekStart';
 import { fmtAxisDay } from '../../src/lib/format';
 // The local calendar day of an instant, so one movement done twice in an
@@ -139,12 +143,17 @@ export default function Trends() {
   }, [log, weightSeries, now]);
   const maxVol = Math.max(1, ...weeks.map((w) => w.vol));
 
-  // Exercises that have logged sets (skip pure cardio) → trend of best est-1RM.
-  const exercises = useMemo(() => {
+  // Every movement in the log with sets on it (skip pure cardio). Unsliced,
+  // because the "Lift by Lift" section below has to name the movements that got
+  // no verdict — and a list capped at 24 for a row of chips would have made
+  // that a lie about the 25th.
+  const movements = useMemo(() => {
     const names: string[] = [];
     for (const e of log) { if (e.sets && e.sets.length && !names.includes(e.exercise)) names.push(e.exercise); }
-    return names.slice(0, 24);
+    return names;
   }, [log]);
+  // → trend of best est-1RM. The chip row is what the 24 is for.
+  const exercises = useMemo(() => movements.slice(0, 24), [movements]);
   const [sel, setSel] = useState<string | null>(null);
   const selName = sel || exercises[0] || null;
 
@@ -209,6 +218,34 @@ export default function Trends() {
   const weekNote = tonnageNote({ kg: thisWeek.vol, unknownSets: thisWeek.unpriced });
   const anyVolume = weeks.some((w) => w.vol > 0);
   const bestWeek = weeks.reduce((m, w) => (w.vol > m.vol ? w : m), weeks[0]);
+
+  // ── which lift is where ──────────────────────────────────────────────────
+  //
+  // The chart above says the week's tonnage moved and never says which movement
+  // moved it. `suggestProgression` in src/lib/progression.ts has answered that
+  // per lift since it was written and nothing on this screen had ever asked it.
+  //
+  // What it answers, exactly: `latestByExercise` keeps the MOST RECENT logged
+  // entry for each movement and reads that one entry. So a verdict is a reading
+  // of one session — the top-weight sets of it against a rep range — and it is
+  // not a direction of travel, however much a screen called Trends wants it to
+  // be. Nothing below is allowed to word it as one.
+  const verdicts = useMemo(() => suggestProgression(log, wu), [log, wu]);
+  // Six, because this is a summary and Targets is the list. Named as a count
+  // with the rest said out loud rather than trailing off: a lift that drops
+  // silently off the end of a list reads as a lift that is fine.
+  const VERDICTS_SHOWN = 6;
+  const shownVerdicts = verdicts.slice(0, VERDICTS_SHOWN);
+  // Movements with sets on them that got no verdict at all. `liftedSets` in
+  // src/lib/progression.ts keeps only sets with BOTH reps and a load on them,
+  // and drops holds outright — so a pull-up done by somebody who has never been
+  // weighed, a plank and a bodyweight squat all fall out of the answer above.
+  // They are real training and the rule simply has nothing to say about them,
+  // which is not the same thing as a lift that is going fine.
+  const noVerdict = useMemo(
+    () => movements.filter((n) => !verdicts.some((v) => v.exercise === n)),
+    [movements, verdicts],
+  );
   const G = layout.gutter;
 
   return (
@@ -377,6 +414,114 @@ export default function Trends() {
               )}
             </>
           )}
+        </Section>
+
+        <Rule />
+
+        {/* ── which lift is where ─────────────────────────────────────────
+            The two charts above say the tonnage moved and never say which
+            movement moved it. This does — off `suggestProgression`, which has
+            produced exactly this reading per lift since it was written and
+            which nothing on this screen had ever called.
+
+            Three things it is careful not to say, each of them a sentence the
+            data does not support:
+
+            · Not a trend. The rule reads ONE session per movement, so every
+              line here describes a day. "Stalled" and "plateaued" are claims
+              about a run of sessions and none of them is available here — the
+              wording is `ACTION_READING`, which is written in the past tense
+              about that single session on purpose.
+            · Not a total. Under a truncated read the log holds the newest
+              sessions (workoutLog orders `performed_at` descending), so every
+              verdict below is drawn from a real latest session — but a movement
+              trained only before the cut is absent altogether, which makes the
+              LIST a floor even though each line on it is whole.
+            · Not silent about what it skipped. A movement whose sets carry no
+              load gets no verdict, and it is named rather than dropped. */}
+        <Section>
+          {/* A description of the ordering rather than a claim about the data,
+              so it is true under every read state that has rows to order. */}
+          <SectionHead title="Lift by Lift" note={verdicts.length ? 'Heaviest first' : undefined} />
+          {/* Four arms, and each of the two bad ones splits again on whether
+              there are rows underneath it. `useWorkoutLog` does not clear `log`
+              on a failed refresh, so "there is nothing to read" printed above a
+              list of lifts is the contradiction app/(client)/progression.tsx
+              already had to write its way out of — it names what the rows ARE
+              instead. Same answer here. */}
+          {!logKnown ? (
+            <Text style={{ ...ty.label, color: t.ink3, marginBottom: verdicts.length ? sp.md : 0 }}>
+              {logStatus === 'loading'
+                ? verdicts.length
+                  ? 'Still reading your training log — these are the lifts it was already holding, so your last session may not be in them yet.'
+                  : 'Reading your training log…'
+                : logStatus === 'partial'
+                ? 'More logged sets than this screen can read at once. The log comes back newest first, so each line below is drawn from a real last session — but a movement you last trained before the read stopped is not on the list at all, which makes this at least what you have been training rather than all of it.'
+                : verdicts.length
+                ? 'We couldn’t read your training log, so the lines below come from what this phone was already holding and may not include your last session.'
+                : 'We couldn’t read your training log, so there is nothing to read lift by lift. This is not a record with nothing in it.'}
+            </Text>
+          ) : null}
+          {verdicts.length === 0 ? (
+            logKnown ? (
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                Nothing here yet — this reads your last session of each lift, and it needs a set with a
+                weight on it to read.
+              </Text>
+            ) : null
+          ) : (
+            <>
+              {shownVerdicts.map((v, i) => (
+                <View key={v.exercise}
+                  style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                  <View style={{ flex: 1 }}>
+                    {/* The chip row above reads in the member's language and
+                        keys on the English name; the same rule here. */}
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, textTransform: 'capitalize' }}>{movement(v.exercise)}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {shortDayLabel(v.at)} · {fig(liftLabel(v.lastWeight, wu))} × {v.lastReps}
+                    </Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {ACTION_READING[v.action]}
+                    </Text>
+                  </View>
+                  <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>{ACTION_LABEL[v.action]}</Text>
+                </View>
+              ))}
+              {verdicts.length > shownVerdicts.length ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  Your {shownVerdicts.length} heaviest lifts. The other {verdicts.length - shownVerdicts.length} read
+                  the same way and are all on Targets.
+                </Text>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                Each line reads your most recent session of that lift and nothing before it, so it says where
+                that day landed rather than where the lift is heading. One session is not a direction and two
+                are not either — the chart above is where a movement over time is drawn.
+              </Text>
+            </>
+          )}
+          {/* Said whether or not there were verdicts, and gated on the read
+              like everything else: naming what got no reading is a statement
+              about the member's log, and a log that did not finish loading
+              cannot support one. */}
+          {logKnown && noVerdict.length ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              No reading for {noVerdict.slice(0, 4).map(movement).join(', ')}
+              {noVerdict.length > 4 ? `, and ${noVerdict.length - 4} more` : ''}. This rule works from the
+              weight on the bar, and a set done at your own bodyweight or held for time does not carry one —
+              so there is nothing here to read, which is not the same as nothing to worry about.
+            </Text>
+          ) : null}
+          {/* Not gated on the read. The screen that turns these readings into a
+              load on a bar is worth reaching from here in every state that has
+              a reading in it, and it carries its own notice about a read that
+              did not finish. */}
+          {verdicts.length ? (
+            <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+              <Ghost label="See Your Targets" onPress={() => router.push('/(client)/progression')} />
+            </View>
+          ) : null}
         </Section>
       </ScrollView>
     </SafeAreaView>
