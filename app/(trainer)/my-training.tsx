@@ -508,7 +508,18 @@ export default function MyTraining() {
             </Section>
           ) : status === 'partial' ? (
             <Section>
-              <PartialRead what="sessions of your own" shown={log.length} onPress={reload} />
+              {/* "exercises", not "sessions". `log` is `useWorkoutLog`'s rows and
+                  that provider's own read says what one row is — "One row per
+                  set, not per session" (src/ui/workoutLog.tsx) — so one gym visit
+                  files as many rows as it had movements. This banner prints
+                  `shown` as "Showing the first N <what>", and calling a thousand
+                  exercise rows a thousand sessions is the arithmetic
+                  src/lib/streaks.ts refuses everywhere else: `days` is the only
+                  provable unit for a visit, and `wk.workouts` — the same
+                  `recent.length` count — is labelled "Exercises" forty lines
+                  below this one. A coach reading "the first 1,000 sessions of
+                  your own" is being told they have trained a thousand times. */}
+              <PartialRead what="exercises of your own" shown={log.length} onPress={reload} />
             </Section>
           ) : null}
 

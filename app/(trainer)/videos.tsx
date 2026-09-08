@@ -73,6 +73,7 @@ import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/t
 import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem, type Visibility } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useAuth } from '../../src/ui/auth';
 import { coverageFor, coverageLine } from '../../src/lib/videoCoverage';
 import { clipOwner, canManageClip, canRemoveClip } from '../../src/lib/clipOwner';
@@ -411,10 +412,20 @@ export default function TrainerVideos() {
   // provider's own marker), and only off a read that landed. With nothing
   // saved there is nothing to say, `coverageLine` returns null for an empty
   // list, and the whole section is absent rather than invented.
+  //
+  // `isWhole`, and not `=== 'error' || === 'loading'`, which is what stood here
+  // and which admits the third status that is not a whole read. `readLibrary`
+  // (src/lib/templateLibrary.ts:153) reads `.limit(capLimit())` and answers
+  // 'partial' when the page came back at the ceiling, so under it
+  // `savedTemplates` is a PREFIX of the coach's library — and the section this
+  // feeds counts across it. A prefix of the programmes produces a SHORTER list
+  // of movements to film, so the coach is told there is less to do than there
+  // is, which is the one direction this section must never be wrong in.
+  // `check:whole` matches the `!== 'error'` spelling and cannot see this one.
   const savedTemplates = useMemo(
-    () => (tplStatus === 'error' || tplStatus === 'loading'
-      ? null
-      : templates.filter((tpl) => !tpl.id.startsWith('seed_'))),
+    () => (isWhole(tplStatus)
+      ? templates.filter((tpl) => !tpl.id.startsWith('seed_'))
+      : null),
     [tplStatus, templates],
   );
   // Every movement this coach has written into a template, however they spelt
@@ -436,7 +447,14 @@ export default function TrainerVideos() {
       : null),
     [cat.status, cat.rows],
   );
-  const coverage = status === 'error' || status === 'loading' || !savedTemplates ? null : coverageFor(
+  // `isWhole(status)`, for the clip library, and it is the same correction the
+  // hero's note above already carries: under 'partial' `vids` is a page of a
+  // longer library, so a movement whose clip fell off the end is reported here
+  // as having NOTHING TO SHOW and counted into "N to film". That is not a
+  // smaller number, it is a false statement about work the coach has already
+  // done — the hero's own comment says so about the very same rows, and this
+  // was the half of the screen it did not reach.
+  const coverage = !isWhole(status) || !savedTemplates ? null : coverageFor(
     savedTemplates.flatMap((tpl) => tpl.program.days.flatMap((d) => d.exercises.map((e) => e.name))),
     vids,
     myId,
