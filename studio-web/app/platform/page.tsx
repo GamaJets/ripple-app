@@ -149,7 +149,12 @@ export default function Platform() {
   if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
   const shell = (children: React.ReactNode) => (
-    <Shell me={me} gymName={null} platformAdmin={admin === 'yes'} current="/platform">{children}</Shell>
+    // `gymScoped={false}` because this screen is not one gym's. It passes
+    // `gymName={null}` permanently and asks no `tenants` read at all, so the
+    // rail's label has no question to answer here — and without this it would
+    // report a read as still running that nobody started. See the prop's note
+    // in components/Shell.tsx.
+    <Shell me={me} gymName={null} gymScoped={false} platformAdmin={admin === 'yes'} current="/platform">{children}</Shell>
   );
 
   // ── the profile read, before the allowlist read ──────────────────────

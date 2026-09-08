@@ -71,6 +71,7 @@ import { gymDateText } from '@lib/gymWhen';
 import { fetchVisits } from '@lib/gymVisits';
 import { fetchClasses } from '@lib/gymSchedule';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+import { gymLink, noGymNote } from '@lib/gymLink';
 import { parseGymZone, gymWallValue, instantAtGym } from '@lib/gymZone';
 import { readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
@@ -78,6 +79,7 @@ import { fetchSessions } from '@lib/gymSessions';
 import { buildDossiers, sliceLoading, sliceReady, sliceFailed, slicePartial, type Slice, type MemberBooking } from '@lib/memberView';
 import { bandTitle, bandNote, DRIFT_LABEL, type ActivityEvent, type Drift } from '@lib/clientDrift';
 import { Banner } from '@/components/Banner';
+import { num as groupNum } from '@/lib/num';
 import {
   buildGymRetention, headline, suppressionNote, activityFor,
   type RetentionRecord, type RetentionRow, type Cohort, type GymRetention,
@@ -209,16 +211,17 @@ export default function RetentionPage() {
       if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
       setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) {
-        setWide({
-          memberships: sliceReady([]), visits: sliceReady([]),
-          bookings: sliceReady([]), sessions: sliceReady([]),
-        });
-        setContacts(sliceReady([]));
-        return;
-      }
+      // `sliceReady([])` is a read that landed whole and returned nothing, and
+      // five of them turn this screen into a gym that is keeping everybody: no
+      // memberships means no lapsed members, no visits means nobody drifting,
+      // and `bandTitle` prints those bands as empty rather than as unknown. A
+      // clean retention board is the one thing an owner would never chase. It
+      // was made out of a fact about the reader's profile — nothing was asked.
+      // See src/lib/gymLink.ts.
+      const link = gymLink(who?.tenantId, 'memberships, visits or bookings');
+      if (!link.linked) return;
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, timezone').eq('id', who.tenantId).single();
+        .from('tenants').select('name, timezone').eq('id', link.tenantId).single();
       // supabase-js resolves on a database error, so this is checked rather
       // than assumed: a null name here means "not read", not "unnamed gym".
       if (live) {
@@ -287,6 +290,20 @@ export default function RetentionPage() {
         <h1>Not your console</h1>
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           Retention reads the whole roster and every member&rsquo;s attendance, so it is owner-only.
+        </p>
+      </Shell>
+    );
+  }
+
+  // Before the bands, because an empty band is a finding here. This screen
+  // exists to say who to ring, and a board with nobody on it reads as a gym
+  // with nothing to chase — the one answer nobody follows up.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/retention">
+        <h1>Retention</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('memberships, visits or bookings')}
         </p>
       </Shell>
     );
@@ -736,8 +753,8 @@ function BandBar({ total, parts }: {
   parts: { key: string; label: string; n: number; colour: string }[];
 }) {
   const W = 600, H = 26;
-  const label = `The roster in four bands, ${total} members in total: `
-    + parts.map((p) => `${p.n} ${p.label.toLowerCase()}`).join(', ') + '.';
+  const label = `The roster in four bands, ${groupNum(total)} members in total: `
+    + parts.map((p) => `${groupNum(p.n)} ${p.label.toLowerCase()}`).join(', ') + '.';
 
   let x = 0;
   const rects = parts.map((p) => {
@@ -1485,9 +1502,29 @@ function driftColour(d: Drift): string {
 
 /* ── shared bits (same shapes as the Members and Money screens) ────────────── */
 
-/** A count, or null so the KPI draws a dash. Never String(0) for an unknown. */
+/**
+ * A count, or null so the KPI draws a dash. Never String(0) for an unknown.
+ *
+ * The null contract is this function's whole reason to exist and is kept:
+ * `Kpi` documents `text` as "an ALREADY-FORMATTED figure, and null means 'not
+ * recorded'", so a dash has to arrive as null and not as the string "—".
+ *
+ * What changed is the spelling. This was `String(n)`, which groups nothing —
+ * so a gym with 1,204 members read "1204" on the Roster KPI, four lines above
+ * a DataTable footer that counts its rows with `toLocaleString`. Kpi's own
+ * fallback for a bare `value` is `toLocaleString()`; this shadow was the one
+ * path into it that skipped that, and it was reached by seven figures on this
+ * screen.
+ *
+ * It is worth noting how it survived: check-numbers.mjs treats any line with
+ * `num(` on it as formatted, and this local has the same NAME as the console's
+ * real formatter in lib/num.ts. A same-named shadow that does less is
+ * invisible to that gate by construction, which is a hole in the gate and not
+ * a licence — the honest fix is for the name to mean one thing, so this now
+ * delegates rather than reimplementing.
+ */
 function num(n: number | null): string | null {
-  return n == null ? null : String(n);
+  return n == null ? null : groupNum(n);
 }
 
 function pct(r: number): string {

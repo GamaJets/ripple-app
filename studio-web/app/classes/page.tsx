@@ -93,6 +93,7 @@ import {
   type GymClass, type RosterEntry,
 } from '@lib/gymSchedule';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+import { gymLink, noGymNote } from '@lib/gymLink';
 // The reader's locale, the gym's zone. `groupSlots` below already buckets on
 // the gym's weekday and hour; the tables were still printing each class on the
 // reader's clock, so the same 06:00 class read 02:00 in London and was grouped
@@ -104,6 +105,7 @@ import { summariseClassRows, type ClassSummaryRow, type ClassRates } from '@lib/
 import { branchSpan, branchNote } from '@lib/ownedSites';
 // Escape, focus and the tab trap these dialogs never had.
 import { useDialog, dialogPanel } from '@/lib/dialog';
+import { num } from '@/lib/num';
 
 const DAY = 86400000;
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -269,11 +271,19 @@ export default function Classes() {
       if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
       setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) { setClasses([]); setTrainers([]); setUpcoming(0); return; }
+      // `[]` here is the exact substitution the `load` above spends a paragraph
+      // refusing to make: "A read that failed is null, never []. [] is the gym
+      // saying it ran none; null is nobody knowing." A read nobody SENT is the
+      // second of those too. This branch made the gym say it ran no classes at
+      // all, gave it a fill rate of nothing and put `0` — not null — on "still
+      // to run", while the `<Fetched>` line above said the window had never
+      // been read. Nothing was asked. See src/lib/gymLink.ts.
+      const link = gymLink(who?.tenantId, 'classes');
+      if (!link.linked) return;
       // The error is now read off the result. Not because the name matters — it is
       // a label — but because "we could not ask" and "there is no gym" must not
       // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
-      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', link.tenantId).single();
       if (live) {
         setGymName(tErr ? null : t?.name ?? null); setGymNameUnread(!!tErr);
         // The gym's own wall clock. A timetable repeats by weekday and hour, and
@@ -434,7 +444,23 @@ export default function Classes() {
     );
   }
 
-  const tenantId = me.tenantId!;
+  // Before the fill rates — and it is what lets the line below read
+  // `me.tenantId` instead of asserting `me.tenantId!`. Every figure on this
+  // screen is a rate — filled, shown, no-showed — and a rate computed over no
+  // classes is a judgement on coaches who ran a full week, printed because the
+  // reader's account lost its gym.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/classes">
+        <h1>Classes</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('classes')}
+        </p>
+      </Shell>
+    );
+  }
+
+  const tenantId = me.tenantId;
   // `refresh` is the hook's, not a second reader — see /money for the same note.
 
   // err is only ever set by a finished load, so a state still null once it is
@@ -903,7 +929,7 @@ function Waiting({ classes, unread, nameOf, zone, onOpen }: {
   return (
     <Section
       title="Waiting lists"
-      sub={`${total} ${total === 1 ? 'person' : 'people'} across ${queued.length} ${queued.length === 1 ? 'class' : 'classes'}. Demand the gym did not sell — deliberately out of the fill rate, and therefore invisible without this. A place freed at the desk is given away from the register; the app only promotes somebody when a member cancels on their own phone.`}
+      sub={`${num(total)} ${total === 1 ? 'person' : 'people'} across ${num(queued.length)} ${queued.length === 1 ? 'class' : 'classes'}. Demand the gym did not sell — deliberately out of the fill rate, and therefore invisible without this. A place freed at the desk is given away from the register; the app only promotes somebody when a member cancels on their own phone.`}
     >
       <DataTable noun="classes with a waiting list" rows={queued} columns={cols} rowKey={(c) => c.id} empty="Nobody is waiting for a place." />
     </Section>

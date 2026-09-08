@@ -86,6 +86,7 @@ import { useMonthTick } from '@/lib/monthTick';
 import { fetchGymZone } from '@lib/gymZone';
 import { toCsv } from '@lib/gymExport';
 import { readTenant } from '@/lib/currency';
+import { gymLink, noGymNote } from '@lib/gymLink';
 import { saveText } from '@/lib/save';
 
 /** Four quarters and six months. A gym filing quarterly wants last quarter and
@@ -195,9 +196,17 @@ export default function Tax() {
       if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
       setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) { setProfileState('ready'); return; }
+      // `setProfileState('ready')` said the gym's tax profile had been READ and
+      // came back empty, over a query nobody sent — and `taxProfileLine` turns
+      // that into "nobody at this gym has said whether it is registered", a
+      // statement about a business's legal standing made out of a fact about
+      // the reader's profile. It stays 'loading' now and the branch below the
+      // role gate is what renders, so nothing here is reachable to contradict.
+      // See src/lib/gymLink.ts.
+      const link = gymLink(who?.tenantId, 'payments, invoices or costs to file');
+      if (!link.linked) return;
 
-      const t = await readTenant(supabase, who.tenantId);
+      const t = await readTenant(supabase, link.tenantId);
       if (!live) return;
       setGymName(t.name);
       setGymNameUnread(!!t.error);
@@ -206,12 +215,12 @@ export default function Tax() {
       // one read that keeps "the gym has not set a timezone" apart from "the
       // gym record would not load", and printing the first over the second
       // sends an owner to change a setting that is already correct.
-      const z = await fetchGymZone(supabase, who.tenantId);
+      const z = await fetchGymZone(supabase, link.tenantId);
       if (!live) return;
       setZone(z.zone);
       setZoneErr(z.error);
 
-      const tax = await readGymTaxProfile(supabase, who.tenantId);
+      const tax = await readGymTaxProfile(supabase, link.tenantId);
       if (!live) return;
       setProfile(tax.profile);
       setProfileState(tax.error ? 'error' : 'ready');
@@ -306,6 +315,22 @@ export default function Tax() {
         <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
           What the gym files, and what it says about its own registration, are the
           owner&rsquo;s. The database refuses this read independently.
+        </p>
+      </Shell>
+    );
+  }
+
+  // Before the books, and before the Export button beside them. This is the
+  // screen a quarter is filed from: a handoff packet built for an account with
+  // no gym on it would have carried an empty register, a nil total and a
+  // registration line nobody typed, and it exports as a file that leaves this
+  // console and lands on an accountant's desk saying the period is settled.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/tax">
+        <h1>Tax</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('payments, invoices or costs to file')}
         </p>
       </Shell>
     );

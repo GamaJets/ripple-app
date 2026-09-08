@@ -32,6 +32,7 @@ import { settledLanded } from '@lib/readLanded';
 import { changedFailure } from '@lib/changedRows';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchEquipment, capacityFor, type Equipment } from '@lib/gymEquipment';
+import { gymLink, noGymNote } from '@lib/gymLink';
 import { tellTheCancelledRoom, type ClassOffSend } from '@lib/classOff';
 import { classOffConfirmation } from '@lib/notifyCopy';
 
@@ -200,14 +201,22 @@ export default function Timetable() {
       if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
       setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) { setRaw({ classes: [], slots: [] }); return; }
+      // `{ classes: [], slots: [] }` is a board that was read and is genuinely
+      // empty: no classes this week, no one-to-ones, a fill rate of nothing out
+      // of nothing — on the screen a coach walks up to in order to find out
+      // which room to stand in. And the `<Fetched>` line above it said the
+      // board had never been read, so the page contradicted itself in two
+      // places at once. Nothing was asked; `raw` stays null and the branch
+      // below the staff gate is what renders. See src/lib/gymLink.ts.
+      const link = gymLink(who?.tenantId, 'classes or one-to-ones');
+      if (!link.linked) return;
       // supabase-js resolves with { data, error } rather than rejecting, so a
       // read that failed — or that RLS refused — arrives as t === null and is
       // indistinguishable from a tenant row that genuinely is not there. Dropping
       // the error leaves the sidebar saying "No gym linked", which the owner reads
       // as a fact about their account: they go off to re-link a gym that was
       // linked all along and never learn the read is what broke.
-      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', who.tenantId).single();
+      const { data: t, error: tErr } = await supabase.from('tenants').select('name, timezone').eq('id', link.tenantId).single();
       if (live) {
         setGymName(tErr ? null : (t?.name ?? null));
         setGymNameErr(tErr ? (tErr.message ?? 'Could not read which gym this account is linked to.') : null);
@@ -216,7 +225,7 @@ export default function Timetable() {
       }
       // The roster, independently of the board: it is not week-scoped, and a
       // membership read that fails must not empty the timetable with it.
-      fetchMemberships(supabase, who.tenantId)
+      fetchMemberships(supabase, link.tenantId)
         .then((rows) => { if (live) { setMembers(rows); setMembersErr(null); } })
         .catch((e: any) => { if (live) { setMembers(null); setMembersErr(e?.message ?? 'Could not read the member list.'); } });
     })();
@@ -356,7 +365,23 @@ export default function Timetable() {
   }
   const owner = me.role === 'owner';
 
-  const tenantId = me.tenantId!;
+  // Before the board — and it is what lets the line below read `me.tenantId`
+  // instead of asserting `me.tenantId!`. A coach on an account with no gym was
+  // otherwise shown an empty week and no register, and a register not taken on
+  // the day is not recoverable afterwards, so "there is nothing on today" is
+  // the most expensive wrong sentence this screen can print.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/timetable">
+        <h1>Timetable</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('classes or one-to-ones')}
+        </p>
+      </Shell>
+    );
+  }
+
+  const tenantId = me.tenantId;
   // `refresh` is the hook's, not a second reader. It was a local
   // `() => load(tenantId)`, handed to every write on this board, so adding a
   // class re-read the week WITHOUT moving the stamp under it.

@@ -36,6 +36,8 @@ import {
   type PassType, type PassKind,
 } from '@lib/gymPasses';
 
+import { gymLink, noGymNote } from '@lib/gymLink';
+
 const DAY = 86400000;
 
 /**
@@ -170,7 +172,14 @@ export default function Money() {
       if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
       setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) { setPlans([]); setMembers([]); setPayments([]); setPassTypes([]); return; }
+      // Four reads filled with `[]`, which every table below reads as a query
+      // that ran and found nothing: "No payments recorded in the last 30 days"
+      // under a nil MRR, on the screen the desk records money ON. Nothing was
+      // ever asked. The rows stay null and the branch below the role gate is
+      // what renders — see src/lib/gymLink.ts, which this screen's sibling
+      // /accounting is named in.
+      const link = gymLink(who?.tenantId, 'plans, memberships or payments');
+      if (!link.linked) return;
       // supabase-js resolves with { data, error } on a database error rather
       // than rejecting, so the error has to be read off the result, not caught.
       // Destructuring only `data` turned an RLS refusal into t === null, and
@@ -178,7 +187,7 @@ export default function Money() {
       // account, when the account is demonstrably linked (this is the branch
       // where tenantId exists) and all that failed was the name lookup.
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, currency, timezone').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency, timezone').eq('id', link.tenantId).single();
       if (live) {
         setGymName(tErr ? null : ((t as any)?.name ?? null));
         setCcy(tErr ? null : ((((t as any)?.currency ?? '') as string).trim().toUpperCase() || null));
@@ -241,7 +250,22 @@ export default function Money() {
     );
   }
 
-  const tenantId = me.tenantId!;
+  // This is what lets the line below read `me.tenantId` instead of asserting
+  // `me.tenantId!`. Every section on this screen WRITES — a plan, a membership,
+  // a payment, a correction — against that id, and the assertion was the only
+  // thing standing between a null tenant and four write forms pointed at it.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/money">
+        <h1>Money</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('plans, memberships or payments')}
+        </p>
+      </Shell>
+    );
+  }
+
+  const tenantId = me.tenantId;
   const sum = plans && members && payments ? summarise(payments, members, plans) : null;
   // The currency each SUM is actually in. A set with no rows states nothing, so
   // there is nothing to disagree with and the gym's own currency is the honest

@@ -46,6 +46,7 @@ import {
   type GymMemberRecord, type MemberRecordPatch,
 } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
+import { gymLink, noGymNote } from '@lib/gymLink';
 // Totals that never cross a currency. /analytics solves the same problem with
 // the same function; this tile used a bare `reduce` and the gym's current code.
 import { paidTotal, paidNote } from '@lib/gymPaidTotal';
@@ -213,16 +214,17 @@ export default function Members() {
       if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
       setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) {
-        setRec({
-          memberships: sliceReady([]), payments: sliceReady([]), visits: sliceReady([]),
-          bookings: sliceReady([]), sessions: sliceReady([]), passes: sliceReady([]),
-          invites: sliceReady([]),
-        });
-        return;
-      }
+      // `sliceReady([])` is the strongest positive claim this codebase has: it
+      // is a read that landed WHOLE and returned nothing. Seven of them for an
+      // account with no gym on it, and `buildDossiers` then builds a roster of
+      // nobody — no members, nobody behind on payment, nobody who has not been
+      // in — for an owner whose gym is full. Nothing was asked. The slices stay
+      // loading and the branch below the role gate is what renders. See
+      // src/lib/gymLink.ts.
+      const link = gymLink(who?.tenantId, 'members, memberships or visits');
+      if (!link.linked) return;
       const { data: t, error: tErr } = await supabase
-        .from('tenants').select('name, currency, timezone').eq('id', who.tenantId).single();
+        .from('tenants').select('name, currency, timezone').eq('id', link.tenantId).single();
       // supabase-js resolves on a database error, so this is checked rather
       // than assumed: a null name here means "not read", not "unnamed gym".
       if (live) {
@@ -376,6 +378,22 @@ export default function Members() {
     );
   }
 
+  // Before the roster, because the roster is the claim. Every tile, the search
+  // and all seven tables below are built from `rec`, and an owner reading "no
+  // members" off this screen concludes their gym has lost its roster — not
+  // that their own account has lost its gym, which is the thing somebody can
+  // actually put right.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/members">
+        <h1>Members</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('members, memberships or visits')}
+        </p>
+      </Shell>
+    );
+  }
+
   const warning = partialWarning(rec);
   // A separate sentence from the one above, deliberately. "We could not read the
   // door log" and "we read the first thousand visits of more" are two different
@@ -419,9 +437,12 @@ export default function Members() {
   // honest here, and the gym-wide view at /retention gates the same two
   // figures the same way.
   const doorLive = active === true;
-  // Non-null after the role gate above: this screen refuses anybody without a
-  // tenant long before it reaches a write.
-  const tenantId = me.tenantId!;
+  // Non-null because the no-gym branch above returned. This said "after the
+  // ROLE gate", which refuses a non-owner and says nothing about a tenant — so
+  // the `!` was carrying a claim nothing on the page had checked, and an
+  // account with no gym reached every write form on this screen with an empty
+  // string in hand. The check exists now, so the assertion does not need to.
+  const tenantId = me.tenantId;
   const offTimetable = doorLive ? (reads?.filter((x) => x.r.stillTrainingOffTheTimetable) ?? null) : null;
   const absent = doorLive ? (reads?.filter((x) => x.r.absentFromLiveDoorLog) ?? null) : null;
 

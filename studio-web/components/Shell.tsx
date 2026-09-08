@@ -261,6 +261,7 @@ export function Shell({
   me,
   gymName,
   gymNameUnread,
+  gymScoped = true,
   platformAdmin,
   sites,
   current,
@@ -280,8 +281,33 @@ export function Shell({
    *
    * Optional, so a page that genuinely checks the read and shows a banner about
    * it need not pass anything.
+   *
+   * It stays a boolean about ONE query, and is deliberately not widened into a
+   * status. It cannot describe the moment before that query answers — every
+   * page starts it false — and the two answers that moment needs are read off
+   * `me` instead, in `gymNote` below. Widening this to `'loading' | 'failed'`
+   * would put the pending case back in the hands of thirty call sites that
+   * would each have to remember to set it before awaiting.
    */
   gymNameUnread?: boolean;
+  /**
+   * False on the one screen whose subject is not a gym.
+   *
+   * `gymNote` below reads a name-shaped hole as a read still in flight, which
+   * is right for the thirty-four routes that DO ask for the name — they all
+   * render this rail while that query is out. /platform never asks: it is the
+   * platform allowlist, above every tenant, and it passes `gymName={null}`
+   * permanently. Left to the default it would sit on "Reading the gym name…"
+   * for as long as the tab is open, which is the same class of untruth in the
+   * other direction — a read reported as pending that nobody ever started.
+   *
+   * So the slot is left empty there, and only there. That is not the "empty
+   * line" the comment beside the label argues against: that argument is about
+   * staying silent where there IS an answer, and here the screen is not asking
+   * the question. Defaulting to true keeps every other caller unchanged and
+   * makes this an opt-out a page has to state on purpose.
+   */
+  gymScoped?: boolean;
   /**
    * True only when `is_platform_admin()` came back true.
    *
@@ -322,6 +348,56 @@ export function Shell({
   // preference to drift out of step with the page being shown.
   const landing = (id: NavContext) => reachable.find((n) => n.context === id)?.href ?? '/';
   const who = me.fullName?.trim() || me.email || 'Signed in';
+  /*
+   * What the rail says where the gym's name goes, when there is no name.
+   *
+   * ── Extending the argument on `gymNameUnread` ─────────────────────────────
+   *
+   * That prop's own note above says a read that FAILED must not be printed as
+   * "No gym linked", because that is a statement about the owner's account
+   * assembled out of a query that did not return. Every word of it holds for a
+   * read that has not COME BACK YET, and there was no third answer for one.
+   *
+   * Every page in this console starts the flag at `useState(false)` and sets it
+   * only when the `tenants` row lands. So for the whole round trip between the
+   * profile resolving — which is when this component first renders, the pages
+   * gate on `me` above it — and that second read landing, `gymName` is null and
+   * `gymNameUnread` is false, and the rail on roughly twenty routes told the
+   * owner their account had no gym on it. Not on failure: on EVERY load, of
+   * every screen, for every account on the platform. A false sentence shown for
+   * a few hundred milliseconds on every page view is not a milder version of
+   * the failure case; it is the one people actually see.
+   *
+   * ── Why the two new answers are not two new props ─────────────────────────
+   *
+   * Because they are already sitting in `me`, and a prop threaded through
+   * thirty call sites is one more thing for a page to forget to pass — which is
+   * exactly how `gymNameUnread` came to be false during the load it was meant
+   * to describe. `gymScoped` above is a prop and is not a counter-example: it
+   * answers a different question, one page knows the answer and every other
+   * page keeps the default.
+   *
+   * `me.tenantId` is the column the sentence is ABOUT. Null is an account with
+   * no gym on it, which is the one case "No gym linked" was ever true for; a
+   * non-null id with no name yet is a name still in flight, and says so.
+   *
+   * `me.roleUnknown` has to be checked first, because `loadMe` returns
+   * `tenantId: null` for a profile read that failed — it says so in its own
+   * comment — so the id is not evidence of anything there. Reading it as "no
+   * gym" would rebuild the identical defect one query earlier: an account state
+   * invented out of a refused read. The page beside this rail already renders
+   * "We could not read your account" for that branch, and this now agrees with
+   * it rather than contradicting it in the corner of the screen.
+   */
+  const gymNote = !gymScoped
+    ? null
+    : gymNameUnread
+      ? 'Gym name unread'
+      : me.roleUnknown
+        ? 'Profile unread'
+        : me.tenantId
+          ? 'Reading the gym name…'
+          : 'No gym linked';
   /*
    * The site list, asked for here when the page did not hand one over.
    *
@@ -439,7 +515,9 @@ export function Shell({
         </div>
 
         {/* The gym, not the person — this console is scoped to one tenant, and
-            "no gym linked" is a state worth seeing rather than an empty line. */}
+            "no gym linked" is a state worth seeing rather than an empty line.
+            Which of the four things a missing name can mean is decided by
+            `gymNote` above; the argument for there being four is with it. */}
         <div
           className="mono"
           style={{
@@ -448,11 +526,7 @@ export function Shell({
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}
         >
-          {gymName ?? (
-            <span className="dash">
-              {gymNameUnread ? 'Gym name unread' : 'No gym linked'}
-            </span>
-          )}
+          {gymName ?? (gymNote ? <span className="dash">{gymNote}</span> : null)}
         </div>
 
         {/* Which of how many, and only when there is more than one. Null for a

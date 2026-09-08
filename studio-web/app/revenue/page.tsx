@@ -54,6 +54,7 @@ import { readByIds } from '@lib/idLookup';
 import { sumTaken, combineTaken, minorMoney, type Taken } from '@lib/coachMoney';
 import { Banner } from '@/components/Banner';
 import { Fetched, useFetched } from '@/components/Fetched';
+import { gymLink, noGymNote } from '@lib/gymLink';
 import { num1 } from '@/lib/num';
 
 /** The cash window. Ninety days is a quarter: long enough that a month with one
@@ -287,16 +288,20 @@ export default function Revenue() {
       if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
       setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) {
-        setPlans([]); setMembers([]); setTakings([]); setPacks({ packs: [], renewals: [] }); setPromos([]);
-        return;
-      }
+      // Five reads filled with `[]` for an account carrying no gym, which is a
+      // query that RAN and found nothing to everything below: an empty price
+      // book, no memberships, a till that took nothing in ninety days and a
+      // forecast of zero — a full month's trading reported as flat, assembled
+      // out of a fact about the reader's profile. See src/lib/gymLink.ts; the
+      // slices stay unread and the branch below the role gate says why.
+      const link = gymLink(who?.tenantId, 'plans, memberships or payments');
+      if (!link.linked) return;
       // supabase-js resolves with { data, error } on a database error rather
       // than rejecting, so the error is read off the result, not caught. The
       // name is cosmetic here and the failure is reported by the sidebar's own
       // dash; nothing on this page is computed from it.
       const { data: t, error } = await supabase
-        .from('tenants').select('name').eq('id', who.tenantId).single();
+        .from('tenants').select('name').eq('id', link.tenantId).single();
       if (live) setGymName(error ? null : ((t as any)?.name ?? null));
       if (live) setGymNameUnread(!!error);
     })();
@@ -364,6 +369,22 @@ export default function Revenue() {
         <p style={{ color: 'var(--ink2)', marginTop: 10 }}>
           This screen carries every price the gym charges and everything it has
           been paid, so it is owner-only.
+        </p>
+      </Shell>
+    );
+  }
+
+  // Before the figures, because there are none: nothing below this line was
+  // asked for. The tiles read a dash for an unread slice, which is right, but
+  // the tables under them print "no priced membership" and "nothing taken",
+  // and an owner who reads those goes looking for their money rather than for
+  // whoever can put the gym back on their account.
+  if (!me.tenantId) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/revenue">
+        <h1>Revenue</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 10, maxWidth: '62ch' }}>
+          {noGymNote('plans, memberships or payments')}
         </p>
       </Shell>
     );
