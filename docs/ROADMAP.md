@@ -1,7 +1,9 @@
 # Roadmap
 
 > **Launch gate:** [LAUNCH-CHECKLIST.md](LAUNCH-CHECKLIST.md) lists what has to
-> be put back before the apps go public. Email confirmation is currently OFF.
+> be put back before the apps go public. **Email confirmation is ON** —
+> confirmed against the live project on 8 Sep 2026, not inferred from this
+> file. See the note below.
 
 The plan for turning three apps and a database into the thing the marketing
 site claims: one operating record, read three ways.
@@ -578,12 +580,27 @@ not ready to be worked.
 
 ### Could not be verified from this repo — do not brief as either
 
-- **Email confirmation on/off.** A Supabase Auth dashboard setting with no
-  representation in this tree. The header of this file and
-  `docs/LAUNCH-CHECKLIST.md:15` both say OFF as of 26 Aug 2026; neither is
-  evidence of the live state today. Somebody has to open the dashboard.
-- **Whether the six realtime tables are actually in the publication on the LIVE
-  project.** `supabase/parts/220` adds them inside an exception-swallowing loop
-  (`when others then null`), which is right for a bundle that must apply against
-  partial schemas and means a failure there is silent. The migration is written;
-  that it took is a separate question, answerable only against the live database.
+- ~~**Email confirmation on/off.**~~ **Settled 8 Sep 2026: it is ON.** The
+  claim was right that no file in this tree is evidence of it — but the live
+  project answers for itself without a dashboard. `GET /auth/v1/settings` is a
+  public endpoint and returned `mailer_autoconfirm: false`, which means a new
+  signup must confirm before the account works. Both this file's header and
+  `docs/LAUNCH-CHECKLIST.md` said OFF, dated 26 Aug 2026, and both were stale by
+  a week. The lesson is the one this document keeps re-learning in a new place:
+  a setting that lives outside the repo still has an authority you can query, and
+  "not verifiable in this repo" is not the same as "not verifiable".
+- ~~**Whether the six realtime tables are actually in the publication on the
+  LIVE project.**~~ **Settled 8 Sep 2026: all six are in.** `supabase/parts/220`
+  adds them inside an exception-swallowing loop (`when others then null`), which
+  is right for a bundle that must apply against partial schemas and means a
+  failure there would have been silent — so this genuinely was unanswerable from
+  the tree. Querying `pg_publication_tables` for `supabase_realtime` on LIVE
+  returns exactly `class_bookings`, `gym_classes`, `messages`, `notifications`,
+  `session_approvals`, `sessions`. The loop took.
+
+  The same query settles a second thing, and it is the more useful half:
+  `gym_visits` is **not** in the publication. A subscription to an unpublished
+  table succeeds and reports itself subscribed and then never fires, so the
+  console's door screen — the one screen whose arrivals are `gym_visits` — is
+  correctly on a poll rather than a socket. That was decided from part 220's
+  header and is now confirmed against the database.

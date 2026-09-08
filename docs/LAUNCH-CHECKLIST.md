@@ -12,12 +12,23 @@ Work top to bottom on the day the last of the three apps is approved and live.
 
 ---
 
-## 1. Turn email confirmation back on — SECURITY
+## 1. ~~Turn email confirmation back on~~ — DONE, verified 8 Sep 2026
 
 **Supabase → Authentication → Sign In / Providers → Supabase Auth → Confirm email**
 
-Turned **off** on 26 Aug 2026. Right now anyone can register an address they do
-not own, and the account works immediately.
+**It is back on.** Turned off on 26 Aug 2026, turned on again on 1 Sep 2026, and
+this file went on saying it was off for a week — which is the reason to record
+how it was checked rather than just flipping the word. The live project answers
+without a dashboard: `GET /auth/v1/settings` is public and returns
+`mailer_autoconfirm: false`, meaning a new signup must confirm before the
+account works. Re-run that if you need to know the state on any given day; a
+sentence in a document is not evidence of a setting that lives somewhere else.
+
+The rest of this section is kept because it is the argument for why the toggle
+must stay on, and because the template requirement below is still live.
+
+While it was off, anyone could register an address they did not own and the
+account worked immediately.
 
 **Why it was turned off.** Confirmation emails were being delivered by Resend
 and then quarantined by the recipient's mail provider — Microsoft 365 in the
