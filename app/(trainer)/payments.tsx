@@ -1443,13 +1443,13 @@ export default function TrainerPayments() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>Getting paid</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Payments</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Get paid by your clients — memberships &amp; session packs.
         </Text>
 
-        {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} /> : (
+        {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading how you get paid…" /> : (
           <>
             {/* ── payout status: the one decision on this screen ──────────── */}
             {/* Three renders, not two. The middle one is new: a read that did
@@ -2433,7 +2433,7 @@ export default function TrainerPayments() {
             {/* ── add a package ──────────────────────────────────────────── */}
             <Section>
               <SectionHead title="Add a Package" />
-              <TextInput value={name} onChangeText={setName} placeholder="Name — e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={input} />
+              <TextInput value={name} onChangeText={setName} placeholder="Name — e.g. 10-Session Pack" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Package name" />
 
               <View style={{ marginTop: sp.md }}>
                 <Pick label="Billing" options={INTERVALS.map((i) => ({ key: i.key, label: i.label }))} chosen={interval}

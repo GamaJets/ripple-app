@@ -2447,6 +2447,7 @@ export default function Builder() {
                   <Icon name="swap" size={13} color={t.ink3} />
                 </Pressable>
                 <TextInput value={d.focus} onChangeText={(v) => setDayFocus(di, v)} placeholder="Focus (e.g. Push)" placeholderTextColor={t.ink3}
+                  accessibilityLabel={`Focus for ${d.day}`}
                   style={[inp, { flex: 1 }]} />
                 {/* Fold. The count travels with it, so a folded day still says
                     how much is in it — a row that collapses to just "Wed" makes

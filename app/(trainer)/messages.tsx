@@ -392,7 +392,10 @@ export default function Messages() {
         keyboardDismissMode="interactive" refreshControl={pull}>
         {status === 'loading' ? (
           <View style={{ paddingTop: sp.xxl, alignItems: 'center' }}>
-            <ActivityIndicator size="small" color={t.ink3} />
+            {/* Named. Unnamed it is not in the accessibility tree, so the screen
+                reads as a coach with no conversations rather than one still
+                being read — and the error branch below never draws. */}
+            <ActivityIndicator size="small" color={t.ink3} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your conversations…" />
           </View>
         ) : null}
 

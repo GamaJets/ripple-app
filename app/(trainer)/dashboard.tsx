@@ -2653,7 +2653,7 @@ export default function TrainerClients() {
                   ))}
                 </View>
                 <View style={{ flexDirection: 'row', gap: sp.sm }}>
-                  <TextInput value={tagDraft} onChangeText={setTagDraft} placeholder="Add a tag — e.g. comp prep" placeholderTextColor={t.ink3} autoCapitalize="none" returnKeyType="done" onSubmitEditing={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} style={{ ...field(t), flex: 1 }} />
+                  <TextInput value={tagDraft} onChangeText={setTagDraft} placeholder="Add a tag — e.g. comp prep" placeholderTextColor={t.ink3} accessibilityLabel="Add a tag" autoCapitalize="none" returnKeyType="done" onSubmitEditing={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} style={{ ...field(t), flex: 1 }} />
                   <Cta label="Add" onPress={() => { if (tagDraft.trim()) { addTag(sel.id, tagDraft); setTagDraft(''); } }} />
                 </View>
                 {allTags.filter((tg) => !tagsFor(sel.id).includes(tg)).length > 0 ? (
@@ -2861,7 +2861,7 @@ export default function TrainerClients() {
                   );
                 })}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
-                  <TextInput value={nnote} onChangeText={setNnote} placeholder="Note on the plan (optional)…" placeholderTextColor={t.ink3} style={{ ...field(t), flex: 1 }} />
+                  <TextInput value={nnote} onChangeText={setNnote} placeholder="Note on the plan (optional)…" placeholderTextColor={t.ink3} accessibilityLabel="Note on the plan, optional" style={{ ...field(t), flex: 1 }} />
                   <Cta label="Save" onPress={() => { setNutri(sel.id, { note: nnote.trim() }); }} />
                 </View>
                 {getNutri(sel.id) ? (
@@ -2932,7 +2932,7 @@ export default function TrainerClients() {
                   </View>
                 ))}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                  <TextInput value={fb} onChangeText={setFb} placeholder="Leave advice or a note…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 44), flex: 1 }} />
+                  <TextInput value={fb} onChangeText={setFb} placeholder="Leave advice or a note…" placeholderTextColor={t.ink3} accessibilityLabel="Leave advice or a note" multiline style={{ ...field(t, 44), flex: 1 }} />
                   {/* The result of the send is read, and the box is cleared
                       only once the row is on the server. This used to throw the
                       boolean away: `addFeedback` returns false when there is no
@@ -3018,7 +3018,7 @@ export default function TrainerClients() {
                   </View>
                 ))}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                  <TextInput value={pnote} onChangeText={setPnote} placeholder="Private note (client can't see this)…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 44), flex: 1 }} />
+                  <TextInput value={pnote} onChangeText={setPnote} placeholder="Private note (client can't see this)…" placeholderTextColor={t.ink3} accessibilityLabel="Private note, your client cannot see this" multiline style={{ ...field(t, 44), flex: 1 }} />
                   {/* The text is cleared only once the note is stored. It used
                       to be cleared immediately, which is how a note that was
                       never saved anywhere also stopped being recoverable by
@@ -3146,7 +3146,7 @@ export default function TrainerClients() {
             <>
               <Text style={{ ...ty.title, color: t.ink, textTransform: 'capitalize' }}>Pick a {mealPick.slot.toLowerCase()}</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>For {sel.name.split(' ')[0]} · {sel.diet || 'meat'} plan · tap to assign</Text>
-              <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder="Search meals…" placeholderTextColor={t.ink3} style={{ ...field(t), marginBottom: sp.md }} />
+              <TextInput value={mealQuery} onChangeText={setMealQuery} placeholder="Search meals…" placeholderTextColor={t.ink3} accessibilityLabel="Search meals" style={{ ...field(t), marginBottom: sp.md }} />
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
                 {searchMeals((sel.diet || 'meat') as any, mealPick.slot, mealQuery, 40, (sel.avoid ?? []) as any).map((m) => (
                   <Pressable key={m.idx} onPress={() => { setNutri(sel.id, { mealOverride: { ...(getNutri(sel.id)?.mealOverride ?? {}), [mealPick.pos]: m.idx } }); setMealPick(null); }}
@@ -3411,7 +3411,7 @@ export default function TrainerClients() {
                   The rule this file keeps relearning: the sentence describes what
                   the write does TODAY, and it moves when the write moves. */}
               <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.xs, marginBottom: sp.lg }}>Every client on your roster sees this on their dashboard, in their notifications, and in their Notices — where it stays after today. It is not a message and does not land in anyone’s thread; for that, use Broadcast.</Text>
-              <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} multiline style={{ ...field(t, 90), marginBottom: sp.md }} />
+              <TextInput value={bcText} onChangeText={setBcText} placeholder="Your announcement…" placeholderTextColor={t.ink3} accessibilityLabel="Your announcement" multiline style={{ ...field(t, 90), marginBottom: sp.md }} />
 
               {/* The push is its own decision and the label says what it does.
                   Before this, a notice reached nobody at all; the temptation on
@@ -3674,6 +3674,7 @@ export default function TrainerClients() {
                         value={newCodeLabel}
                         onChangeText={setNewCodeLabel}
                         placeholder="Name it — “Gym flyer”, “Instagram bio”"
+                        accessibilityLabel="What to call this join code"
                         placeholderTextColor={t.ink3}
                         maxLength={MAX_LABEL}
                         style={{ ...field(t), marginBottom: sp.sm }}
@@ -3851,7 +3852,7 @@ export default function TrainerClients() {
                   <Text style={{ ...ty.label, color: t.ink3 }}>Drafting a personalised check-in…</Text>
                 </View>
               ) : (
-                <TextInput value={draftText} onChangeText={setDraftText} multiline placeholder="Your message…" placeholderTextColor={t.ink3} style={{ ...field(t, 110), marginBottom: sp.lg }} />
+                <TextInput value={draftText} onChangeText={setDraftText} multiline placeholder="Your message…" placeholderTextColor={t.ink3} accessibilityLabel="The check-in message" style={{ ...field(t, 110), marginBottom: sp.lg }} />
               )}
               <View style={{ flexDirection: 'row', gap: sp.sm }}>
                 <Ghost icon="sparkle" label="Redraft" onPress={() => draftNudge(draftClient)} />
@@ -3898,7 +3899,7 @@ export default function TrainerClients() {
                   note={`${listNames(msgFailed.map(nameOf))} — nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
               ) : null}
 
-              <TextInput value={msgBody} onChangeText={setMsgBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline
+              <TextInput value={msgBody} onChangeText={setMsgBody} placeholder="Your message…" placeholderTextColor={t.ink3} multiline accessibilityLabel="Your message"
                 style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, minHeight: 120, textAlignVertical: 'top', marginTop: sp.lg, marginBottom: sp.md }} />
 
               {/* What the client will see, said to the coach and not added to

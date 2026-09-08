@@ -473,6 +473,7 @@ export default function TrainerAssistant() {
             <Rule />
             <View ref={barRef} style={{ flexDirection: 'row', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md, alignItems: 'flex-end' }}>
               <TextInput value={input} onChangeText={setInput} placeholder="Ask about your book…" placeholderTextColor={t.ink3} multiline
+                accessibilityLabel="Ask about your book"
                 style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, maxHeight: 120 }} />
               {/* The refusal is drawn — the circle goes to `surface3` with an
                   empty box — and drawing is the only place it was said. A

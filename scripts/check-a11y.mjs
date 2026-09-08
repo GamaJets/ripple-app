@@ -115,7 +115,15 @@
 // is one of the two mirroring constants and which passes neither `a11yLabel`
 // nor a visible `label`. It is one prop to fix — `a11yLabel="Back"` — which is
 // what every call site in src/ui already does (FeedbackScreen, EndReasonSheet,
-// notifications) and what the 58 in app/(client) now do too.
+// notifications) and what every screen in all three apps now does too: the 58
+// in app/(client) first, then the 43 in app/(trainer) and app/(owner), so Rule 4
+// carries nothing on the standing list any more and a hit is a regression.
+//
+// Two of those 43 were NOT back buttons — the month stepper on the coach
+// calendar draws BACK_ICON and FORWARD_ICON either side of the month name, and
+// "Back" there would be a second lie in place of the first. They say "Previous
+// month" and "Next month", which is what the control does. The rule cannot tell
+// the two shapes apart and does not try; whoever fixes one has to read it.
 //
 // A Ghost with a visible `label` is NOT flagged: its words are the name, and
 // the icon beside them is decoration. `<Icon name={BACK_ICON}>` inside a
@@ -149,9 +157,11 @@
 //
 // ── The standing list, and why it does not have to count down ─────────────
 //
-// Rule 3 carries NOTHING on this list, and that is the point of it: all fifteen
-// it found on its first run were fixed in the same change that added it, so a
-// hit is a regression rather than a backlog and there is no list to argue with.
+// Rules 3 and 4 carry NOTHING on this list, and that is the point of them: all
+// fifteen Rule 3 found on its first run were fixed in the same change that added
+// it, and Rule 4's hundred were cleared across two changes — 58 in app/(client),
+// then the last 43 in app/(trainer) and app/(owner). For both rules a hit is now
+// a regression rather than a backlog and there is no list to argue with.
 //
 // The offences below were all present when this file was written and every one of
 // them is in a screen under app/. The list may not GROW: a new one fails the
@@ -195,52 +205,6 @@ const KNOWN = new Set([
   'app/(trainer)/settings.tsx|scrim',
   'app/(trainer)/templates-messages.tsx|scrim',
   'app/(trainer)/templates.tsx|scrim',
-  /* Rule 4. Every one of these is a back button that says "More" to a
-   * right-to-left reader. They are in app/(trainer) and app/(owner), which the
-   * lane that added this rule does not write; the fix is one prop each and is
-   * spelled out in the Rule 4 note above. Keyed by file, so a file with two of
-   * them clears when both are fixed. */
-  'app/(owner)/class-analytics.tsx|backicon',
-  'app/(owner)/explore.tsx|backicon',
-  'app/(owner)/feedback.tsx|backicon',
-  'app/(owner)/financials.tsx|backicon',
-  'app/(owner)/library.tsx|backicon',
-  'app/(owner)/promotions.tsx|backicon',
-  'app/(owner)/revenue.tsx|backicon',
-  'app/(owner)/settings.tsx|backicon',
-  'app/(trainer)/account.tsx|backicon',
-  'app/(trainer)/billing.tsx|backicon',
-  'app/(trainer)/broadcast-session.tsx|backicon',
-  'app/(trainer)/broadcast.tsx|backicon',
-  'app/(trainer)/calendar.tsx|backicon',
-  'app/(trainer)/chat.tsx|backicon',
-  'app/(trainer)/checklists.tsx|backicon',
-  'app/(trainer)/client-attendance.tsx|backicon',
-  'app/(trainer)/client-body.tsx|backicon',
-  'app/(trainer)/client-cancellations.tsx|backicon',
-  'app/(trainer)/client-goals.tsx|backicon',
-  'app/(trainer)/client-intake.tsx|backicon',
-  'app/(trainer)/client-nutrition.tsx|backicon',
-  'app/(trainer)/client-photos.tsx|backicon',
-  'app/(trainer)/client-training.tsx|backicon',
-  'app/(trainer)/client-week.tsx|backicon',
-  'app/(trainer)/client.tsx|backicon',
-  'app/(trainer)/credentials.tsx|backicon',
-  'app/(trainer)/devices.tsx|backicon',
-  'app/(trainer)/documents.tsx|backicon',
-  'app/(trainer)/explore.tsx|backicon',
-  'app/(trainer)/getting-started.tsx|backicon',
-  'app/(trainer)/join-code.tsx|backicon',
-  'app/(trainer)/library.tsx|backicon',
-  'app/(trainer)/my-nutrition.tsx|backicon',
-  'app/(trainer)/my-progress.tsx|backicon',
-  'app/(trainer)/my-register.tsx|backicon',
-  'app/(trainer)/my-training.tsx|backicon',
-  'app/(trainer)/nudges.tsx|backicon',
-  'app/(trainer)/payments.tsx|backicon',
-  'app/(trainer)/referrals.tsx|backicon',
-  'app/(trainer)/settings.tsx|backicon',
-  'app/(trainer)/share-kit.tsx|backicon',
 ]);
 
 /* ── walking ──────────────────────────────────────────────────────────────── */
@@ -407,11 +371,17 @@ for (const file of ROOTS.flatMap((r) => walk(join(ROOT, r)))) {
     const end = tagEnd(src, m.index);
     if (end < 0) continue;
     const tag = src.slice(m.index, end + 1);
-    if (!MIRRORING_ICON.test(tag)) continue;
+    const which = tag.match(MIRRORING_ICON);
+    if (!which) continue;
     if (/\ba11yLabel\s*=/.test(tag)) continue;   // named outright
     if (/\blabel\s*=/.test(tag)) continue;       // named by the words it draws
     found.push({
       key: `${rel}|backicon`, file: rel, line: lineOf(m.index), rule: 'mirroring',
+      // Which constant it was. The advice differs: a BACK_ICON is almost always
+      // a back button, and a FORWARD_ICON never is — the one this rule caught
+      // was the forward half of a month stepper, where "Back" would have been a
+      // second wrong word in place of the first.
+      icon: which[1],
       text: tag.replace(/\s+/g, ' ').slice(0, 96),
     });
   }
@@ -478,10 +448,19 @@ if (fresh.length) {
     } else if (f.rule === 'mirroring') {
       console.error(`  ${f.file}:${f.line}  an icon-only button named by a MIRRORING icon`);
       console.error(`    ${f.text}`);
-      console.error('    → BACK_ICON is \'back\' left-to-right and \'chevron\' right-to-left, and');
-      console.error('      ICON_NAMES in src/ui/kit.tsx calls the second one "More". This button');
-      console.error('      therefore says "Back" in English and "More" in Arabic. Give it the');
-      console.error('      action: a11yLabel="Back".\n');
+      if (f.icon === 'FORWARD_ICON') {
+        console.error('    → FORWARD_ICON is \'chevron\' left-to-right and \'back\' right-to-left, and');
+        console.error('      ICON_NAMES in src/ui/kit.tsx calls them "More" and "Back". This button');
+        console.error('      therefore says "More" in English and "Back" in Arabic. It is NOT a back');
+        console.error('      button — name the action it performs, as the month stepper on');
+        console.error('      app/(trainer)/calendar.tsx does with a11yLabel="Next month".\n');
+      } else {
+        console.error('    → BACK_ICON is \'back\' left-to-right and \'chevron\' right-to-left, and');
+        console.error('      ICON_NAMES in src/ui/kit.tsx calls the second one "More". This button');
+        console.error('      therefore says "Back" in English and "More" in Arabic. Give it the');
+        console.error('      action it performs: a11yLabel="Back" on a back button, and the step it');
+        console.error('      takes — "Previous month" — where it is not one.\n');
+      }
     } else if (f.rule === 'unnamed') {
       console.error(`  ${f.file}:${f.line}  a touchable with no children and no name`);
       console.error(`    ${f.text}`);

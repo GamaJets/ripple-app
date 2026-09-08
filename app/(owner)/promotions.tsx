@@ -262,7 +262,7 @@ export default function Promotions() {
             app/(owner)/financials.tsx. These two were the only screens in the
             owner portal with it on the trailing side. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your members</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Promotions</Text>

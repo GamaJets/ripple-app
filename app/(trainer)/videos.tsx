@@ -959,9 +959,9 @@ export default function TrainerVideos() {
         <View style={sheet}>
           <Text style={{ ...ty.title, color: t.ink }}>Add a Video by Link</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>Paste a hosted link (YouTube, Vimeo…). Clients watch it in their library.</Text>
-          <TextInput value={lName} onChangeText={setLName} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
-          <TextInput value={lGroup} onChangeText={setLGroup} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
-          <TextInput value={lUrl} onChangeText={setLUrl} placeholder="https://…" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="url" style={[input, { marginBottom: sp.lg }]} />
+          <TextInput value={lName} onChangeText={setLName} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Exercise name" />
+          <TextInput value={lGroup} onChangeText={setLGroup} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Muscle group" />
+          <TextInput value={lUrl} onChangeText={setLUrl} placeholder="https://…" placeholderTextColor={t.ink3} autoCapitalize="none" keyboardType="url" accessibilityLabel="Link to the video" style={[input, { marginBottom: sp.lg }]} />
           <Cta label={lBusy ? 'Adding…' : 'Add to Library'} wide disabled={lBusy} onPress={saveLink} />
           <View style={{ height: sp.sm }} />
           <Ghost label="Cancel" onPress={() => { if (!lBusy) setLinkOpen(false); }} />
@@ -982,8 +982,8 @@ export default function TrainerVideos() {
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>Name This Clip</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.lg }}>{videoUploadAvailable() ? 'It uploads to your library, and only the people you choose below can watch it.' : 'Saved to this device — turn on the backend to share it with anyone.'}</Text>
-            <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} />
-            <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} />
+            <TextInput value={upName} onChangeText={setUpName} editable={!upBusy} placeholder="Exercise name (e.g. Front Squat)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Exercise name" />
+            <TextInput value={upGroup} onChangeText={setUpGroup} editable={!upBusy} placeholder="Muscle group (e.g. Legs)" placeholderTextColor={t.ink3} style={input} accessibilityLabel="Muscle group" />
 
             {/* Asked here rather than after the fact, because the upload is the
                 moment the clip becomes visible to somebody. */}

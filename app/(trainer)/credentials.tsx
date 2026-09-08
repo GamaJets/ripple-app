@@ -226,7 +226,7 @@ export default function TrainerCredentials() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 48 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your profile</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Credentials & Reviews</Text>
@@ -250,7 +250,12 @@ export default function TrainerCredentials() {
           />
 
           {credStatus === 'loading' ? (
-            <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
+            /* A spinner is drawn, not spoken. With no name it is not in the
+               accessibility tree at all, so the section reads as EMPTY — the
+               one conclusion the error branch below exists to refuse. */
+            <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}>
+              <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your credentials…" />
+            </View>
           ) : credStatus === 'error' ? (
             /* Not "you have added none". A coach reading that would add the
                same qualification a second time, and a coach checking whether
@@ -357,7 +362,9 @@ export default function TrainerCredentials() {
           ) : null}
 
           {listState === 'loading' ? (
-            <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}><ActivityIndicator color={t.brand} /></View>
+            <View style={{ paddingVertical: sp.xl, alignItems: 'center' }}>
+              <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your reviews…" />
+            </View>
           ) : listState === 'unreadable' ? (
             <Notice tone={t.warn} kicker="Reviews" title="We couldn’t load your reviews"
               note="This is our end, not an empty profile. Until it loads we can’t tell you what clients have written or whether anything is waiting on a reply.">

@@ -70,7 +70,16 @@ function Field({ t, label, value: val, onChangeText, placeholder, multiline, key
   );
 }
 
-function ChipEditor({ t, items, onAdd, onRemove, value: val, setValue, placeholder }: { t: Theme; items: string[]; onAdd: () => void; onRemove: (i: number) => void; value: string; setValue: (v: string) => void; placeholder: string }) {
+/**
+ * A list of chips and one box for adding another.
+ *
+ * `noun` names BOTH the box and the button beside it. The screen draws this
+ * twice — specialities and what you offer — and both boxes were named only by
+ * a placeholder that the first keystroke erases, beside two buttons a screen
+ * reader could only ever call "Add". Two identical Adds on one screen, and
+ * nothing saying which list either of them lands in.
+ */
+function ChipEditor({ t, items, onAdd, onRemove, value: val, setValue, placeholder, noun }: { t: Theme; items: string[]; onAdd: () => void; onRemove: (i: number) => void; value: string; setValue: (v: string) => void; placeholder: string; noun: string }) {
   return (
     <View>
       {items.length > 0 ? (
@@ -86,8 +95,9 @@ function ChipEditor({ t, items, onAdd, onRemove, value: val, setValue, placehold
       ) : null}
       <View style={{ flexDirection: 'row', gap: sp.sm }}>
         <TextInput value={val} onChangeText={setValue} placeholder={placeholder} placeholderTextColor={t.ink3}
+          accessibilityLabel={noun}
           style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderColor: t.ring, borderWidth: hairline, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }} />
-        <Cta label="Add" onPress={onAdd} />
+        <Cta label="Add" a11yLabel={`Add this ${noun.toLowerCase()}`} onPress={onAdd} />
       </View>
     </View>
   );
@@ -421,14 +431,14 @@ export default function CoachProfile() {
 
         <Section>
           <SectionHead title="Specialties" note="Tap a chip to remove" />
-          <ChipEditor t={t} items={p.specialties} onAdd={addSpec} onRemove={(i) => p.setSpecialties(p.specialties.filter((_, x) => x !== i))} value={newSpec} setValue={setNewSpec} placeholder="e.g. Mobility" />
+          <ChipEditor t={t} items={p.specialties} onAdd={addSpec} onRemove={(i) => p.setSpecialties(p.specialties.filter((_, x) => x !== i))} value={newSpec} setValue={setNewSpec} placeholder="e.g. Mobility" noun="A speciality" />
         </Section>
 
         <Rule />
 
         <Section>
           <SectionHead title="What You Offer" note="Tap a chip to remove" />
-          <ChipEditor t={t} items={p.offers} onAdd={addOffer} onRemove={(i) => p.setOffers(p.offers.filter((_, x) => x !== i))} value={newOffer} setValue={setNewOffer} placeholder="e.g. Nutrition coaching" />
+          <ChipEditor t={t} items={p.offers} onAdd={addOffer} onRemove={(i) => p.setOffers(p.offers.filter((_, x) => x !== i))} value={newOffer} setValue={setNewOffer} placeholder="e.g. Nutrition coaching" noun="Something you offer" />
         </Section>
 
         <Rule />

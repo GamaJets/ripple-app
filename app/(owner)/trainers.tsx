@@ -302,7 +302,7 @@ export default function OwnerTrainers() {
               They join your gym when they accept in their own app.
             </Text>
             <TextInput value={invEmail} onChangeText={(v) => { setInvEmail(v); if (invErr) setInvErr(null); }}
-              placeholder="their@email.com" placeholderTextColor={t.ink3}
+              placeholder="their@email.com" placeholderTextColor={t.ink3} accessibilityLabel="Their email address"
               autoCapitalize="none" autoCorrect={false} keyboardType="email-address" style={input} />
             {invErr ? (
               <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{invErr}</Flag>

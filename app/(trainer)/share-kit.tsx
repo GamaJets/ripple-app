@@ -709,7 +709,7 @@ export default function ShareKit() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 44 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Marketing</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Share Kit</Text>
@@ -742,14 +742,14 @@ export default function ShareKit() {
             <Rule />
             <Section>
               <SectionHead title="The result" note="You type it" />
-              <TextInput value={spanText} onChangeText={setSpanText} placeholder="12 weeks in" placeholderTextColor={t.ink3} style={field} />
+              <TextInput value={spanText} onChangeText={setSpanText} placeholder="12 weeks in" placeholderTextColor={t.ink3} style={field} accessibilityLabel="The period, in your words" />
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>The headline on the card — the period, in your words.</Text>
 
               <View style={{ marginTop: sp.lg, gap: sp.sm }}>
                 {figures.map((f, i) => (
                   <View key={i} style={{ flexDirection: 'row', gap: sp.sm }}>
-                    <TextInput value={f.label} onChangeText={(v) => setFigure(i, { label: v })} placeholder={i === 0 ? 'Weight' : 'Label'} placeholderTextColor={t.ink3} style={{ ...field, flex: 1 }} />
-                    <TextInput value={f.value} onChangeText={(v) => setFigure(i, { value: v })} placeholder={i === 0 ? '−8.4 kg' : 'Figure'} placeholderTextColor={t.ink3} style={{ ...field, flex: 1 }} />
+                    <TextInput value={f.label} onChangeText={(v) => setFigure(i, { label: v })} placeholder={i === 0 ? 'Weight' : 'Label'} placeholderTextColor={t.ink3} style={{ ...field, flex: 1 }} accessibilityLabel={`What figure ${i + 1} is called`} />
+                    <TextInput value={f.value} onChangeText={(v) => setFigure(i, { value: v })} placeholder={i === 0 ? '−8.4 kg' : 'Figure'} placeholderTextColor={t.ink3} style={{ ...field, flex: 1 }} accessibilityLabel={`Figure ${i + 1}`} />
                   </View>
                 ))}
               </View>
@@ -760,7 +760,7 @@ export default function ShareKit() {
                 Type the figures your client agreed you could post. Repple will not pull them from their record — those are theirs, not yours to publish.
               </Text>
 
-              <TextInput value={note} onChangeText={setNote} placeholder="Add a line of your own (optional)" placeholderTextColor={t.ink3} multiline
+              <TextInput value={note} onChangeText={setNote} placeholder="Add a line of your own (optional)" placeholderTextColor={t.ink3} multiline accessibilityLabel="A line of your own, optional"
                 style={{ ...field, marginTop: sp.lg, minHeight: 72, textAlignVertical: 'top' }} />
             </Section>
 
@@ -781,9 +781,9 @@ export default function ShareKit() {
                 note="Off by default, and asked separately. Their name is removed from your caption too."
               />
               {okName ? (
-                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} />
+                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} accessibilityLabel="Their name" />
               ) : (
-                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name — used to keep it OFF the card" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} />
+                <TextInput value={clientName} onChangeText={setClientName} placeholder="Their name — used to keep it OFF the card" placeholderTextColor={t.ink3} style={{ ...field, marginTop: sp.md }} accessibilityLabel="Their name — typed here so it can be kept off the card" />
               )}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {okName
@@ -1240,7 +1240,10 @@ function Segmented({ options, value, onChange }: {
 function Check({ on, onPress, title, note }: { on: boolean; onPress: () => void; title: string; note: string }) {
   const t = useTheme();
   return (
-    <Pressable onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={title}
+    // The note is the CONSEQUENCE of the tick, not a second name for it, so it
+    // goes on the hint channel: VoiceOver reads it after the label rather than
+    // instead of the children, which is what an accessibilityLabel would do.
+    <Pressable onPress={onPress} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={title} accessibilityHint={note}
       style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md }}>
       <View style={{ width: 22, height: 22, borderRadius: 7, marginTop: 2, borderWidth: hairline, borderColor: on ? t.brand : t.ink3, backgroundColor: on ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
         {on ? <Icon name="check" size={13} color={t.brandInk} /> : null}

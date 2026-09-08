@@ -334,7 +334,7 @@ export default function TrainerDevices() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your tracking</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; Devices</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {/* ── what your own devices are reporting today ──────────────────── */}
@@ -452,7 +452,10 @@ export default function TrainerDevices() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{p.meta.blurb}</Text>
                   </View>
                   {busy ? (
-                    <ActivityIndicator color={t.brand} />
+                    // Named, because it is the only thing this row draws while the
+                    // link is being changed and an unnamed spinner is not in the
+                    // accessibility tree at all.
+                    <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel={`Working on ${p.meta.name}…`} />
                   ) : link.action === 'reconnect' ? (
                     // The primary control, because it is the one thing that
                     // fixes this — and offered ONLY where re-authorising

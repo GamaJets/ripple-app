@@ -358,7 +358,7 @@ export default function CoachChat() {
 
       {/* ── header ───────────────────────────────────────────────────────── */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: G, paddingVertical: sp.md }}>
-        <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+        <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         {/* The client's face, read for the CLIENT's id via
             `profiles_trainer_read` and from nowhere else. On the roster path the
             hook is handed no id and does no work, so there is nothing to draw
@@ -535,6 +535,10 @@ export default function CoachChat() {
             <Icon name="pencil" size={18} color={t.ink2} />
           </Pressable>
           <TextInput value={text} onChangeText={setText} editable={canSend}
+            // The placeholder is the only thing naming this box, and a placeholder
+            // is drawn only while it is EMPTY — so from the first keystroke it was
+            // an unnamed field, and a closed conversation said nothing at all.
+            accessibilityLabel={canSend ? (firstName ? 'Message ' + firstName : 'Message your client') : 'This conversation is closed'}
             placeholder={canSend ? (firstName ? 'Message ' + firstName + '…' : 'Message your client…') : 'This conversation is closed'}
             placeholderTextColor={t.ink3}
             style={{ flex: 1, ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.md, paddingHorizontal: sp.lg, paddingVertical: sp.md, opacity: canSend ? 1 : 0.6 }} />

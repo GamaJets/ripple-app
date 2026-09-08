@@ -405,7 +405,7 @@ export default function TrainerLeads() {
           <Text style={{ ...ty.label, color: t.ink2 }}>{book.note}</Text>
 
           {book.status === 'loading' ? (
-            <ActivityIndicator color={t.brand} style={{ marginVertical: 24 }} />
+            <ActivityIndicator color={t.brand} style={{ marginVertical: 24 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your enquiries…" />
           ) : book.status === 'error' ? (
             <View style={{ marginTop: sp.lg }}>
               <Flag tone={t.crit}>

@@ -115,7 +115,7 @@ export default function TrainerBilling() {
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your Repple plan</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Billing</Text>
           </View>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           Your Repple plan, payment method and invoices.
@@ -168,7 +168,7 @@ export default function TrainerBilling() {
         </Section>
 
         {loading ? (
-          <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} />
+          <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading your subscription…" />
         ) : subErr ? (
           <Section>
             <SectionHead title="Current Plan" />

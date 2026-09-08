@@ -2871,9 +2871,9 @@ export default function TrainerSchedule() {
         {/* ── month grid ─────────────────────────────────────────────────── */}
         <Section>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: sp.lg }}>
-            <Ghost icon={BACK_ICON} onPress={() => shiftMonth(-1)} />
+            <Ghost icon={BACK_ICON} a11yLabel="Previous month" onPress={() => shiftMonth(-1)} />
             <Text style={{ ...ty.head, color: t.ink }}>{MON[viewMonth]} {viewYear}</Text>
-            <Ghost icon={FORWARD_ICON} onPress={() => shiftMonth(1)} />
+            <Ghost icon={FORWARD_ICON} a11yLabel="Next month" onPress={() => shiftMonth(1)} />
           </View>
 
           <View style={{ flexDirection: 'row', marginBottom: sp.sm }}>

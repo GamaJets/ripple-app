@@ -615,7 +615,7 @@ export default function Financials() {
             reading order, so a screen reader announced the screen and then
             offered the way out of it. */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Financial Checks</Text>

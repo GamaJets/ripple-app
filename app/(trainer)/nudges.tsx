@@ -202,7 +202,7 @@ export default function Nudges() {
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Your book</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>Quiet Clients</Text>
@@ -229,7 +229,10 @@ export default function Nudges() {
           </Section>
         ) : n.status === 'loading' ? (
           <Section>
-            <ActivityIndicator color={t.brand} />
+            {/* Named. The error branch below is emphatic that an empty screen must
+                not read as a quiet week, and an unnamed spinner draws exactly that
+                for a reader: nothing at all. */}
+            <ActivityIndicator color={t.brand} accessible accessibilityRole="progressbar" accessibilityLabel="Working out who has gone quiet…" />
           </Section>
         ) : n.status === 'error' ? (
           <Section>
@@ -695,7 +698,7 @@ function WhySheet({ name, drift, evidence, onClose }: {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 40 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={onClose} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={onClose} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Why they are here</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>{name ?? 'Client'}</Text>

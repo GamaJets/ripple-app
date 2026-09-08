@@ -313,7 +313,7 @@ export default function TrainerLibrary() {
         keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-          <Ghost icon={BACK_ICON} onPress={goBack} />
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={goBack} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Everything you can put in a programme</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Exercise Library</Text>

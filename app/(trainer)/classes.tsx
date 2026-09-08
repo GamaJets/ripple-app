@@ -647,7 +647,8 @@ export default function TrainerClasses() {
         <Section>
           <SectionHead title="New Class" />
 
-          <TextInput value={title} onChangeText={setTitle} placeholder="Class title — e.g. Sunrise CrossFit" placeholderTextColor={t.ink3} style={inp} />
+          <TextInput value={title} onChangeText={setTitle} placeholder="Class title — e.g. Sunrise CrossFit" placeholderTextColor={t.ink3} style={inp}
+            accessibilityLabel="Class title" />
 
           <Text style={[lbl, { marginTop: sp.md }]}>Type</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -2 }} contentContainerStyle={{ gap: 7, paddingHorizontal: 2 }}>
@@ -1050,7 +1051,8 @@ export default function TrainerClasses() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.sm }}>
                       The class stays on the timetable marked as cancelled, and keeps its bookings, its check-ins and its waiting list. That is the evidence the hour was wanted.
                     </Text>
-                    <TextInput value={mReason} onChangeText={setMReason} placeholder="Why is it off? e.g. instructor off sick" placeholderTextColor={t.ink3} style={inp} />
+                    <TextInput value={mReason} onChangeText={setMReason} placeholder="Why is it off? e.g. instructor off sick" placeholderTextColor={t.ink3} style={inp}
+                      accessibilityLabel="Why the class is off" />
                     <View style={{ height: sp.md }} />
                     <Ghost label={mSeries && manage.seriesId ? 'Call Off This And Later' : 'Call Off This Class'} onPress={() => callOff(manage)} />
 

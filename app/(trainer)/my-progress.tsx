@@ -414,7 +414,7 @@ export default function MyProgress() {
 
           {/* ── header. Whose body this is, said before anything else ─────── */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
-            <Ghost icon={BACK_ICON} onPress={() => router.back()} />
+            <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
             <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Your own body, not a client&rsquo;s</Text>
               <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>My Progress</Text>

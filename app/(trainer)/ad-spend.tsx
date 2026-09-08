@@ -276,7 +276,7 @@ export default function TrainerAdSpend() {
                 : 'None of the three is set up here'}
           />
           {status === 'loading' ? (
-            <ActivityIndicator color={t.brand} style={{ marginVertical: 24 }} />
+            <ActivityIndicator color={t.brand} style={{ marginVertical: 24 }} accessible accessibilityRole="progressbar" accessibilityLabel="Checking which ad accounts are connected…" />
           ) : read.status === 'error' ? (
             <Flag tone={t.crit}>
               {read.reason || 'We could not check whether your ad accounts are connected, so nothing on this screen says whether they are. If they were connected, they still are.'}
