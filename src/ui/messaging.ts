@@ -464,9 +464,22 @@ export function useThread(clientId: string | null, role: ChatRole) {
   /** Bumped to re-read the thread. Two things bump it: a queued message of
    *  ours having gone (see the effect below), and `reload` — the screen asking
    *  for the conversation again, which is what a pull-to-refresh on a chat is.
-   *  There is no realtime subscription on this thread, so until now the only
-   *  way a coach saw a reply that arrived while they were looking at it was to
-   *  send something themselves or leave and come back. */
+   *
+   *  This said "There is no realtime subscription on this thread", and it was
+   *  flatly wrong about the code two hundred lines below it: the effect opens
+   *  `.channel('msg:' + cid)` and subscribes to INSERTs on `messages` filtered
+   *  to this thread, appending anything `seen` has not already got. The false
+   *  sentence outlived several readings of this file and generated a roadmap
+   *  item to build the subscription that was already here;
+   *  app/(client)/messages.tsx carries the same correction against its own
+   *  copy of it, and this is the copy that sentence was read from.
+   *
+   *  What is TRUE, and what `reload` is actually for, is that the subscription
+   *  is BEST-EFFORT: it is opened inside a try/catch whose own comment reads
+   *  "realtime optional", so a project without the publication, a network that
+   *  will not open a websocket, or a socket dropped while the phone was asleep
+   *  each leave the thread live-looking and silently static with nothing on
+   *  screen to say so. Re-reading is the only way out of that. */
   const [reloadTick, setReloadTick] = useState(0);
   /**
    * Whether there is more thread ABOVE what is on screen.

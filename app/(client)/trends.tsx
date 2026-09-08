@@ -385,9 +385,19 @@ export default function Trends() {
                     },
                     { label: 'Best', value: logKnown ? fig(est1RMIn(maxE, wu)) : fig(null), unit: logKnown ? wu : undefined },
                     // Days this movement was trained — see the fold in
-                    // `allSessions`. Counted per row it read "Sessions 12"
-                    // over eight afternoons.
-                    { label: 'Sessions', value: logKnown ? fig(allSessions.length) : fig(null) },
+                    // `allSessions`, which keys a Map by `dayKeyOf(e.t)` and
+                    // keeps one point per day. Counted per row it read
+                    // "Sessions 12" over eight afternoons; folded by day it
+                    // still SAID "Sessions", which is the same false claim with
+                    // the arithmetic already fixed underneath it. The label is
+                    // what was left. This file argues the point itself 270
+                    // lines above — "calling the field `sessions` was how the
+                    // same figure got read as a session count on three other
+                    // screens" — and src/lib/streaks.ts settles it: a session
+                    // count cannot be derived from this data at all, because
+                    // one visit is saved as it goes and produces seven rows
+                    // with seven distinct timestamps. Days is what is provable.
+                    { label: 'Days Trained', value: logKnown ? fig(allSessions.length) : fig(null) },
                   ]} />
                   {/* Said only when the chart is showing less than the two
                       figures above it count. Without it the line and the
@@ -395,7 +405,7 @@ export default function Trends() {
                       nothing on the screen says so. */}
                   {logKnown && allSessions.length > series.length ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-                      Best and Sessions count all {allSessions.length} sessions of this movement in your log. The chart below draws the last {series.length}.
+                      Best and Days Trained count all {allSessions.length} days you trained this movement. The chart below draws the last {series.length}.
                     </Text>
                   ) : null}
                   {series.length >= 2 ? (<>

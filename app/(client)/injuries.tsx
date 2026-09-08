@@ -46,6 +46,7 @@ import { useClientData } from '../../src/ui/clientData';
 import { INJURY_AREAS, areaLabel, newInjuryId, type Injury, type InjurySeverity } from '../../src/lib/injuries';
 import { injuryPatch, editAckWarning, deleteInjuryConfirm, editSheetTitle } from '../../src/lib/injuryEdit';
 import { ackState, programmeChoiceState } from '../../src/lib/injuryGate';
+import { worstStatus } from '../../src/ui/loadStatus';
 import { useMyInjuryAcks } from '../../src/ui/injuryAcks';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { fmtDay, num } from '../../src/lib/format';
@@ -93,7 +94,23 @@ export default function Injuries() {
   // mine.readStatus, not mine.status: the acknowledgement read and the
   // programme read fail independently, and the folded figure made this
   // sentence disclaim an answer that had come back perfectly.
-  const coachRead = ackState(mine.readStatus, active, mine.read?.keys ?? null);
+  // BOTH reads, folded with `worstStatus`. `ackState` is given a status and a
+  // list of disclosures, and the status it was given was only ever the
+  // acknowledgement half — while `active` comes off `c.injuries`, whose read is
+  // `c.profileStatus` and which this provider deliberately does NOT clear when
+  // that read fails (the cached copy stays on screen, which is right). So a
+  // healthy ack read over a stale or unconfirmed disclosure list satisfies
+  // `active.every(seen.has(...))` trivially, and this screen printed "Your
+  // coach confirmed they have read these" over a list the app had just failed
+  // to confirm — about the one subject where being wrong sends somebody into a
+  // session on a knee nobody has been told about.
+  //
+  // The coach's side of this exact fact already takes the disclosure read's
+  // status as its FIRST argument, and says why in as many words: "An empty
+  // `active` means 'they have disclosed nothing' only when the read that
+  // produced it finished." One function, two readers, and the two must not be
+  // able to disagree — so the client side passes the same thing.
+  const coachRead = ackState(worstStatus(mine.readStatus, c.profileStatus), active, mine.read?.keys ?? null);
   // The second fact, with its own status and its own failure sentence.
   const choices = programmeChoiceState(mine.choicesStatus, mine.choices.length);
 

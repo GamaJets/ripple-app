@@ -298,7 +298,21 @@ export default function GymPlans() {
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{p.name}</Text>
                   <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink2 }}>{planPrice(p)}</Text>
                 </View>
-                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{offer.note}</Text>
+                {/* The NOTE was the other half of the same defect, and it
+                    survived the fix directly above. Under an unknown membership
+                    `offerFor` is handed `null, null`, reads that as "they hold
+                    none", and takes its first branch — so `offer.note` is
+                    `runNote(termFrom(today, interval))`, a concrete "Runs 8
+                    September 2026 to 8 October 2026." A member whose membership
+                    read failed was shown that term three lines above the
+                    sentence saying this screen cannot work one out until the
+                    read lands. Everywhere else in this file an unread fact
+                    withholds the claim; a date is a claim. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                  {membershipKnown ? offer.note
+                    : mStatus === 'loading' ? 'Reading your membership before a term can be worked out.'
+                    : 'We could not read your membership, so there is no term to state for this plan. A start date worked out without it would be a guess about a membership that may still be running.'}
+                </Text>
                 {/* No transaction on an unknown membership. Everywhere else in
                     this file an unread fact withholds the CLAIM; this was the
                     one place it was allowed to start a payment. */}

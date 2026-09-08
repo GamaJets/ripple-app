@@ -551,8 +551,28 @@ export default function InjuryDoc() {
             document was NOT sent. Separated from the panel below because "we
             could not read that" would be false — nobody tried — and because the
             reason is one the member is owed: we declined to send a medical
-            document on an agreement we could not show them afterwards. */}
-        {result && result.read === 'error' && result.consent === 'granted' && !result.recorded ? (
+            document on an agreement we could not show them afterwards.
+
+            `result.stored === 'ready'` is the condition that was missing, and
+            without it this panel stole every pre-upload failure from the honest
+            one below. `readInjuryDocument`'s early exit is
+            `fail(error) => ({ stored: 'error', path: null, consent, recorded:
+            false, sent: false, read: 'error', … })` — so a member who is signed
+            out, whose photo could not be prepared, whose file read back empty,
+            or whose upload to the bucket failed, satisfied `read === 'error' &&
+            consent === 'granted' && !recorded` exactly. What they were then
+            shown was RECORD_FAILED_NOTE: "Your document is saved, and it has not
+            been sent anywhere. We could not write down that you agreed to it
+            being read…" Both halves false. Nothing was saved — `stored` is
+            'error' and `path` is null, and the document does not appear in the
+            list below — and the consent ledger was blamed for a write nobody
+            attempted. The real sentence, `result.error` ("Sign in to add a
+            document.", "That image could not be prepared for reading."), was
+            thrown away, because the panel underneath is guarded on the exact
+            complement of this one. This branch is only for the case its own
+            title describes: the file IS in their account, and the agreement to
+            read it is what did not land. */}
+        {result && result.read === 'error' && result.stored === 'ready' && result.consent === 'granted' && !result.recorded ? (
           <View>
             <Rule />
             <Section>
@@ -566,7 +586,7 @@ export default function InjuryDoc() {
           </View>
         ) : null}
 
-        {result && result.read === 'error' && !(result.consent === 'granted' && !result.recorded) ? (
+        {result && result.read === 'error' && !(result.stored === 'ready' && result.consent === 'granted' && !result.recorded) ? (
           <View>
             <Rule />
             <Section>

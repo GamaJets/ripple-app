@@ -16,7 +16,7 @@
 //
 // ── The rule that governs every threshold here ────────────────────────────
 //
-// EVERY THRESHOLD IS MONOTONE IN THE LOG. `totalWorkouts >= 50` over a
+// EVERY THRESHOLD IS MONOTONE IN THE LOG. `trainingDays >= 50` over a
 // truncated read can only under-count, never over-count, and the same is true
 // of the longest streak, the PR count and the total volume. That asymmetry is
 // the reason `badgeState` below returns three values rather than a boolean:
@@ -35,7 +35,7 @@
 // by hand with two separate booleans. It is the type now.
 import type { WorkoutEntry } from './mockData';
 import type { BodyweightHistory } from './bodyweightSets';
-import { longestStreak, personalRecords } from './streaks';
+import { activeDays, longestStreak, personalRecords } from './streaks';
 import { tonnage } from './bodyweightSets';
 
 export type BadgeKey =
@@ -78,8 +78,8 @@ export const BADGES: readonly BadgeDef[] = [
   { key: 'week-warrior', title: 'Week Warrior', desc: '7-day streak', cheer: 'Seven days in a row.' },
   { key: 'two-weeks', title: 'Two Weeks Strong', desc: '14-day streak', cheer: 'Two straight weeks of training.' },
   { key: 'unstoppable', title: 'Unstoppable', desc: '30-day streak', cheer: 'Thirty days in a row. Very few people get here.' },
-  { key: 'ten-sessions', title: 'Ten Sessions', desc: 'Log 10 workouts', cheer: 'Ten sessions logged.' },
-  { key: 'fifty-club', title: 'Fifty Club', desc: 'Log 50 workouts', cheer: 'Fifty sessions logged.' },
+  { key: 'ten-sessions', title: 'Ten Sessions', desc: 'Train on 10 separate days', cheer: 'Ten sessions logged.' },
+  { key: 'fifty-club', title: 'Fifty Club', desc: 'Train on 50 separate days', cheer: 'Fifty sessions logged.' },
   { key: 'record-breaker', title: 'Record Breaker', desc: 'Set a personal record', cheer: 'Your first personal record is on the board.' },
   { key: 'pr-machine', title: 'PR Machine', desc: '5 personal records', cheer: 'Five personal records.' },
   { key: 'cardio-kick', title: 'Cardio Kick', desc: 'Log a cardio session', cheer: 'Cardio is on your record too.' },
@@ -91,7 +91,40 @@ export const BADGE_COUNT = BADGES.length;
 
 /** The figures every threshold is decided from, so they are computed once. */
 export interface BadgeFigures {
-  totalWorkouts: number;
+  /**
+   * DISTINCT CALENDAR DAYS with something logged. It was `log.length`, and that
+   * is the defect this field is named after.
+   *
+   * A `WorkoutEntry` is one `workouts` row and this app writes one row per
+   * EXERCISE — src/ui/workoutLog.tsx calls it "One row per set, not per
+   * session", and src/lib/streaks.ts records the production case: one member's
+   * 17 August is seven rows with seven distinct timestamps, one visit to one
+   * gym, saved as they went. So `log.length` over that day was 7, and a member
+   * who trained twice, logging five movements each time, was handed a badge
+   * titled "Ten Sessions" and a notification reading "Ten sessions logged."
+   * Fifty Club — "Fifty sessions logged." — arrived at roughly eight visits.
+   * The badges meant to mark a year of training were being given away in a
+   * fortnight, which is the same harm the hold-arithmetic bug did to One Tonne
+   * and which the note in `badgeFigures` below already describes: every badge
+   * on the screen, including the earned ones, is worth less afterwards.
+   *
+   * There is no session count to fix it with. streaks.ts refuses to expose one
+   * at all and says why: distinct `performed_at` counts SAVES, not sessions,
+   * and `workouts.session_id` is NULL on every row. Days is what this app can
+   * prove, and it is what every other member-facing count already shows.
+   *
+   * The two badges that read as session counts stay truthful under it rather
+   * than by accident: ten distinct days with training on them is at least ten
+   * sessions, so "Ten Sessions" and "Fifty sessions logged." are floors of the
+   * member's real record instead of multiples of it. `desc` is what changed
+   * with the arithmetic, because it states the REQUIREMENT and the requirement
+   * is now a day and not a row.
+   *
+   * Monotone, like every other threshold here: a page that did not come back
+   * can only remove days, never add them, so 'earned' still survives a
+   * truncated read — see the header.
+   */
+  trainingDays: number;
   longestStreak: number;
   prCount: number;
   hasCardio: boolean;
@@ -140,7 +173,7 @@ export function badgeFigures(log: readonly WorkoutEntry[], history: BodyweightHi
   const totalVolumeKg = t.kg;
   const unpricedBodyweightSets = t.unknownSets;
   return {
-    totalWorkouts: log.length,
+    trainingDays: activeDays(log as WorkoutEntry[]).length,
     longestStreak: longestStreak(log as WorkoutEntry[]),
     prCount: personalRecords(log as WorkoutEntry[], history).length,
     hasCardio: log.some((e) => e.cardio),
@@ -165,13 +198,13 @@ const BODYWEIGHT_SENSITIVE: ReadonlySet<BadgeKey> = new Set<BadgeKey>([
  *  input — see the header, which is why 'earned' survives a partial read. */
 export function badgeMet(key: BadgeKey, f: BadgeFigures): boolean {
   switch (key) {
-    case 'first-rep': return f.totalWorkouts >= 1;
+    case 'first-rep': return f.trainingDays >= 1;
     case 'on-a-roll': return f.longestStreak >= 3;
     case 'week-warrior': return f.longestStreak >= 7;
     case 'two-weeks': return f.longestStreak >= 14;
     case 'unstoppable': return f.longestStreak >= 30;
-    case 'ten-sessions': return f.totalWorkouts >= 10;
-    case 'fifty-club': return f.totalWorkouts >= 50;
+    case 'ten-sessions': return f.trainingDays >= 10;
+    case 'fifty-club': return f.trainingDays >= 50;
     case 'record-breaker': return f.prCount >= 1;
     case 'pr-machine': return f.prCount >= 5;
     case 'cardio-kick': return f.hasCardio;

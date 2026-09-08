@@ -748,7 +748,20 @@ export default function Bookings() {
           {/* Cancelled classes are listed and are not counted as bookings —
               the figure says "booked", and a class the gym called off is not
               one. */}
-          <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.filter((it) => !it.cancelled).length} booked` : undefined} />
+          {/* Nor is a place in a QUEUE, and that half was missing: the filter
+              excluded cancelled rows and let every waitlist place through, so a
+              member holding one seat and queuing for two read "3 booked" and
+              arranged three evenings around one confirmed place. `addToCalendar`
+              in this same file already spells the predicate correctly —
+              `!it.waitlist && !it.cancelled` — and argues it twice in prose: "A
+              place in a queue is not a booking, so it is not written into your
+              calendar", and, over the PT list two hundred lines down, "A PT
+              waitlist is not a booking and is never listed as one". A class
+              waitlist is not a different kind of thing, and the count under the
+              heading is where the member reads it. The queued rows stay ON the
+              list — they are real and they are theirs — they are simply not
+              what the word "booked" counts. */}
+          <SectionHead title="Upcoming" note={bookingsWhole && items.length > 0 ? `${items.filter((it) => !it.waitlist && !it.cancelled).length} booked` : undefined} />
           {/* Above the rows, not below them: the rows are what makes the list
               look finished, and the reader has to be told before they scroll
               past the one booking that did come back. */}

@@ -140,7 +140,7 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
   eq(b.absence, null, 'there is a score, so there is no reason for its absence');
   eq(b.lines.length, 4, 'four signals, four rows — always, even the ones that were not scored');
   eq(b.lines.map((l) => l.key).join(','), 'sleep,recovery,hydration,load', 'in scale order, which is order of weight');
-  eq(b.lines.map((l) => l.title).join(','), 'Sleep,Device Recovery,Hydration,Recent Sessions',
+  eq(b.lines.map((l) => l.title).join(','), 'Sleep,Device Recovery,Hydration,Recent Training',
     'titles are Title Case, per the house rule for a label beside a value');
   // "Device Recovery" rather than "Recovery": this breakdown renders on a
   // screen called Recovery, under a hero called Readiness, and a third bare
@@ -212,10 +212,16 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
 
 // ── recent sessions ───────────────────────────────────────────────────────
 {
-  eq(lineFor(br({ workoutsLast2Days: 0 }), 'load').detail, 'no sessions in the last two days',
-    'zero sessions is a fact and reads as one');
-  eq(lineFor(br({ workoutsLast2Days: 1 }), 'load').detail, '1 session in the last two days', 'one is singular');
-  eq(lineFor(br({ workoutsLast2Days: 2 }), 'load').detail, '2 sessions in the last two days', 'two is not');
+  // DAYS, never sessions. `workoutsLast2Days` is a Set of local day keys —
+  // src/ui/readiness.ts: "three sets on Monday are one day of training" — so
+  // "1 session in the last two days", which is what this row used to print,
+  // is a false statement to a member who trained twice yesterday.
+  eq(lineFor(br({ workoutsLast2Days: 0 }), 'load').detail, 'no training logged in the last two days',
+    'nothing logged is a fact and reads as one');
+  eq(lineFor(br({ workoutsLast2Days: 1 }), 'load').detail, 'training logged on 1 day in the last two', 'one is singular');
+  eq(lineFor(br({ workoutsLast2Days: 2 }), 'load').detail, 'training logged on 2 days in the last two', 'two is not');
+  ok(!/session/.test(lineFor(br({ workoutsLast2Days: 2 }), 'load').detail),
+    'and the word "session" is not in it at all — the log cannot count them');
   eq(lineFor(br({ workoutsLast2Days: 0 }), 'load').state, 'scored',
     'and nought is scored, never mistaken for unread — the two are opposite ends of the scale');
 }

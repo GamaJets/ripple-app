@@ -33,7 +33,12 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { num, fmtClock, fmtAxisDay } from '../../src/lib/format';
+// `numUpTo`, because `perWeek` is a ONE-DECIMAL mean — `Math.round(x * 10) / 10`
+// in src/lib/attendance.ts — and a bare `${perWeek}` writes a full stop in every
+// locale. "2.7 a week" is read as twenty-seven by a reader whose language makes
+// the full stop the thousands separator, and it sat beside `num(days.length)` in
+// the same row, which does ask. See the header of src/lib/format.ts.
+import { num, numUpTo, fmtClock, fmtAxisDay } from '../../src/lib/format';
 import { appLocale } from '../../src/lib/locale';
 import { dateParts } from '../../src/lib/localDate';
 import { useMyAttendance, RHYTHM_WEEKS } from '../../src/ui/attendance';
@@ -214,7 +219,7 @@ export default function Attendance() {
         <Section>
           <SectionHead
             title="How often you come"
-            note={countable && rhythm.perWeek != null ? `${rhythm.perWeek} a week` : undefined}
+            note={countable && rhythm.perWeek != null ? `${numUpTo(rhythm.perWeek, 1)} a week` : undefined}
           />
 
           {status === 'loading' ? (
@@ -269,7 +274,7 @@ export default function Attendance() {
                 <View>
                   <Text style={{ ...ty.micro, color: t.ink3 }}>Days a week</Text>
                   <Text style={{ ...ty.head, ...numeric, color: t.ink, marginTop: 2 }}>
-                    {countable && rhythm.perWeek != null ? rhythm.perWeek : fig(null)}
+                    {countable && rhythm.perWeek != null ? numUpTo(rhythm.perWeek, 1) : fig(null)}
                   </Text>
                 </View>
               </View>

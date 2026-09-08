@@ -597,10 +597,21 @@ export default function Devices() {
     // member reads and closes the screen on. A four-hour-old number under that
     // label, with the admission a section further down, is the admission in the
     // wrong place.
-    note={energy.kcal == null
-     ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
-     : w.todayStatus === 'error'
-      ? `Last figure we had from ${energy.from} — it has not synced since, so it is not today's total yet.`
+    // The FAILED read is asked about first, and it was asked about second —
+    // which put it behind a null test it can never get past. `sync()` leaves
+    // `metrics[id]` untouched when the first read throws, so a device that
+    // could not be reached produces `energy.kcal == null` AND
+    // `todayStatus === 'error'` together, and the chain answered "Wear your
+    // watch": our own failed read, stated back to the member as something they
+    // did not do. Two connected providers where one answers and the other does
+    // not is enough to reach it — `showLive` is true, `todayStatus` is
+    // `worstStatus(...)`, and the energy figure is still missing.
+    note={w.todayStatus === 'error'
+     ? (energy.kcal == null
+      ? `We couldn’t read today’s energy from your ${connected.length} connected ${devicesWord}, so there is no figure here yet. That is our read, not a day you did not move.`
+      : `Last figure we had from ${energy.from} — it has not synced since, so it is not today's total yet.`)
+     : energy.kcal == null
+      ? `Wear your watch — energy syncs on its own from your ${connected.length} connected ${devicesWord}.`
       : energy.kind === 'total'
        ? `Whole day from ${energy.from}, rest included · already inside your calorie target.`
        : `Energy above rest, from ${energy.from} · already inside your calorie target.`}
@@ -1067,7 +1078,21 @@ export default function Devices() {
          // for whom Sync cannot work: `sync()` returns at its first line for an
          // unavailable provider. The flag above this block has already said
          // why, so this only has to stop contradicting it.
-         if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>{unreadable ? 'Nothing has been read from this device on this phone.' : 'Connected. Tap Sync — no data for today yet.'}</Text>;
+         // …and a read that FAILED, or has not come back, is not a device with
+         // nothing to say. `sync()` calls `setMetrics` on success and on a
+         // `WearableNotConnectedError` only; every other throw leaves the key
+         // undefined, so a token that 500s, a network that dropped and a first
+         // read still in flight all arrived here as "no data for today yet" —
+         // an absence claim over a question nobody got an answer to, with an
+         // instruction to tap the button that had just failed. `syncStatus` is
+         // on the context and is per provider, which is what makes the three
+         // sentences separable.
+         const st = w.syncStatus[p.meta.id];
+         if (!m) return <Text style={{ ...ty.caption, color: t.ink3 }}>{
+          unreadable ? 'Nothing has been read from this device on this phone.'
+           : st === 'loading' ? 'Connected. Reading today from this device…'
+           : st === 'error' ? 'Connected, but today could not be read from this device. That is our read failing rather than a day with nothing in it — try Sync again in a moment.'
+           : 'Connected. Tap Sync — no data for today yet.'}</Text>;
          // A read that answered with every field empty rendered as an EMPTY ROW
          // — no figures, no message, and a "Synced just now" beside it. That is
          // the same silence the flag above exists to break, arriving by the

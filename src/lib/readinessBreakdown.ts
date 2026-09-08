@@ -363,14 +363,33 @@ function hydrationLine(i: ReadinessBreakdownInput): ReadinessInputLine {
 function loadLine(i: ReadinessBreakdownInput): ReadinessInputLine {
   // Title Case, and the member's words rather than ours: "load" is a coach's
   // term and this row is read by everybody.
-  const title = 'Recent Sessions';
+  //
+  // ── Days, and not sessions, because that is what the figure is ──────────
+  //
+  // `workoutsLast2Days` is a count of DISTINCT LOCAL DAYS with a logged set in
+  // the window, not a count of sessions — src/ui/readiness.ts builds it out of
+  // a `Set` of day keys and says so on the line above it: "Days with a session
+  // in the last two, not entries — three sets on Monday are one day of
+  // training." This row printed it as "1 session in the last two days" to a
+  // member who trained morning and evening yesterday, which is a false
+  // statement about their own record and one they can check. It is the same
+  // defect app/(client)/consistency.tsx already fixed from the other side,
+  // where a per-exercise row count was labelled "Sessions" and read out as
+  // seven of them over one visit to the gym: "The fix is the label rather than
+  // the arithmetic, because a session count is not available." It is not
+  // available here either — the log holds one row per exercise, so the number
+  // of sessions inside a day cannot be recovered from it — and a day of
+  // training is a fact this app can stand behind.
+  const title = 'Recent Training';
   const n = i.workoutsLast2Days;
   if (n == null || !Number.isFinite(n)) {
     return { key: 'load', title, state: 'unread', detail: 'we could not read your training log' };
   }
   return {
     key: 'load', title, state: 'scored',
-    detail: n === 0 ? 'no sessions in the last two days' : `${n} session${n === 1 ? '' : 's'} in the last two days`,
+    detail: n === 0
+      ? 'no training logged in the last two days'
+      : `training logged on ${n} day${n === 1 ? '' : 's'} in the last two`,
   };
 }
 

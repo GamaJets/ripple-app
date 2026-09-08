@@ -48,7 +48,7 @@ export default function Achievements() {
   // 'partial' is not 'error', and it needs a different answer from either.
   //
   // A truncated read (src/lib/rowCap.ts) holds real rows — just not all of
-  // them — and every threshold here is MONOTONE: `totalWorkouts >= 50` over the
+  // them — and every threshold here is MONOTONE: `trainingDays >= 50` over the
   // newest thousand sessions can only be an under-count, never an over-count,
   // and the same is true of `best`, `prs` and `totalVolume`. So on a partial
   // read an EARNED badge is genuinely earned and may be shown; a LOCKED one is

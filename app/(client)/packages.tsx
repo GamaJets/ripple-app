@@ -641,9 +641,27 @@ export default function ClientPackages() {
                 is missing and who can act on it. */}
             <Section>
               <SectionHead title="Payment & Invoices" />
-              {subs === null ? (
+              {/* BOTH reads, because the button is chosen from both. The guard
+                  was `subs === null` alone, and the final arm of this chain is
+                  an assertion about the member's money: "Stripe has no billing
+                  account for anything you have bought here." `portalBuy` is
+                  `portalPurchase(rows)`, and `fetchMyPurchases` answers `null`
+                  for a refusal, a stall AND a truncated read — so a member
+                  whose purchases read failed while their subscriptions read
+                  came back empty was told, as a fact, that there is no receipt
+                  and no route to a refund for anything they have ever paid for.
+                  Twenty lines below, the same failed read renders the panel
+                  that says the opposite: "This is our end, not a statement
+                  about what you have bought."
+
+                  `subsUnknown` rather than `subs === null` for the other half,
+                  for the reason this file already gives where that flag is
+                  defined: a WARM CACHE is not knowing either — it is up to a
+                  week old, and a subscription taken out since is exactly the
+                  one that would not be in it. */}
+              {subsUnknown || subs === null || failed || rows == null ? (
                 <Flag tone={t.crit}>
-                  We couldn't read your subscriptions, so we can't tell you which billing account to open.
+                  We couldn't read everything you have bought here, so we can't tell you which billing account to open.
                   This is our end, not a statement about what you are paying for.
                 </Flag>
               ) : portalSub || portalBuy ? (

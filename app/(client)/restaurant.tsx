@@ -10,7 +10,7 @@
 // `src/lib/restaurant.ts` is a reference table of typical restaurant servings —
 // a lookup vocabulary, not a record of anything the client ate — so it stays.
 // Nothing is logged until they pick a dish, a portion, and tap Add.
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { num } from '../../src/lib/format';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
@@ -19,6 +19,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useFoodLog } from '../../src/ui/foodLog';
+// The gesture DISH_MARK_UNKNOWN promises. That sentence — the one an allergic
+// member reads when their exclusions could not be read — ends "pull down to try
+// again", and this screen had no refreshControl, no `usePullToRefresh` and no
+// call to `cd.reload()` anywhere in it. So the instruction was dead: a member
+// pulled, nothing happened, and the reasonable conclusion from a dead gesture is
+// "I retried and it still cannot see my exclusions" rather than "the app never
+// asked". app/(client)/foodlog.tsx shows the same sentence over a ScrollView that
+// does have one, so this was an omission and not a house style.
+import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 // The exclusions the member set. This screen had no client-data surface at
 // all — `useFoodLog()` was the whole of it — so an app-wide "no shellfish"
 // governed the meal planner and nothing else, and this screen offered prawns
@@ -40,6 +49,9 @@ export default function Restaurant() {
   const router = useRouter();
   const fl = useFoodLog();
   const cd = useClientData();
+  // `cd.reload()` alone: the exclusions are the only thing on this screen that a
+  // failed read can leave unstated, and the dish table is a local constant.
+  const pull = usePullToRefresh(useCallback(() => { cd.reload(); }, [cd.reload]));
   const [q, setQ] = useState('');
   const [cuisine, setCuisine] = useState<string | null>(null);
   const [sel, setSel] = useState<Dish | null>(null);
@@ -75,7 +87,7 @@ export default function Restaurant() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />

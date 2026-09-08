@@ -102,7 +102,18 @@ export default function WeeklyReport() {
   // the ring on Home and the model was told a streak the app had already told
   // the member was longer.
   const streak = shownStreak(log);
-  const milestone = streakMilestone(streak);
+  // Gated, like every other streak statement on this page — and it was the one
+  // that was not. `useWorkoutLog` does not clear `log` when a refresh fails: it
+  // sets 'error' and returns, leaving the cached and queued entries in place.
+  // So an ungated milestone printed "23-day streak — unstoppable! 🔥" in a
+  // Notice at the top of the report, directly above a hero of dashes and the
+  // sentence "We could not read your training this week, so this summary leaves
+  // it out" — a celebration of a run that may already have broken, on the
+  // document a member sends to their coach. The same expression is refused to
+  // the model on line 226 and to the fallback narrative on line 280 for exactly
+  // this reason, and app/(client)/activity.tsx already writes it as
+  // `prsKnown ? streakMilestone(streak) : null`.
+  const milestone = trainingWhole ? streakMilestone(streak) : null;
   const prs = personalRecords(log, c.weightSeries);
 
   const wSeries = c.weightSeries;

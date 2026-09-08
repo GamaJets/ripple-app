@@ -222,6 +222,21 @@ export default function Cards() {
   const UNWEIGHED = c.scansStatus === 'loading' ? 'Reading your weight history…'
     : c.scansStatus === 'partial' ? 'More weigh-ins on record than can be read at once — a top lift priced against part of them is not one'
     : 'We couldn’t read your weight history, and pull-ups and dips are priced against it';
+  // The same three sentences again for the Progress card, which asks a
+  // different question of the same read and so cannot borrow the one above.
+  //
+  // That card ended its chain `scansKnown ? 'Weigh in twice to unlock' : 'We
+  // couldn’t read your weigh-ins'` — and `scansKnown` is `isWhole`, which is
+  // false for 'loading' and 'partial' as well as for 'error'. So on the first
+  // frame of every launch, before anything had been asked for, this card
+  // asserted a read failure that had not happened; and under a truncated read
+  // it asserted one where nothing failed at all. The whole point of the card
+  // is that it gets screenshotted and posted, and the note beside it says
+  // every figure on one is a public claim — a false claim about our own
+  // failure is still a false claim.
+  const UNWEIGHED_PROGRESS = c.scansStatus === 'loading' ? 'Reading your weight history…'
+    : c.scansStatus === 'partial' ? 'More weigh-ins on record than can be read at once — a change measured over part of them is not one'
+    : 'We couldn’t read your weigh-ins';
 
   const cards = [
     // `available: true` was hardcoded on this one card while the other two
@@ -247,7 +262,7 @@ export default function Cards() {
     // asked of the figure that will actually be printed, in the member's own
     // unit, so a change too small to show at this grain does not become a
     // shareable milestone either.
-    { kicker: 'Progress', big: moved ? deltaLabel(wDeltaShown, { since: null }) : '—', unit: moved ? wu : '', sub: moved ? 'Since you started' : hasProgress ? 'No change since your first weigh-in' : scansKnown ? 'Weigh in twice to unlock' : 'We couldn’t read your weigh-ins', available: moved },
+    { kicker: 'Progress', big: moved ? deltaLabel(wDeltaShown, { since: null }) : '—', unit: moved ? wu : '', sub: moved ? 'Since you started' : hasProgress ? 'No change since your first weigh-in' : scansKnown ? 'Weigh in twice to unlock' : UNWEIGHED_PROGRESS, available: moved },
   ];
   const card = cards[idx];
   const shareText = (i: number) => {

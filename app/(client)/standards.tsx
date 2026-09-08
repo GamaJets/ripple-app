@@ -21,17 +21,31 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
-import { weightIn, weightLabel } from '../../src/lib/units';
+// `plain` beside them: `weightIn` hands back a NUMBER rounded to a tenth, and a
+// number rendered as a JSX child is `String(n)` — an ASCII full stop, in every
+// locale. This screen printed "142.5 kg · 1,75×" on one row, a full stop and a
+// comma as decimal separators inside the same widget, because the ratio beside
+// it goes through `num2` and the load did not. A German reader parses "142.5" as
+// a hundred and forty-two thousand five hundred. `plain` and not `num2` for the
+// same reason src/lib/deltaLabel.ts gives: a load is a figure that is typed back
+// into boxes `readNumber` parses, so it takes the reader's separator and never a
+// thousands group.
+import { plain, weightIn, weightLabel } from '../../src/lib/units';
 import { useCallback } from 'react';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { personalRecords } from '../../src/lib/streaks';
-import { Rule, Section, SectionHead, Ghost, Notice } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, fig } from '../../src/ui/kit';
 import { gradeLift } from '../../src/lib/strengthLevel';
 import { STRENGTH_LIFTS, countsFor } from '../../src/lib/strengthLifts';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { BACK_ICON } from '../../src/ui/direction';
+
+/** A converted weight in the reader's own spelling, or null for `fig` to dash.
+ *  The same two steps `weightLabel` takes, without the unit — this screen draws
+ *  the unit in its own element beside the figure. */
+const weightShown = (v: number | null): string | null => (v == null ? null : plain(v));
 import { num2 } from '../../src/lib/format';
 
 const LEVELS = ['Beginner', 'Novice', 'Intermediate', 'Advanced', 'Elite'];
@@ -144,7 +158,7 @@ export default function Standards() {
       <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{lift.name}</Text>
       {best ? (
        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-        <Text style={{ ...value(18), color: t.ink }}>{weightIn(best, wu)}</Text>
+        <Text style={{ ...value(18), color: t.ink }}>{fig(weightShown(weightIn(best, wu)))}</Text>
         {/* The multiple is deliberately printed raw beside the converted
             lift: it is a ratio, so 1.75× is 1.75× in pounds too. And it is
             printed only when there was something to divide by — "0.00×" beside
@@ -176,7 +190,7 @@ export default function Standards() {
          <Text style={{ ...ty.caption, fontWeight: '500', color: lvl >= 0 ? t.ink : t.ink3 }}>{lvl >= 0 ? LEVELS[lvl] : 'Getting started'}</Text>
         </View>
         {nextTarget ? (
-         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Next: {LEVELS[lvl + 1]} @ {nextTarget} {wu}</Text>
+         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>Next: {LEVELS[lvl + 1]} @ {plain(nextTarget)} {wu}</Text>
         ) : lvl === LEVELS.length - 1 ? (
          <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>Top of the scale</Text>
         ) : null}

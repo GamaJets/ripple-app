@@ -30,9 +30,20 @@ import { useCallback } from 'react';
 import { useClientData } from '../../src/ui/clientData';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useSettings } from '../../src/ui/settings';
-import { weightDeltaIn } from '../../src/lib/units';
+// `plain`, not `String(Math.abs(x))`. Both figures on this screen are carried
+// to one decimal, and a bare interpolation of a Number writes a FULL STOP in
+// every locale there has ever been — which is the sixth thing src/lib/
+// deltaLabel.ts's header says a movement has to get right, and the reason that
+// module prints through `plain` itself. The KPI row further down already used
+// `deltaLabel` for these same two values, so a German member read "3,4" there
+// and "3.4" in the hero four lines above it. The share text is worse than a
+// disagreement: it leaves the phone and stays posted, addressed to readers who
+// have no settings screen to check it against and for whom a full stop is the
+// THOUSANDS separator.
+import { plain, weightDeltaIn } from '../../src/lib/units';
  import { deltaLabel, deltaSign, deltaMoved } from '../../src/lib/deltaLabel';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { num } from '../../src/lib/format';
 import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, type as ty } from '../../src/theme/scale';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -88,8 +99,8 @@ export default function Social() {
  // about a change the scans did not record, made in public on the member's
  // behalf.
  const bits = [
- deltaMoved(wtMove) ? `${wayWord(wtMove)} ${Math.abs(wtMove)} ${wu}` : null,
- deltaMoved(bfMove) ? `${wayWord(bfMove)} ${Math.abs(bfMove)}% body fat` : null,
+ deltaMoved(wtMove) ? `${wayWord(wtMove)} ${plain(Math.abs(wtMove), 1)} ${wu}` : null,
+ deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}% body fat` : null,
  ].filter(Boolean);
  const msg = measured && bits.length
  ? `My ${BRAND.label} progress — ${bits.join(' and ')} so far. Every rep ripples out.`
@@ -120,9 +131,9 @@ export default function Social() {
  {measured ? (
  <Hero
  label={!deltaMoved(wtMove) ? 'Weight Unchanged' : wayWord(wtMove) === 'down' ? 'Weight Down' : 'Weight Up'}
- figure={Math.abs(wtMove).toString()}
+ figure={plain(Math.abs(wtMove), 1)}
  unit={wu}
- note={`Body fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${Math.abs(bfMove)}%` : 'unchanged'} across ${cd.scans.length} scans`}
+ note={`Body fat ${deltaMoved(bfMove) ? `${wayWord(bfMove)} ${plain(Math.abs(bfMove), 1)}%` : 'unchanged'} across ${num(cd.scans.length)} scans`}
  />
  ) : (
  !scansWhole && cd.scansStatus !== 'loading' ? (
