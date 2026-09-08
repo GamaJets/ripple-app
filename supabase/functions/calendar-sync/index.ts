@@ -516,10 +516,31 @@ Deno.serve(async (req) => {
       // every push, leaving the coach's account filling up with empty ones —
       // so a failed write here stops the push, at the cost of the single empty
       // calendar just made.
-      const { error: idErr } = await service.from('calendar_links')
-        .update({ write_calendar_id: made.id, updated_at: new Date().toISOString() })
+      //
+      // COUNTED, and for the same reason the `write` action's remake at the top
+      // of this file is: a calendar has by now been CREATED in the coach's
+      // Google account, and zero rows loses its id exactly as thoroughly as an
+      // error does. This runs under the service role and is filtered by nothing
+      // but the link the row was read from a moment ago, so zero rows means the
+      // connection has since been deleted — a disconnect from another device
+      // while a push was running. Left uncounted, that is the empty-calendars
+      // failure this comment describes, on every push, for ever, with the coach
+      // told the push merely could not list its events.
+      //
+      // The same `reason` as the error path, because it is the same outcome to
+      // the coach and src/ui/calendarSync.ts already has a sentence for it.
+      const { error: idErr, count: idRows } = await service.from('calendar_links')
+        .update({ write_calendar_id: made.id, updated_at: new Date().toISOString() }, { count: 'exact' })
         .eq('user_id', userId).eq('provider', PROVIDER);
       if (idErr) return json({ ok: false, connected: true, reason: 'calendar_remake_not_stored' });
+      if (!idRows) {
+        console.error(
+          'calendar-sync: re-made the write calendar ' + made.id + ' for ' + userId
+          + ' and the connection row it belongs on was not there to record it. An empty calendar is '
+          + 'left in that Google account.',
+        );
+        return json({ ok: false, connected: true, reason: 'calendar_remake_not_stored' });
+      }
       calendarId = made.id;
       read = { ok: true, events: new Map<string, { startMs: number; endMs: number }>() };
     }

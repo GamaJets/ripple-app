@@ -124,6 +124,22 @@ Deno.serve(async (req) => {
     acctId = existing.stripe_account_id;
     try {
       const acct = await stripe.accounts.retrieve(acctId);
+      // no-count-ok: the same argument connect-onboard makes at the same write,
+      // one table across.
+      //
+      // `existing.stripe_account_id` came off this row a few lines above under
+      // the service role, and nothing else filters this update, so zero rows
+      // means the gym's `gym_connect_accounts` row went away between that read
+      // and this write. What that costs is not a stale capability column — it
+      // is a gym with no payment account row at all, and gym-checkout already
+      // refuses on it in front of the member: "Your gym cannot take card
+      // payments yet, so nothing has been charged. Reception can still take
+      // your money at the desk." That is the report, in the place where it is
+      // worth something, to the person it stops.
+      //
+      // And `account.updated` in stripe-webhook writes these same columns and
+      // is the path that matters, because an owner who finishes verification on
+      // Stripe's hosted flow may never come back through this function.
       const { error: updErr } = await service.from('gym_connect_accounts').update(accountState(acct)).eq('tenant_id', tenantId);
       // Not fatal. The link below is what the owner came for, and the webhook
       // writes the same columns. Losing this refresh delays a capability

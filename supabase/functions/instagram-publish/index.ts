@@ -180,12 +180,57 @@ async function removeCardObject(service: any, key: string): Promise<{ removed: b
   return { removed: true, why: null };
 }
 
-/** Record the outcome of a removal on the ledger row, whichever way it went. */
-async function markRemoval(service: any, key: string, r: { removed: boolean; why: string | null }) {
-  await service.from('share_card_objects').update({
+/**
+ * Record the outcome of a removal on the ledger row, whichever way it went.
+ *
+ * Answers whether the ledger actually took it, and both halves of that are
+ * checked because neither was.
+ *
+ * The result used not to be bound at all, so `error` was not read and nor was
+ * the row count — and a PostgREST UPDATE that matches ZERO rows is a 204 with a
+ * null error, indistinguishable from one that changed something. This table is
+ * the only record of what this product has put on the public internet, and the
+ * only thing that will ever come back for an object: `sweep` selects the rows
+ * whose `removed_at` is null. So a ledger row that is not there is an object no
+ * sweep will ever look for again.
+ *
+ * The key is 32 hex characters of `crypto.getRandomValues` and the client is
+ * the service role, so nothing filters this update and zero rows has exactly
+ * one meaning: the row is gone. Paired with a removal that could NOT be
+ * confirmed, that is a public object nothing knows about — the state the ledger
+ * exists to make impossible, and the state the caller is otherwise about to
+ * promise a coach the sweep will clear.
+ *
+ * Logged rather than thrown. Five of the six call sites are already returning
+ * somebody Meta's own refusal, which is the actionable half of what they have
+ * to say; the sixth is a published post. Only that sixth changes what the coach
+ * is told, and only when the object is still up.
+ */
+async function markRemoval(service: any, key: string, r: { removed: boolean; why: string | null }): Promise<boolean> {
+  const { error, count } = await service.from('share_card_objects').update({
     removed_at: r.removed ? new Date().toISOString() : null,
     remove_failure: r.why,
-  }).eq('object_key', key);
+  }, { count: 'exact' }).eq('object_key', key);
+  if (error) {
+    console.error(
+      'instagram-publish: card object ' + key + ' ' + (r.removed ? 'was removed' : 'could NOT be removed')
+      + ' and the ledger refused the record of it: ' + error.message
+      + (r.removed ? '' : ' The object is still public and the sweep will still find it.'),
+    );
+    return false;
+  }
+  if (!count) {
+    console.error(
+      'instagram-publish: card object ' + key + ' ' + (r.removed ? 'was removed' : 'could NOT be removed')
+      + ' and share_card_objects has no row for it to be recorded on.'
+      + (r.removed
+        ? ' Nothing is public and nothing is owed.'
+        : ' THE OBJECT IS STILL PUBLIC AND NO SWEEP WILL FIND IT — the sweep reads this table. Remove ' + key
+          + ' from the ' + CARD_BUCKET + ' bucket by hand.'),
+    );
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -514,7 +559,22 @@ Deno.serve(async (req) => {
     // removed rather than marked as deleted. A row saying an object was removed
     // when it never existed is a false entry in the one table that says what
     // has been public.
-    await service.from('share_card_objects').delete().eq('object_key', key);
+    //
+    // no-count-ok: zero rows deleted is the outcome this line asks for. The row
+    // was inserted a few lines above under the service role, the key is 32 hex
+    // characters of `crypto.getRandomValues` and nothing else filters this, so
+    // zero rows means the row is already absent — and an absent row is exactly
+    // what "no false entry" means. Unlike `markRemoval` above, there is no
+    // public object on the other side of this: the upload is the thing that
+    // just failed, so there is nothing for a sweep to be deprived of.
+    const { error: cleanupErr } = await service.from('share_card_objects').delete().eq('object_key', key);
+    if (cleanupErr) {
+      // Not returned: the coach is about to be told, in the next line, the one
+      // thing they can act on — the upload failed and nothing was posted. What
+      // this leaves behind is a ledger row for an object that was never
+      // created, which the sweep will confirm absent and close at the ceiling.
+      console.error('instagram-publish: upload of ' + key + ' failed and its ledger row could not be cleared: ' + cleanupErr.message);
+    }
     return fail(`The card could not be put where Instagram can fetch it: ${up.error.message}. Nothing has been posted.`);
   }
 
@@ -632,7 +692,7 @@ Deno.serve(async (req) => {
   // post is up either way, and a warning about a temporary file is a different
   // thing from a post that failed.
   const removal = await removeCardObject(service, key);
-  await markRemoval(service, key, removal);
+  const recorded = await markRemoval(service, key, removal);
 
   return json({
     ok: true,
@@ -640,8 +700,15 @@ Deno.serve(async (req) => {
     containerId,
     permalink,
     objectRemoved: removal.removed,
+    // Three states, not two, because the sweep is a promise this function can
+    // only keep while the ledger row exists. An object that could not be
+    // confirmed deleted AND could not be recorded is one the sweep reads no row
+    // for and will never come back to, so saying "Repple will remove it" there
+    // would be a claim about a thing that is not going to happen.
     warning: removal.removed ? undefined
-      : 'Your post is up. The temporary copy of the card could not be confirmed as deleted, so Repple will remove it on the next sweep.',
+      : recorded
+        ? 'Your post is up. The temporary copy of the card could not be confirmed as deleted, so Repple will remove it on the next sweep.'
+        : 'Your post is up. The temporary copy of the card could not be confirmed as deleted, and Repple has no record left to sweep it from, so it will not be removed on its own. Tell whoever runs this Repple, and quote ' + key + '.',
   });
 });
 

@@ -405,46 +405,36 @@ ok(sampleLines.includes(35), "and it does NOT lend its count to the uncounted el
  *
  * Listed at N, fails at N+1, and fails when it drops below N so a fix cannot
  * leave its entry behind. Every one is REAL — each is an UPDATE or DELETE whose
- * `error` is read and whose row count never is — and every one is left as it
- * stands, because this lane audits these files and does not own them. None was
- * silenced with a marker: a gate's author annotating other people's code is how
- * a rule gets weakened by the person least placed to judge it.
+ * `error` is read and whose row count never is.
  *
- * They are not equally urgent, and the `why` says where each sits. The two in
- * instagram-publish are the worst shape in the tree — the result is not bound
- * at all, so not even `error` is read — and the twenty in stripe-webhook are
- * the mildest, because most are the deliberate `lte('stripe_event_at', …)`
- * ordering filter whose whole job is to match nothing when a stale delivery
- * arrives late. Between them sit the writes a person is waiting on.
+ * It stood at 35 when this file was written and at 29 after the eight writes
+ * shown to somebody as a success were closed. It is 15 now. What came off was
+ * the fourteen where NOTHING is shown to the person and a later screen reads
+ * the row as truth, and they did not all come off the same way: eleven are
+ * counted, and three are marked `no-count-ok:` because a zero-row match there
+ * is the outcome the write was asking for and reporting it would be noise a
+ * caller cannot act on. Which of the two a site got is argued at the site.
+ *
+ * What is left is the residue that argument does not reach. The twelve in
+ * stripe-webhook are the four insert-then-two-guarded-updates idempotency sets
+ * and nothing else — `lte('stripe_event_at', …)` matching nothing IS an
+ * out-of-order delivery being correctly ignored. They want a `no-count-ok:`
+ * naming that, and they have not got one, because the lane that closed the
+ * fourteen was told to leave them alone and annotating a design it was not
+ * asked to judge is how a marker stops meaning anything.
  */
 const KNOWN = new Map<string, { count: number; why: string }>([
-  ['instagram-publish/index.ts', {
-    count: 2,
-    why: "`markRemoval` and the failed-upload cleanup do not bind the result at all, so neither `error` nor `count` is read. A removal that did not happen is recorded as one that did, on the one table that says what has been public. The chosen-Page write that used to make this 3 is counted now: the connection can be removed between the read and the write, and a coach shown a Page they no longer have finds out at the first publish, after writing the caption.",
-  }],
   ['calendar-sync/index.ts', {
-    count: 3,
-    why: "The token-refresh stores. Three of the six came off: the write-calendar id is counted, because a calendar has by then been CREATED in the coach's Google account and losing the id reports two-way sync on while nothing is ever pushed; and the disconnect delete and the write-enable-off toggle are now marked no-count-ok rather than counted, because zero rows there means the credential had already gone, which is the state both were asking for. Reporting those two would be worse than silent — calendarSync.ts turns any error into advice to retry or disconnect a connection that no longer exists.",
-  }],
-  ['gym-checkout/index.ts', {
-    count: 1,
-    why: 'Closing an abandoned order, keyed on an order read moments earlier under the service role, so a zero match means the row went away mid-flight. The session-id stamp that used to make this 2 now logs: fulfilment does not depend on it, because the webhook stamps the same column off metadata.order_id, so what a zero match actually loses is the ability to reconcile an order that is never paid — a report to read rather than an error to show somebody with a live payment page open.',
-  }],
-  ['connect-onboard/index.ts', {
-    count: 1,
-    why: 'Mirroring Stripe account state onto an existing coach. Explicitly not fatal — the webhook writes the same columns — but nothing distinguishes "no row" from "written".',
-  }],
-  ['gym-onboard/index.ts', {
-    count: 1,
-    why: 'The same mirror for a gym tenant, with the same reasoning and the same gap.',
+    count: 2,
+    why: "Down from 3. The push path's write-calendar remake is counted now: it re-creates a calendar in the coach's Google account when the stored id 404s, and zero rows there means the connection was deleted while the push ran — so the id is lost, a new calendar is made on the next push, and the account fills with empty ones, which is the failure the comment above it already describes. It answers with `calendar_remake_not_stored`, the reason its own error path uses, and logs the abandoned calendar's id. The two left are the token stores in `usableToken`: zero rows there means the link row has gone, so there is no connection left for a rotated token to be lost from.",
   }],
   ['wearable-day/index.ts', {
     count: 1,
     why: 'Storing a rotated refresh token. The comment above it already explains that a lost write leaves the row holding a token the vendor will never accept again; a zero-row match loses it just as thoroughly as an error does.',
   }],
   ['stripe-webhook/index.ts', {
-    count: 20,
-    why: "Mostly the insert-then-two-guarded-updates idempotency shape, where `lte('stripe_event_at', …)` matching nothing IS the design for an out-of-order delivery. Those want a `no-count-ok:` naming that, not a count. The order and membership writes around them are the ones where zero rows would be a real loss.",
+    count: 12,
+    why: "Down from 20, and now exactly the four idempotency sets: the upsert-then-lte-then-is-null triples on client_subscriptions, subscriptions, client_disputes and invoices. Zero rows in one of those is a stale delivery arriving after a newer one, which is what the filter is FOR. The eight that came off were the writes around them: both halves of `account.updated` (counted jointly — one of the pair matching nothing is the design, both matching nothing is an account neither table knows, which is a coach or a gym who has finished Stripe's verification and still cannot sell); the upgrade's supersede-close; both gym_orders closes, paid and failed; the gym refund's `refunded_cents` state; and the client-side sale's `refunded_cents`. All eight log rather than 500: every one is keyed on a row this same request read moments earlier, so zero rows means the row has gone, and a retry re-runs that read and reaches a branch this file already wrote for it. The refund_note write beside the state write is marked no-count-ok instead — same key, same request, seconds apart, so its zero match is the state write's, already logged.",
   }],
 ]);
 

@@ -748,8 +748,14 @@ Deno.serve(async (req) => {
       // opening the app — Stripe sends `account.updated` for its own reasons,
       // and a null type is refused, so the column must not depend on the coach
       // coming back through connect-onboard.
+      //
+      // COUNTED, but the two writes are judged TOGETHER and neither on its own.
+      // The note on the second one is the reason: an account id belongs to
+      // exactly one of these two tables, so one of this pair matching nothing
+      // is the design and failing on it would break every delivery. What is
+      // NOT the design is BOTH matching nothing, and that had no reader at all.
       const acct = event.data.object as Stripe.Account;
-      const { error } = await service.from('connect_accounts').update({
+      const { error, count: coachRows } = await service.from('connect_accounts').update({
         charges_enabled: !!acct.charges_enabled,
         details_submitted: !!acct.details_submitted,
         payouts_enabled: !!acct.payouts_enabled,
@@ -758,7 +764,7 @@ Deno.serve(async (req) => {
         losses_owner: acct.controller?.losses?.payments ?? null,
         account_type: acct.type ?? null,
         updated_at: new Date().toISOString(),
-      }).eq('stripe_account_id', acct.id);
+      }, { count: 'exact' }).eq('stripe_account_id', acct.id);
       if (error) return fail('connect_accounts', error.message);
 
       // The same event, for a GYM's own account (part 280).
@@ -776,7 +782,7 @@ Deno.serve(async (req) => {
       // tell us `card_payments` went active. `gym-checkout` refuses a charge
       // while that capability is present and not active, so a gym whose status
       // is never written stays unable to sell to anybody.
-      const { error: gymErr } = await service.from('gym_connect_accounts').update({
+      const { error: gymErr, count: gymRows } = await service.from('gym_connect_accounts').update({
         charges_enabled: !!acct.charges_enabled,
         details_submitted: !!acct.details_submitted,
         payouts_enabled: !!acct.payouts_enabled,
@@ -785,8 +791,30 @@ Deno.serve(async (req) => {
         losses_owner: acct.controller?.losses?.payments ?? null,
         account_type: acct.type ?? null,
         updated_at: new Date().toISOString(),
-      }).eq('stripe_account_id', acct.id);
+      }, { count: 'exact' }).eq('stripe_account_id', acct.id);
       if (gymErr) return fail('gym_connect_accounts', gymErr.message);
+
+      // NEITHER table knew this account, which is the case the paragraph above
+      // does not cover. Stripe verified the signature, so this is an account on
+      // this platform, and nothing here has a row for it: a coach or a gym
+      // whose capability columns will never be written by the one event that
+      // was ever going to write them. `connect-checkout` and `gym-checkout`
+      // both refuse a sale on a missing or not-enabled row, so what this state
+      // becomes is a coach or an owner who has finished Stripe's verification
+      // and still cannot sell, with nothing anywhere saying why.
+      //
+      // A log and NOT a 500. A retry cannot conjure a row that does not exist —
+      // the same call `if (!order)` and `if (!gym)` make elsewhere in this file
+      // — and spending Stripe's retry budget on it ends with the delivery
+      // abandoned and still nothing recorded.
+      if (!coachRows && !gymRows) {
+        console.error(
+          'stripe-webhook: account.updated for ' + acct.id + ' matched no row in connect_accounts '
+          + 'or gym_connect_accounts. Charges ' + (acct.charges_enabled ? 'enabled' : 'disabled')
+          + ', card_payments ' + String(acct.capabilities?.card_payments ?? 'none')
+          + '. Whoever owns this account cannot be told it went live, and cannot sell until a row exists for it.',
+        );
+      }
     } else if (event.type === 'payout.paid' || event.type === 'payout.failed'
                || event.type === 'payout.updated' || event.type === 'payout.canceled') {
       // ── what actually landed in the coach's bank ─────────────────────────
@@ -952,13 +980,23 @@ Deno.serve(async (req) => {
                 if (held && String(held.member_id) === String(order.member_id)) {
                   const close = supersedeRow({ startedOn: String(held.started_on) }, String(order.term_starts_on));
                   if (close) {
-                    const { error: closeErr } = await service.from('memberships')
-                      .update({ status: close.status, ends_on: close.ends_on }).eq('id', held.id);
+                    const { error: closeErr, count: closed } = await service.from('memberships')
+                      .update({ status: close.status, ends_on: close.ends_on }, { count: 'exact' }).eq('id', held.id);
                     // Logged, not fatal, and not `problem`: the member HAS the
                     // plan they paid for. What is wrong is that the old one is
                     // still open beside it, which is a tidy-up rather than a
                     // reason to tell somebody their purchase failed.
                     if (closeErr) console.error('stripe-webhook: gym order ' + orderId + ' upgraded but the old membership ' + held.id + ' was not closed:', closeErr.message);
+                    // Counted so that zero rows reaches the same log, because
+                    // it is the same outcome by a route `closeErr` cannot see.
+                    // `held` was selected by this id two lines up under the
+                    // service role, so zero rows means it has since gone — and
+                    // a membership that is gone is not one left open beside the
+                    // new one, which is the only harm this write prevents. It
+                    // is recorded rather than passed over because two rows and
+                    // no rows are different things to find in a month's billing
+                    // and this is the one moment either can be told apart.
+                    else if (!closed) console.error('stripe-webhook: gym order ' + orderId + ' upgraded and the membership ' + held.id + ' it supersedes was not there to close. Nothing is left open; the superseded term is simply not on record.');
                   }
                 }
               }
@@ -1088,18 +1126,33 @@ Deno.serve(async (req) => {
             // with the reason, because a member who has paid and holds nothing
             // must not be left looking at a screen that shows no membership and
             // says nothing about why.
-            const { error: markErr } = await service.from('gym_orders').update({
+            const { error: markErr, count: marked } = await service.from('gym_orders').update({
               status: 'failed',
               failure_note: problem,
               stripe_session_id: sess.id,
               stripe_payment_intent: pi,
               paid_at: eventAt,
               updated_at: nowIso,
-            }).eq('id', orderId);
+            }, { count: 'exact' }).eq('id', orderId);
             if (markErr) return fail('gym_orders', markErr.message);
             console.error('stripe-webhook: gym order ' + orderId + ' was paid and could not be fulfilled: ' + problem);
+            // The order was selected by this id at the top of the branch under
+            // the service role, so zero rows means it has gone since — and with
+            // it the row `problem` was going to be written on. The member has
+            // paid, holds nothing, and now has nothing on any screen saying so
+            // either, which is the exact state the write above exists to
+            // prevent. Logged and not 500'd: a retry re-reads `gym_orders`,
+            // finds nothing, and lands on this file's own `if (!order)` branch,
+            // so the row cannot be conjured by trying again.
+            if (!marked) {
+              console.error(
+                'stripe-webhook: gym order ' + orderId + ' was paid, could not be fulfilled, and has no row '
+                + 'left to record the failure on. Session ' + sess.id + ', intent ' + (pi ?? 'none')
+                + '. The member has been charged and holds nothing. Reconcile from Stripe by hand.',
+              );
+            }
           } else {
-            const { error: doneErr } = await service.from('gym_orders').update({
+            const { error: doneErr, count: done } = await service.from('gym_orders').update({
               status: 'paid',
               membership_id: membershipId,
               pass_id: passId,
@@ -1108,8 +1161,21 @@ Deno.serve(async (req) => {
               paid_at: eventAt,
               failure_note: null,
               updated_at: nowIso,
-            }).eq('id', orderId);
+            }, { count: 'exact' }).eq('id', orderId);
             if (doneErr) return fail('gym_orders', doneErr.message);
+            // Same key, same reasoning, opposite outcome: here the entitlement
+            // and the money were both written, and only the order that ties
+            // them together is missing. The member HAS what they paid for, so
+            // this is not a purchase to report as failed — it is a membership
+            // or a pass with no order behind it, which is what the gym's
+            // reconciliation screen will show and what somebody has to close.
+            if (!done) {
+              console.error(
+                'stripe-webhook: gym order ' + orderId + ' was paid and fulfilled and has no row left to close. '
+                + 'Session ' + sess.id + ', intent ' + (pi ?? 'none') + ', membership ' + (membershipId ?? 'none')
+                + ', pass ' + (passId ?? 'none') + '. The member holds what they bought; the order does not exist.',
+              );
+            }
           }
         }
       }
@@ -1337,16 +1403,32 @@ Deno.serve(async (req) => {
               currency: charge.currency,
               atISO: eventAt,
             });
-            const { error: stateErr } = await service.from('gym_orders').update({
+            const { error: stateErr, count: stateRows } = await service.from('gym_orders').update({
               refunded_cents: refundState.refundedCents,
               refunded_currency: refundState.refundedCurrency,
               refunded_at: refundState.refundedAt,
               updated_at: new Date().toISOString(),
-            }).eq('id', gym.orderId);
+            }, { count: 'exact' }).eq('id', gym.orderId);
             // A 500 here, and not a log: this is the write that makes every
             // later failure visible, so losing it silently would put the whole
             // path back to where it started.
             if (stateErr) return fail('gym_orders refund', stateErr.message);
+            // Zero rows is that same loss by the route `stateErr` cannot see,
+            // and it gets a log rather than the 500 above. `gym.orderId` came
+            // from `gymSaleForCharge` a moment ago under the service role, so
+            // zero rows means the order has since gone — and a retry would
+            // re-run that same lookup, find nothing, and land on this file's
+            // own "REFUND WITH NO SALE TO MIRROR IT ON" branch. The 500 exists
+            // to buy a second attempt at a write that could succeed; there is
+            // no second attempt at a row that is not there.
+            if (!stateRows) {
+              console.error(
+                'stripe-webhook: refund on gym order ' + gym.orderId + ' has no order row left to record it on. '
+                + 'Charge ' + charge.id + ', account ' + (eventAccount ?? 'platform')
+                + '. The exception /accounting draws from this column cannot be raised, so this refund is '
+                + 'invisible to the gym. Reconcile from Stripe by hand.',
+              );
+            }
 
             const refusals: string[] = [];
 
@@ -1438,6 +1520,15 @@ Deno.serve(async (req) => {
             // trying. `refusalNote` answers null when nothing was refused,
             // which is what clears a note left by an earlier delivery once a
             // later one gets through.
+            // no-count-ok: zero rows here is the write above, already reported.
+            //
+            // Same key, same request, seconds apart: if this update matches
+            // nothing then `refunded_cents` matched nothing either, and that
+            // has just been logged with the charge, the account and what it
+            // costs. A second line saying the sentence explaining a refusal
+            // could not be stored on the row that is not there adds a fact
+            // nobody can act on differently, and the refusals themselves are
+            // already in the log individually, where each was raised.
             const { error: noteErr } = await service.from('gym_orders').update({
               refund_note: refusalNote(refusals),
               updated_at: new Date().toISOString(),
@@ -1449,12 +1540,12 @@ Deno.serve(async (req) => {
             if (noteErr) console.error('stripe-webhook: could not record why a refund on gym order ' + gym.orderId + ' was not mirrored:', noteErr.message);
           }
         } else {
-          const { error: refErr } = await service.from(sale.table).update({
+          const { error: refErr, count: refRows } = await service.from(sale.table).update({
             refunded_cents: refunded,
             // Stripe's own instant for the event, not now(): a delivery retried
             // three days late must not move a refund into a different month.
             refunded_at: eventAt,
-          }).eq('id', sale.id);
+          }, { count: 'exact' }).eq('id', sale.id);
           // 23514 is the CHECK in part 192 — `refunded_cents <= amount_cents`.
           // It should be unreachable, because Stripe refuses to refund more than
           // was charged; if it fires, this app's `amount_cents` disagrees with
@@ -1466,6 +1557,19 @@ Deno.serve(async (req) => {
             console.error('stripe-webhook: refund of ' + refunded + ' on ' + sale.table + ' ' + sale.id + ' was refused by the amount check — this app has a smaller amount recorded than Stripe refunded. Charge ' + charge.id + '. Reconcile by hand.');
           } else if (refErr) {
             return fail(sale.table + ' refund', refErr.message);
+          } else if (!refRows) {
+            // The sale row went away between `saleForCharge` finding it and
+            // this write, so the money that has gone back is recorded against
+            // nothing. Worse than the CHECK above rather than better: there the
+            // sale is left visibly wrong, here there is no sale left to look
+            // wrong, and the coach's takings simply never counted it either
+            // way. A log and not a 500, because a retry re-runs the same lookup
+            // and reaches the "REFUND WITH NO SALE TO MIRROR IT ON" branch.
+            console.error(
+              'stripe-webhook: refund of ' + refunded + ' had no row left in ' + sale.table + ' to record it on — '
+              + sale.id + ' has gone. Charge ' + charge.id + ', account ' + (eventAccount ?? 'platform')
+              + '. Stripe is the only record that this money went back. Reconcile by hand.',
+            );
           }
         }
       }

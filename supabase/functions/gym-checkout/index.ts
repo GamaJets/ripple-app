@@ -379,6 +379,19 @@ Deno.serve(async (req) => {
     // Nobody was charged: there is no session. The order is closed rather than
     // left pending forever, so the member's screen does not show a purchase
     // waiting on a Stripe confirmation that can never arrive.
+    //
+    // no-count-ok: and DELIBERATELY not counted, against its counted sibling
+    // twenty lines below, because the two writes fail into opposite states.
+    //
+    // Both are keyed on a row inserted moments earlier under the service role,
+    // so for both zero rows can only mean the order has gone — cascaded away by
+    // a member deletion mid-flight. Below, that is the alarming state and the
+    // only place able to notice it: a live Stripe checkout page in front of a
+    // member with no order row behind it. Here there IS no session — this is
+    // the catch around the call that failed to create one — so nobody has been
+    // charged and nothing will be. The only thing this write exists to prevent
+    // is a pending row nobody will ever close, and a row that is not there is
+    // not a pending row. Zero rows IS the state being asked for.
     const { error: closeErr } = await service.from('gym_orders')
       .update({ status: 'abandoned', failure_note: 'The checkout session was never created.', updated_at: new Date().toISOString() })
       .eq('id', orderId);

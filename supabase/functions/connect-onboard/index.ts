@@ -184,6 +184,25 @@ Deno.serve(async (req) => {
     // connect-checkout reads those columns before it will take a direct charge.
     try {
       const acct = await stripe.accounts.retrieve(acctId);
+      // no-count-ok: zero rows here cannot be reported to anybody who could act
+      // on it, and is already reported to somebody who can.
+      //
+      // `existing.stripe_account_id` came off this very row a few lines above,
+      // under the service role, and nothing else filters this update — so zero
+      // rows means the coach's `connect_accounts` row was deleted between that
+      // read and this write. That is not a stale capability column, which is
+      // all this write is for: it is a coach with NO connect row at all, and
+      // connect-checkout already refuses a sale on exactly that state, by name,
+      // to the client trying to pay — `if (!acct?.stripe_account_id ||
+      // !acct.charges_enabled) … 'This trainer is not set up to take payments
+      // yet.'` The gap is visible where it costs money, which is where it can
+      // be acted on.
+      //
+      // And the write itself is not the record: `account.updated` in
+      // stripe-webhook writes these same columns and is the path that matters,
+      // because a coach who finishes Stripe's hosted flow may never come back
+      // through this function at all. This is the catch-up for a coach from
+      // before part 161, on the way to the link they actually came for.
       const { error: updErr } = await service.from('connect_accounts').update(accountState(acct)).eq('trainer_id', userId);
       // Not fatal. The link below is what the coach came for, and the webhook
       // writes the same columns. Losing this refresh delays a capability
