@@ -187,7 +187,9 @@ export default function CoachMoney() {
   // `COSTS_ARE_NEVER_NETTED` says so where the figure is drawn.
   const [costs, setCosts] = useState<{ rows: CoachCost[]; status: LoadStatus }>({ rows: [], status: 'loading' });
 
-  const fees = useLateCancelCharges();
+  // 'my-clients': this is the coach's ledger, and the fees on it are the ones
+  // their clients owe them. See `ChargesAudience` in src/ui/sessions.tsx.
+  const fees = useLateCancelCharges('my-clients');
   // Pulled out because the hook hands back a fresh object each render while
   // the callback inside it is stable.
   const reloadFees = fees.reload;

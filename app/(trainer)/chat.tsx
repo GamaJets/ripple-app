@@ -328,11 +328,18 @@ export default function CoachChat() {
 
   /* ── pull to refresh ───────────────────────────────────────────────────
    *
-   * There is no realtime subscription on a thread. A reply written on the
-   * client's phone reaches this screen only when the coach sends something
-   * themselves or leaves and comes back — so a coach waiting for an answer,
-   * looking straight at the conversation, was the one person the app would not
-   * tell.
+   * This began "There is no realtime subscription on a thread", which is the
+   * same false sentence app/(client)/messages.tsx carried and is wrong about
+   * the same code: `useThread` opens `.channel('msg:' + cid)` and appends
+   * INSERTs on `messages` for this thread (src/ui/messaging.ts). Both screens
+   * mount that hook, so both have had live updates for as long as it has.
+   *
+   * The subscription is BEST-EFFORT, and that is what earns this control. It is
+   * opened inside a try/catch marked "realtime optional", so a project without
+   * the publication, a network that will not open a websocket, or a socket lost
+   * while the phone slept leaves the thread looking live and quietly frozen —
+   * and a coach waiting for an answer, looking straight at the conversation, is
+   * the one person nothing would then tell.
    *
    * The block state goes with it: it is written from the other side too, and a
    * composer enabled against a stale answer is a message sent into a thread

@@ -1538,7 +1538,16 @@ export { waitlistLine };
  *
  * Both go through RLS rather than an RPC because both are already the coach's
  * own rows to read: `session_waitlist_trainer_r` scopes the queue to sessions
- * they own, and `charges_trainer_rw` scopes charges to their own clients.
+ * they own, and `charges_trainer_read` scopes charges to the fees they recorded
+ * plus the fees against their current clients. (It said `charges_trainer_rw`,
+ * which part 189 dropped when it split that one `for all` policy into four —
+ * the read had to widen to survive a client leaving, and widening a `for all`
+ * would have widened its WITH CHECK with it.)
+ *
+ * "Their own rows" is a statement about the POLICY and not about the caller.
+ * The second of these hooks is also mounted by a client screen, where the same
+ * policy answers a different question, and `ChargesAudience` below is what
+ * keeps those two apart — see the note on the read itself.
  */
 export function useSessionWaitlistCounts(sessionIds: string[]): {
   counts: Map<string, number>;
@@ -1606,7 +1615,25 @@ export interface LateCancelCharge {
   waivedAt: string | null;
 }
 
-export function useLateCancelCharges(): {
+/**
+ * Whose late-cancellation fees a caller is asking for.
+ *
+ * There is no default and there deliberately cannot be one. Both answers are
+ * real, they are drawn under opposite headings, and the read that produces them
+ * is the same table — so the only thing that can keep them apart is the caller
+ * saying which it means. A default would be a fourth call site's chance to
+ * forget, which is the argument `registerForPush` and `notifyInbox` both make
+ * about gates that live at the call site.
+ *
+ *   'mine'       — the fees charged to THE SIGNED-IN PERSON, under
+ *                  "What this member has actually been charged".
+ *   'my-clients' — every fee this coach has recorded against their clients,
+ *                  under "Late cancellations" on the coach's own screens, where
+ *                  they are the person collecting and the person who may waive.
+ */
+export type ChargesAudience = 'mine' | 'my-clients';
+
+export function useLateCancelCharges(audience: ChargesAudience): {
   charges: LateCancelCharge[];
   status: LoadStatus;
   reload: () => Promise<void>;
@@ -1617,26 +1644,70 @@ export function useLateCancelCharges(): {
   const [charges, setCharges] = useState<LateCancelCharge[]>([]);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
 
-  // Not gated on the app variant, and deliberately so: RLS already decides
-  // WHICH rows come back, and the two answers are both wanted. On the coach app
-  // `charges_trainer_rw` returns the fees their own clients owe them; on the
-  // client app `charges_client_r` returns the member's own. A record only the
-  // person collecting can see is half a record — the member has to be able to
-  // look up what they were told they owe, after the alert has gone.
+  // ── why RLS is not the scope, and why `charges` being empty is not a reason
+  //    to leave this ────────────────────────────────────────────────────────
   //
-  // `waive` is the coach's, and on the client app it simply changes nothing:
-  // the update falls outside their policy, returns zero rows, and is reported
-  // as the failure it is rather than as a success.
+  // This used to be one unscoped read for both apps, on the reasoning that "RLS
+  // already decides WHICH rows come back". That reasoning was half right and
+  // the half it got wrong is the whole of the bug.
+  //
+  // It IS true that a member reading this table sees only their own rows:
+  // `charges_client_r` (part 142) is `client_id = auth.uid()` and there is
+  // nothing else a member's grants let through. What is not true is that the
+  // person on a client screen is always a member. `charges_trainer_read` (part
+  // 189) is
+  //
+  //     coach_id = auth.uid()
+  //     or exists (select 1 from clients c
+  //                 where c.id = charges.client_id and c.trainer_id = auth.uid())
+  //
+  // — correlated, so it is NOT the whole table, but it is every fee this coach
+  // has ever recorded against anybody. And this codebase's documented shape is
+  // that trainers self-track ON THE CLIENT HOOKS: there is no client→trainer
+  // promotion, `my-training.tsx` and `my-progress.tsx` are built exactly that
+  // way, and a coach who trains through the client app opens
+  // app/(client)/calendar.tsx like anyone else. Under the heading "What this
+  // member has actually been charged" they would have been shown every late
+  // fee owed to them by every client on their roster, as their own debts. Not a
+  // leak — those are rows they may read, and do read, two screens away — but an
+  // ATTRIBUTION, and a screen that attributes a hundred people's fees to one
+  // person is saying something false about money.
+  //
+  // `charges` holds 0 rows today, so nobody has seen this. That is not a reason
+  // to leave it, and the reason it is not is specific rather than dutiful: the
+  // first row this table ever gets is written by `cancel_my_session`, on a
+  // member's phone, at the moment a coach's own cancellation policy starts
+  // biting — and the first person likely to be running the client app with a
+  // roster behind them is the coach who has just switched their policy on to
+  // test it. An empty table means the defect is unobserved, not absent, and it
+  // means the fix can be made now for free instead of after somebody has been
+  // told they owe four hundred pounds.
+  //
+  // `waive` is the coach's act and it is refused outright under 'mine' — see
+  // `setWaived`.
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
     try {
       const { data: sess } = await supabase.auth.getSession();
       if (!sess?.session) { setCharges([]); setStatus('ready'); return; }
-      const { data, error } = await supabase.from('charges')
-        .select('id, client_id, session_id, amount, currency, created_at, waived_at')
-        .eq('reason', 'late_cancellation')
-        .order('created_at', { ascending: false })
-        .limit(capLimit());
+      const uid = sess.session.user.id;
+      // Two literal reads rather than one conditionally-extended builder, for
+      // the reason `setWaived` below writes two literal updates: a chain
+      // assembled behind an `if` is opaque to scripts/check-schema.mjs and to
+      // anybody grepping for which column scopes this read, and an unreadable
+      // scope is a scope nothing checks.
+      const { data, error } = audience === 'mine'
+        ? await supabase.from('charges')
+          .select('id, client_id, session_id, amount, currency, created_at, waived_at')
+          .eq('reason', 'late_cancellation')
+          .eq('client_id', uid)
+          .order('created_at', { ascending: false })
+          .limit(capLimit())
+        : await supabase.from('charges')
+          .select('id, client_id, session_id, amount, currency, created_at, waived_at')
+          .eq('reason', 'late_cancellation')
+          .order('created_at', { ascending: false })
+          .limit(capLimit());
       if (error) { setStatus('error'); return; }
       const page = capped(data ?? []);
       setCharges((page.rows as any[]).map((r) => ({
@@ -1650,12 +1721,20 @@ export function useLateCancelCharges(): {
       })));
       setStatus(page.truncated ? 'partial' : 'ready');
     } catch { setStatus('error'); }
-  }, []);
+  }, [audience]);
 
   useEffect(() => { load(); }, [authRev, load]);
 
   const setWaived = useCallback(async (id: string, waived: boolean): Promise<boolean> => {
     if (!USE_SUPABASE) return false;
+    // Refused rather than attempted under 'mine'. Forgiving a fee is the act of
+    // the person collecting it, and the caller asking for their OWN charges has
+    // said they are not that person. Left to RLS it would be right for a member
+    // — zero rows, reported as the failure it is — and WRONG for the coach who
+    // is self-tracking on this hook, whose `charges_trainer_update` would take
+    // the write and quietly waive one of their clients' fees from a screen that
+    // never meant to offer it.
+    if (audience === 'mine') return false;
     try {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id ?? null;
@@ -1676,7 +1755,7 @@ export function useLateCancelCharges(): {
       await load();
       return true;
     } catch { return false; }
-  }, [load]);
+  }, [load, audience]);
 
   return {
     charges, status, reload: load,

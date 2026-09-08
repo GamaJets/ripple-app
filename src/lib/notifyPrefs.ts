@@ -111,9 +111,200 @@ export const CATEGORIES: readonly CategoryDef[] = [
     // the server. It now points at the control instead of naming an effect,
     // because whether the server applies it is a fact about the installation
     // and `quietAvailability` is what reads it.
-    note: 'Messages, notices and invoices. These are sent from the server, so the switches on this list do not reach them. Quiet Hours is stored on your account rather than on this phone, which is why it can.',
+    note: 'Messages, notices and invoices. These are sent from the server, so the switches on this list do not reach them — the ones below, which are stored on your account, are what does. Quiet Hours is stored there too, which is why it reaches them as well.',
   },
 ];
+
+/* ── the refusal this file made, and what has since made it false ─────────
+ *
+ * The header above says, twice and as a fact about the product, that "REMOTE
+ * pushes are sent by the send-push edge function from a server that has never
+ * heard of these preferences", and `CategoryDef.local` exists to stop a switch
+ * being offered for one. app/(client)/notification-prefs.tsx said the same
+ * thing in its own words and rendered the coach-and-gym category as a text row
+ * rather than a switch.
+ *
+ * Every word of that was true when it was written and the first half of it
+ * still is: nothing on this handset can gate a push somebody else's server
+ * sends, and a DEVICE-local preference for a remote category would still be a
+ * switch reading "off" while the banner arrived. That is not what has changed.
+ *
+ * What has changed is that the preference no longer has to live on the device.
+ * `notify_channel_prefs` (parts 251 and 730) is keyed on `user_id` — "not
+ * coach-only by construction", in its own words, and its RLS policy `ncp_self`
+ * is `user_id = auth.uid()` for any authenticated account, a member's included.
+ * Both senders read it:
+ *
+ *   · supabase/functions/send-push drops every recipient with an explicit
+ *     `enabled = false` on the channel it was given, BEFORE the tokens are
+ *     read, whoever the recipient is.
+ *   · supabase/functions/notify-message does the same for `chat` against its
+ *     single `recipient` — which is the CLIENT whenever a coach sends.
+ *
+ * So the server has been able to honour a member's answer for as long as those
+ * have been deployed, and the only reason it never did is that nothing in the
+ * client app ever offered them the control. That is the same shape of mistake
+ * the `coach` note above was corrected for once already: a sentence that
+ * described the app and was read as describing the server.
+ *
+ * ── what the screen may claim, given that the table is EMPTY ─────────────
+ *
+ * `notify_channel_prefs` holds 0 rows. Not one coach and not one member has
+ * ever turned a channel off, so neither filter has ever dropped a recipient in
+ * production. Nothing here is a report of observed behaviour, and the copy is
+ * written so that it never has to be: every sentence on the switches states
+ * what the senders DO with a row, in the present tense of a rule, and not one
+ * of them says a notification was or was not suppressed. That is the same line
+ * `sendPushChecked`'s callers hold — a push is never claimed delivered — and it
+ * matters more here, because the first row this table gets will be written by
+ * somebody reading these sentences and expecting them to come true.
+ *
+ * The empty table is also why `wholeChannel` below is stated per channel rather
+ * than assumed: with no row ever written, nobody has been in a position to
+ * notice that four of the five only reach part of what their label names.
+ */
+
+/**
+ * A channel a MEMBER can be sent on, in the member's own words.
+ *
+ * The keys are `CoachChannel` strings because there is one table and one
+ * filter, and a second vocabulary for the same column would be two chances to
+ * disagree about a value the server compares literally. What is member-specific
+ * is the label and the note: `COACH_CHANNELS` describes each channel as things
+ * a coach's clients did, and every one of those sentences is the wrong way
+ * round for the person they were done to.
+ *
+ * `MemberChannel` below is a SUBSET of `CoachChannel` written out rather than
+ * imported, and both halves of that are deliberate. Written out, because this
+ * module is pure and compiles into the test tree on its own — a runtime edge to
+ * the coach's module would drag `coachReminders` in behind it — and because the
+ * subset is the point: 'book' must not be nameable here at all. Pinned, because
+ * a string that fails the database's own CHECK constraint would otherwise be
+ * discovered by a member whose save silently did nothing; `notifyPrefs.test.ts`
+ * imports both lists and asserts every key here is a real channel.
+ */
+export interface MemberChannelDef {
+  key: MemberChannel;
+  /** Title Case — a switch's label. */
+  title: string;
+  /** Sentence case prose under it, naming what would stop. */
+  note: string;
+  /**
+   * Whether EVERY push of this kind names the channel when it is sent.
+   *
+   * This is the honest half of the control and it is per channel because the
+   * answer differs. supabase/functions/send-push filters a send only when it
+   * was given a `channel` — "a send with no channel is not filtered at all", in
+   * its own comment — and the client-directed pushes in this product are sent
+   * three ways:
+   *
+   *   · by supabase/parts/900's dispatcher, which derives the channel from the
+   *     row and always passes it. Filtered.
+   *   · by notify-message, which hard-codes 'chat'. Filtered.
+   *   · by somebody's HANDSET calling `sendPushChecked`, where the channel is
+   *     the optional fifth argument and most callers omit it — a freed PT slot
+   *     broadcast, a gym's offer, an intake ask, an injury ask. Not filtered.
+   *
+   * Only `chat` has no handset sender that omits it, so only `chat` is true.
+   * The rest are switches that stop the server's sends and cannot stop a
+   * coach's phone, and `MEMBER_CHANNELS_REACH` says exactly that on the screen
+   * rather than letting a member infer a guarantee from a label.
+   */
+  wholeChannel: boolean;
+}
+
+/** The subset of `CoachChannel` a member can actually be a recipient on. */
+export type MemberChannel = 'chat' | 'bookings' | 'money' | 'clients' | 'admin';
+
+/**
+ * The five, and why there are five rather than six.
+ *
+ * `book` is the sixth channel and it is the coach's own book — an unmarked
+ * session, an ageing invoice, a client who has stopped. Every route on it is a
+ * `/(trainer)/` one, so no notification a member can receive has ever carried
+ * it, and offering it here would be a switch over an empty set: the exact
+ * defect `notifyDispatch.ts` was written for, where two channels had switches
+ * and no sender.
+ *
+ * The order is what a member would look for first. Messages are the reason
+ * anybody opens this screen.
+ */
+export const MEMBER_CHANNELS: readonly MemberChannelDef[] = [
+  {
+    key: 'chat', title: 'Messages From Your Coach', wholeChannel: true,
+    note: 'Every message your coach sends you.',
+  },
+  {
+    key: 'bookings', title: 'Sessions And Classes', wholeChannel: false,
+    note: 'A session answered, moved or cancelled, a slot you were waiting for coming free, and a class seat opening up.',
+  },
+  {
+    key: 'money', title: 'Payments And Packs', wholeChannel: false,
+    note: 'A card that was declined, an invoice from your gym, a pack running out, and an offer your gym is running.',
+  },
+  {
+    key: 'clients', title: 'You And Your Coach', wholeChannel: false,
+    note: 'An answer to a coaching request, a coaching arrangement ending, and a goal you reached.',
+  },
+  {
+    key: 'admin', title: 'Forms And Paperwork', wholeChannel: false,
+    note: 'An intake form to fill in, an injury your coach has asked you to add, and a document to sign.',
+  },
+];
+
+/** The definition for a member channel, or null. */
+export function memberChannelDef(key: string): MemberChannelDef | null {
+  return MEMBER_CHANNELS.find((c) => c.key === key) ?? null;
+}
+
+/**
+ * That these are stored on the account rather than on the handset.
+ *
+ * Said because the section above it is the opposite, in the same list, on the
+ * same screen — and the closing paragraph of that screen already promises that
+ * "the switches above are kept on this phone, and only this phone". Without
+ * this sentence a member reads that promise as covering all of them.
+ */
+export const MEMBER_CHANNELS_ACCOUNT =
+  'These are stored on your account rather than on this phone, because the phone is not what sends them. They follow you to a new handset, and they are the same on every device you sign in on.';
+
+/**
+ * What a muted channel does not do.
+ *
+ * The member's half of `CHANNEL_STILL_RECORDED`, and the same argument: muting
+ * is safe to offer only because the row is written either way. Both senders
+ * write the notification BEFORE they check this table — notify-message's own
+ * comment turns on it, "muting is safe to offer BECAUSE the row exists" — so
+ * nothing is lost, and saying so is what stops a member reading a mute as
+ * "do not tell me".
+ */
+export const MEMBER_CHANNELS_STILL_RECORDED =
+  'Turning one off stops your phone buzzing about it. It is still written into your notifications list either way, so nothing is lost — you find out when you next open the app instead of as it happens.';
+
+/**
+ * How far a switch reaches, stated rather than implied.
+ *
+ * The `wholeChannel` note above is the reasoning; this is the sentence. It
+ * names the one that is complete instead of hedging all five equally, because
+ * "some notifications may still arrive" under a switch a member has just turned
+ * off is the kind of sentence that teaches people the controls do not work.
+ */
+export const MEMBER_CHANNELS_REACH =
+  'Messages is the complete one — every message your coach sends is checked against it. The other four stop everything the app’s own server sends on them, but some of these can also be sent straight from your coach’s or your gym’s phone, and those do not pass through the check.';
+
+/**
+ * The one kind no switch here covers.
+ *
+ * '/(client)/notices' is deliberately unclassified in `notifyDispatch.ts` — all
+ * six channels are things a coach receives, and a notice is the one kind whose
+ * only recipient is a member, who had no switches at all. That reasoning is
+ * still sound and this list does not fix it: a notice carries no channel, so no
+ * row in this table can stop one. A member who muted all five and then got a
+ * gym announcement at 9pm would otherwise conclude the whole screen is a
+ * decoration.
+ */
+export const MEMBER_CHANNELS_NOT_COVERED =
+  'Notices from your coach or your gym are not on this list. They are sent without a category on them, so none of these switches can stop one — Quiet Hours can, and turning off Push Notifications stops them at every hour.';
 
 export interface NotifyPrefs {
   /** Per category. A category absent from the map is ON — see `allows`. */

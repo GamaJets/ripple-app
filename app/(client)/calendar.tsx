@@ -270,7 +270,13 @@ export default function Calendar() {
   // let a client read their own — there was simply never a row to read, and
   // nowhere to read it. The alert at the moment of cancelling is not a record;
   // this is.
-  const { charges: myFees, status: feeStatus, reload: reloadFees } = useLateCancelCharges();
+  // 'mine' — the read is scoped to the signed-in person's `client_id` and not
+  // left to RLS. A coach self-tracking on the client app (this codebase has no
+  // client→trainer promotion; the coach's own training lives on these screens)
+  // reads this table under `charges_trainer_read`, which returns every fee they
+  // have recorded against every client. Unscoped, this heading would have
+  // attributed their whole roster's late fees to them.
+  const { charges: myFees, status: feeStatus, reload: reloadFees } = useLateCancelCharges('mine');
   // The arrangements behind some of the bookings on this screen. Only the count
   // and the read's honesty are used here — the arrangement itself, and the two
   // ways out of it, live on app/(client)/standing.tsx, because "cancel this one"

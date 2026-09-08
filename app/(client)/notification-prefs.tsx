@@ -11,13 +11,40 @@
 //
 // ── The one thing this screen must not do ─────────────────────────────────
 //
-// Offer a switch it cannot honour. Everything listed here as a switch is
-// scheduled BY THIS PHONE and is gated inside src/ui/pushNotifications.ts,
-// where a caller cannot skip it. The coach-and-gym category is sent from the
+// Offer a switch it cannot honour. Everything in the first list is scheduled BY
+// THIS PHONE and is gated inside src/ui/pushNotifications.ts, where a caller
+// cannot skip it. That is the failure src/lib/pushConsent.ts exists for,
+// pointing the other way, and it is still the rule.
+//
+// ── What this screen refused, and what changed ────────────────────────────
+//
+// This paragraph used to end: the coach-and-gym category "is sent from the
 // server, which has never heard of these preferences — so it is shown as a row
-// that says so rather than as a switch that would read "off" while the banners
-// went on arriving. That is the failure src/lib/pushConsent.ts exists for,
-// pointing the other way.
+// that says so rather than as a switch that would read 'off' while the banners
+// went on arriving". The section below it was a paragraph of prose where five
+// switches now are.
+//
+// That was true, and the half of it that was load-bearing has stopped being.
+// The premise was that the only place a preference could live is this handset,
+// and a handset cannot gate somebody else's send. `notify_channel_prefs` (parts
+// 251 and 730) is on the ACCOUNT, its `ncp_self` policy is `user_id =
+// auth.uid()` for any authenticated account rather than for coaches, and both
+// senders filter on it: supabase/functions/send-push drops muted recipients
+// before it reads their tokens, and supabase/functions/notify-message applies
+// 'chat' to its `recipient` — which is the member whenever a coach writes. So
+// the server has been able to honour a member's answer since those deployed,
+// and the only thing missing was a screen that asked for one. The reasoning is
+// kept rather than deleted because it is still the reasoning: what is offered
+// below is offered because it is stored where the sender can read it, and the
+// device-local list above is still refused a remote category for exactly the
+// argument this paragraph used to make about all of them.
+//
+// The full case, including which of the five reach everything their label names
+// and which reach only the server's half, is in src/lib/notifyPrefs.ts. So is
+// the one thing this screen may not say: the table holds no rows at all, so
+// nothing has ever been suppressed for anybody, and every sentence under these
+// switches states what the senders do with a row rather than reporting an
+// effect somebody has had.
 //
 // ── What the Quiet Hours section below is now ─────────────────────────────
 //
@@ -48,7 +75,18 @@ import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Ghost, Field, Cta, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useNotifyPrefs } from '../../src/ui/notifyPrefs';
-import { CATEGORIES, allows } from '../../src/lib/notifyPrefs';
+import {
+  CATEGORIES, allows,
+  MEMBER_CHANNELS, MEMBER_CHANNELS_ACCOUNT, MEMBER_CHANNELS_NOT_COVERED,
+  MEMBER_CHANNELS_REACH, MEMBER_CHANNELS_STILL_RECORDED,
+  type MemberChannel,
+} from '../../src/lib/notifyPrefs';
+// The member's switches are stored in the same table the coach's are, so they
+// are read and written by the same two functions rather than by a second copy
+// of them, and their state machine — 'unknown' for a read that has not landed
+// or failed, never 'on' — is the one already under test in coachNotify.test.ts.
+import { useChannelPrefs, setChannel } from '../../src/ui/coachNotify';
+import { channelState, channelsNote, CHANNEL_UNKNOWN_LABEL } from '../../src/lib/coachNotify';
 import { pushAvailable } from '../../src/ui/pushNotifications';
 import { BACK_ICON } from '../../src/ui/direction';
 import { useQuietHours, saveQuietHours } from '../../src/ui/quietHours';
@@ -107,14 +145,95 @@ const QUIET_OFF_HALF =
 const QUIET_UNSAVED =
   'These hours are not in force yet. Save them.';
 
+/** Tapped while the account read has not landed or has failed. Not a save and
+ *  not a refusal by the server — nothing was sent, and saying so is the
+ *  difference between "try again" and "this control does not work". */
+const CHANNEL_NOT_READ =
+  'Your account has not told us which of these you have turned off, so nothing was changed. Turning one now would save over whatever is actually stored.';
+
+/** The server refused, or the write reached nothing. `setChannel` counts rows
+ *  rather than trusting the absence of an error, so this covers both. */
+const CHANNEL_NOT_SAVED =
+  'That change was not saved, so nothing has moved — your notifications carry on exactly as they were. Try again once you have signal.';
+
+/**
+ * The one thing the master switch does that these cannot.
+ *
+ * The member's version of `CHANNEL_MASTER_NOTE`, worded for the switch they
+ * actually have: theirs is in the phone's own Settings and in the app's,
+ * and it takes this handset out of `push_tokens` altogether.
+ */
+const CHANNEL_MASTER =
+  'These only matter while Push Notifications is on. Turning that off takes this phone off the list entirely, so nothing arrives whatever is set here.';
+
+/** A tri-state switch. `unknown` is a real answer and neither position is: a
+ *  switch drawn on over a read that never happened is the app stating a fact
+ *  about somebody's settings that it has not looked up. The pattern is
+ *  `TriSwitchRow` in app/(trainer)/settings.tsx and the colours are this
+ *  screen's own. */
+function TriSwitch({ t, label, state, onPress }: {
+  t: ReturnType<typeof useTheme>; label: string; state: 'on' | 'off' | 'unknown'; onPress: () => void;
+}) {
+  const on = state === 'on';
+  const unknown = state === 'unknown';
+  return (
+    <Pressable onPress={onPress}
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      accessibilityState={{ checked: unknown ? 'mixed' : on }}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
+      style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: unknown ? t.surface2 : on ? t.brand : t.surface3, borderWidth: hairline, borderColor: t.ring, justifyContent: 'center', paddingHorizontal: 3 }}>
+      <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: unknown ? t.ink3 : '#fff', alignSelf: unknown ? 'center' : on ? 'flex-end' : 'flex-start', opacity: unknown ? 0.45 : 1 }} />
+    </Pressable>
+  );
+}
+
 export default function NotificationPrefs() {
   const t = useTheme();
   const router = useRouter();
   const { prefs, loaded, setCategory, setQuiet, setQuietHours } = useNotifyPrefs();
 
   const switches = CATEGORIES.filter((c) => c.local);
-  const sentToYou = CATEGORIES.filter((c) => !c.local);
   const G = layout.gutter;
+
+  /* ── the switches that are not this phone's ────────────────────────────
+   *
+   * `useChannelPrefs` and `setChannel` are the coach's own reader and writer,
+   * used unchanged. There is one table, one filter and one state machine, and a
+   * second copy of any of them for the member would be a second chance to
+   * disagree with the server about what `enabled = false` means.
+   *
+   * `channelState` and not `muted.has(key)`. Under 'loading', 'partial' and
+   * 'error' the muted set is empty, and an empty set reads as everything on —
+   * so a screen that consulted the set alone would draw five switches in the on
+   * position over a read that has not happened, on the screen a member opened
+   * in order to find out what is on. `isWhole` is the same rule this file
+   * already applies to the quiet-hours read, spelled the way that module spells
+   * it.
+   */
+  const channels = useChannelPrefs();
+  const channelNote = channelsNote(channels.status);
+  const [channelSaid, setChannelSaid] = useState<{ note: string; ok: boolean } | null>(null);
+  const toggleChannel = async (key: MemberChannel, title: string) => {
+    const state = channelState(key, channels.muted, channels.status);
+    // Refused from 'unknown' rather than guessed. Tapping here would write the
+    // position the screen happens to be drawing, which is not an answer anybody
+    // gave — and on this table the value written is the one the server obeys.
+    if (state === 'unknown') {
+      setChannelSaid({ note: channelNote ?? CHANNEL_NOT_READ, ok: false });
+      return;
+    }
+    const next = state === 'off';
+    const ok = await setChannel(key, next);
+    // Said from what the server took, never from the tap. `setChannel` counts
+    // the rows it changed, so a write that landed nowhere reports as one.
+    setChannelSaid(ok
+      ? { note: `${title} is ${next ? 'on' : 'off'} on your account.`, ok: true }
+      : { note: CHANNEL_NOT_SAVED, ok: false });
+    // Re-read rather than assume: what the switch shows next comes from the
+    // row, which is the discipline the quiet-hours save below keeps too.
+    await channels.reload();
+  };
 
   /* ── one window, two mechanisms ────────────────────────────────────────
    *
@@ -420,29 +539,66 @@ export default function NotificationPrefs() {
 
         <Rule />
 
+        {/* ── what is sent TO you ──────────────────────────────────────────
+            This section was a paragraph explaining why it could not be
+            switches. The reasoning is kept in the header of this file and in
+            src/lib/notifyPrefs.ts, because it is still the reasoning: these are
+            switches only because the answer is stored on the account, where the
+            two senders read it, rather than on this handset, which sends none
+            of them. */}
         <Section>
-          <SectionHead title="Sent By Your Coach" />
-          {sentToYou.map((c) => (
-            <View key={c.key} style={{ paddingVertical: sp.md }}>
-              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2 }}>{c.title}</Text>
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.note}</Text>
-            </View>
-          ))}
-          {/* This paragraph used to end "that is the only control that works
-              today", which stopped being true when part 530 shipped and stayed
-              on the screen because the sentence described the app rather than
-              the server. Quiet hours are the other control, and they are the
-              one a member reaches for at three in the morning. */}
-          <Text style={{ ...ty.caption, color: t.ink3 }}>
-            There is no switch here for these because a switch here could not stop them: they are sent from the server, which does not read the per-kind choices on this screen. What does reach them is Quiet Hours above, which is stored on your account and applied wherever they are sent from. Turning off Push Notifications in Settings stops all of them at every hour instead.
-          </Text>
+          <SectionHead title="Sent To You" />
+
+          {/* Before any switch, for the same reason the build warning is drawn
+              before the first list: a switch whose position was never read is
+              worse than no switch, and this is the only sentence that says so
+              while it is true. */}
+          {channelNote ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{channelNote}</Text>
+          ) : null}
+
+          {MEMBER_CHANNELS.map((c, i) => {
+            const state = channelState(c.key, channels.muted, channels.status);
+            return (
+              <View key={c.key} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{c.title}</Text>
+                  {/* The unknown label goes in front of the note rather than
+                      replacing it: what the switch governs is true whether or
+                      not the position has been read, and dropping the note
+                      would leave a row that says only that something failed. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                    {state === 'unknown' ? `${CHANNEL_UNKNOWN_LABEL} — ${c.note}` : c.note}
+                  </Text>
+                </View>
+                <TriSwitch t={t} label={c.title} state={state}
+                  onPress={() => { void toggleChannel(c.key, c.title); }} />
+              </View>
+            );
+          })}
+
+          {channelSaid ? (
+            <Flag tone={channelSaid.ok ? t.good : t.warn} style={{ marginTop: sp.md }}>{channelSaid.note}</Flag>
+          ) : null}
+
+          {/* Four sentences, and each is a different thing a member would
+              otherwise get wrong: how far a switch reaches, that muting does
+              not lose the message, that these follow them off this phone, and
+              the one kind no switch here covers. None of them reports that a
+              notification was or was not suppressed, because no row in that
+              table has ever existed to suppress one. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{MEMBER_CHANNELS_REACH}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_CHANNELS_STILL_RECORDED}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_CHANNELS_ACCOUNT}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{MEMBER_CHANNELS_NOT_COVERED}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{CHANNEL_MASTER}</Text>
         </Section>
 
         <Rule />
 
         <Section>
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            The switches above are kept on this phone, and only this phone. If you use the app on a second phone, that one has its own answers — and signing out clears them, so the next person to sign in here starts from the defaults rather than yours. Quiet hours are the exception: they are also stored on your account, so they follow you to a new phone even though the reminders this app sets are held by whichever handset set them.
+            The switches under What This App Sends are kept on this phone, and only this phone. If you use the app on a second phone, that one has its own answers — and signing out clears them, so the next person to sign in here starts from the defaults rather than yours. The switches under Sent To You are the other way round: they are stored on your account, so they are the same wherever you sign in. Quiet hours are both — the account holds the window that stops what is sent to you, and this phone holds the one that delays the reminders it sets itself.
           </Text>
         </Section>
 

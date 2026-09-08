@@ -371,6 +371,11 @@
     "src/lib/avatarImage.test.ts",
     "src/lib/inbodyVision.ts",
     "src/lib/inbodyVision.test.ts",
+    // The fourteen composition metrics both apps draw their table from —
+    // src/lib/inbodyMetrics.ts is shared by app/(client)/scans.tsx and
+    // app/(trainer)/client-body.tsx, so it is asserted once for both.
+    "src/lib/inbodyMetrics.ts",
+    "src/lib/inbodyMetrics.test.ts",
     "src/lib/classCancel.ts",
     "src/lib/classCancel.test.ts",
     "src/lib/foodAllergens.ts",

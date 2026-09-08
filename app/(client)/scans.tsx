@@ -71,7 +71,7 @@ import { useToast } from '../../src/ui/toast';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
 import { useClientData } from '../../src/ui/clientData';
-import { fmtFullDay, monthNamesShort } from '../../src/lib/format';
+import { fmtFullDay, monthNamesShort, numUpTo } from '../../src/lib/format';
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { useSettings } from '../../src/ui/settings';
@@ -105,7 +105,7 @@ import {
   SCAN_REFUSED_TITLE, SCAN_REFUSED_NOTE, SCAN_RECORD_FAILED_TITLE, SCAN_RECORD_FAILED_NOTE,
   type ScanSheetAnswer,
 } from '../../src/lib/scanSheetConsent';
-import { metricTrends, compositionInsights, METRIC_GROUPS, type ScanMetrics } from '../../src/lib/inbodyMetrics';
+import { trendsByGroup, compositionInsights, type ScanMetrics } from '../../src/lib/inbodyMetrics';
 import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
@@ -1374,9 +1374,11 @@ export default function Scans() {
   const chrono = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
   const latest = chrono[chrono.length - 1];
   const wsv = cd.weightSeries.map((x) => x.v);
-  const mTrends = metricTrends(cd.scans);
   const mInsights = compositionInsights(cd.scans);
-  const mByGroup = METRIC_GROUPS.map((g) => ({ group: g, items: mTrends.filter((x) => x.def.group === g) })).filter((g) => g.items.length > 0);
+  // The same four headings, in the same order, as app/(trainer)/client-body.tsx
+  // now draws for the coach — assembled once in src/lib/inbodyMetrics.ts rather
+  // than filtered into shape here and again there.
+  const mByGroup = trendsByGroup(cd.scans);
   const wDelta = wsv.length > 1 ? +(wsv[wsv.length - 1] - wsv[0]).toFixed(1) : null;
   const wDeltaShown = weightDeltaIn(wDelta, wu);
   // `scans.taken_at` is a bare postgres DATE, and this used to be
@@ -2017,7 +2019,17 @@ export default function Scans() {
                     <Pressable onPress={() => { if (it.series.length >= 2) setMxOpen(mxOpen === String(it.def.key) ? null : String(it.def.key)); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                       <Text style={{ ...ty.label, color: t.ink2 }}>{it.def.label}{it.series.length >= 2 ? (mxOpen === String(it.def.key) ? '  ▴' : '  ▾') : ''}</Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
-                        <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{it.latest} {it.def.unit}</Text>
+                        {/* Through `numUpTo`, not interpolated. BMR is the one
+                            metric on this table that passes a thousand, and
+                            `{it.latest}` printed it as 1750 with no separator —
+                            beside a "1,204.5 kg lifted" from `num1` on another
+                            screen of the same app. It also puts the decimal
+                            separator in the reader's own language, which a bare
+                            interpolation cannot: a German handset showed 3.42 kg
+                            of left arm where 3,42 is what that reader parses.
+                            `decimals` is the metric's own grain, so a whole
+                            figure still looks whole. */}
+                        <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{numUpTo(it.latest, it.def.decimals ?? 0)} {it.def.unit}</Text>
                         {it.delta != null && it.delta !== 0 ? (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 52, justifyContent: 'flex-end' }}>
                             <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: it.good == null ? t.ink3 : it.good ? t.brand : t.warn }} />

@@ -422,7 +422,10 @@ export default function TrainerSchedule() {
   // `charges`, which nothing in this product wrote until part 126. The coach is
   // the one who collects them, so they are the one who has to be able to see
   // them, and to let one off.
-  const { charges: lateFees, status: feeStatus, waive: waiveFee, unwaive: unwaiveFee, reload: reloadFees } = useLateCancelCharges();
+  // 'my-clients', and this is the screen the audience argument was added for:
+  // the coach is the one collecting, so `waive` is offered here and refused on
+  // the client half of the same hook.
+  const { charges: lateFees, status: feeStatus, waive: waiveFee, unwaive: unwaiveFee, reload: reloadFees } = useLateCancelCharges('my-clients');
   const lcPolicy = useMyCancellationPolicy();
   // Pulled out because the hook hands back a fresh object every render; the
   // callback inside it is stable, and depending on the object would rebuild the

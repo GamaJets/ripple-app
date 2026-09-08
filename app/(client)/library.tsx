@@ -47,6 +47,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useBackFromHub } from '../../src/ui/backTo';
 import { useTheme } from '../../src/ui/components';
+import type { Theme } from '../../src/theme/tokens';
+import { isWhole } from '../../src/ui/loadStatus';
 import { useToast } from '../../src/ui/toast';
 import { Icon } from '../../src/ui/Icon';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
@@ -72,6 +74,87 @@ import { frameUrls } from '../../src/lib/exerciseMedia';
 import { signMedia, needsSigning } from '../../src/ui/signedMedia';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
+/**
+ * `level` is a ladder, not a tally.
+ *
+ * Every other facet on this screen is ordered by how many movements carry it,
+ * which is the right order for a list of unrelated labels — the chip a member
+ * is most likely to want is first. Difficulty is not unrelated labels. Ordered
+ * by frequency it would read Intermediate, Beginner, Advanced (300 / 264 / 44
+ * on the live table), and a rung out of order in a three-rung ladder reads as
+ * a bug in the sorting rather than as a deliberate order. Anything the
+ * catalogue adds later that is not on this ladder sorts after it, alphabetically.
+ */
+const LEVEL_ORDER = ['beginner', 'intermediate', 'advanced'];
+
+/**
+ * The four tags a member must not be handed as a filter.
+ *
+ * `knee_safe`, `shoulder_safe`, `lower_back_safe` and `no_axial_load` are on
+ * roughly 270-300 rows each, and they are the vendor catalogue's own labels
+ * meaning, at most, "this movement does not load that joint". A member reads
+ * "Knee Safe" as "safe for my knee", which is a clinical claim about THEIR
+ * knee that nobody in this system has made. The catalogue tags Behind the Neck
+ * Press `knee_safe`, which is true and useless, and it is not a sentence this
+ * app should put in front of somebody choosing what to train on.
+ *
+ * It also routes around the one process built for this. An injury is disclosed
+ * to the coach, and src/lib/injuryGate.ts holds a programme closed until the
+ * coach has acknowledged it — "building a programme around an injury nobody
+ * has read is the thing this check exists to stop". A chip that filters six
+ * hundred movements down to "the safe ones" is a member building that
+ * programme alone, off a third party's label, with no coach in the loop.
+ *
+ * They stay in `CatalogueRow.tags` — the column is read, the data is intact,
+ * and a screen with a clinician or a coach in front of it may yet have a use
+ * for it. What they do not get is a chip on the member's library.
+ */
+const HIDDEN_TAGS = new Set(['knee_safe', 'shoulder_safe', 'lower_back_safe', 'no_axial_load']);
+
+/**
+ * One row of filter chips over one catalogue column.
+ *
+ * A component rather than five copies of the same JSX, because five copies is
+ * how the muscle-group row and a facet row come to disagree about what a
+ * selected chip looks like — and a chip whose selected state is not obvious is
+ * a filter a member cannot tell is on.
+ *
+ * There is no 'All' chip. The lit chip is the filter, and tapping it again
+ * turns it off — so the row has one control per value and no thirty-first
+ * control meaning "none of the above". `accessibilityState.selected` is what
+ * says which, and the spoken label says what the tap will DO, because "Beginner,
+ * selected" does not tell a screen-reader user that the next double-tap clears it.
+ */
+function FacetRow({ label, options, value, onPick, t }: {
+  label: string;
+  options: string[];
+  value: string | null;
+  onPick: (v: string | null) => void;
+  t: Theme;
+}) {
+  if (!options.length) return null;
+  return (
+    <View style={{ marginTop: sp.md }}>
+      <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: sp.xs }} contentContainerStyle={{ gap: sp.sm, paddingVertical: sp.xs }}>
+        {options.map((o) => {
+          const on = value === o;
+          const shown = cap(o);
+          return (
+            <Pressable key={o} onPress={() => onPick(on ? null : o)}
+              accessibilityRole="button"
+              accessibilityLabel={on ? `${shown}. Tap to stop filtering by ${label.toLowerCase()}` : `Show ${shown} movements only`}
+              accessibilityState={{ selected: on }}
+              style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
+              <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{shown}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
 export default function Library() {
  const toast = useToast();
  // The unit this member reads a LIFTED load in. Chosen if they have chosen,
@@ -83,6 +166,28 @@ export default function Library() {
  const goBack = useBackFromHub('(client)');
  const [q, setQ] = useState('');
  const [group, setGroup] = useState('All');
+ // ── the catalogue's own columns, offered as filters ──────────────────────
+ //
+ // Null is "not filtering on this", and it is null rather than '' or 'All' on
+ // purpose: '' is a value that compares equal to a missing one, and 'All' is a
+ // magic string that has to be excluded from every comparison by hand — the
+ // muscle-group chips above carry exactly that cost and are only left alone
+ // because they are already shipped and drive two lists.
+ //
+ // These five drive the CATALOGUE list only. A clip a coach filmed has a name,
+ // a group and a file, and nothing else; filtering the clips by a column their
+ // rows do not have would hide a coach's own demonstration behind a label
+ // nobody applied to it. So the panel lives inside All Exercises, under the
+ // heading of the list it governs, rather than beside the group chips at the
+ // top, which do drive both.
+ const [level, setLevel] = useState<string | null>(null);
+ const [mechanic, setMechanic] = useState<string | null>(null);
+ const [force, setForce] = useState<string | null>(null);
+ const [goal, setGoal] = useState<string | null>(null);
+ const [tag, setTag] = useState<string | null>(null);
+ // Folded away by default. Five more chip rows permanently open would push the
+ // list itself off the first screenful of a phone, and the list is the screen.
+ const [facetsOpen, setFacetsOpen] = useState(false);
  const { videos, status, reload } = useExerciseVideos();
  // A failed read used to strand this screen for the whole session: the only
  // way to ask again was the Try Again button inside the failure notice, and
@@ -136,6 +241,63 @@ export default function Library() {
   if (group !== 'All' && !groups.some((g) => g.toLowerCase() === group.toLowerCase())) setGroup('All');
  }, [groups, group]);
 
+ // ── the facet chips are whatever the catalogue actually holds ────────────
+ //
+ // Derived, never hardcoded, for the reason the group chips are: a hardcoded
+ // list is a second copy of the vocabulary, and the day the catalogue gains a
+ // value the chip for it does not exist and the rows carrying it become
+ // unreachable through the one control on the screen whose job is finding
+ // them. Today that vocabulary is three levels, two mechanics, four forces,
+ // seven goals and thirty-odd tags; none of those numbers are written down
+ // anywhere in this file.
+ //
+ // Ordered by how many movements carry each value, so the chip worth tapping
+ // is the one nearest the member's thumb, with ties broken alphabetically so
+ // the row does not reshuffle between two equal counts. `level` is the
+ // exception — see LEVEL_ORDER.
+ const facets = useMemo(() => {
+  const tally = (values: (string | null)[][]) => {
+   const n = new Map<string, number>();
+   for (const vs of values) for (const v of vs) { const s = (v || '').trim(); if (s) n.set(s, (n.get(s) ?? 0) + 1); }
+   return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([v]) => v);
+  };
+  const levels = tally(cat.rows.map((e) => [e.level])).sort((a, b) => {
+   const ia = LEVEL_ORDER.indexOf(a), ib = LEVEL_ORDER.indexOf(b);
+   // A value the ladder does not name sorts after every value it does, rather
+   // than at -1, which would put it first.
+   if (ia < 0 && ib < 0) return a.localeCompare(b);
+   if (ia < 0) return 1;
+   if (ib < 0) return -1;
+   return ia - ib;
+  });
+  return {
+   levels,
+   mechanics: tally(cat.rows.map((e) => [e.mechanic])),
+   forces: tally(cat.rows.map((e) => [e.force])),
+   goals: tally(cat.rows.map((e) => e.goals)),
+   // See HIDDEN_TAGS. Filtered here rather than at the read, so the column is
+   // still whole for anything else that comes to want it.
+   tags: tally(cat.rows.map((e) => e.tags.filter((v) => !HIDDEN_TAGS.has(v)))),
+  };
+ }, [cat.rows]);
+
+ // A chip can vanish underneath the selection, exactly as a group chip can —
+ // the catalogue read lands, or is re-read after a sign-in, and the value the
+ // member was standing on is no longer in it. Left alone the list would be
+ // empty under a filter that is no longer drawn anywhere on the screen.
+ useEffect(() => {
+  // Only once a read has actually landed. While `cat.rows` is empty because
+  // the read is still in flight — or failed — every facet is "missing", and
+  // clearing on that would wipe the member's filters every time they pulled
+  // to refresh.
+  if (!cat.rows.length) return;
+  if (level != null && !facets.levels.includes(level)) setLevel(null);
+  if (mechanic != null && !facets.mechanics.includes(mechanic)) setMechanic(null);
+  if (force != null && !facets.forces.includes(force)) setForce(null);
+  if (goal != null && !facets.goals.includes(goal)) setGoal(null);
+  if (tag != null && !facets.tags.includes(tag)) setTag(null);
+ }, [facets, cat.rows.length, level, mechanic, force, goal, tag]);
+
  const term = q.trim().toLowerCase();
  const list = videos.filter((v) =>
   (group === 'All' || (v.group || '').trim().toLowerCase() === group.toLowerCase()) &&
@@ -145,7 +307,10 @@ export default function Library() {
  // The same search box and the same chips drive both lists, so a client typing
  // 'squat' filters what we can show them AND what they can read about, rather
  // than filtering one and leaving the other showing everything.
- const catList = cat.rows.filter((e) =>
+ // The group and the search alone. Kept apart from the facet filters below so
+ // the "we cannot judge these rows" sentence is counted over the same set the
+ // facets are applied to, rather than over the whole catalogue.
+ const catScoped = cat.rows.filter((e) =>
   (group === 'All' || (e.group || '').trim().toLowerCase() === group.toLowerCase()) &&
   // Both names, and the catalogue's synonyms. A member whose phone is in German
   // sees "Kniebeuge" and must be able to type it; the same member reading a
@@ -156,7 +321,43 @@ export default function Library() {
   // movement we have.
   matchesSearch(term, e.name, e.display, e.synonyms)
  );
- useEffect(() => { setCatShown(50); }, [term, group]);
+ // A null column never matches a chip. That is the whole rule and it is worth
+ // saying out loud: a movement the catalogue has not rated is NOT a beginner
+ // movement by default, and it is not an advanced one either — it is a row we
+ // cannot judge, and it drops out of every level filter rather than being
+ // guessed into one. The count of those rows is printed under the panel.
+ const catList = catScoped.filter((e) =>
+  (level == null || e.level === level) &&
+  (mechanic == null || e.mechanic === mechanic) &&
+  (force == null || e.force === force) &&
+  (goal == null || e.goals.includes(goal)) &&
+  (tag == null || e.tags.includes(tag))
+ );
+ const facetsOn = [level, mechanic, force, goal, tag].filter((v) => v != null).length;
+ const clearFacets = () => { setLevel(null); setMechanic(null); setForce(null); setGoal(null); setTag(null); };
+ // Everything currently narrowing the catalogue list, named. Empty string when
+ // nothing is — which is the only condition under which "the catalogue is
+ // empty" is a true sentence.
+ const narrowedBy = [
+  term ? `“${q.trim()}”` : null,
+  group !== 'All' ? group : null,
+  facetsOn > 0 ? `${facetsOn} filter${facetsOn === 1 ? '' : 's'}` : null,
+ ].filter(Boolean).join(' and ');
+ // Rows the group and the search DID select, which carry nothing in a column
+ // being filtered on. They are absent from the list below, and the reason is
+ // not that they failed the test — nobody applied the test to them. Saying so
+ // is the same duty `unmatchedNote` discharges on the muscle board and
+ // `unpricedSets` discharges under a tonnage: a filtered count that quietly
+ // omits the rows it could not classify is a smaller number presented as a
+ // complete one.
+ const unjudged = facetsOn === 0 ? 0 : catScoped.filter((e) =>
+  (level != null && !e.level) ||
+  (mechanic != null && !e.mechanic) ||
+  (force != null && !e.force) ||
+  (goal != null && e.goals.length === 0) ||
+  (tag != null && e.tags.length === 0)
+ ).length;
+ useEffect(() => { setCatShown(50); }, [term, group, level, mechanic, force, goal, tag]);
 
  // Thumbnails for the page on screen, signed in ONE request.
  //
@@ -393,6 +594,69 @@ export default function Library() {
               // have been printed as a measurement of the catalogue.
               note={cat.status === 'ready' && !cat.signedOut ? `${catList.length} of ${cat.rows.length}` : undefined}
      />
+
+     {/* ── filtering by the columns the catalogue already has ───────────── */}
+     {/* Drawn whenever there are rows at all, and NOT only when the filtered
+         list has some. A panel that disappears the moment its filters empty
+         the list strands the member on a blank screen with the control that
+         emptied it no longer on it — which is the one moment they need it. */}
+     {cat.rows.length > 0 ? (<>
+      <Pressable onPress={() => setFacetsOpen((v) => !v)}
+       accessibilityRole="button"
+       accessibilityState={{ expanded: facetsOpen }}
+       accessibilityLabel={facetsOpen
+        ? 'Hide the filters'
+        : facetsOn > 0
+        ? `Show the filters. ${facetsOn} ${facetsOn === 1 ? 'is' : 'are'} on`
+        : 'Show filters for difficulty, movement, direction, goal and label'}
+       style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.md }}>
+       <Text style={{ ...ty.label, fontWeight: '500', color: t.ink2 }}>
+        {/* The count is in the closed label as well as the open panel. A
+            filter a member forgot they set is indistinguishable, from a
+            folded panel, from a catalogue that is missing movements. */}
+        Filters{facetsOn > 0 ? ` · ${facetsOn} on` : ''}
+       </Text>
+       <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>{facetsOpen ? 'Hide' : 'Show'}</Text>
+      </Pressable>
+      {facetsOpen ? (<>
+       <FacetRow label="Difficulty" options={facets.levels} value={level} onPick={setLevel} t={t} />
+       {/* 'Movement' and 'Direction' rather than the catalogue's own
+           'mechanic' and 'force'. Those are the column names and they are the
+           vocabulary of whoever compiled the dataset, not of somebody looking
+           for a chest exercise — 'force: static' is not a phrase a member has
+           ever used. The VALUES stay exactly as the catalogue writes them,
+           because those are words people do use, and rewording them here
+           would be a second vocabulary for the same data. */}
+       <FacetRow label="Movement" options={facets.mechanics} value={mechanic} onPick={setMechanic} t={t} />
+       <FacetRow label="Direction" options={facets.forces} value={force} onPick={setForce} t={t} />
+       <FacetRow label="Goal" options={facets.goals} value={goal} onPick={setGoal} t={t} />
+       <FacetRow label="Label" options={facets.tags} value={tag} onPick={setTag} t={t} />
+       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+        These are the exercise catalogue's own labels for a movement, not advice about your
+        training. What to do about an injury, or which of these to work towards, is a
+        conversation with your coach.
+       </Text>
+       {facetsOn > 0 ? (
+        <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+         <Ghost label="Clear Filters" onPress={clearFacets} />
+        </View>
+       ) : null}
+      </>) : null}
+      {/* Said whether the panel is open or shut, because it explains rows that
+          are missing from the list either way. Under a truncated read it is a
+          FLOOR: `catScoped` is drawn from the thousand rows that came back, so
+          the number of unrated movements in the whole catalogue is at least
+          this and may be more. See src/ui/loadStatus.ts on why 'partial' is
+          not 'ready'. */}
+      {unjudged > 0 ? (
+       <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+        {isWhole(cat.status)
+         ? `${num(unjudged)} movement${unjudged === 1 ? '' : 's'} here carr${unjudged === 1 ? 'ies' : 'y'} no label of that kind in the catalogue, so ${unjudged === 1 ? 'it is' : 'they are'} not in the list below. That is a gap in what we know about ${unjudged === 1 ? 'it' : 'them'}, not a judgement about ${unjudged === 1 ? 'it' : 'them'}.`
+         : `At least ${num(unjudged)} of the movements read carry no label of that kind in the catalogue, so they are not in the list below. That is a gap in what we know about them, not a judgement about them.`}
+       </Text>
+      ) : null}
+     </>) : null}
+
      {cat.status === 'loading' ? (
       <Text style={{ ...ty.label, color: t.ink3 }}>Reading the exercise catalogue…</Text>
      ) : cat.status === 'error' ? (
@@ -410,9 +674,22 @@ export default function Library() {
       <Notice tone={t.warn} kicker="Catalogue" title="Sign in to see the exercise list"
        note="The library is only available once you are signed in, so this screen was not allowed to look it up. Nothing has been removed — all 900-odd movements are still there." />
      ) : catList.length === 0 ? (
-      <Text style={{ ...ty.label, color: t.ink3 }}>
-       {filtering ? `No movement matches ${term ? `“${q.trim()}”` : `${group}`}.` : 'The catalogue is empty.'}
-      </Text>
+      <View>
+       <Text style={{ ...ty.label, color: t.ink3 }}>
+        {/* `filtering` was the test here, and `filtering` is the CLIPS' notion
+            of it — search plus muscle group. With a facet chip lit and neither
+            of those set it is false, so a filter that had narrowed 615
+            movements down to none would have printed "The catalogue is empty."
+            over a catalogue that is nothing of the sort. It now names every
+            control that is currently narrowing the list. */}
+        {narrowedBy ? `No movement matches ${narrowedBy}.` : 'The catalogue is empty.'}
+       </Text>
+       {narrowedBy ? (
+        <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+         <Ghost label="Clear Filters" onPress={() => { setQ(''); setGroup('All'); clearFacets(); }} />
+        </View>
+       ) : null}
+      </View>
      ) : (
       <>
        {cat.status === 'partial' ? <PartialRead what="exercises" shown={cat.rows.length} /> : null}

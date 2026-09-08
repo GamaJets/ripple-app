@@ -198,6 +198,45 @@ export interface CatalogueRow {
   primaryMuscles: string[];
   secondaryMuscles: string[];
   /**
+   * How hard the catalogue rates the movement — 'beginner', 'intermediate',
+   * 'advanced'. Three values across the whole table.
+   *
+   * Null on 7 of 615 rows (checked live, 8 Sep 2026), and null is a GAP: it
+   * means the catalogue does not rate this movement, never that it is
+   * unrated because it is easy. A filter built on it therefore has to say how
+   * many rows it could not judge, the same way every count in this app that
+   * cannot place a row says so.
+   */
+  level: string | null;
+  /** 'compound' or 'isolation' — whether the movement crosses more than one
+   *  joint. Two values, null on the same 7 rows as `level`. */
+  mechanic: string | null;
+  /** 'push', 'pull', 'static' or 'dynamic'. The direction the working muscles
+   *  produce force in, not the direction of travel. Null on the same 7 rows. */
+  force: string | null;
+  /**
+   * What the movement is FOR, in the catalogue's own words — 'hypertrophy',
+   * 'strength', 'endurance', 'mobility', 'power', 'rehabilitation', 'core'.
+   *
+   * `not null default '{}'` like `synonyms`, so an empty array is the ordinary
+   * answer for a row nobody has classified, and never the claim that the read
+   * failed. 'rehabilitation' is the catalogue's label for a movement commonly
+   * PRESCRIBED in rehab; it is not clearance to train on an injury, and no
+   * screen may word it as one.
+   */
+  goals: string[];
+  /**
+   * The catalogue's free-form labels — 'leg_day', 'requires_bench',
+   * 'calisthenics', 'knee_safe'. Stored lower snake case; `catalogueValue` in
+   * src/lib/format.ts is what turns one into words.
+   *
+   * Empty on 32 of 615 rows. Read the note on TAG_FILTERS in
+   * app/(client)/library.tsx before putting any of these in front of a member:
+   * four of them end in the word "safe" and mean something much narrower than
+   * a member will read them as.
+   */
+  tags: string[];
+  /**
    * The other things this movement is called — 'butt kicks' on heel-flicks.
    *
    * Searched, never shown as a title. `display` below is the name a row wears;
@@ -251,6 +290,33 @@ export interface CatalogueRow {
  * per-row lookup to answer "is this also called what they typed" would be one
  * round trip per row of a list of six hundred, which is not a search.
  *
+ * `level`, `mechanic`, `force`, `goals` and `tags` are here on the same
+ * accounting, and it was measured rather than assumed before they were added.
+ * Against the live table on 8 Sep 2026, 615 rows:
+ *
+ *   whole rows, as JSON            891 kB   ← the megabyte the header names
+ *   this select before these five  241 kB
+ *   these five, keys included       94 kB
+ *   `instructions` alone           199 kB
+ *
+ * So the list read goes from about 241 kB to about 335 kB — still nowhere near
+ * the whole-row figure, and `instructions` and `description` (73 kB) stay out,
+ * which is what keeps it there. Three of the five are single short words from
+ * a fixed vocabulary of two to four values; `goals` averages under two words a
+ * row. `tags` is the largest of them at 23 kB and is still a tenth of
+ * `instructions`.
+ *
+ * They pay for themselves the way `equipment` does. A member browsing 615
+ * movements could filter by muscle group and equipment and by nothing else,
+ * and the alternative to having these on every row is a detail read per row to
+ * answer "is this one a beginner movement" — six hundred round trips to draw
+ * one filtered list, which is the same arithmetic that put `synonyms` here.
+ *
+ * What is NOT claimed: that these columns are complete. 7 rows carry no
+ * `level`, `mechanic` or `force`, and 32 carry no `tags`. Every screen
+ * filtering on them has to say how many rows it could not judge — see
+ * app/(client)/library.tsx.
+ *
  * `hasDemo` is computed here rather than on the screen so the list can say
  * which entries are illustrated WITHOUT reading image_paths into every row —
  * `image_paths is not null` is a cheap thing for Postgres to answer and an
@@ -273,7 +339,7 @@ export function useExerciseCatalogue() {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, equipment, primary_muscles, secondary_muscles, synonyms, image_paths, equipment_icon_path, source')
+        .select('id, name, muscle_group, equipment, level, mechanic, force, goals, tags, primary_muscles, secondary_muscles, synonyms, image_paths, equipment_icon_path, source')
         .order('name', { ascending: true })
         .limit(capLimit());
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
@@ -297,8 +363,20 @@ export function useExerciseCatalogue() {
           ? String(r.image_paths[0])
           : (typeof r.equipment_icon_path === 'string' && r.equipment_icon_path ? r.equipment_icon_path : null),
         source: r.source ?? null,
+        // `?? null` and never `?? ''`. An empty string would sort and compare
+        // as a value, so a row the catalogue has not rated would join whatever
+        // chip an empty string happened to match rather than sitting outside
+        // every one of them, which is where a row we cannot judge belongs.
+        level: r.level ?? null,
+        mechanic: r.mechanic ?? null,
+        force: r.force ?? null,
         primaryMuscles: strs(r.primary_muscles),
         secondaryMuscles: strs(r.secondary_muscles),
+        // Through `strs` like every other array on this row, so a stray empty
+        // string in the column cannot become a chip with no name on it that
+        // silently matches nothing.
+        goals: strs(r.goals),
+        tags: strs(r.tags),
         // `strs` drops blanks, so a row whose array holds an empty string does
         // not acquire a synonym that matches every search term ever typed.
         synonyms: strs(r.synonyms),

@@ -191,11 +191,22 @@ export default function Messages() {
   const peer = useThreadPeerName('client', null);
   const head = peerHeading(peer, 'coach');
   const { messages: msgs, send, status, unsent, cachedNote, hasOlder, loadingOlder, olderError, loadOlder, reload, threadId } = useThread(null, 'client');
-  // There is no realtime subscription on this thread, so a reply that arrived
-  // while the member was looking at the screen appeared only if they sent
-  // something themselves or left and came back. `reload` re-reads the newest
-  // page; `loadOlder` above walks backwards, and the two are different asks.
-  // Nothing queued on this device is dropped by it.
+  // This said "There is no realtime subscription on this thread", and it was
+  // flatly wrong about the code directly under it: `useThread` opens
+  // `.channel('msg:' + cid)` and subscribes to INSERTs on `messages` filtered to
+  // this thread (src/ui/messaging.ts), appending anything it has not already
+  // seen. The header of this file says "realtime" in its first line, so the
+  // screen carried both sentences at once — and the false one generated a
+  // roadmap item to build a subscription that has been there all along.
+  //
+  // What is TRUE, and what pull-to-refresh is actually for, is that the
+  // subscription is best-effort. It is opened inside a try/catch whose comment
+  // reads "realtime optional", so a project without the publication, a network
+  // that will not open a websocket, or a socket dropped while the phone was
+  // asleep all leave the thread live-looking and silently static, with nothing
+  // on screen to say so. `reload` re-reads the newest page and is the member's
+  // only way out of that; `loadOlder` above walks backwards, and the two are
+  // different asks. Nothing queued on this device is dropped by either.
   const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
   // The block and the report. Its state is deliberately allowed to be stale or
   // unread: the database refuses a blocked write regardless, so being wrong
