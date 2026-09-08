@@ -17,6 +17,7 @@ import { NotificationBell } from '../../src/ui/notifications';
 import { sp, layout, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { num } from '../../src/lib/format';
+import { plainExact } from '../../src/lib/units';
 import { usePlatformTrainers } from '../../src/ui/trainers';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { Fetched } from '../../src/ui/fetched';
@@ -429,8 +430,8 @@ export default function OwnerOverview() {
         <Section>
           <SectionHead title="Your Gym" note="Trainers" onPress={() => router.push('/(owner)/trainers')} />
           <KpiRow items={[
-            { label: 'Trainers', value: trainersUnknown ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${roll.avgSessionsPerTrainer} sessions avg` },
-            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
+            { label: 'Trainers', value: trainersUnknown ? '—' : fig(roll.trainers), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${plainExact(roll.avgSessionsPerTrainer)} sessions avg` },
+            { label: 'Clients', value: trainersUnknown ? '—' : fig(num(roll.clients)), delta: loading ? 'not read yet' : trainersUnread ? 'could not be read' : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${plainExact(roll.avgClientsPerTrainer)} avg / trainer` },
             // The delta names the population the money is priced over, which is
             // `delivered30` and not the count in the hero above. Without it the
             // two figures sit on one screen with nothing saying they are made of

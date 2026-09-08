@@ -5,6 +5,13 @@
 // path would have passed against the five-item constant this replaces.
 import { buildChecklist, scheduledFocus, scheduledDay, donePercent, coachHabitId, COACH_ID_PREFIX, type ChecklistInput } from './checklist';
 import { buildProgram } from './programs';
+// The step, calorie, protein and sleep labels now go through `num` and `plain`,
+// which ask the reader's locale — so every assertion below that names a figure
+// is an assertion about a locale, and the runner's own is a fact about this
+// machine rather than about this module. Stated, for the reason
+// units.test.ts states its own.
+import { setAppLocale } from './locale';
+setAppLocale('en-GB');
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };

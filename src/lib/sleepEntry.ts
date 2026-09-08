@@ -19,6 +19,8 @@
 // `npm test`. A refusal a member is not told about is the same as a silent
 // failure, whichever layer is doing the refusing.
 
+import { plain } from './units';
+
 export const MAX_SLEEP_HOURS = 24;
 export const MAX_QUALITY = 5;
 
@@ -42,7 +44,13 @@ export function sleepRefusal(hours: number, quality: number): string | null {
   if (isFilableNight(hours, quality)) return null;
   if (!Number.isFinite(hours) || hours <= 0) return 'How many hours did you sleep? Type the hours.';
   if (hours > MAX_SLEEP_HOURS) {
-    return `A night is at most ${MAX_SLEEP_HOURS} hours, so ${hours} could not be stored and nothing has been logged. If you meant ${hours / 10}, type that.`;
+    // `plain` on both figures. `hours / 10` is the whole point of the sentence
+    // — it is the reading the member almost certainly meant, 7.5 for a typed
+    // 75 — and it is a fraction in every case that reaches here, so a bare
+    // interpolation offered "7.5" to somebody whose decimal pad has a comma on
+    // it and whose next keystroke would therefore be "7,5". `readNumber` takes
+    // that comma; the sentence telling them what to type has to write it.
+    return `A night is at most ${plain(MAX_SLEEP_HOURS)} hours, so ${plain(hours)} could not be stored and nothing has been logged. If you meant ${plain(hours / 10)}, type that.`;
   }
   return `Mark how well you slept, from 1 to ${MAX_QUALITY}, and it will be logged.`;
 }

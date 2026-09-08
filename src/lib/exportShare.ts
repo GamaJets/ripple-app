@@ -27,7 +27,7 @@ import { money } from './gymRecord';
 import { minorFromWhole } from './coachMoney';
 // The client's unit reaches these builders as an argument. Nothing here reads a
 // provider, so a report can be built for whoever's row is in hand.
-import { weightIn, convertedNote, type WeightUnit } from './units';
+import { weightIn, convertedNote, plainExact, type WeightUnit } from './units';
 
 // ── Why the file share degraded, and what it took to stop it ────────────────
 //
@@ -471,7 +471,11 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     // rendered and which the note under the table already explains.
     ['Value of those sessions',
       money(minorFromWhole(d.payroll30, d.currency), d.currency) ?? '\u2014'],
-    ['Avg clients / trainer', d.avgClientsPerTrainer == null ? '\u2014' : String(d.avgClientsPerTrainer)],
+    // `plainExact`, not `String`: `gymRollup` rounds this to ONE DECIMAL
+    // PLACE, so most gyms have a fraction here — 4.2 clients a trainer — and
+    // `String` writes an English full stop into a document that leaves the
+    // app. `figure()` two tables down already spells its figures this way.
+    ['Avg clients / trainer', d.avgClientsPerTrainer == null ? '\u2014' : plainExact(d.avgClientsPerTrainer)],
     ['Trainers needing a look', String(d.atRiskCount)],
     ['Clients with those trainers', String(d.atRiskClients)],
   ];

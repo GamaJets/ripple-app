@@ -46,6 +46,8 @@
 // rather than its index in an array — an index reattaches yesterday's tick to
 // whichever item happens to have slid into that slot.
 import type { ProgramDay } from './programs';
+import { num } from './format';
+import { plain } from './units';
 
 /** Where a line came from, so a screen can say so without guessing. */
 export type ChecklistSource = 'targets' | 'plan' | 'coach';
@@ -96,18 +98,25 @@ export const COACH_ID_PREFIX = 'coach:';
 
 export function coachHabitId(rowId: string): string { return COACH_ID_PREFIX + rowId; }
 
-// Thousands separators without toLocaleString. The label is compared in tests
-// and rendered on devices in every locale the app ships to; a separator that
-// changes underneath both is a difference nobody asked for.
-function thousands(n: number): string {
-  const s = String(Math.round(Math.abs(n)));
-  let out = '';
-  for (let i = 0; i < s.length; i++) {
-    if (i > 0 && (s.length - i) % 3 === 0) out += ',';
-    out += s[i];
-  }
-  return (n < 0 ? '-' : '') + out;
-}
+// These labels go through the app's own formatters, and the reason the private
+// one below them was removed is the reason this file now imports two.
+//
+// `thousands` hand-rolled an ASCII comma every three digits — "Walk 8,000
+// steps" — and argued for it on the grounds that the label is compared in
+// tests and a separator that changes underneath the test is a difference
+// nobody asked for. The trouble is what that comma MEANS to the person holding
+// the phone: in German and Spanish a comma is the DECIMAL separator, so "Walk
+// 8,000 steps" is a target of eight steps and "Eat to your 2,140 kcal target"
+// is a diet of two. That is `num()`'s founding bug, written down in
+// src/lib/locale.ts, reproduced here by hand. A test asserting an exact string
+// is fixed by stating the locale it asserts in, which checklist.test.ts now
+// does — the same thing units.test.ts does, and for the same reason.
+//
+// `plain` for the sleep goal rather than `num1`, because a whole-hour goal must
+// read "Sleep 8h+" and not "Sleep 8.0h+": `plain` caps the decimal places
+// instead of padding to them. It is also the function the sleep BOX is filled
+// from, so the goal a member sets and the goal they read back are spelled the
+// same way.
 
 // A number that came out of a division, a null column or a half-finished form
 // is not a target. Anything non-finite or non-positive means "not set", which
@@ -187,10 +196,10 @@ export function buildChecklist(input: ChecklistInput): Checklist {
   if (focus) items.push({ id: 'train', label: `Train — ${focus}`, icon: '🏋️', source: 'plan' });
 
   const kcal = target(input.kcalTarget);
-  if (kcal != null) items.push({ id: 'kcal', label: `Eat to your ${thousands(kcal)} kcal target`, icon: '🔥', source: 'targets' });
+  if (kcal != null) items.push({ id: 'kcal', label: `Eat to your ${num(kcal)} kcal target`, icon: '🔥', source: 'targets' });
 
   const protein = target(input.proteinTargetG);
-  if (protein != null) items.push({ id: 'protein', label: `Hit ${thousands(protein)} g protein`, icon: '🍗', source: 'targets' });
+  if (protein != null) items.push({ id: 'protein', label: `Hit ${num(protein)} g protein`, icon: '🍗', source: 'targets' });
 
   // Both come out of the same calculation, so they are missing together and one
   // note covers them. Worth saying because the client CAN fix it: weight and
@@ -200,14 +209,14 @@ export function buildChecklist(input: ChecklistInput): Checklist {
   }
 
   const water = target(input.waterGoalGlasses);
-  if (water != null) items.push({ id: 'water', label: `Drink ${thousands(water)} glasses of water`, icon: '💧', source: 'targets' });
+  if (water != null) items.push({ id: 'water', label: `Drink ${num(water)} glasses of water`, icon: '💧', source: 'targets' });
   // Its own note, for the same reason steps and sleep have separate ones: the
   // three are set independently, and the client can set this one on the screen
   // that shows the note.
   else gaps.push({ id: 'water', note: 'Set a water goal below and your glasses count towards it.' });
 
   const steps = target(input.stepGoal);
-  if (steps != null) items.push({ id: 'steps', label: `Walk ${thousands(steps)} steps`, icon: '👟', source: 'targets' });
+  if (steps != null) items.push({ id: 'steps', label: `Walk ${num(steps)} steps`, icon: '👟', source: 'targets' });
   // Separate notes, not one covering both, because they are set independently:
   // telling somebody who has a step goal that they need a step goal is the sort
   // of thing that teaches people to stop reading these.
@@ -215,7 +224,10 @@ export function buildChecklist(input: ChecklistInput): Checklist {
 
   const sleep = target(input.sleepGoalHours);
   // One decimal at most, and no trailing '.0' — "Sleep 7.5h+" and "Sleep 8h+".
-  if (sleep != null) items.push({ id: 'sleep', label: `Sleep ${(Math.round(sleep * 10) / 10)}h+`, icon: '😴', source: 'targets' });
+  // Through `plain`, so the half hour is written with the reader's own decimal
+  // separator: `Math.round(sleep * 10) / 10` interpolated bare put an English
+  // full stop in a row that sits directly under the step and calorie rows.
+  if (sleep != null) items.push({ id: 'sleep', label: `Sleep ${plain(sleep, 1)}h+`, icon: '😴', source: 'targets' });
   else gaps.push({ id: 'sleep', note: 'Set a sleep goal below to track it here.' });
 
   const seen = new Set(items.map((i) => i.id));

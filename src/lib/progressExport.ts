@@ -18,7 +18,7 @@ import { localDate } from './localDate';
 // audience least able to check. The unit arrives as an argument rather than
 // from a provider because everything in this module is pure and has to stay
 // that way: it is the half of the export the node suite can actually assert on.
-import { weightIn, weightDeltaIn, type WeightUnit } from './units';
+import { weightIn, weightDeltaIn, plainExact, type WeightUnit } from './units';
 import { deltaSign } from './deltaLabel';
 
 export interface ProgressRow {
@@ -80,9 +80,22 @@ const readingShown = (v: number, spec: MetricSpec, unit: WeightUnit): number =>
 const changeShown = (v: number, spec: MetricSpec, unit: WeightUnit): number =>
   spec.mass ? weightDeltaIn(v, unit)! : v;
 
-/** A figure for display, or an em-dash where there is no reading. */
+/**
+ * A figure for display, or an em-dash where there is no reading.
+ *
+ * `plainExact` rather than the bare interpolation this was: every value that
+ * reaches here is a body weight, a body-fat percentage, a skeletal-muscle mass
+ * or a tape measurement, all of which carry a decimal place, and `${v}` writes
+ * an ASCII full stop in every locale there has ever been. The document this
+ * builds is read by the member and by their coach, whose handsets may write
+ * "3,42"; the CSV beside it is untouched, because `progressCsv` passes the raw
+ * stored numbers to `toCsv` and never comes through here.
+ *
+ * It changes the separator and nothing else — no rounding, so the grain each
+ * caller chose with `weightIn` / `weightDeltaIn` survives, and no grouping.
+ */
 export const figure = (v: number | null | undefined, unit = ''): string =>
-  v == null || !Number.isFinite(v) ? '—' : `${v}${unit}`;
+  v == null || !Number.isFinite(v) ? '—' : `${plainExact(v)}${unit}`;
 
 /** A date-only value as the reader's own day, never shifted by their timezone. */
 export const dayLabel = (iso: string): string => localDate(iso)?.toLocaleDateString() ?? iso;

@@ -21,7 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
-import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Card, ListRow, QuickRow, Cta, Flag, Notice, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { trainerAccessNote } from '../../src/lib/trainerProfileAccess';
@@ -356,7 +356,7 @@ export default function CoachProfile() {
                 not saying. */}
             {p.sessionFee == null
               ? <Text style={{ ...ty.body, color: t.ink3 }}>— no rate set</Text>
-              : <Text style={{ ...value(20), color: t.ink }}>{p.sessionFee}<Text style={{ ...ty.caption, color: t.ink3 }}> / session</Text></Text>}
+              : <Text style={{ ...value(20), color: t.ink }}>{fig(p.sessionFee)}<Text style={{ ...ty.caption, color: t.ink3 }}> / session</Text></Text>}
           </View>
         </Card>
         )}

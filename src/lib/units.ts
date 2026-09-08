@@ -177,6 +177,72 @@ export function plain(n: number, places = 3): string {
 }
 
 /**
+ * The reader's decimal separator — "." or "," or U+066B on an Arabic locale —
+ * asked once per locale rather than once per figure.
+ *
+ * Latched on the tag rather than unconditionally, because `appLocale()` is
+ * itself a latch that is seeded on first use: caching the separator before the
+ * tag has resolved would pin every figure in the app to the fallback.
+ *
+ * A separator is one character and is never a digit. Anything else — a runtime
+ * that hands back something surprising, or no `Intl` at all — falls through to
+ * the full stop this app printed before it could ask, which is the same
+ * contract `spell` above works to.
+ */
+let sepTag: string | null = null;
+let sepChar = '.';
+function decimalSeparator(): string {
+  const tag = appLocale();
+  if (tag === sepTag) return sepChar;
+  let found = '.';
+  try {
+    const parts = new Intl.NumberFormat(tag, {
+      numberingSystem: 'latn',
+    } as Intl.NumberFormatOptions).formatToParts(1.1);
+    const d = parts.find((p) => p.type === 'decimal')?.value;
+    if (d && d.length === 1 && !/[\d.]/.test(d)) found = d;
+  } catch {
+    // Left as '.'.
+  }
+  sepTag = tag;
+  sepChar = found;
+  return found;
+}
+
+/**
+ * The digits `String(n)` would have written, with the reader's own decimal
+ * separator in place of the ASCII full stop. Nothing else changes: no
+ * rounding, no grouping, no locale digits, no sign of its own.
+ *
+ * ── why this is not `plain` ────────────────────────────────────────────────
+ *
+ * `plain` is a spelling AND a rounding — three decimal places by default — and
+ * it is right for the boxes and labels that call it, every one of which is a
+ * body weight, a load or a tape measurement whose grain is known. This is for
+ * the two GENERIC printers this app has, `fig` in src/ui/kit.tsx and `figure`
+ * in src/lib/progressExport.ts, which between them stand in front of 190-odd
+ * call sites carrying values whose grain they do not know. Rounding there would
+ * be this function deciding the precision of a figure it has never seen, and
+ * rounding for display and rounding for storage are different operations that
+ * have to stay separable. So this one takes only the half of the job that is
+ * unambiguously wrong today — the separator — and leaves the digits alone.
+ *
+ * Only a bare decimal is touched: `-12.5` yes, `12` no (there is nothing to
+ * separate), `1e-7` and `1.5e+21` no (an exponent form is not a figure a
+ * separator belongs in, and `String` only produces one outside the range any
+ * reading here occupies), `NaN`/`Infinity` no. Everything it declines to
+ * rewrite it returns exactly as `String` gave it, so this can never make a
+ * value that was printable unprintable.
+ */
+const BARE_DECIMAL = /^-?\d+\.\d+$/;
+export function plainExact(n: number): string {
+  const s = String(n);
+  if (!BARE_DECIMAL.test(s)) return s;
+  const sep = decimalSeparator();
+  return sep === '.' ? s : s.replace('.', sep);
+}
+
+/**
  * What a person typed, as a number — or null if they typed nothing usable.
  *
  * ── Why this is exported, and why every typed figure should come through it ──

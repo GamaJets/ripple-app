@@ -54,6 +54,7 @@
 // header is gone.
 import { useState, useEffect, useCallback } from 'react';
 import { num, num1 } from '../../src/lib/format';
+import { plainExact } from '../../src/lib/units';
 import { View, Text, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/ui/components';
@@ -365,9 +366,9 @@ export default function OwnerGrowth() {
             // sibling row below and both rows on Overview have always had this
             // guard; this one had been missed.
             { label: 'Sessions · 30d', value: trainersUnknown ? '—' : fig(num(roll.sessions30)),
-              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${roll.avgSessionsPerTrainer} avg / trainer` },
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgSessionsPerTrainer == null ? 'no trainers yet' : `${plainExact(roll.avgSessionsPerTrainer)} avg / trainer` },
             { label: 'Clients', value: trainersUnknown ? '—' : fig(num(ca.total)),
-              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : ca.avgPerTrainer == null ? 'no trainers yet' : `${ca.avgPerTrainer} avg / trainer` },
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : ca.avgPerTrainer == null ? 'no trainers yet' : `${plainExact(ca.avgPerTrainer)} avg / trainer` },
           ]} />
         </Section>
 
@@ -496,7 +497,11 @@ export default function OwnerGrowth() {
               <View style={{ flex: 1 }}>
                 <Text style={{ ...value(15), letterSpacing: 1, color: t.ink }}>{p.code}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                  {p.discountPct}% off · {p.redeemed < 0 ? '—' : p.redeemed} used
+                  {/* `fig` on the percentage: `src/ui/promos.tsx` builds this with
+                      `Number(r.discount)`, straight off a numeric column, so a
+                      12.5% offer is a shape this row can be handed and `{p.discountPct}`
+                      wrote an English full stop into it. */}
+                  {fig(p.discountPct)}% off · {p.redeemed < 0 ? '—' : p.redeemed} used
                 </Text>
               </View>
               {/* Awaited. `toggleActive` and `removePromo` became server calls

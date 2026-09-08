@@ -16,6 +16,7 @@ import { effectiveWidth, linesAtScale } from '../lib/typeScale';
 import { hitSlopFor } from '../lib/a11y';
 import { appLocale } from '../lib/locale';
 import { num } from '../lib/format';
+import { plainExact } from '../lib/units';
 import {
   axisLabel, pointLabel, tickIndices, maxTicksForWidth,
   segments, readablePoints, hasInteriorGap, nearestPoint,
@@ -54,11 +55,27 @@ import { END_ALIGN, FORWARD_CHAR, FORWARD_ICON } from './direction';
  * NaN is caught too — `0/0` reaching a screen as "NaN" is the same failure
  * wearing a different word. Both mean "not measured", and both must read as a
  * dash rather than as a value the reader might believe.
+ *
+ * ── and why a NUMBER does not go through String ────────────────────────────
+ *
+ * `String(3.42)` is "3.42" on every handset there has ever been. A member whose
+ * language writes 3,42 was reading an English decimal point here — in the Hero
+ * figure, in every Kpi column, and in the report tables — while the same
+ * screen's `weightLabel`, `deltaLabel` and `plain` output beside it wrote the
+ * comma. Two decimal conventions in one row, one of them not the reader's.
+ *
+ * `plainExact` from src/lib/units.ts changes the separator and NOTHING else: it
+ * does not round, does not group and does not write the locale's own digits, so
+ * a figure this printer has never seen the grain of comes out with exactly the
+ * digits it came in with. A string argument is already somebody else's finished
+ * sentence — `weightLabel`, `liftLabel`, `num1` — and is passed through
+ * untouched, because spelling an already-spelled figure a second time is how a
+ * separator gets applied twice.
  */
 export function fig(v: number | string | null | undefined): string {
   if (v == null) return '—';
   if (typeof v === 'number' && !Number.isFinite(v)) return '—';
-  const s = String(v);
+  const s = typeof v === 'number' ? plainExact(v) : String(v);
   return s === 'null' || s === 'undefined' || s === 'NaN' ? '—' : s;
 }
 
@@ -743,13 +760,18 @@ export function Meter({ label, val, target, unit = 'g', dim }: {
     <View
       accessible
       accessibilityRole="progressbar"
-      accessibilityLabel={`${label}, ${val} of ${target}${unit}`}
+      accessibilityLabel={`${label}, ${plainExact(val)} of ${plainExact(target)}${unit}`}
       accessibilityValue={{ min: 0, max: 100, now: pct }}
       style={{ marginTop: sp.md }}
     >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
         <Text style={{ ...ty.caption, color: t.ink2 }}>{label}</Text>
-        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{val} / {target}{unit}</Text>
+        {/* `plainExact`, and the same in the label above, because these are
+            grams of a macro and a challenge score in kilometres — both carry a
+            decimal place, and a bare `{val}` writes an English full stop into a
+            row whose other figures come from `num1` and `plain`. Separator
+            only: a meter must not round what it was handed. */}
+        <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{plainExact(val)} / {plainExact(target)}{unit}</Text>
       </View>
       <View style={{ height: 3, borderRadius: 2, backgroundColor: t.surface3, marginTop: 7, overflow: 'hidden' }}>
         <View style={{ height: 3, borderRadius: 2, width: `${pct}%`, backgroundColor: t.brand, opacity: dim ? 0.45 : 1 }} />

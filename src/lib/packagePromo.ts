@@ -327,12 +327,30 @@ export function oneOffDiscount(
       // A fractional percentage is a real Stripe shape (`percent_off` is a
       // decimal) and it is refused rather than handled, because 12.5% of an odd
       // price is exactly the rounding this whole design exists to avoid.
+      // Bare, and deliberately. This branch is reached BECAUSE `pct` is not a
+      // whole number, so the sentence does carry a decimal separator every time
+      // it is printed — but this module is reached from
+      // supabase/functions/connect-checkout and connect-promo, and a server has
+      // no reader whose locale it could ask. `appLocale()` on Deno would resolve
+      // to the container's, which is nobody's. Importing src/lib/units here also
+      // pulls src/lib/locale into the Deno module graph, which
+      // scripts/check-functions.mjs refuses on its own terms.
+      //
+      // The screen that shows this to a coach is where a separator belongs, and
+      // it is the one place that knows whose separator it is.
       return { ok: false, why: `the coupon takes ${pct}% off, which is not a whole percentage between 1 and 100` };
     }
     const discountCents = exactPercentOff(priceCents, pct);
     if (discountCents == null) {
       return {
         ok: false,
+        // The product is fractional — that is the whole subject of the
+        // sentence — and it is left bare for the reason given in the branch
+        // above: this runs on the server as well as the phone. It is also a
+        // COUNT OF MINOR UNITS rather than an amount, carrying no currency, so
+        // `money` is not the answer either: there is nothing here to take
+        // decimal places from, and inventing some would be the defect this file
+        // is written against.
         why: `${pct}% of ${priceCents} minor units is ${(priceCents * pct) / 100}, which is not a whole number of them — and Stripe does not document how it rounds a percentage discount, so what it would actually charge cannot be known before the session is created`,
       };
     }

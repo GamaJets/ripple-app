@@ -35,7 +35,7 @@
 //     forever.
 import { progressOf, type GoalTarget, type Point } from './goalTargets';
 import type { WeightUnit } from './units';
-import { weightIn } from './units';
+import { weightIn, plain } from './units';
 
 export interface GoalOnBody {
   /** The target itself, in the reader's unit, for printing beside the figure. */
@@ -81,13 +81,18 @@ export function goalOnBody(
   // distance to state.
   if (!p) return null;
 
+  // Both arms land on a tenth — `weightIn` rounds a kilogram to one decimal
+  // place, and a body-fat percentage is rounded to one here — so every
+  // sentence below carries a decimal separator, and every one of them was
+  // interpolating it bare. They go out through `plain` at the grain this
+  // line produces: one place, no trailing zero, the reader's own separator.
   const conv = (v: number): number | null => (opts.weight ? weightIn(v, opts.wu) : Math.round(v * 10) / 10);
   const target = conv(p.target);
   if (target == null) return null;
   const unit = opts.weight ? opts.wu : opts.unit;
 
   if (p.reached) {
-    return { target, unit, remaining: null, reached: true, note: `target of ${target} ${unit} reached` };
+    return { target, unit, remaining: null, reached: true, note: `target of ${plain(target, 1)} ${unit} reached` };
   }
 
   // Converted as a SPAN, once, rather than as the difference between two
@@ -103,14 +108,14 @@ export function goalOnBody(
     // Within a rounding step of the target and not across it. Saying "0.0 kg to
     // go" is worse than saying nothing; saying "reached" would be claiming
     // something `progressOf` explicitly did not.
-    return { target, unit, remaining: null, reached: false, note: `target ${target} ${unit}, all but there` };
+    return { target, unit, remaining: null, reached: false, note: `target ${plain(target, 1)} ${unit}, all but there` };
   }
   return {
     target,
     unit,
     remaining: gap,
     reached: false,
-    note: `${gap} ${unit} to go — target ${target} ${unit}`,
+    note: `${plain(gap, 1)} ${unit} to go — target ${plain(target, 1)} ${unit}`,
   };
 }
 

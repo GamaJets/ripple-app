@@ -38,6 +38,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
+import { plainExact } from '../../src/lib/units';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePromos } from '../../src/ui/promos';
 import { supabase } from '../../src/lib/supabase';
@@ -359,7 +360,11 @@ export default function Promotions() {
                     means the count itself could not be read, which renders as
                     a dash rather than as nobody. */}
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                  {p.discountPct}% off · {p.redeemed < 0 ? '—' : p.redeemed} used
+                  {/* `fig` on the percentage: `src/ui/promos.tsx` builds this with
+                      `Number(r.discount)`, straight off a numeric column, so a
+                      12.5% offer is a shape this row can be handed and `{p.discountPct}`
+                      wrote an English full stop into it. */}
+                  {fig(p.discountPct)}% off · {p.redeemed < 0 ? '—' : p.redeemed} used
                   {p.active ? '' : ' · switched off, nobody can redeem it'}
                 </Text>
               </View>
@@ -384,7 +389,12 @@ export default function Promotions() {
                   telling them about it. */}
               {p.active ? (
                 <Ghost label="Push" onPress={() => {
-                  const body = `${p.discountPct}% off with code ${p.code}`;
+                  // Spelled the same way as the row above it. Notification copy
+                  // is composed on the SENDER's handset throughout this app —
+                  // src/lib/notifyCopy.ts puts every figure in one through
+                  // `num()` — so the owner's own separator is the house answer
+                  // here, and an English full stop in a comma locale was not.
+                  const body = `${plainExact(p.discountPct)}% off with code ${p.code}`;
                   // The same report as the create path, from the same function,
                   // said in the same words. This one had its own hand-written
                   // pair of sentences over `r.queued` — the length of the list

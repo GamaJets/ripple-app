@@ -38,6 +38,8 @@
  *  The three macros are nullable and the calories are not, because a source
  *  that cannot say how many calories something has has not identified a food at
  *  all — every reader already refuses those. */
+import { plain } from './units';
+
 export interface FoodFacts {
   name: string;
   kcal: number;
@@ -78,14 +80,25 @@ export type QuantityRead = { ok: true; qty: number } | { ok: false; reason: stri
  * keyboards is a comma, and `parseFloat('1,5')` is 1 — which would log two
  * thirds of what somebody ate and tell them it was all of it.
  */
+/*
+ * The three sentences below name their example figures through `plain` and not
+ * as literals, and the middle one no longer says "with a point".
+ *
+ * `readQuantity` replaces a comma with a full stop on the line under this, which
+ * is to say it ALREADY accepts what a German, French, Spanish or Italian decimal
+ * pad types. The refusals were then telling that member to type a point — a key
+ * their keyboard does not have — and printing the offending figure back with a
+ * full stop in it. `plain` writes the example and the echo in the separator the
+ * reader's own keyboard will produce.
+ */
 export function readQuantity(text: string): QuantityRead {
   const raw = (text ?? '').trim().replace(',', '.');
-  if (!raw) return { ok: false, reason: 'How much of it did you have? Type a number, like 1 or 1.5.' };
-  if (!/^\d*\.?\d+$/.test(raw)) return { ok: false, reason: 'Type how many portions, like 1, 1.5 or 0.5.' };
+  if (!raw) return { ok: false, reason: `How much of it did you have? Type a number, like 1 or ${plain(1.5)}.` };
+  if (!/^\d*\.?\d+$/.test(raw)) return { ok: false, reason: `Type how many portions, like 1, ${plain(1.5)} or ${plain(0.5)}.` };
   const q = parseFloat(raw);
   if (!Number.isFinite(q) || q <= 0) return { ok: false, reason: 'A portion has to be more than nothing.' };
   if (q > MAX_QUANTITY) {
-    return { ok: false, reason: `That is ${q} portions. If you meant a decimal, type it with a point — 1.5 rather than 15.` };
+    return { ok: false, reason: `That is ${plain(q)} portions. If you meant a decimal, type it with your decimal key — ${plain(1.5)} rather than 15.` };
   }
   return { ok: true, qty: q };
 }

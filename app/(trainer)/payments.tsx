@@ -2322,7 +2322,11 @@ export default function TrainerPayments() {
                             {p.code}
                           </Text>
                           <Text style={{ ...ty.label, ...numeric, color: state === 'live' ? t.ink2 : t.ink3 }}>
-                            {p.percentOff}% off
+                            {/* `fig`: this row comes back from Stripe, whose
+                                `percent_off` is a decimal. The code the coach
+                                created here is whole (`Math.trunc` above), one
+                                made in the Stripe dashboard need not be. */}
+                            {fig(p.percentOff)}% off
                           </Text>
                         </View>
                         {/* The package the code is attached to. Two codes at

@@ -33,6 +33,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { num } from '../../src/lib/format';
+import { plainExact } from '../../src/lib/units';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
@@ -380,7 +381,7 @@ export default function OwnerRevenue() {
             { label: 'Value / Client', value: trainersUnknown ? '—' : fig(gymMoney(valuePerClient, cur)),
               delta: loading ? 'not read yet' : trainersUnread ? unreadNote : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
             { label: 'Clients', value: trainersUnknown ? '—' : fig(roll.clients),
-              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${roll.avgClientsPerTrainer} avg / trainer` },
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${plainExact(roll.avgClientsPerTrainer)} avg / trainer` },
           ]} />
         </Section>
 

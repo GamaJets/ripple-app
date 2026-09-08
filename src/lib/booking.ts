@@ -7,6 +7,7 @@ import type { TrainingSession, CancellationResult } from './types';
 // units, and the `* 100` that bridged them was a hundred-times error waiting
 // for the first gym that charges in yen.
 import { wholeMoney } from './coachMoney';
+import { plainExact } from './units';
 // `openSlotWindow` has to be able to say "the availability read has not landed
 // yet", and `isWhole` is the codebase's one answer to "is this all of it".
 import { isWhole, type LoadStatus } from '../ui/loadStatus';
@@ -183,8 +184,23 @@ export function lateCancelFee(
  * and nothing here has to know which currencies are which.
  */
 export function feeAmountLine(amount: number, currency: string | null | undefined): string {
-  if (!currency) return String(amount);
-  return wholeMoney(amount, currency) ?? String(amount);
+  // `plainExact` and not `String` on the two no-currency arms.
+  //
+  // Those arms are deliberate and stay: an amount whose currency nobody set is
+  // printed BARE, never with a symbol somebody guessed, and `unstatedCurrency`
+  // below is the clause that says so. What was not deliberate is the DECIMAL
+  // POINT in it. A coach charging 27.50 for a late cancellation read "27.5"
+  // with an English full stop, on a handset that writes 27,5 everywhere else —
+  // and the branch two lines up, where the currency IS known, has always gone
+  // through `wholeMoney` and so has always written the reader's own separator.
+  // One figure, two spellings, decided by whether a gym had filled in a field.
+  //
+  // `plainExact` changes the separator and nothing else: it does not round, so
+  // no subdivision is invented for a currency that has none — which is the
+  // whole subject of the note above — and it does not group, so the digits are
+  // the ones this function has always printed.
+  if (!currency) return plainExact(amount);
+  return wholeMoney(amount, currency) ?? plainExact(amount);
 }
 
 /**

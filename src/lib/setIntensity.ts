@@ -162,10 +162,19 @@ export function readRpe(text: string | null | undefined): ReadRpe {
  */
 export function rpeLabel(rpe: number | null | undefined): string | null {
   if (typeof rpe !== 'number' || !Number.isFinite(rpe)) return null;
-  // No trailing zero: 8, not 8.0. `Number.prototype.toString` already does
-  // this and does not need a decimal-place count that would have to be kept in
-  // step with the halves rule above.
-  return `@${rpe}`;
+  // No trailing zero: 8, not 8.0 — `numUpTo` caps the decimal places rather
+  // than padding to them, so the halves rule above is honoured and a whole
+  // number stays whole.
+  //
+  // `numUpTo` rather than the bare `${rpe}` this was, and for the same reason
+  // `readRpe` above takes a comma: an RPE is written in HALVES, so half of
+  // these labels carry a decimal separator, and `Number.prototype.toString`
+  // writes an English full stop in every locale. A coach on a German handset
+  // typed "8,5" into a decimal pad whose decimal key is a comma and read "@8.5"
+  // back on the row — and `rpeMeaning` two functions down was already printing
+  // its "about 1,5 reps left" through `numUpTo` in the same panel. One figure,
+  // two decimal conventions, on one screen.
+  return `@${numUpTo(rpe, 1)}`;
 }
 
 /**
@@ -481,7 +490,11 @@ export function intensityLine(i: Intensity): string | null {
 export function intensityMeaning(i: Intensity): string[] {
   const out: string[] = [];
   const rpe = rpeMeaning(i.rpe);
-  if (i.rpe != null && rpe) out.push(`RPE ${i.rpe} means ${rpe}.`);
+  // `numUpTo` for the same reason `rpeLabel` uses it: RPE 8.5 is half the
+  // scale's values, and `rpe` — the sentence this is interpolated beside —
+  // comes out of `rpeMeaning`, which already spells its own fraction in the
+  // reader's separator.
+  if (i.rpe != null && rpe) out.push(`RPE ${numUpTo(i.rpe, 1)} means ${rpe}.`);
   if (i.pct1rm != null) {
     out.push(
       `${i.pct1rm}% is the share of a one rep max your coach wrote. It stays a percentage here: `

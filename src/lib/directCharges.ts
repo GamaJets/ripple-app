@@ -202,11 +202,22 @@ export function applicationFeeCents(priceCents: unknown, pct: number): FeeAmount
   }
   if (priceCents < 0) return { ok: false, reason: 'The package price is negative.' };
   if (!Number.isFinite(pct) || pct < 0 || pct >= 100) {
+    // Bare, and deliberately. A platform fee is not required to be whole —
+    // `pct < 100` is the only bound — so this figure can carry a separator. But
+    // this module is reached from five supabase/functions entry points, and a
+    // server has no reader whose locale it could ask; `appLocale()` there would
+    // resolve to the container's. src/lib/units may not be imported here for
+    // the same reason scripts/check-functions.mjs gives.
     return { ok: false, reason: `A platform fee of ${pct}% cannot be applied.` };
   }
   const fee = Math.round((priceCents * pct) / 100);
   if (fee <= 0) return { ok: true, fee: null };
   if (fee >= priceCents) {
+    // `priceCents` is checked whole above and `fee` is `Math.round`, so neither
+    // can carry a separator; both are counts of minor units rather than
+    // amounts, and there is no currency on this sentence to take decimal places
+    // from. Only `pct` can be fractional, and it is left bare for the reason
+    // the branch above gives.
     return { ok: false, reason: `A ${pct}% fee on ${priceCents} would be ${fee}, which is not less than the charge. Stripe refuses that.` };
   }
   return { ok: true, fee };

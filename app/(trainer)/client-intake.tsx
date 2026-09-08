@@ -33,7 +33,7 @@ import { View, Text, ScrollView, Pressable, Alert, Linking } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Notice, Ghost, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Notice, Ghost, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { useRoster } from '../../src/ui/roster';
@@ -316,8 +316,13 @@ export default function ClientIntakeScreen() {
             <Section>
               <SectionHead title="Their Week" />
               <Line label="Their days" value={labelOf(WORK_KINDS, intake.practical.work)} />
+              {/* `fig` on the hours, because a client answers this with a
+                  half — "About 7.5 hours" — and a bare interpolation writes an
+                  English full stop on a coach's handset whatever its language.
+                  `intake.ts` reads the field with `numOrNull`, so nothing here
+                  is integral by construction. */}
               <Line label="Sleep"
-                value={intake.practical.sleepHours == null ? null : `About ${intake.practical.sleepHours} hours`} />
+                value={intake.practical.sleepHours == null ? null : `About ${fig(intake.practical.sleepHours)} hours`} />
               <Line label="Anything else" value={intake.practical.anythingElse} />
             </Section>
 

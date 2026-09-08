@@ -16,13 +16,13 @@ import {
   kgToLb, lbToKg, cmToIn, inToCm, convertedNote, plain,
   liftIn, liftLabel, liftToKg, liftDeltaIn, est1RMIn, volumeIn, volumeHeadline, readLift,
   readBodyWeight,
-  readNumber,
+  readNumber, plainExact,
 } from './units';
 // The documents a client SHARES are the last thing TF-37 reached, and they are
 // asserted here rather than in a file of their own because what is being
 // checked is the conversion, not the prose: a report and a summary that print
 // kilograms to a pounds reader, and a CSV that must not follow them.
-import { progressChangeLines, progressSummary, progressCsv, PROGRESS_CSV_HEADER, type ProgressRow } from './progressExport';
+import { progressChangeLines, progressSummary, progressCsv, PROGRESS_CSV_HEADER, figure, type ProgressRow } from './progressExport';
 // `plain` now writes the READER's decimal separator, so every assertion below
 // that names a figure is an assertion about a locale. Stated here rather than
 // inherited from the runner: `appLocale()` falls back to whatever
@@ -558,6 +558,75 @@ ok(readNumber('16,') === 16, 'including on a comma keyboard');
 
   setAppLocale('en-GB');
   ok(plain(82.4) === '82.4', 'and a full-stop reader is unaffected by any of it');
+}
+
+/* ── plainExact: the SEPARATOR, and nothing else ─────────────────────────── */
+//
+// `plain` is a spelling and a rounding, and it is right for the boxes and
+// labels that call it — every one of them a body weight, a load or a tape
+// measurement whose grain is known. `plainExact` exists for the two generic
+// printers, `fig` in src/ui/kit.tsx and `figure` in src/lib/progressExport.ts,
+// which stand in front of around 190 call sites carrying values whose grain
+// they have never been told. Rounding there would be a printer deciding the
+// precision of a figure it has never seen.
+//
+// So the contract is narrow and the assertions are about the narrowness: the
+// digits are `String`'s own, and the separator is the reader's. If those two
+// ever come apart — if this starts rounding, grouping, or writing the locale's
+// own digits — a figure changes meaning somewhere no test is looking, and the
+// block below is what stops that.
+{
+  setAppLocale('de-DE');
+  ok(plainExact(3.42) === '3,42', `a comma-decimal reader gets a comma, got "${plainExact(3.42)}"`);
+  ok(plainExact(82) === '82', `a whole number has nothing to separate, got "${plainExact(82)}"`);
+  ok(plainExact(-1.5) === '-1,5', `a negative keeps its ASCII sign, got "${plainExact(-1.5)}"`);
+  // No grouping. `fig` fills Hero and Kpi slots that sit beside `plain` output
+  // in the same row, and `plain` may never group either — see the header.
+  ok(plainExact(1204.5) === '1204,5', `no thousands separator, got "${plainExact(1204.5)}"`);
+
+  // The claim that separates this from `plain`, and the reason it is a second
+  // function rather than `plain(n, 20)`: the digits are byte-identical to what
+  // `String` writes, however many there are. `plain` rounds 1/3 to three
+  // places; this must not round it at all.
+  const third = 1 / 3;
+  ok(plainExact(third) === String(third).replace('.', ','),
+    `every digit String would have written survives, got "${plainExact(third)}"`);
+  ok(plain(third) === '0,333', `where plain deliberately rounds, got "${plain(third)}"`);
+  ok(plainExact(0.1 + 0.2) === '0,30000000000000004',
+    `including the ones binary floating point produces, got "${plainExact(0.1 + 0.2)}"`);
+
+  // What it declines to touch. Each of these has no bare decimal point in it,
+  // and a separator substituted into one would produce a string that is not a
+  // figure at all.
+  ok(plainExact(NaN) === 'NaN', `NaN is passed through, got "${plainExact(NaN)}"`);
+  ok(plainExact(Infinity) === 'Infinity', `and so is an infinity, got "${plainExact(Infinity)}"`);
+  ok(plainExact(1e21) === String(1e21), `and an exponent form, got "${plainExact(1e21)}"`);
+  ok(plainExact(1.5e-7) === String(1.5e-7), `at either end of the range, got "${plainExact(1.5e-7)}"`);
+
+  // The printer this was written for. `figure` puts the same figures into the
+  // progress document and the share text.
+  ok(figure(82.4, ' kg') === '82,4 kg', `figure() carries it, got "${figure(82.4, ' kg')}"`);
+  ok(figure(null, ' kg') === '\u2014', 'and an absent reading is still a dash, never a nought');
+
+  // The separator is asked for with `numberingSystem: 'latn'`, the same way
+  // `spell` asks, so the two can never disagree about one figure. On Egyptian
+  // Arabic that means a FULL STOP and Western digits: latn carries latn's
+  // symbols, which is the property that keeps `plain`'s round trip through
+  // `readNumber` alive on that handset. Asserted against `plain` rather than
+  // against a character, so the pair stay locked together whatever ICU says.
+  setAppLocale('ar-EG');
+  ok(plainExact(16.5) === plain(16.5),
+    `the two spellings agree on one locale, got "${plainExact(16.5)}" and "${plain(16.5)}"`);
+  ok(!/[\u0660-\u0669]/.test(plainExact(16.5)),
+    `and never Arabic-Indic digits, got "${plainExact(16.5)}"`);
+
+  // The locale is LATCHED and the separator is cached against the tag it was
+  // asked for, so the switch has to re-derive it. A cache that did not would
+  // hand this reader Cairo's full stop after Berlin's comma, or the reverse.
+  setAppLocale('de-DE');
+  ok(plainExact(16.5) === '16,5', `switching back re-derives it, got "${plainExact(16.5)}"`);
+  setAppLocale('en-GB');
+  ok(plainExact(16.5) === '16.5', `and a full-stop reader is unaffected, got "${plainExact(16.5)}"`);
 }
 
 // The exit-on-failure epilogue belongs LAST. It used to sit further up this
