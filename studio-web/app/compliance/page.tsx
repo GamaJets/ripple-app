@@ -991,10 +991,28 @@ function Documents({ documents, members, ccy, zone, tenantId, me, onChange }: {
               deleteDocument(supabase, d)
                 .then(() => { setErr(null); onChange(); })
                 .catch((e: any) => {
+                  // `unchanged` is about the ENTRY, not the file, and that is
+                  // the whole repair. It read "it is still on file" — a claim
+                  // this write cannot make, and one that contradicts the very
+                  // message printed two clauses to its left. `deleteDocument`
+                  // removes the storage object FIRST and only then the row, so
+                  // the failure it throws most often says, verbatim, "The file
+                  // itself HAS been deleted from storage, so what is left is an
+                  // entry pointing at nothing" — and `failedWriteSentence` then
+                  // appended "Nothing was written, so it is still on file." to
+                  // it. One banner, two opposite facts, and the reassuring half
+                  // was the false one. The comment three lines above the button
+                  // already said the document "might not be" on file.
+                  //
+                  // The entry surviving is true in both halves — a refused
+                  // object removal leaves both, a refused row delete leaves the
+                  // row — so this is the one clause that holds whatever
+                  // happened, and the reason above it says what became of the
+                  // file.
                   setErr(writeFailedText(e, {
                     what: 'That document',
-                    unchanged: 'it is still on file',
-                    howToCheck: 'The list below has been re-read — it shows whether the document is actually gone.',
+                    unchanged: 'its entry is still in the register',
+                    howToCheck: 'The list below has been re-read — it shows whether the entry is actually gone. If the reason above says the file itself was already deleted, press Delete it again to clear what is left.',
                   }));
                   onChange();
                 });

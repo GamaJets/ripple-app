@@ -991,10 +991,25 @@ function Dossier({ d, rec, active, onClose, ccy, today, zone, gymRec, gymRecsRea
                 render: (s: PtSession) => s.outcome
                   ? s.outcome.replace('_', ' ')
                   : <span className="dash">not recorded</span> },
+              // The currency the rate was SNAPSHOTTED in, never the gym's
+              // setting today. It was `amount(s.rateCents, ccy)`, which is the
+              // substitution `PtSession.rateCurrency` names as the defect in as
+              // many words: "It must be read as UNKNOWN and never as the gym's
+              // current currency — that substitution is the defect, not the
+              // fallback for it." A gym that has changed its currency had its
+              // whole PT history relabelled in this column, and a session
+              // delivered before supabase/parts/1010 carries no unit at all and
+              // was being given one. This screen already made the same repair
+              // twice for the money a member PAID — the Paid column and the
+              // "Paid, all time" tile — and left the money the gym OWES.
               { key: 'rate', header: 'Rate', value: (s: PtSession) => s.rateCents ?? null, numeric: true,
                 render: (s: PtSession) => s.rateCents == null
                   ? <span className="dash">—</span>
-                  : (amount(s.rateCents, ccy) ?? <span className="dash">{NO_CURRENCY_NOTE}</span>) },
+                  : (money(s.rateCents, s.rateCurrency) ?? (
+                      <span className="dash">
+                        {s.rateCurrency ? 'rate in a currency this console cannot write' : 'no currency was recorded with this rate'}
+                      </span>
+                    )) },
               // What the MEMBER paid with, which is a different question from
               // the Rate beside it: that is what the gym owes the coach. A
               // shortfall is the two of them disagreeing — an hour costed,

@@ -103,8 +103,43 @@ export interface LiveSub {
    * a socket that would only ever throw the event away. `null` where a table
    * has no tenant column — see `class_bookings` above — and that is not a
    * weakening, because the payload is never read either way.
+   *
+   * ── The one event a filter cannot carry ──────────────────────────────────
+   *
+   * A filter on a column other than the primary key silently drops DELETEs, and
+   * that is a fact about Postgres rather than about Supabase. Logical decoding
+   * writes only the REPLICA IDENTITY columns into the WAL record for a deleted
+   * row, and every table in the `supabase_realtime` publication on this project
+   * has the default identity — `pg_class.relreplident = 'd'`, checked against
+   * the live database, which means the primary key and nothing else. There is
+   * no `tenant_id` in the record for the broker to compare, so
+   * `tenant_id=eq.<uuid>` cannot evaluate true and the event never reaches this
+   * browser.
+   *
+   * That is not hypothetical here. `deleteClass` (src/lib/gymSchedule.ts) is
+   * wired to this console's own /timetable, and `sessions` rows are hard-deleted
+   * by src/lib/gymPtSchedule.ts and src/ui/sessions.tsx when a coach releases a
+   * slot from their phone. A tab that had said "Updating as the gym changes" for
+   * an hour would go on showing a class that no longer existed — and the desk
+   * two feet away would go on selling places in it.
+   *
+   * So a screen that cares about deletions adds a second, UNFILTERED binding on
+   * the same table with `event: 'DELETE'`. It is the same trade the header
+   * above already makes for `class_bookings`, and it is cheap for the same
+   * reason: the payload is never read, so an unfiltered doorbell from another
+   * gym costs one debounced refetch of THIS gym's rows and tells this browser
+   * nothing it did not already have. Deletions are also rare — a released slot,
+   * a cancelled class — where inserts and updates are the traffic the filter
+   * exists to keep off the wire.
    */
   filter?: string | null;
+  /**
+   * Which change to hear about. `'*'` — every one — unless a caller says
+   * otherwise, which is what every filtered subscription wants.
+   *
+   * The one caller that says otherwise is the DELETE binding described above.
+   */
+  event?: '*' | 'INSERT' | 'UPDATE' | 'DELETE';
 }
 
 /**
@@ -216,7 +251,7 @@ export function useLive({ channel, subs, enabled = true, onChange }: {
   // literal — which is a new identity on every render — without the effect
   // below restarting continuously. Compared as a string because that is what
   // the effect can actually depend on.
-  const key = subs.map((s) => `${s.table}|${s.filter ?? ''}`).join(',');
+  const key = subs.map((s) => `${s.table}|${s.filter ?? ''}|${s.event ?? '*'}`).join(',');
 
   const subsRef = useRef(subs);
   subsRef.current = subs;
@@ -256,7 +291,7 @@ export function useLive({ channel, subs, enabled = true, onChange }: {
       for (const s of subsRef.current) {
         built = built.on(
           'postgres_changes',
-          { event: '*', schema: 'public', table: s.table, ...(s.filter ? { filter: s.filter } : {}) },
+          { event: s.event ?? '*', schema: 'public', table: s.table, ...(s.filter ? { filter: s.filter } : {}) },
           bump,
         );
       }

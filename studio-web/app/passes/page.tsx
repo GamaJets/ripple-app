@@ -289,12 +289,28 @@ export default function Passes() {
           text={c.passes ? String(c.passes.issued) : null}
           note={stateNote(rec.passes, 'passes not read', c.passes ? `${c.passes.live} still live` : undefined)}
         />
+        {/* The four tiles below hand-rolled a TWO-arm version of `stateNote`,
+            which is directly under this file and keeps four states apart. Two
+            costs, both of them the page's own headline claim made out of a read
+            that did not happen:
+
+              · `=== 'failed'` admitted 'loading' and 'partial'. Under a
+                truncated pass read every one of these figures is withheld
+                (`buildPassConversion` returns null for the lot when
+                `rowsOf(rec.passes)` is null) and the note read as though the
+                query had been fine.
+              · "Typical gap" and "Held a pass, then joined" branched on the
+                MEMBERSHIPS slice alone, and both are null when the PASSES read
+                fails too — so a gym whose pass query was refused, with a
+                perfectly healthy roster, was told "nobody has joined after a
+                pass". That is a finding about the business produced by a broken
+                query, and it is the sentence this whole page exists to make. */}
         <Kpi
           label="Used at least once"
           text={c.redeemedPasses == null ? null : String(c.redeemedPasses)}
           note={
-            rec.passes.state === 'failed' ? 'passes not read'
-              : c.redemptionVisits == null ? 'door log not read'
+            rec.passes.state !== 'ready' ? stateNote(rec.passes, 'passes not read')
+              : c.redemptionVisits == null ? stateNote(rec.visits, 'door log not read')
               : `${c.redemptionVisits} seen by the door log`
           }
         />
@@ -302,7 +318,7 @@ export default function Passes() {
           label="To a walk-in"
           text={c.anonymousPasses == null ? null : String(c.anonymousPasses)}
           note={
-            rec.passes.state === 'failed' ? 'passes not read'
+            rec.passes.state !== 'ready' ? stateNote(rec.passes, 'passes not read')
               : c.anonymousPasses ? 'no account — excluded below'
               : 'every pass carries an account'
           }
@@ -311,7 +327,8 @@ export default function Passes() {
           label="Held a pass, then joined"
           text={c.counts == null ? null : String(c.counts.joinedAfter)}
           note={
-            rec.memberships.state === 'failed' ? 'roster not read'
+            rec.passes.state !== 'ready' ? stateNote(rec.passes, 'passes not read')
+              : rec.memberships.state !== 'ready' ? stateNote(rec.memberships, 'roster not read')
               : c.counts == null ? undefined
               : `of ${c.counts.decided} whose pass has run out`
           }
@@ -320,9 +337,11 @@ export default function Passes() {
           label="Typical gap"
           text={c.interval == null ? null : `${c.interval.medianDays}d`}
           note={
-            c.interval == null
-              ? (rec.memberships.state === 'ready' ? 'nobody has joined after a pass' : 'roster not read')
-              : `median of ${c.interval.n}, ${c.interval.minDays}–${c.interval.maxDays} days`
+            c.interval != null
+              ? `median of ${c.interval.n}, ${c.interval.minDays}–${c.interval.maxDays} days`
+              : rec.passes.state !== 'ready' ? stateNote(rec.passes, 'passes not read')
+              : rec.memberships.state !== 'ready' ? stateNote(rec.memberships, 'roster not read')
+              : 'nobody has joined after a pass'
           }
         />
       </div>

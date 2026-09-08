@@ -466,6 +466,25 @@ export default function CoachChecklists() {
   // and nothing announced to a screen reader.
   if (!me) return <ConsoleGate me={me} failed={authUnread} />;
 
+  // The fourth screen. /coach, /coach/roster and /coach/earnings each carry this
+  // branch and each carries a comment saying they "were the only ones in the
+  // console without it" — the sweep that added them stopped at three. Without
+  // it a refused `profiles` read arrives as `role: null`, falls through to the
+  // refusal below, and tells a working coach their account is not a coaching
+  // account: a claim about them, made out of a query that failed.
+  if (me.roleUnknown) {
+    return (
+      <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/checklists">
+        <h1>We could not read your account</h1>
+        <p style={{ color: 'var(--ink2)', marginTop: 8, maxWidth: '62ch' }}>
+          Your profile did not load, so this console does not know what you are —
+          which is not the same as you not being a coach. Reload the page; if it
+          keeps happening the database refused the read rather than you.
+        </p>
+      </Shell>
+    );
+  }
+
   if (me.role !== 'trainer' && me.role !== 'owner') {
     return (
       <Shell me={me} gymName={gymName} gymNameUnread={gymNameUnread} current="/coach/checklists">

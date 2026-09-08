@@ -147,7 +147,24 @@ export default function Close() {
   /** `tenants.timezone`, or null when the gym has not set one. */
   const [zone, setZone] = useState<string | null>(null);
   const [sessionFee, setSessionFee] = useState<number | null>(null);
-  const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
+  /**
+   * Whether the gym row has come back, and how — THREE states, not two.
+   *
+   * This was `useState<'ok' | 'failed'>('ok')`, so between `loadMe` resolving
+   * and the `tenants` read landing the screen held 'ok' with `policyCode` still
+   * null, and read that pair as "the gym has stated no pay policy". The banner
+   * below then made a claim about the gym over a record nobody had read yet —
+   * on the one screen in this console whose whole job is to refuse, and whose
+   * own header says that refusing over an unread record is the one refusal it
+   * must not turn into a clean bill of health. It ran on every load, for a whole
+   * round trip, on every gym on the platform including the ones that HAVE set a
+   * policy.
+   *
+   * `gymRead` on /payroll is the same distinction already drawn in this console,
+   * for the same reason: a gym that has set nothing and a gym whose row has not
+   * arrived are not the same fact and may not print the same sentence.
+   */
+  const [feeRead, setFeeRead] = useState<'reading' | 'ok' | 'failed'>('reading');
   /**
    * What this gym pays EACH coach, from `gym_trainer_pay`.
    *
@@ -672,7 +689,9 @@ export default function Close() {
             saved nothing, so the close could be settled on a policy the owner
             had set somewhere else and this screen had forgotten. */}
         <span style={{ color: 'var(--ink2)', fontSize: 12.5 }}>
-          {feeRead === 'failed' ? (
+          {feeRead === 'reading' ? (
+            <>Reading what this gym pays for…</>
+          ) : feeRead === 'failed' ? (
             <>Pay policy unknown — the gym record could not be read; delivered sessions only.</>
           ) : stated ? (
             <>Pays for {PAY_POLICY_LABEL[policyCode as PayPolicyCode].toLowerCase()} ·{' '}
@@ -700,7 +719,10 @@ export default function Close() {
       {/* A month is closed here and the figure goes to an accountant, so the
           floor is said in a banner rather than only in a caption beside a
           dropdown. */}
-      {feeRead !== 'failed' && !stated ? (
+      {/* `=== 'ok'`, never `!== 'failed'`. The second admits 'reading', which is
+          how this banner came to assert that a gym had stored no pay policy
+          before anything had asked it. */}
+      {feeRead === 'ok' && !stated ? (
         <Banner>
           <strong style={{ color: 'var(--ink)' }}>No pay policy is stored for this gym</strong> —{' '}
           {NO_PAY_POLICY_NOTE}. Everything below pays delivered sessions only, which is the least
@@ -760,7 +782,7 @@ function CloseView({ c, rec, currency, gymCcy, zone, nowMs, feeRead, payErr, ses
   /** `tenants.currency`. What the gym's own standing figures are denominated
    *  in: the session fee, and therefore payroll. */
   gymCcy: TenantCurrency;
-  feeRead: 'ok' | 'failed';
+  feeRead: 'reading' | 'ok' | 'failed';
   /** Why the per-coach pay rates could not be read, or null. A close taken over
    *  this prices every coach at the gym's standard fee and files it. */
   payErr: string | null;

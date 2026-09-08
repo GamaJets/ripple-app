@@ -625,9 +625,21 @@ function Handoff({ p, gymName, books, raised, profile, profileState, moving }: {
     // box on a return.
     parts.push('NOT A RETURN. Repple applies no tax rate to anything, holds no rate anywhere, and states no tax figure. These are the records a return is made from.\n');
     if (moving) parts.push(`${moving}\n`);
-    parts.push(profileState === 'error'
+    // `=== 'ready'`, not `!== 'error'` — the rule the comment fifteen lines
+    // below states for the payments slice, applied to the state that reaches an
+    // accountant as a sentence about the business. `profileState` has THREE
+    // values and this gate admitted 'loading' into the positive branch, where
+    // `profile` is still the empty default. It is reachable rather than
+    // theoretical: the books read fires the moment `me.tenantId` lands, while
+    // the tax profile is the third of three awaits, so the Export button — which
+    // watches only the three books — un-disables before the profile is back. A
+    // registered gym's accountant got a file saying "Registered: nobody has
+    // said. Registration number: none stated."
+    parts.push(profileState === 'ready'
+      ? `Registered: ${profile.registered === true ? 'yes, as stated by the gym' : profile.registered === false ? 'no, as stated by the gym' : 'nobody has said'}. Registration number: ${profile.registration ?? 'none stated'} (held as typed, never checked).\n`
+      : profileState === 'error'
       ? 'What this gym says about tax could not be read, so it is not stated here. That is not a statement that it has said nothing.\n'
-      : `Registered: ${profile.registered === true ? 'yes, as stated by the gym' : profile.registered === false ? 'no, as stated by the gym' : 'nobody has said'}. Registration number: ${profile.registration ?? 'none stated'} (held as typed, never checked).\n`);
+      : 'What this gym says about tax had not come back when this file was written, so it is not stated here. That is not a statement that it has said nothing — export it again once the page has finished reading.\n');
 
     parts.push(head('TAKEN — payments recorded in the period, gross'));
     // `!== null` and not `=== 'failed'`. `Unread` has THREE values, and the

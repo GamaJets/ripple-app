@@ -206,11 +206,23 @@ export default function Classes() {
 
   const load = useCallback(async (tenantId: string, window: number): Promise<boolean> => {
     setClasses(null); setTrainers(null); setUpcoming(null); setErr(null);
-    // Back to the whole gym on every reload. A 7-day window and a 90-day one do
-    // not have to contain the same places, and a filter left pointing at a place
-    // the new window has no classes at empties every table on the screen — which
-    // is the one sentence this page must never say by accident.
-    setPlace(ALL_PLACES);
+    // The place filter is reset by the WINDOW BUTTONS, not from in here.
+    //
+    // `setPlace(ALL_PLACES)` used to sit on this line, and the argument for it
+    // was about the window: "a 7-day window and a 90-day one do not have to
+    // contain the same places, and a filter left pointing at a place the new
+    // window has no classes at empties every table on the screen". That is
+    // still true and the reset still happens — at `setDays`, which is the only
+    // thing that changes the window.
+    //
+    // It cannot live here any more. `load` is no longer called only on mount
+    // and on a window press: it is the reader handed to `useLiveFetched`, so it
+    // now runs on every socket bump, on every return to the tab and on the
+    // fallback poll. An owner who narrowed the screen to Studio 2 watched the
+    // picker snap back to "Every place" — and every tile and all five tables
+    // silently re-widen to the whole gym — the moment anybody anywhere in the
+    // gym booked a class. The realtime change did not touch this line, which is
+    // exactly why nothing noticed.
     const now = Date.now();
     // The window ends now, not at midnight and not at the end of the week: a
     // class that has not started cannot have a show rate, and its unsold seats
@@ -309,6 +321,12 @@ export default function Classes() {
       subs: me?.tenantId
         ? [
             { table: 'gym_classes', filter: `tenant_id=eq.${me.tenantId}` },
+            // Unfiltered, because a filter cannot carry a DELETE — see
+            // `LiveSub.filter` in lib/live.ts. A class removed from /timetable
+            // at the other desk would otherwise stay on this page's tables and
+            // in its fill figures. `class_bookings` needs no such pair: it is
+            // already unfiltered, so its deletions arrive.
+            { table: 'gym_classes', event: 'DELETE' },
             { table: 'class_bookings', filter: null },
           ]
         : [],
@@ -510,7 +528,7 @@ export default function Classes() {
             key={w.days}
             type="button"
             aria-pressed={w.days === days}
-            onClick={() => setDays(w.days)}
+            onClick={() => { setDays(w.days); setPlace(ALL_PLACES); }}
             style={{
               ...field, cursor: 'pointer',
               background: w.days === days ? 'var(--surface3)' : 'var(--surface2)',

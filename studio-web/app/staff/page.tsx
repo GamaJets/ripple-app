@@ -111,7 +111,21 @@ export default function Staff() {
   // session fee and carries no currency of its own, so a null here means the
   // amounts are unprintable rather than printable in a guessed money.
   const [ccy, setCcy] = useState<TenantCurrency>(null);
-  const [feeRead, setFeeRead] = useState<'ok' | 'failed'>('ok');
+  /**
+   * Whether the gym row has come back, and how — THREE states, not two.
+   *
+   * This was `useState<'ok' | 'failed'>('ok')`, and 'ok' is a claim: two of the
+   * sentences below are gated on it. Between `loadMe` resolving and the
+   * `tenants` read landing, `ccy` is still null and `policyCode` is still null,
+   * so `feeRead === 'ok' && !ccy` fired and every owner on every load was shown
+   * a critical banner saying their gym had not set its currency — including
+   * every gym that had — with a second line underneath saying no pay policy was
+   * stored. A read that has not happened is not a gym that has stated nothing.
+   *
+   * `gymRead` on /payroll is the same distinction, already drawn in this console
+   * for the same reason.
+   */
+  const [feeRead, setFeeRead] = useState<'reading' | 'ok' | 'failed'>('reading');
   /**
    * `tenants.timezone`. Null means the gym has not said where it is, and on this
    * page that is a statement with consequences rather than a blank field.
@@ -325,7 +339,9 @@ export default function Staff() {
           and saved nothing: an owner ticked "Pay no-shows", read a bigger number
           on this screen, and settled the month on /close against a smaller one. */}
       <div style={{ margin: '16px 0 4px', color: 'var(--ink2)', fontSize: 12.5, maxWidth: '72ch' }}>
-        {feeRead === 'failed' ? (
+        {feeRead === 'reading' ? (
+          <>Reading what this gym pays for…</>
+        ) : feeRead === 'failed' ? (
           <>Pay policy unknown — the gym&rsquo;s record could not be read, so the figures below price
           delivered sessions only.</>
         ) : stated ? (
@@ -432,9 +448,16 @@ export default function Staff() {
         </Section>
       )}
 
+      {/* `onChanged` is `refresh`, the hook's — not a second reader. It was
+          `() => load(me.tenantId!)`, which re-runs all six of this screen's
+          reads and stamps none of them, so granting or revoking a staff role
+          replaced every figure on the page while the line under the heading
+          went on saying "This rota, read 20 minutes ago". /timetable and
+          /sessions were both swept for exactly this and say so in their own
+          comments; this call was missed. */}
       <Roles
         tenantId={me.tenantId!} actorId={me.id} clients={rec.clients} zone={zone}
-        onChanged={() => load(me.tenantId!)}
+        onChanged={refresh}
       />
 
       <Rota tenantId={me.tenantId!} trainers={rec.trainers} ccy={ccy} zone={zone} zoneRead={zoneRead} />

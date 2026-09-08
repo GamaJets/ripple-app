@@ -20,7 +20,7 @@
 // with the count beside it, never a number — not even a number labelled
 // "provisional", because the provisional number is the one that gets paid.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
+import { supabase, loadMe, ME_UNREADABLE, writeFailedText, type Me } from '@/lib/supabase';
 // `Unresolved` comes from here rather than being declared at the bottom of
 // this file. Seven console screens held a near-identical copy, every one of
 // them a plain `<div>` — so the sentence saying THIS section's rows could not
@@ -203,6 +203,40 @@ export default function Payroll() {
    *  a reversed run put back. */
   const [classPay, setClassPay] = useState<ClassPayLine[] | null>(null);
   const [adjustments, setAdjustments] = useState<Adjustment[] | null>(null);
+  /**
+   * Why the class lines and the adjustments could not be read.
+   *
+   * Both reads had NO error state at all. The two `setX(res.status ===
+   * 'fulfilled' ? res.value : null)` lines below sat three lines under a comment
+   * saying "A read that failed is null, never []. [] is the gym saying it has
+   * none; null is nobody knowing. On this screen those two answers differ by a
+   * month's wages" — and then both nulls were collapsed straight back to `[]` at
+   * the point of use, `(classPay ?? [])` and `(adjustments ?? [])`.
+   *
+   * So a refused `gym_class_pay` read produced a run with no class lines on it,
+   * which is byte-for-byte what a coach who taught nothing looks like: an em
+   * dash in the Classes column, a payable total that is simply smaller, and a
+   * live Settle button. For a coach whose whole period was classes it was worse
+   * than smaller — `anything === 0` and the screen said "Nothing outstanding for
+   * this trainer", an all-clear built on a query that failed. The adjustments
+   * side is the same shape pointing the other way: a deduction that never
+   * arrived is an overpayment.
+   *
+   * They are blockers for exactly the reason `payErr` is one, in the sentence
+   * beside it: this run writes a permanent payment row and stamps its sessions
+   * paid, so it never comes round again to be corrected.
+   */
+  const [classPayErr, setClassPayErr] = useState<string | null>(null);
+  const [adjErr, setAdjErr] = useState<string | null>(null);
+  /**
+   * Why a settlement did not go through — kept APART from `err`.
+   *
+   * `err` is what a finished read sets, and the settle handler used to write
+   * into it. That was survivable only because the failing settle never re-read
+   * the screen; the moment it does, the next successful load clears `err` to
+   * null and takes the sentence about the money with it.
+   */
+  const [settleErr, setSettleErr] = useState<string | null>(null);
   // Every close and reopen this gym has recorded. null is "not read", which is
   // not the same as "no month is closed" — see the note where it is set.
   const [closes, setCloses] = useState<MonthCloseRow[] | null>(null);
@@ -350,8 +384,12 @@ export default function Payroll() {
     setCloses(closesRes.status === 'fulfilled' ? closesRes.value : null);
     if (uRes.status === 'fulfilled') { setUnmarked(uRes.value); setUnmarkedErr(null); }
     else { setUnmarked(null); setUnmarkedErr(failure(uRes, 'the sessions nobody has marked')); }
-    setClassPay(cRes.status === 'fulfilled' ? cRes.value : null);
-    setAdjustments(aRes.status === 'fulfilled' ? aRes.value : null);
+    // Same shape as the sessions, the roster and the settlements below, and for
+    // the same reason — see `classPayErr`. These two used to lose their reason.
+    const c = failure(cRes, 'the classes this gym owes for');
+    const a = failure(aRes, "the adjustments to anybody's pay");
+    setClassPay(cRes.status === 'fulfilled' ? cRes.value : null); setClassPayErr(c);
+    setAdjustments(aRes.status === 'fulfilled' ? aRes.value : null); setAdjErr(a);
 
     // A read that failed is null, never []. [] is the gym saying it has none;
     // null is nobody knowing. On this screen those two answers differ by a
@@ -365,7 +403,7 @@ export default function Payroll() {
     const r = failure(rRes, 'what has already been paid');
     setSessionsErr(s); setTrainersErr(t); setRunsErr(r);
 
-    const trouble = [s, t, r].filter((x): x is string => x !== null);
+    const trouble = [s, t, r, c, a].filter((x): x is string => x !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
 
     // Whole means all eight came back. `useFetched` stamps only on a whole
@@ -731,6 +769,12 @@ export default function Payroll() {
       const closedSide = closedMonthBlocker(period.fromDate, closes);
       r.blocker =
         (r.line?.unmarked ?? 0) > 0 ? sessionSide
+        // BEFORE the `anything === 0` arm, which is the whole point. A refused
+        // class-pay read leaves a coach who taught eight classes with no class
+        // lines, and "Nothing outstanding for this trainer" is then an all-clear
+        // produced by a query that did not run. See `classPayErr`.
+        : classPayErr ? `${classPayErr} Until it does, this run cannot say what this coach taught, so a settlement now would pay for none of it.`
+        : adjErr ? `${adjErr} Until it does, this run cannot say what is meant to be added to or taken off this coach's pay.`
         : anything === 0 ? 'Nothing outstanding for this trainer.'
         // A month that is closed stays closed. The run's `period_from` is what
         // /accounting buckets "Money out" by, so a settlement dated into a
@@ -813,6 +857,19 @@ export default function Payroll() {
     // re-read, and one that succeeds has no row left to ask about.
     setAsking(null);
     setSettling(r.trainerId);
+    setSettleErr(null);
+    /*
+     * Whether the settlement ROW exists.
+     *
+     * This is two writes into two different worlds and one `catch` said the
+     * same sentence about both. If `recordSettlement` throws, nothing was paid.
+     * If it returns and `stampRunExtras` throws, the coach HAS been paid and
+     * their sessions are stamped — every message `stampAll` throws in that case
+     * ends "Reload before settling this trainer again", and the one instruction
+     * that must not be implied is the one a bare "could not record that
+     * settlement" implies, which is to press the button again.
+     */
+    let settlementId: string | null = null;
     try {
       const id = await recordSettlement(supabase, tenantId, {
         trainerId: r.trainerId,
@@ -842,15 +899,40 @@ export default function Payroll() {
         // above stops the button reaching here without one.
         currency: ccy ?? undefined,
       });
+      settlementId = id;
       // Second, and separately, because `recordSettlement` is shared with the
       // phone app and knows only about sessions. A partial stamp throws rather
       // than being swallowed: the unstamped remainder is silently payable a
       // SECOND time, which is the expensive direction.
       await stampRunExtras(supabase, id, r.classes.map((c) => c.id), r.adjustments.map((a) => a.id));
-      await load(tenantId, period, zone);
     } catch (e: any) {
-      setErr(e?.message ?? 'Could not record that settlement.');
-    } finally { setSettling(null); }
+      setSettleErr(settlementId
+        // Paid. Only the classes and adjustments are in doubt, and saying
+        // "could not record that settlement" here would be an instruction to
+        // pay this coach a second time.
+        ? `${e?.message ?? 'The classes and adjustments on that run could not be stamped as paid.'} The settlement itself WAS recorded and this coach's sessions are stamped against it, so do NOT settle them again — read the run again and check the Classes and Adjustments columns first.`
+        // Not paid, or nobody answered. `writeFailedText` is the console's one
+        // sentence for the third of those, and it is the sentence this screen
+        // most needed: the request ceiling in lib/supabase.ts means a
+        // settlement that timed out may be in the database with only its reply
+        // lost, and "could not record that settlement" beside a live button is
+        // an instruction to pay a coach twice.
+        : writeFailedText(e, {
+            what: 'That settlement',
+            unchanged: "nothing has been paid and this coach's sessions, classes and adjustments are all still owed",
+            howToCheck: 'Read the run again and look for it under what has already been paid. Settle again only if it is not there.',
+          }));
+    } finally {
+      setSettling(null);
+      // On BOTH paths, and through the hook. It was `await load(tenantId,
+      // period, zone)` INSIDE the try — so a failure printed its sentence over
+      // the figures from before the settlement, including every partial-stamp
+      // message that ends "Reload before settling this trainer again"; and a
+      // success re-read the whole screen without moving the stamp under it or
+      // passing the `stale` guard, which is the pair the note beside `refresh`
+      // above says was taken off every write on this screen.
+      refresh();
+    }
   };
 
   // Unsettled extras this run deliberately leaves alone. Counted over the same
@@ -908,7 +990,8 @@ export default function Payroll() {
       <Fetched at={readAt} busy={reading} onRefresh={refresh}
                what="this run" style={{ margin: '2px 0 14px' }} />
 
-      {err ? <Banner tone="crit">{err}</Banner> : null}
+{err ? <Banner tone="crit">{err}</Banner> : null}
+      {settleErr ? <Banner tone="crit">{settleErr}</Banner> : null}
 
       {gymError ? (
         <Banner tone="crit">
@@ -1080,12 +1163,12 @@ export default function Payroll() {
       </Section>
 
       <Rates
-        trainers={trainers} pay={pay} payErr={payErr} ccy={ccy}
+        trainers={trainers} rosterUnread={unread(trainers, trainersErr) ?? 'loading'} pay={pay} payErr={payErr} ccy={ccy}
         sessionFee={sessionFee} tenantId={tenantId} me={me} onChange={refresh}
       />
 
       <Adjustments
-        trainers={trainers} rows={adjustments} ccy={ccy}
+        trainers={trainers} rows={adjustments} rowsUnread={unread(adjustments, adjErr) ?? 'loading'} ccy={ccy}
         tenantId={tenantId} me={me} period={period} onChange={refresh}
       />
 
@@ -1210,8 +1293,18 @@ function Blocking({ sessions, unread, ccy, zone }: {
  * are the same digits and completely different money. A gym that meant the
  * second and stored the first pays a coach twelve times what it agreed.
  */
-function Rates({ trainers, pay, payErr, ccy, sessionFee, tenantId, me, onChange }: {
-  trainers: GymTrainer[] | null; pay: PayIndex | null; payErr: string | null;
+function Rates({ trainers, rosterUnread, pay, payErr, ccy, sessionFee, tenantId, me, onChange }: {
+  trainers: GymTrainer[] | null;
+  /**
+   * Which of the two silences a null roster is.
+   *
+   * This section drew `state="loading"` as a LITERAL, so a roster read the
+   * database refused sat at "Loading…" for the life of the page — on the
+   * section where a coach's rate is set, and with `trainersErr` already in
+   * state one component up and already threaded into the run below it.
+   */
+  rosterUnread: Exclude<Unread, null>;
+  pay: PayIndex | null; payErr: string | null;
   ccy: TenantCurrency; sessionFee: number | null;
   tenantId: string; me: Me; onChange: () => void;
 }) {
@@ -1288,7 +1381,7 @@ function Rates({ trainers, pay, payErr, ccy, sessionFee, tenantId, me, onChange 
         </Banner>
       ) : null}
       {trainers === null ? (
-        <Unresolved style={{ fontSize: 13 }} state="loading" what="the roster, so there is nobody to price" />
+        <Unresolved style={{ fontSize: 13 }} state={rosterUnread} what="the roster, so there is nobody to price" />
       ) : (
         <DataTable noun="coaches"
           rows={trainers} columns={cols} rowKey={(t) => t.id}
@@ -1425,8 +1518,18 @@ function RateEditor({ trainer, existing, ccy, tenantId, me, onDone, onCancel, on
  * should have been. supabase/parts/183 enforces the same rule at the database,
  * so the two say it independently.
  */
-function Adjustments({ trainers, rows, ccy, tenantId, me, period, onChange }: {
-  trainers: GymTrainer[] | null; rows: Adjustment[] | null; ccy: TenantCurrency;
+function Adjustments({ trainers, rows, rowsUnread, ccy, tenantId, me, period, onChange }: {
+  trainers: GymTrainer[] | null; rows: Adjustment[] | null;
+  /**
+   * Which of the two silences a null `rows` is.
+   *
+   * This drew `state="failed"` as a LITERAL, and `rows` is null on the first
+   * render of every page load — so the adjustments section opened by telling
+   * every owner that the read of what is about to be added to or taken off
+   * somebody's pay had failed, before it had been attempted.
+   */
+  rowsUnread: Exclude<Unread, null>;
+  ccy: TenantCurrency;
   tenantId: string; me: Me; period: Period; onChange: () => void;
 }) {
   const [trainerId, setTrainerId] = useState('');
@@ -1512,7 +1615,7 @@ function Adjustments({ trainers, rows, ccy, tenantId, me, period, onChange }: {
       ) : null}
       {err ? <Banner tone="crit">{err}</Banner> : null}
       {rows === null ? (
-        <Unresolved style={{ fontSize: 13 }} state="failed" what="the adjustments, so what is about to be added to or taken off anybody's pay is unknown" />
+        <Unresolved style={{ fontSize: 13 }} state={rowsUnread} what="the adjustments, so what is about to be added to or taken off anybody's pay is unknown" />
       ) : (
         <DataTable noun="adjustments" rows={rows} columns={cols} rowKey={(a) => a.id}
                    empty="No adjustment has been recorded. Every run below is sessions and classes only." />

@@ -248,7 +248,16 @@ export default function Sessions() {
     () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
     {
       channel: `console-sessions-${me?.tenantId ?? 'none'}`,
-      subs: me?.tenantId ? [{ table: 'sessions', filter: `tenant_id=eq.${me.tenantId}` }] : [],
+      subs: me?.tenantId
+        ? [
+            { table: 'sessions', filter: `tenant_id=eq.${me.tenantId}` },
+            // Unfiltered, because a filter cannot carry a DELETE — see
+            // `LiveSub.filter` in lib/live.ts. A coach releasing an hour from
+            // their phone deletes the row, and this is the screen the run is
+            // settled from.
+            { table: 'sessions', event: 'DELETE' },
+          ]
+        : [],
       enabled: !!me?.tenantId,
     },
   );

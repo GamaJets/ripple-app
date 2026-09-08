@@ -673,7 +673,21 @@ function TheList({ invites, readErr, gymName, zone, nowMs, tenantId, onChange }:
       setMsg(`The invitation to ${i.email} has been withdrawn.`);
       onChange();
     } catch (x: any) {
-      setErr(`The invitation to ${i.email} was not withdrawn: ${x?.message ?? 'the change was refused'}. It is still open.`);
+      // "It is still open" was the one thing this could not say. `revokeInvite`
+      // filters `.eq('status', 'pending')` and counts the rows it changed, so
+      // the commonest way it throws is the invitation having been ACCEPTED
+      // since this list was read — in which case it is not open, the person has
+      // joined, and the sentence sent an owner off to chase a member who was
+      // already in the gym. The other two ways are a refusal, where the state is
+      // whatever it was, and a request nobody answered, where the withdrawal may
+      // well have landed. Three outcomes, one sentence, and it was true of the
+      // least likely of them. `extend` ten lines above already does this
+      // correctly, and says why.
+      setErr(writeFailedText(x, {
+        what: `Withdrawing the invitation to ${i.email}`,
+        unchanged: 'its state is unchanged — which may mean it is still open, or that it has already been accepted or withdrawn',
+        howToCheck: 'Reload this page: the state shown against that address is whatever is actually stored.',
+      }));
     }
   };
 

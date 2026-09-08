@@ -261,6 +261,15 @@ export default function Timetable() {
         ? [
             { table: 'gym_classes', filter: `tenant_id=eq.${me.tenantId}` },
             { table: 'sessions', filter: `tenant_id=eq.${me.tenantId}` },
+            // And the deletions, unfiltered, because a filtered binding cannot
+            // receive one — see `LiveSub.filter` in lib/live.ts. Both verbs on
+            // this board hard-delete: `deleteClass` is wired to the Remove
+            // control below, and `removePtSlot` is what a coach presses to
+            // release an hour from their phone. Without these two lines a class
+            // or a slot taken off the board elsewhere stayed on this one, under
+            // a line saying the screen was updating as the gym changed.
+            { table: 'gym_classes', event: 'DELETE' },
+            { table: 'sessions', event: 'DELETE' },
           ]
         : [],
       enabled: !!me?.tenantId,
