@@ -59,11 +59,31 @@
 //
 // ── Why a refusal, and why before the settlement is touched ───────────────
 //
-// Refusing costs nothing. The settlement is still standing, the run is still
-// recorded as paid, nothing has been stranded, and pressing the button again
-// is safe — which is exactly the state the ordering argument above was written
-// to preserve. Going ahead costs a coach money they are owed, silently, for
-// ever. There is no version of this where guessing is better.
+// Refusing is the cheap side of the trade. The settlement is still standing,
+// the run is still recorded as paid, and nothing has been stranded — which is
+// exactly the state the ordering argument above was written to preserve. Going
+// ahead costs a coach money they are owed, silently, for ever. There is no
+// version of this where guessing is better.
+//
+// ── What the refusal must NOT say ─────────────────────────────────────────
+//
+// It must not say nothing has changed unless nothing has. This runs AFTER the
+// sessions update, so on a shortfall of 3-out-of-5 the caller is holding the
+// number 3 and three rows have already come loose; on a surplus every counted
+// row has. The sentence used to end "Nothing has been changed" in both, and
+// src/lib/reversalState.ts then prints a dated, MEASURED clause beside it —
+// "Checked just now: 2 of the 31 sessions it paid for are still stamped against
+// it; the other 29 are not." Two sentences on one screen, one of them false.
+//
+// It is not a wording slip either, because of what that module establishes:
+// once sessions are loose the reversal is not retryable — the retry's unstamp
+// matches zero rows and this function refuses on "only 0 of them", for ever. So
+// the reader of this sentence is deciding whether to press a button that will
+// never work again, and "nothing has been changed" is the one reading that
+// makes pressing it look free. What is true, and what is said instead: the
+// settlement is untouched and still reads as paid, and the rows that DID come
+// loose are payable a second time until the run is put right on the record.
+// Where the count is zero, nothing has changed and the sentence still says so.
 
 /**
  * Why a reversal must not be completed, or null when it may be.
@@ -74,6 +94,10 @@
  * gives: treating a missing count as "fine" silently re-admits every call site
  * that forgot to ask for one, which is the entire population this exists to
  * close.
+ *
+ * `unstamped` is rows that HAVE already come loose, not rows that would. This
+ * is called after the update, so the refusal describes a write that has already
+ * landed in part — see "What the refusal must NOT say" above.
  *
  * Pure, so the sentence an owner reads is assertable without a database.
  */
@@ -90,13 +114,42 @@ export function unstampBlocker(claimed: number, unstamped: number | null | undef
       + `only ${unstamped} of them could be unstamped — ${sessions(short)} did not come loose. `
       + `Going ahead would mark the run reversed while ${short === 1 ? 'that session stays' : 'those sessions stay'} `
       + `attached to it, which takes ${short === 1 ? 'it' : 'them'} out of what the coach is owed `
-      + `permanently. Nothing has been changed.`;
+      + `permanently. ${whatIsLoose(unstamped)}`;
   }
   const extra = unstamped - claimed;
   return `This run was not taken back. It was recorded as paying for ${sessions(claimed)}, and `
     + `${unstamped} came loose — ${sessions(extra)} more than the run says it covered. Two records `
     + `disagree about what was paid for, and reversing over that would settle the disagreement by `
-    + `guessing. Nothing has been changed.`;
+    + `guessing. ${whatIsLoose(unstamped)}`;
+}
+
+/**
+ * Where the run stands after this refusal, which is not the same sentence every
+ * time.
+ *
+ * The settlement clause is true in both branches and at every count: this
+ * refusal is thrown before the fourth write, so the run has not been marked
+ * reversed. What varies is the sessions, and `unstamped` is the exact number of
+ * them that have already come loose.
+ *
+ * Zero is genuinely nothing changed and says so — an owner who reads "some
+ * sessions are loose" over a run nothing touched will go looking for a repair
+ * that is not needed, and vagueness in the other direction is no safer than the
+ * false claim it replaced. Anything above zero is the double-pay warning, in
+ * the words src/lib/reversalState.ts uses for the same state, so the two
+ * sentences on that screen say one thing.
+ */
+function whatIsLoose(unstamped: number): string {
+  if (unstamped === 0) {
+    return 'Nothing has been changed: no session came loose and the settlement is untouched.';
+  }
+  const one = unstamped === 1;
+  return `The settlement is untouched and still reads as paid, but ${sessions(unstamped)} `
+    + `${one ? 'has' : 'have'} already come loose from it and ${one ? 'is' : 'are'} back in what this `
+    + `coach is owed, so recording another run now pays ${one ? 'that hour' : 'those hours'} a `
+    + `second time. Pressing Reverse again will not finish the job — the unstamp would now match nothing `
+    + `and be refused for that very reason — so put this run right on the record before paying this coach `
+    + `anything else.`;
 }
 
 /** "1 session" / "4 sessions". Its own function because this sentence says the

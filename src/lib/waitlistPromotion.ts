@@ -105,6 +105,18 @@ export function mayReoffer(p: WaitlistPromotion): boolean {
  * the notification in the promoting transaction, so "they have been told" is
  * safe to print on a promotion that came back; whether the push then reached a
  * handset is `send-push`'s business and is not claimed here.
+ *
+ * ── what the failed line may claim, which is very little ───────────────────
+ *
+ * It used to end "so nobody has been given it", and that is a claim about the
+ * SERVER made by a caller who never heard from it. The RPC is not a read: it
+ * books the hour and writes the notification in one transaction, so a lost or
+ * refused reply is equally consistent with a promotion that landed and an
+ * answer that never came home — which is exactly why 'failed' is a third
+ * outcome and why `mayReoffer` is false for it. The two things actually known
+ * here are that the slot was freed and that its queue could not be read, so
+ * those are the two things said, and the hour is described as one that may
+ * already have an owner rather than one nobody holds.
  */
 export function promotionText(p: WaitlistPromotion, name?: string | null): string {
   const who = name && name.trim() ? name.trim() : 'the member who was first in the queue';
@@ -114,6 +126,6 @@ export function promotionText(p: WaitlistPromotion, name?: string | null): strin
     case 'nobody':
       return 'Nobody was waiting for that hour. It is open for anyone to book.';
     case 'failed':
-      return 'That hour is free, but we could not find out whether anybody was waiting for it, so nobody has been given it. Reload the timetable before offering it to anyone.';
+      return 'That hour was freed, but its waiting list could not be checked, so whether it has already gone to whoever was first in the queue is not known. Reload the timetable before offering it to anyone.';
   }
 }

@@ -78,13 +78,28 @@ for (const missing of [undefined, null, '', '   ']) {
 ok(say({ outcome: 'nobody', clientId: null }).includes('open for anyone'),
   'an empty queue says the hour is open, because it is');
 
+// A failed call knows two things and claims two things: the slot was freed, and
+// the queue could not be read. Everything else about that hour is open,
+// INCLUDING whether somebody now holds it — the RPC books and notifies in one
+// transaction, so a lost reply is as consistent with a promotion that landed as
+// with one that never ran. The line used to end "so nobody has been given it",
+// which is the same overclaim as "nobody was waiting" pointed the other way,
+// and it is pinned here as a negative so it cannot come back in either form.
 const failedLine = say({ outcome: 'failed', clientId: null });
-ok(failedLine.includes('could not find out'),
-  'a failed call says the queue is unknown');
+ok(failedLine.includes('could not be checked'),
+  'a failed call names the queue check as the thing that did not happen');
+ok(failedLine.includes('That hour was freed'),
+  'and still says the freeing itself landed, which is the one write it did hear about');
 ok(!failedLine.includes('Nobody was waiting'),
   'and never says nobody was waiting, which is the claim it cannot make');
-ok(failedLine.includes('nobody has been given it'),
-  'and says what did not happen, so the hour is not quietly assumed handled');
+ok(!/nobody has been given it|has not been given|nobody holds it|nobody has it/i.test(failedLine),
+  'and never says nobody was GIVEN the hour either — a reply that did not come back may be a promotion that did');
+ok(/already gone to whoever was first in the queue is not known/.test(failedLine),
+  'it says the hour may already have an owner and that this is not known, which is the fact the desk acts on');
+ok(failedLine.includes('Reload the timetable'),
+  'and says what to do about it, rather than leaving the desk with a fact and no move');
+ok(!mayReoffer({ outcome: 'failed', clientId: null }),
+  'and the sentence is never joined by the re-offer clause, which is gated on mayReoffer');
 
 if (errors.length) {
   console.error(`waitlistPromotion: ${errors.length} of ${checks} checks failed:`);

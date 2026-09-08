@@ -13,7 +13,18 @@
 //   THE SHORTFALL    fewer came loose than the run paid for — refuse
 //   THE SURPLUS      more came loose than the run says it covered — also refuse
 //   NOBODY COUNTED   a missing count is a failure, never a pass
-//   THE SENTENCE     it says nothing has changed, because nothing has
+//   THE SENTENCE     it says where the run stands, and only what is true of it
+//
+// That last one is a second defect, found after the first was fixed. Both
+// refusals used to end "Nothing has been changed" — and this runs AFTER the
+// sessions update, so on a shortfall of 29-out-of-31 twenty-nine rows have come
+// loose and on a surplus every counted row has. src/lib/reversalState.ts prints
+// a dated MEASURED clause beside this one on studio-web/app/payroll/page.tsx
+// ("Checked just now: 2 of the 31 sessions it paid for are still stamped
+// against it; the other 29 are not"), so the two contradicted each other on one
+// screen — and the false one was the reassuring one, over a reversal that can
+// never be retried. Zero unstamped is the one count where nothing HAS changed,
+// and that is the one count where the sentence still says so.
 import { unstampBlocker } from './unstampCheck';
 
 const errors: string[] = [];
@@ -42,8 +53,16 @@ const eq = (a: unknown, b: unknown, msg: string) =>
   ok(!!why && why.includes('31'), 'the refusal names what the run says it paid for');
   ok(!!why && why.includes('29'), 'and what actually came loose');
   ok(!!why && why.includes('2 sessions'), 'and the difference, which is the number somebody has to chase');
-  ok(!!why && why.includes('Nothing has been changed'),
-    'and it says nothing has changed, which is the point of refusing before the settlement is touched');
+  ok(!!why && why.includes('The settlement is untouched and still reads as paid'),
+    'and it says the run was not marked reversed, which is the point of refusing before the fourth write');
+  ok(!!why && !/[Nn]othing has been changed/.test(why),
+    'and it does NOT say nothing has been changed, because 29 sessions have already come loose by now');
+  ok(!!why && why.includes('29 sessions have already come loose'),
+    'it names how many did come loose, which is the number the owner has to act on');
+  ok(!!why && /pays those hours a second time/.test(why),
+    'and says what that costs — the same hours paid twice, which is the live risk after a part-landed unstamp');
+  ok(!!why && /will not finish the job/.test(why),
+    'and says pressing Reverse again cannot fix it, because the retry would match nothing and be refused');
   ok(!!why && why.includes('owed'),
     'and says what going ahead would cost — the coach’s money, not a database inconsistency');
 
@@ -54,10 +73,23 @@ const eq = (a: unknown, b: unknown, msg: string) =>
   ok(!!unstampBlocker(4, 2) && unstampBlocker(4, 2)!.includes('those sessions stay'),
     'and reads as a plural when there is more than one');
 
+  const loose1 = unstampBlocker(4, 1);
+  ok(!!loose1 && loose1.includes('1 session has already come loose'),
+    'one session having come loose is singular in the loose clause too');
+  ok(!!loose1 && !/1 sessions?\s+have/.test(loose1), 'and never "1 session have"');
+  ok(!!loose1 && loose1.includes('pays that hour a second time'),
+    'and its consequence clause is singular with it');
+  ok(!!unstampBlocker(4, 2) && unstampBlocker(4, 2)!.includes('2 sessions have already come loose'),
+    'and it is plural above one');
+
   const all = unstampBlocker(12, 0);
   ok(all !== null, 'the worst case — not one session came loose — is refused like any other');
   ok(!!all && all.includes('only 0 of them'),
     'and says so plainly rather than reading as though something worked');
+  ok(!!all && all.includes('Nothing has been changed'),
+    'and THIS is the one count where nothing has been changed, so it is the one that says so');
+  ok(!!all && !/have already come loose|come loose from it/.test(all),
+    'and it never invents a loose session over a run nothing touched — an owner sent looking for a repair that is not needed is the other way to be wrong here');
 }
 
 /* ── THE SURPLUS ──────────────────────────────────────────────────────────
@@ -70,7 +102,12 @@ const eq = (a: unknown, b: unknown, msg: string) =>
   ok(why !== null, 'a surplus is refused too, not waved through as "at least nothing was stranded"');
   ok(!!why && why.includes('2 sessions more'), 'and it says by how many');
   ok(!!why && why.includes('disagree'), 'and names the actual problem, which is two records disagreeing');
-  ok(!!why && why.includes('Nothing has been changed'), 'nothing has changed here either');
+  ok(!!why && why.includes('The settlement is untouched and still reads as paid'),
+    'and it says the run was not marked reversed');
+  ok(!!why && !/[Nn]othing has been changed/.test(why),
+    'and it does NOT say nothing has been changed — a surplus is 12 rows that definitely came loose');
+  ok(!!why && why.includes('12 sessions have already come loose'),
+    'it names them, because they are payable a second time until the run is put right');
 }
 
 /* ── NOBODY COUNTED ───────────────────────────────────────────────────────
@@ -88,15 +125,33 @@ const eq = (a: unknown, b: unknown, msg: string) =>
 
 /* ── THE SENTENCE ─────────────────────────────────────────────────────────
  * Every refusal here is read by a gym owner mid-task, and every one of them
- * must end with the fact that acts on: the run is still as it was.
+ * must end with WHERE THE RUN STANDS. That is the settlement clause — true at
+ * every count, because this throws before the fourth write — and it is not the
+ * same as "nothing has changed", which is true only at a count of zero.
  */
 {
-  for (const [claimed, got] of [[31, 29], [10, 12], [5, null]] as const) {
+  for (const [claimed, got] of [[31, 29], [10, 12], [5, null], [12, 0]] as const) {
     const why = unstampBlocker(claimed, got);
     ok(!!why && /not taken back/.test(why), `the refusal for (${claimed}, ${got}) opens by saying the reversal did not happen`);
-    ok(!!why && /[Nn]othing (has been changed|is untouched|has changed)|untouched/.test(why),
-      `and for (${claimed}, ${got}) it says the record is untouched`);
+    ok(!!why && /settlement is untouched/.test(why),
+      `and for (${claimed}, ${got}) it says the settlement was not touched, which is what the owner acts on`);
     ok(!!why && !/undefined|null|NaN/.test(why), `and for (${claimed}, ${got}) it leaks no values`);
+    ok(!!why && !/sorry|apolog/i.test(why), `and for (${claimed}, ${got}) it does not apologise`);
+  }
+
+  // The claim itself, isolated: it is made at exactly one count — zero — and
+  // refused at every other. A regex that merely ALLOWED it, which is what the
+  // old sentence check did, passed the version that printed it over 29 loose
+  // sessions.
+  for (const claimed of [1, 12, 31] as const) {
+    const why = unstampBlocker(claimed, 0);
+    ok(!!why && /Nothing has been changed/.test(why),
+      `nothing came loose at (${claimed}, 0), so that is the count where the sentence says nothing has been changed`);
+  }
+  for (const [claimed, got] of [[31, 29], [4, 1], [4, 3], [10, 12], [1, 4]] as const) {
+    const why = unstampBlocker(claimed, got);
+    ok(!!why && !/[Nn]othing has been changed/.test(why),
+      `something DID come loose at (${claimed}, ${got}), so the sentence must not say nothing has been changed`);
   }
 }
 

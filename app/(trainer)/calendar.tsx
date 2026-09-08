@@ -28,6 +28,13 @@ import { expandRange, rangeBlocker, rangeSlotCount, remainderNote, splitAgainstE
   addButtonLabel, rangeSummary, addOutcome, type RangeInput } from '../../src/lib/availabilityRange';
 import { useClasses, CLASS_READ_FLOOR_MS } from '../../src/ui/classes';
 import { useSessions, useSessionWaitlistCounts, useLateCancelCharges, useMyCancellationPolicy, promoteWaitlist } from '../../src/ui/sessions';
+// "May this hour be offered to somebody else?" is answered in ONE place. This
+// screen read `outcome === 'failed'` and inverted it, which is the same answer
+// today and a second copy of the rule — the shape src/ui/sessions.tsx was
+// converged off, and the shape in which a failed call comes to license a
+// broadcast. See that module's header: 'nobody' is the only outcome that
+// licenses it, and it is the only one `mayReoffer` returns true for.
+import { mayReoffer } from '../../src/lib/waitlistPromotion';
 import { useAvailability, upcomingDates, useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 // Why a coach's open slots have stopped being generated, and the one honest
@@ -2081,12 +2088,16 @@ export default function TrainerSchedule() {
     promoted: string | null;
     promotedTold: boolean | null;
     /**
-     * The promotion call did not come back, so whether anybody was queued for
-     * this hour is UNKNOWN. Distinct from `promoted: null`, which used to mean
-     * both this and "the server checked and nobody was waiting" — and the
-     * second of those is what decides whether the hour may be broadcast to the
-     * rest of the book. Under this the re-offer is not made and `offer` is
-     * null, for a third reason the alert has to be able to say.
+     * Nobody was promoted AND the queue was not proven empty, so whether
+     * anybody was waiting for this hour is UNKNOWN. Distinct from
+     * `promoted: null`, which used to mean both this and "the server checked
+     * and nobody was waiting" — and the second of those is what decides whether
+     * the hour may be broadcast to the rest of the book. Under this the
+     * re-offer is not made and `offer` is null, for a third reason the alert
+     * has to be able to say.
+     *
+     * The negative of `mayReoffer`, taken from the same answer as the gate
+     * rather than from a second reading of `outcome`.
      */
     queueUnknown: boolean;
     /**
@@ -2146,7 +2157,17 @@ export default function TrainerSchedule() {
     // queue that may have had somebody at the head of it. Unknown is not empty.
     const promotion = await promoteWaitlist(s.id);
     const promoted = promotion.clientId;
-    const queueUnknown = promotion.outcome === 'failed';
+    // The gate, asked of the shared module rather than read off the outcome
+    // here. `mayReoffer` is true for the proven-empty answer and nothing else.
+    const mayOffer = mayReoffer(promotion);
+    // The third fact the alert has to be able to say — no promotion, and no
+    // proof the queue was empty either. Derived from the SAME answer the gate
+    // uses rather than from a second reading of `outcome`, so the sentence
+    // cannot come apart from the branch it is explaining: anything that stops
+    // licensing a broadcast starts being described as an unchecked queue,
+    // which is the safe direction, instead of falling through to "you have no
+    // other clients to offer it to".
+    const queueUnknown = !promoted && !mayOffer;
     await reloadWaits();
 
     const toldClient = s.clientId
@@ -2159,11 +2180,12 @@ export default function TrainerSchedule() {
     let offer: CancelOutcome['offer'] = null;
     if (promoted) {
       promotedTold = (await sendPushChecked([promoted], 'The slot you were waiting for is yours', `${timeLabel(s.startsAt)} on ${DOW[new Date(s.startsAt).getDay()]} freed up and you were next on the list — it is booked for you.`, { route: '/(client)/calendar' })).ok;
-      // `!queueUnknown`: the broadcast is licensed by a PROVEN empty queue and
-      // by nothing else. Where the promotion did not come back, the hour stays
-      // open on the calendar and is offered to nobody — said in the alert
-      // instead, with Offer It Round as the coach's deliberate next step.
-    } else if (!queueUnknown && rosterWhole) {
+      // `mayOffer`: the broadcast is licensed by a PROVEN empty queue and by
+      // nothing else, and that condition lives in src/lib/waitlistPromotion.ts.
+      // Where the promotion did not come back, the hour stays open on the
+      // calendar and is offered to nobody — said in the alert instead, with
+      // Offer It Round as the coach's deliberate next step.
+    } else if (mayOffer && rosterWhole) {
       const openTo = roster.filter((c) => c.id !== s.clientId).map((c) => c.id);
       if (openTo.length) {
         // What the SERVER did with it, not the size of the list handed over.
