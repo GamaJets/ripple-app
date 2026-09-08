@@ -1,7 +1,14 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- A gym could free a PT hour and not hand it on
 -- ═══════════════════════════════════════════════════════════════════════════
--- NOT APPLIED. Written to be applied by hand.
+-- APPLIED to the live project on 8 Sep 2026. Verified after applying: the
+-- trainer arm is intact and the owner arm is present in pg_get_functiondef, the
+-- grant did not widen (authenticated true, anon false), and session_waitlist
+-- still carries exactly the four policies parts 142 and 145 left it — _client_r,
+-- _client_d, _trainer_r, _service_rw — with no owner arm among them, so part
+-- 144's narrowing stands and the gym gets the answer without being able to read
+-- who was queueing. get_advisors(security) is unchanged: the two anon-executable
+-- SECURITY DEFINER functions are still leave_my_details and public_coach_page.
 --
 --
 -- ── What a person suffers ─────────────────────────────────────────────────

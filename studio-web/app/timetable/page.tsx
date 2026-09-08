@@ -75,7 +75,13 @@ import {
 } from '@lib/gymPtSchedule';
 import { fetchMemberships, type Membership } from '@lib/gymRecord';
 import { WEEK_DAYS, startOfWeek } from '@lib/weekStart';
-import { Banner } from '@/components/Banner';
+import { Banner, type BannerTone } from '@/components/Banner';
+// The three answers `promote_session_waitlist` can give, read once for the
+// whole product. `src/ui/sessions.tsx` reads the same RPC through the same
+// module, so the coach's screen and the desk cannot drift apart on what a null
+// means — and neither of them may print "nobody was waiting" over a call that
+// failed.
+import { readPromotion, mayReoffer, promotionText } from '@lib/waitlistPromotion';
 
 const DAY = 86400000;
 const DAY_NAMES = WEEK_DAYS;
@@ -106,6 +112,11 @@ export default function Timetable() {
   // be deleted and retyped, which took its bookings with it.
   const [editing, setEditing] = useState<GymClass | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Kept apart from `err`, and not for tidiness: `err` is a `crit` banner,
+  // which this console reserves for "that did not happen". An hour handed to
+  // the head of its waitlist DID happen, and interrupting a screen reader with
+  // it as an alert is how a console teaches people to ignore alerts.
+  const [waitNote, setWaitNote] = useState<SlotNote | null>(null);
   const [loadFail, setLoadFail] = useState<string | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   // Who the gym can book a one-to-one to. Read once rather than per week — the
@@ -512,7 +523,7 @@ export default function Timetable() {
             <BookTo
               slot={raw?.slots.find((s) => s.id === e.sourceId) ?? null}
               members={members} membersErr={membersErr}
-              onDone={(m) => { setErr(m); if (!m) refresh(); }}
+              onDone={(m, n) => { setErr(m); setWaitNote(n ?? null); if (!m) refresh(); }}
             />
           ) : null}
           {/* Rendered only where deleting destroys nothing. A class with
@@ -571,6 +582,9 @@ export default function Timetable() {
         </Banner>
       ) : null}
       {err ? <Banner tone="crit">{err}</Banner> : null}
+      {/* What became of a freed hour's waitlist. Three answers, one of which is
+          "we do not know" — see `handOn`. */}
+      {waitNote ? <Banner tone={waitNote.tone}>{waitNote.text}</Banner> : null}
       {loadFail ? (
         <Banner tone="crit">
           <strong style={{ color: 'var(--ink)' }}>The board is incomplete, so none of it is shown.</strong>{' '}
@@ -625,8 +639,9 @@ export default function Timetable() {
             {owner ? (
               <>
                 A one-to-one can be booked to a member here — for the one who rang up — and freeing
-                one opens the hour to anybody rather than to whoever is first on its waitlist in the
-                app; only the trainer&rsquo;s own screen hands it to them.
+                one hands the hour to whoever is first on its waitlist in the app, who is booked in
+                and told. The board says which of those happened each time; where nobody was
+                waiting, the hour simply goes back on as open.
               </>
             ) : (
               <>
@@ -1168,6 +1183,52 @@ function memberOptions(members: Membership[] | null): { id: string; name: string
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** What a freed hour leaves on the screen behind it: what became of its
+ *  waitlist, and whether that is news or a warning. */
+interface SlotNote { text: string; tone?: BannerTone }
+
+/**
+ * Hand a freed hour to the head of its waitlist, and say what happened.
+ *
+ * `promote_session_waitlist` is SECURITY DEFINER and, since part 2610, admits
+ * the owner of the gym the session is delivered in as well as its own trainer.
+ * It returns the promoted member's id, or null for "the server ran and promoted
+ * nobody", or raises. src/lib/waitlistPromotion.ts is the reading of those three
+ * — the same module `promoteWaitlist` in src/ui/sessions.tsx reads them with, so
+ * the coach's screen and the desk cannot drift apart on what null means.
+ *
+ * A THROW is 'failed' and not 'nobody'. `readPromotion(null)` says so, and it
+ * matters here more than anywhere: a refused or lost call tells the desk nothing
+ * about the queue, and least of all that it was empty. So the "book whoever
+ * rings next into it" clause is gated on `mayReoffer` — true for the
+ * proven-empty answer and nothing else — and the failed sentence sends the desk
+ * to a reload instead. Handing the hour to the next caller off an unread queue
+ * is the race the waitlist was built to replace.
+ *
+ * No read of `session_waitlist` anywhere in this file. Part 144 keeps that table
+ * unreadable to owners on purpose and part 2610 did not widen it; the gym gets
+ * the answer, never the queue. The only person named is the one who came out of
+ * it holding the hour — and only where this gym's own roster already knows them.
+ */
+async function handOn(sessionId: string, options: { id: string; name: string }[]): Promise<SlotNote> {
+  let answer: { data?: unknown; error?: unknown } | null = null;
+  try {
+    answer = await supabase.rpc('promote_session_waitlist', { p_session: sessionId });
+  } catch {
+    answer = null;
+  }
+  const p = readPromotion(answer);
+  const who = p.clientId ? options.find((o) => o.id === p.clientId)?.name ?? null : null;
+  return {
+    text: promotionText(p, who)
+      + (mayReoffer(p) ? ' Book whoever rings next into it from the picker on that row.' : ''),
+    // `crit` is this console's word for "that did not happen", and the freeing
+    // did. A promotion that could not be read is a warning about what to do
+    // next, not a refused write.
+    tone: p.outcome === 'failed' ? 'warn' : undefined,
+  };
+}
+
 /**
  * Put a named member on an open slot, or take them off it.
  *
@@ -1187,19 +1248,48 @@ function memberOptions(members: Membership[] | null): { id: string; name: string
  * let one be removed for exactly this reason, and moving whose session it was
  * after the fact would rewrite who a trainer was paid for.
  *
- * ONE THING IT DELIBERATELY DOES NOT DO, and the section below says so out loud:
- * it does not promote the waitlist. Promotion is not a trigger — it rides inside
- * `cancel_my_session` and `promote_session_waitlist`
- * (126-the-late-fee-and-the-waitlist.sql), and the second is authorised on
- * `trainer_id = auth.uid()`, so an owner cannot call it. Freeing an hour here
- * therefore opens it for anyone rather than handing it to whoever was first in
- * the queue. Claiming otherwise would be worse than saying it.
+ * ── FREEING AN HOUR NOW HANDS IT ON ──────────────────────────────────────
+ *
+ * This comment used to say the opposite, and said it deliberately: promotion is
+ * not a trigger, it rides inside `cancel_my_session` and
+ * `promote_session_waitlist` (part 126), and that function was authorised on
+ * `trainer_id = auth.uid()` alone — so an owner could not call it, freeing an
+ * hour at the desk opened it to anybody, and the member who had been first in
+ * the queue for three weeks was never told. Claiming otherwise would have been
+ * worse than saying it.
+ *
+ * Part 2610 added the second arm: `sessions.tenant_id is not null and
+ * public.is_owner_of(s.tenant_id)`, character for character the USING clause of
+ * `sessions_gym_owner_u` — the same fact that already lets this screen empty the
+ * slot, asked again by the function that has to hand it on. The trainer arm is
+ * untouched and is still evaluated first. So the sentence is now false and the
+ * call is made: free the slot, then promote.
+ *
+ * The console still cannot READ the queue, and must not look as though it can.
+ * Part 144 keeps `session_waitlist` unreadable to owners on purpose — which
+ * named members are queueing for a PT slot is not the gym's to see — and part
+ * 2610 does not disturb it. The RPC is SECURITY DEFINER, so the gym gets the
+ * ANSWER without the table. Nothing here reads `session_waitlist`, and nobody in
+ * the queue is named except the one person who came out of it holding the hour.
+ *
+ * ── three answers, and the one that licenses the desk to act ──────────────
+ *
+ * A uuid, a null and a raise are three different facts, and
+ * src/lib/waitlistPromotion.ts is the shared reading of them —
+ * `src/ui/sessions.tsx` reads the same RPC through the same module. The one
+ * that matters is the third: a call that did not come back is NOT a queue
+ * proven empty. It may have promoted somebody and lost the reply, so the desk
+ * is not invited to book the next caller into the hour — `mayReoffer` is the
+ * gate on that sentence and it is true for the proven-empty answer only.
  */
 function BookTo({ slot, members, membersErr, onDone }: {
   slot: PtSlot | null;
   members: Membership[] | null;
   membersErr: string | null;
-  onDone: (err: string | null) => void;
+  /** The refusal, where the write failed; and what became of the waitlist,
+   *  where an hour was freed. They are two different sentences in two different
+   *  tones — a hour handed to the head of the queue is not an error. */
+  onDone: (err: string | null, note?: SlotNote | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
   if (!slot) return null;
@@ -1218,7 +1308,9 @@ function BookTo({ slot, members, membersErr, onDone }: {
     setBusy(true);
     try {
       await updatePtSlot(supabase, slot.id, { clientId: next || null });
-      onDone(null);
+      // Only on freeing. Booking a member IN takes the hour off the queue's
+      // hands; there is nothing to promote into a slot that now has an owner.
+      onDone(null, next ? null : await handOn(slot.id, options));
     } catch (e: any) {
       const who = options.find((o) => o.id === next)?.name ?? 'that member';
       onDone(writeFailedText(e, next

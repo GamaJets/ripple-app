@@ -559,6 +559,8 @@
     "src/lib/waitlistPromotion.ts",
     "src/lib/waitlistPromotion.test.ts",
     "src/lib/edgeWrites.test.ts",
-    "src/lib/reverseExtras.test.ts"
+    "src/lib/reverseExtras.test.ts",
+    "src/lib/reversalState.ts",
+    "src/lib/reversalState.test.ts"
   ]
 }

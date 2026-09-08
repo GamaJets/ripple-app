@@ -67,6 +67,11 @@ import {
   type PayIndex, type TrainerPay, type Adjustment, type AdjustmentKind,
   type ClassPayLine, type ClassPayKind,
 } from '@lib/gymPay';
+// What a reversal that threw actually left behind, and the sentence for it. The
+// screen used to append one clause to every refusal — "it still stands as paid,
+// and its sessions are still stamped against it" — and the second half of that
+// is true at only three of the twelve points `reverseSettlement` can throw at.
+import { aftermathOf, reversalFailureText, type ReversalAftermath } from '@lib/reversalState';
 import { payPolicyOf, PAY_POLICY_LABEL, NO_PAY_POLICY_NOTE, type PayPolicyCode } from '@lib/gymPolicy';
 import { fetchCloses, closedMonthBlocker, type MonthCloseRow } from '@lib/gymClose';
 import { money } from '@lib/gymRecord';
@@ -1953,6 +1958,38 @@ function CrossCheck({ trainers, unread, sessionFee, gymError, ccy, zone }: {
 /* ── what has already gone out ─────────────────────────────────────────────── */
 
 /**
+ * After a reversal threw: how many of this run's sessions still carry its id.
+ *
+ * One question, asked of the record rather than inferred from the message,
+ * because the message cannot answer it. `reverseSettlement` throws in twelve
+ * places and the state behind them is not one state — see
+ * src/lib/reversalState.ts for which is which, and for why the sessions count
+ * alone decides it (they are unstamped FIRST, so every session still stamped
+ * means nothing at all has changed, and any session loose means the run is
+ * standing as paid over hours that are payable again).
+ *
+ * `sessions_count` is not re-read: it is on the row this table is already
+ * showing, written by `recordSettlement` as a count of the rows it stamped.
+ *
+ * The read is `head: true` — the count is the entire answer and no gym needs a
+ * hundred session ids pulled across to a desk screen to produce one sentence.
+ * It cannot over-count: RLS filters, so a row it cannot see is missing from the
+ * answer and pushes it towards the warning rather than towards the all-clear.
+ */
+async function stampedNow(r: Settlement): Promise<ReversalAftermath> {
+  try {
+    const q = await supabase.from('sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('settlement_id', r.id);
+    return aftermathOf(r.sessionsCount, q.count, q.error);
+  } catch (e) {
+    // A throw here is the read never happening at all, which is 'unknown' for
+    // the same reason a refused one is: an unanswered question is not a no.
+    return aftermathOf(r.sessionsCount, null, e ?? new Error('the check could not be run'));
+  }
+}
+
+/**
  * What has been paid, and the way back from a run that should not have been.
  *
  * `recordSettlement` was insert-only, all-or-nothing, with no reverse. Pressing
@@ -1970,6 +2007,14 @@ function CrossCheck({ trainers, unread, sessionFee, gymError, ccy, zone }: {
  *
  * The settlement row is never deleted. It is a statement that money went out;
  * deleting it leaves neither the statement nor the withdrawal.
+ *
+ * That order also decides what a REFUSAL leaves, and this screen has to say it.
+ * A refusal at the first write leaves nothing changed and the button safe to
+ * press again; a refusal at any of the other three leaves the sessions already
+ * loose while the run still reads as paid, which is the state in which
+ * recording the next run pays those hours a second time. `stampedNow` above
+ * finds out which happened and src/lib/reversalState.ts writes the sentence —
+ * one clause covering both was the version that told an owner it was safe.
  */
 function Paid({ runs, unread, sessionsUnread, period, me, zone, onChange, onErr }: {
   runs: Settlement[] | null; unread: Unread; sessionsUnread: Unread; period: Period;
@@ -1993,7 +2038,17 @@ function Paid({ runs, unread, sessionsUnread, period, me, zone, onChange, onErr 
       setReason('');
       onChange();
     } catch (e: any) {
-      onErr(`That run was NOT reversed: ${e?.message ?? 'the write was refused'}. It still stands as paid, and its sessions are still stamped against it.`);
+      // The state is READ, not assumed. See `stampedNow` above and
+      // src/lib/reversalState.ts: the four writes go in a fixed order with the
+      // sessions first, so how many of them still carry this run's id is the
+      // whole answer to what a failure left behind — and the sentence this used
+      // to append ("its sessions are still stamped against it") was true at
+      // only three of the twelve places this can throw.
+      onErr(reversalFailureText(e?.message ?? 'the write was refused', await stampedNow(r)));
+      // Re-read either way. What this table shows must come from the record and
+      // not from what this screen thought it had just done — and after a
+      // half-applied reversal the two are different.
+      onChange();
     } finally { setBusy(false); }
   };
 

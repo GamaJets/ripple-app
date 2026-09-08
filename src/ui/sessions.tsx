@@ -43,6 +43,11 @@ import { reofferSlot, refundSession, sessionsRemaining } from '../lib/connect';
 import { useAuthRevision } from './authRevision';
 import { supabase } from '../lib/supabase';
 import { USE_SUPABASE } from '../lib/config';
+// The three answers `promote_session_waitlist` can give. Shared with the owner
+// console, which reads the same RPC and cannot import this module: it pulls in
+// the React Native client and `USE_SUPABASE`. See the header on `PromoteResult`
+// below for why the second copy of the rule went.
+import { readPromotion, type WaitlistPromotion } from '../lib/waitlistPromotion';
 import type { LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 // A capped page of sessions is up to ROW_CAP uuids, and the approvals lookup
@@ -1784,11 +1789,24 @@ export function useLateCancelCharges(audience: ChargesAudience): {
  * is empty": `_promote_session_waitlist` also returns null when the row is no
  * longer available or has already started, and every one of those means the
  * same thing to the caller — no client is holding this hour.
+ *
+ * ── why this is now an alias, and the reading a name ─────────────────────
+ *
+ * The type was declared here and the rule was written here, and then part 2610
+ * gave the owner console the same RPC. It cannot import this module — this one
+ * pulls in the React Native supabase client and `USE_SUPABASE` — so
+ * src/lib/waitlistPromotion.ts holds the pure half, and a second copy of a
+ * three-way rule about somebody's booking is exactly the thing that drifts.
+ *
+ * It had already drifted by one character. The line below used to be `data ==
+ * null ? PROMOTE_NOBODY : PROMOTE_FAILED`, and loose equality reads `undefined`
+ * as the function's null — that is, reads a result object with no `data` on it
+ * at all, which is a call that did not come back the way this expects, as a
+ * queue PROVEN empty. `readPromotion` is `=== null` and fails safe, and an empty
+ * or blank string is 'failed' there too rather than a client id nobody holds.
+ * Converging on it is the fix, not just the tidy-up.
  */
-export type PromoteResult =
-  | { outcome: 'promoted'; clientId: string }
-  | { outcome: 'nobody'; clientId: null }
-  | { outcome: 'failed'; clientId: null };
+export type PromoteResult = WaitlistPromotion;
 
 const PROMOTE_NOBODY: PromoteResult = { outcome: 'nobody', clientId: null };
 const PROMOTE_FAILED: PromoteResult = { outcome: 'failed', clientId: null };
@@ -1805,13 +1823,6 @@ const PROMOTE_FAILED: PromoteResult = { outcome: 'failed', clientId: null };
 export async function promoteWaitlist(sessionId: string): Promise<PromoteResult> {
   if (!USE_SUPABASE) return PROMOTE_NOBODY;
   try {
-    const { data, error } = await supabase.rpc('promote_session_waitlist', { p_session: sessionId });
-    if (error) return PROMOTE_FAILED;
-    if (typeof data === 'string') return { outcome: 'promoted', clientId: data };
-    // `null` is the function's own answer for "nobody got it" and is the only
-    // non-string this may read as empty. Anything else is a reply we do not
-    // understand, and an answer we cannot read is not an answer that the queue
-    // was empty — the broadcast is not licensed by it.
-    return data == null ? PROMOTE_NOBODY : PROMOTE_FAILED;
+    return readPromotion(await supabase.rpc('promote_session_waitlist', { p_session: sessionId }));
   } catch { return PROMOTE_FAILED; }
 }

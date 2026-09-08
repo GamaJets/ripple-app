@@ -62580,7 +62580,14 @@ alter table public.exercises
 -- ═══════════════════════════════════════════════════════════════════════════
 -- A gym could free a PT hour and not hand it on
 -- ═══════════════════════════════════════════════════════════════════════════
--- NOT APPLIED. Written to be applied by hand.
+-- APPLIED to the live project on 8 Sep 2026. Verified after applying: the
+-- trainer arm is intact and the owner arm is present in pg_get_functiondef, the
+-- grant did not widen (authenticated true, anon false), and session_waitlist
+-- still carries exactly the four policies parts 142 and 145 left it — _client_r,
+-- _client_d, _trainer_r, _service_rw — with no owner arm among them, so part
+-- 144's narrowing stands and the gym gets the answer without being able to read
+-- who was queueing. get_advisors(security) is unchanged: the two anon-executable
+-- SECURITY DEFINER functions are still leave_my_details and public_coach_page.
 --
 --
 -- ── What a person suffers ─────────────────────────────────────────────────
@@ -62984,8 +62991,16 @@ comment on function public.promote_session_waitlist(uuid) is
 -- ═══════════════════════════════════════════════════════════════════════════
 -- A coach could post a class onto another gym's timetable
 -- ═══════════════════════════════════════════════════════════════════════════
--- NOT APPLIED. Written to be applied by hand, and the advisors must be re-run
--- afterwards — applying SQL is not finished until get_advisors is clean.
+-- APPLIED to the live project on 8 Sep 2026, and the advisors were re-run
+-- afterwards and are clean — same four lint kinds at the same counts as before
+-- it, with guard_gym_class_tenant named in neither set. Verified after applying:
+-- both BEFORE row triggers present with the guard sorting first, a member can no
+-- longer insert themselves into `trainers`, a coach can still update their own
+-- bio (the column-level UPDATE survives a table-level revoke of INSERT and
+-- DELETE), and `anon` cannot execute the guard. The two columns `authenticated`
+-- cannot select — join_code and trial_started_at — were withheld before this and
+-- still are; trialAccount.ts reads the second through an RPC and falls back to
+-- the column only for an app shipped before part 2471.
 --
 -- Every fact below was read out of the LIVE database on 8 Sep 2026 with
 -- pg_policies, pg_class, pg_attribute, pg_constraint, pg_trigger, pg_proc,
