@@ -561,8 +561,8 @@
     "src/lib/edgeWrites.test.ts",
     "src/lib/reverseExtras.test.ts",
     "src/lib/reversalState.ts",
-    "src/lib/reversalState.test.ts"
+    "src/lib/reversalState.test.ts",
     "src/lib/siteRollUp.ts",
-    "src/lib/siteRollUp.test.ts",
+    "src/lib/siteRollUp.test.ts"
   ]
 }
