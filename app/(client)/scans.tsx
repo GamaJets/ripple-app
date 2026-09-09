@@ -2048,6 +2048,19 @@ export default function Scans() {
                 the rest of the app uses, and two rules for the same unit is how
                 a client ends up seeing the same reading two ways. */}
             <SectionHead title="Body Composition" note="Latest vs previous" />
+            {/* The units, said out loud.
+                The comment above argues why this table is not converted, and
+                that argument is sound — but it is a comment, and a member
+                reading 163 lb at the top of this screen and 11.8 kg here has
+                been given no way to know the difference is deliberate. It reads
+                as an app that cannot keep its own units straight, which is
+                exactly what it was reported as. So the screen says what the
+                comment says. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+              Copied from your InBody sheet in the units it printed — kilograms,
+              litres and its own scores — so these lines match the paper in your
+              hand. The weight and muscle figures above are in your own unit.
+            </Text>
             {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
               <View style={{ marginBottom: sp.lg }}>
                 {mInsights.improving.length > 0 ? (

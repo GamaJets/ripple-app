@@ -753,6 +753,18 @@ export default function ClientBody() {
                           : compScans === 1 ? 'one breakdown'
                           : `${compScans} breakdowns`}
                       />
+                      {/* The same sentence the client's own screen carries, for
+                          the same reason: this table is a transcription of an
+                          InBody printout and is not converted, while the weight
+                          and muscle figures above it are in the reader's unit. A
+                          coach comparing the two needs to know that is on
+                          purpose before they query it with the client. */}
+                      {compTrends.length > 0 ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                          As their InBody printed it — kilograms, litres and its own
+                          scores. The figures above are in your unit.
+                        </Text>
+                      ) : null}
                       {compTrends.length === 0 || compInsights == null ? (
                         // The FOURTH state, and the one only this table has:
                         // scans exist and none of them carried a breakdown.
