@@ -435,6 +435,36 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
     const owner = uidRef.current;
     if (!USE_SUPABASE || !owner) return;
     for (const t of queuedSessions(listRef.current.filter(isQueued))) {
+      // ── does the server already have this session? ──────────────────────
+      //
+      // The hydrate asks this — `withoutStored`, above — and this loop never
+      // did, and the two run on completely different triggers: the hydrate on
+      // mount, this on the reconnect edge and on returning to the foreground.
+      // So a session whose insert LANDED and whose response was lost is queued,
+      // and the next time the app came forward this sent it again. That is one
+      // duplicate per flush, for ever, and the member sees the same ride twice
+      // and then three times.
+      //
+      // One narrow read per session, on the timestamp about to be sent, and the
+      // matching entries come out of the queue instead of going up. A failed
+      // read leaves the queue exactly as it was and the send proceeds, because
+      // an unanswered question is not permission to drop somebody's session —
+      // a duplicate can be deleted and a lost set cannot.
+      try {
+        const { data, error } = await supabase
+          .from('workouts').select('id, performed_at, exercise')
+          .eq('user_id', owner).eq('performed_at', t);
+        if (!error && Array.isArray(data) && data.length) {
+          const held = withoutStored(
+            listRef.current.filter(isQueued),
+            data.map((r: any) => ({ id: String(r.id), t: String(r.performed_at), exercise: String(r.exercise), sets: [] })),
+          );
+          if (held.length !== listRef.current.filter(isQueued).length) {
+            const stillQueued = new Set(held.map((e) => e.id));
+            setLog(listRef.current.filter((e) => !isQueued(e) || stillQueued.has(e.id)), owner);
+          }
+        }
+      } catch { /* the send below is the fallback, and it is the safe one */ }
       // Re-read from `listRef` each time round: the send before this one
       // rewrote the list with the ids it adopted, and a stale slice would offer
       // a row the server has just taken.
