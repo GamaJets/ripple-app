@@ -159,7 +159,7 @@ import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
 import { ageFromDob } from '../../src/lib/age';
 import { RECOVERY_ACTIVITIES } from '../../src/lib/recoveryActs';
-import { HIIT_ACTIVITIES, MOBILITY_ACTIVITIES } from '../../src/lib/workoutKind';
+import { HIIT_ACTIVITIES, MOBILITY_ACTIVITIES, CARDIO_MOVEMENT_ALIASES } from '../../src/lib/workoutKind';
 import { STRETCH_ROUTINES, routineSummary, type StretchRoutine } from '../../src/lib/stretchRoutine';
 import { buildRoutine, BUILD_MINUTES, STRETCH_FOCUS } from '../../src/lib/stretchBuilder';
 import { useStretchCatalogue } from '../../src/ui/stretchCatalogue';
@@ -264,8 +264,16 @@ const CARDIO = names(CARDIO_ACTS);
  * box nobody was offered; a loose one puts a distance on a deadlift day.
  */
 const CARDIO_MOVEMENTS: ReadonlySet<string> = new Set(
-  [...CARDIO_ACTS.map((a) => a.name), ...MACHINES.filter((m) => m.cardio).map((m) => m.name)]
-    .map((n) => n.trim().toLowerCase()),
+  [
+    ...CARDIO_ACTS.map((a) => a.name),
+    ...MACHINES.filter((m) => m.cardio).map((m) => m.name),
+    // The same movements under the names a programme calls them. Without these
+    // the set held only the names THIS app writes, so a member cycling inside a
+    // coach's programme — where the movement might be 'Bike' or 'Indoor
+    // Cycling' — was offered no distance box and no way to record the ride.
+    // Still exact, still no substring: see the note in src/lib/workoutKind.ts.
+    ...CARDIO_MOVEMENT_ALIASES,
+  ].map((n) => n.trim().toLowerCase()),
 );
 const isCardioMovement = (name: string) => CARDIO_MOVEMENTS.has((name ?? '').trim().toLowerCase());
 const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility' | 'recovery', string[]> = {

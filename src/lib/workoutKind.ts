@@ -101,3 +101,43 @@ export function workoutKind(e: { exercise: string; sets?: unknown[]; cardio?: un
   if (e.cardio != null) return 'cardio';
   return 'strength';
 }
+
+/* ── The names a cardio movement actually goes by ──────────────────────────
+ *
+ * `app/(client)/workouts.tsx` decides whether to draw a distance and an average
+ * wattage box beside a movement in a PROGRAM, and it decides by matching the
+ * movement's name exactly. Exact is right — 380e71b established that at some
+ * cost, after a looser rule put a distance box on every barbell row and none on
+ * cycling — but the set it matched against was the picker's own eight
+ * activities plus the seven cardio machines, and those are the names THIS APP
+ * writes. A programme written by a coach, or imported from a catalogue, calls
+ * the same movements other things.
+ *
+ * So a member cycling inside a programme got no boxes at all and no way to
+ * record the distance they had just ridden, which is what was reported.
+ *
+ * These are aliases, not new activities: every one names a movement already in
+ * the lists above. They are kept here rather than in the screen so that the one
+ * question — "is this thing something you ride, row or run?" — has one answer
+ * with a test behind it, which is what the screen's own note asks for.
+ *
+ * Deliberately NOT a substring rule, for the reason that whole history is
+ * about. 'row' inside 'Barbell Row' is not a rowing machine, and 'step' inside
+ * 'Step Up' is not a stair climber. Adding a name here is cheap and safe;
+ * matching loosely is neither.
+ */
+export const CARDIO_MOVEMENT_ALIASES: readonly string[] = [
+  // Bikes. 'Cycling' was in the old set; nothing else here was.
+  'bike', 'indoor bike', 'stationary bike', 'exercise bike', 'spin bike',
+  'spinning', 'spin', 'indoor cycling', 'cycle', 'assault bike', 'echo bike',
+  'fan bike', 'airbike', 'watt bike', 'wattbike',
+  // Rowers. 'Rowing' and 'Rowing Machine' were in; the words gyms actually
+  // print on the machine were not.
+  'rower', 'erg', 'row erg', 'rowerg', 'concept2', 'concept 2',
+  // Feet. 'Treadmill / Run' was one entry, so neither word matched alone.
+  'run', 'running', 'jog', 'jogging', 'sprint', 'sprints', 'treadmill run',
+  // Ski and stairs.
+  'skierg', 'ski', 'stairmaster', 'stepmill', 'stair master',
+  // Everything else in the picker that has a second common name.
+  'swimming', 'walking', 'cross trainer', 'crosstrainer',
+];

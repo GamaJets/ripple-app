@@ -565,6 +565,7 @@
     "src/lib/siteRollUp.ts",
     "src/lib/siteRollUp.test.ts",
     "src/lib/machines.ts",
-    "src/lib/machines.test.ts"
+    "src/lib/machines.test.ts",
+    "src/lib/workoutKind.test.ts"
   ]
 }

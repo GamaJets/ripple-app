@@ -251,7 +251,10 @@ const entry = (over: Partial<WorkoutEntry> = {}): WorkoutEntry =>
   // row belongs, and deterministically rather than by luck.
   ok(byNewest(x, entry()) < 0, 'an identified entry precedes an unidentified one at the same instant');
 
-  eq(sessionKey({ t: T1, exercise: 'Row' }), `${T1}|Row`, 'a session key is the instant and the movement');
+  // The key is the INSTANT and the movement, which is what this line always
+  // said it was — it just used to compare the characters the timestamp happened
+  // to be written with, and the phone and the database write them differently.
+  eq(sessionKey({ t: T1, exercise: 'Row' }), `${Date.parse(T1)}|Row`, 'a session key is the instant and the movement');
   ok(sessionKey({ t: T1, exercise: 'Row' }) !== sessionKey({ t: T2, exercise: 'Row' }),
     'the same movement in two sessions is two keys');
 }
@@ -281,6 +284,52 @@ const entry = (over: Partial<WorkoutEntry> = {}): WorkoutEntry =>
   ok(queueCacheKey(UID) !== queueCacheKey(SERVER),
     'two accounts on one gym phone must not share a queue — the failure there is one member’s session sent under another member’s name');
   ok(queueCacheKey(UID).includes(UID), 'and the key says whose it is');
+}
+
+/* ── The two spellings of one instant ─────────────────────────────────────
+ *
+ * The defect that put 684 rows in a table holding 87 real sessions. A session
+ * logged on the phone carries JavaScript's ISO string; the same row read back
+ * carries Postgres's rendering. `entryToRow` sends `t` verbatim and
+ * `rowToEntry` takes `performed_at` verbatim, so the two never met as equals —
+ * and every consumer of `sessionKey` compares exactly across that line.
+ */
+const PHONE_T = '2026-09-09T04:06:48.937Z';
+const ROW_T = '2026-09-09 04:06:48.937+00';
+
+eq(Date.parse(PHONE_T), Date.parse(ROW_T), 'the two spellings are the same instant');
+ok(String(PHONE_T) !== String(ROW_T), 'and are not the same string, which was the whole problem');
+eq(sessionKey({ t: PHONE_T, exercise: 'Cycling' }), sessionKey({ t: ROW_T, exercise: 'Cycling' }),
+  'so they key the same');
+
+// The consequence, on the function whose failure kept the queue full for ever.
+{
+  const queued = [{ id: localId(), t: PHONE_T, exercise: 'Cycling', sets: [] } as any];
+  const stored = [{ id: 'srv-1', t: ROW_T, exercise: 'Cycling', sets: [] } as any];
+  eq(withoutStored(queued, stored).length, 0,
+    'a queued session the server already holds leaves the queue');
+}
+
+// And on the one that never handed out an id.
+{
+  const list = [{ id: localId(), t: PHONE_T, exercise: 'Cycling', sets: [] } as any];
+  const rows = [{ id: 'srv-1', performed_at: ROW_T, exercise: 'Cycling' }];
+  eq(adoptIds(list, rows)[0].id, 'srv-1', 'an inserted row is matched back to the entry that made it');
+}
+
+// A different instant is still a different session. Normalising must not make
+// every session with the same name collapse into one.
+ok(sessionKey({ t: PHONE_T, exercise: 'Cycling' }) !== sessionKey({ t: '2026-09-09T05:06:48.937Z', exercise: 'Cycling' }),
+  'an hour later is a different session');
+ok(sessionKey({ t: PHONE_T, exercise: 'Cycling' }) !== sessionKey({ t: PHONE_T, exercise: 'Rowing' }),
+  'and a different movement at the same moment is a different entry');
+
+// A timestamp nothing can parse keeps its text, because two unparseable strings
+// really might be two different things and collapsing them would lose one.
+{
+  const a = sessionKey({ t: 'not a date', exercise: 'Cycling' });
+  const b = sessionKey({ t: 'also not a date', exercise: 'Cycling' });
+  ok(a !== b, 'two unreadable timestamps stay distinct');
 }
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }

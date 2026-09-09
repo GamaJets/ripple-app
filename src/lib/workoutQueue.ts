@@ -73,7 +73,40 @@ export const serverId = (e: WorkoutEntry): string | null =>
  * in common. Matching on the id instead is impossible in that direction: the
  * server has never seen the local one.
  */
-export const sessionKey = (e: { t: string; exercise: string }): string => `${e.t}|${e.exercise}`;
+/**
+ * The identity of a session, as an INSTANT rather than as a string.
+ *
+ * This keyed on the raw timestamp text, and the two sides of every comparison
+ * it is used for spell the same instant differently:
+ *
+ *   logged on this device   2026-09-09T04:06:48.937Z    (JavaScript's ISO)
+ *   read back from the row  2026-09-09 04:06:48.937+00  (Postgres's rendering)
+ *
+ * `entryToRow` sends `e.t` verbatim and `rowToEntry` takes `performed_at`
+ * verbatim, so nothing between the two ever normalises them. The strings are
+ * never equal, and every consumer of this key is a comparison ACROSS that line:
+ *
+ *   withoutStored  asks whether the server already holds a queued session —
+ *                  answered "no" every time, so nothing ever left the queue
+ *   adoptIds       gives a queued entry the id the server just assigned it —
+ *                  never matched, so no entry ever stopped being queued
+ *
+ * A queue that cannot drain is re-sent on every hydrate, and the row it inserts
+ * is a new row each time. One cycling session logged on 4 September was still
+ * being re-inserted five days later; the table held 684 rows for 87 real
+ * sessions.
+ *
+ * Comparing the instant fixes all three consumers at once, because an instant
+ * is what a member means by "that session" — not the characters their phone
+ * happened to write it with. The raw text is kept as the key only when the
+ * timestamp cannot be parsed at all, which is the one case where two unequal
+ * strings might genuinely be two different things.
+ */
+export const sessionKey = (e: { t: string; exercise: string }): string => {
+  const ms = Date.parse(e.t);
+  const at = Number.isFinite(ms) ? String(ms) : `raw:${(e.t ?? '').trim()}`;
+  return `${at}|${e.exercise}`;
+};
 
 /**
  * Newest first, with a deterministic tie-break.
