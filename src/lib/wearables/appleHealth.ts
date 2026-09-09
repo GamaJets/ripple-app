@@ -195,9 +195,30 @@ function avgValues(res: any): number | null {
   if (!Array.isArray(res) || res.length === 0) return null;
   return Math.round(res.reduce((s: number, x: any) => s + (Number(x?.value) || 0), 0) / res.length);
 }
-function lastValue(res: any): number | null {
+/**
+ * The MOST RECENT sample's value — which is not "the last element" unless you
+ * know how the list was sorted, and this file sorted its two heart-rate reads
+ * differently.
+ *
+ * `lastValue` took `res[res.length - 1]` from both. The resting read asks for
+ * `ascending: false`, so its last element is the OLDEST resting reading of the
+ * day, and that is the number the app has been showing as somebody's resting
+ * heart rate.
+ *
+ * The live read is worse, because it fails only sometimes. It asked ascending
+ * with `limit: 10000`, and a limit applied to an ascending query keeps the
+ * OLDEST ten thousand — so a member whose watch has written more than that
+ * since midnight gets a "latest" heart rate from earlier in the day, on the
+ * screen showing it live during a session. It is the row-cap trap this codebase
+ * has elsewhere: a capped read is only a top-N if it is sorted the way you are
+ * reading it.
+ *
+ * So the caller states the sort and this picks the right end.
+ */
+function newestValue(res: any, ascending: boolean): number | null {
   if (!Array.isArray(res) || res.length === 0) return null;
-  return Math.round(Number(res[res.length - 1]?.value) || 0);
+  const r = ascending ? res[res.length - 1] : res[0];
+  return Math.round(Number(r?.value) || 0);
 }
 
 // ── Sleep ───────────────────────────────────────────────────────────────────
@@ -427,7 +448,10 @@ export const appleHealth: WearableProvider = {
     const [active, steps, hr, rhr, workouts] = await Promise.all([
       read('getActiveEnergyBurned', sampleOpts),
       read('getStepCount', options),
-      read('getHeartRateSamples', sampleOpts),
+      // Newest first, so that the ten-thousand cap keeps the END of the day
+      // rather than the start of it. The average below does not care about the
+      // order; the live reading cares about nothing else.
+      read('getHeartRateSamples', { ...sampleOpts, ascending: false }),
       read('getRestingHeartRateSamples', { ...sampleOpts, ascending: false }),
       read('getSamples', { ...options, type: 'Workout', limit: 100 }),
     ]);
@@ -435,8 +459,8 @@ export const appleHealth: WearableProvider = {
     m.activeKcal = sumValues(active);
     m.steps = steps && typeof steps.value === 'number' ? Math.round(steps.value) : sumValues(steps);
     m.heartRateAvg = avgValues(hr);
-    m.heartRateLatest = lastValue(hr);
-    m.heartRateResting = lastValue(rhr);
+    m.heartRateLatest = newestValue(hr, false);
+    m.heartRateResting = newestValue(rhr, false);
     if (Array.isArray(workouts) && workouts.length) {
       const mins = workouts.reduce((s: number, w: any) => {
         const a = Date.parse(w?.start ?? w?.startDate);
