@@ -172,11 +172,9 @@ import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, read
 // The distance unit a cardio log opens on. Derived from the member's length
 // unit rather than defaulted to km — see src/lib/distance.ts.
 import { distanceUnitFor, distanceUnitName, type DistanceUnit } from '../../src/lib/distance';
-// Whether a movement in a plan is something you ride, row or run rather than
-// something you lift. The programme runner needs it for the same reason the
-// standalone cardio timer does — see the note above the cardio boxes in
-// SessionRunner's finish screen.
-import { isCardioName } from '../../src/lib/machines';
+// The cardio machines by their own names. NOT `isCardioName`, and that is the
+// whole point — see CARDIO_MOVEMENTS below.
+import { MACHINES } from '../../src/lib/machines';
 import { WEEK_DAYS, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 import { BACK_ICON, FORWARD_ARROW, FORWARD_ICON, turn } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
@@ -241,6 +239,38 @@ const byName = (a: Activity, b: Activity) => a.name.localeCompare(b.name);
 const names = (acts: Activity[]) => [...acts].sort(byName).map((a) => a.name);
 
 const CARDIO = names(CARDIO_ACTS);
+
+/* IS THIS MOVEMENT SOMETHING YOU RIDE, ROW OR RUN?
+ *
+ * Matched on the WHOLE name against the two lists this app already keeps — the
+ * cardio activities the timer offers, and the cardio machines by their own
+ * names. Deliberately NOT `isCardioName`, which is right for a scanned machine
+ * and wrong here, in both directions:
+ *
+ *   isCardioName('Barbell Row')  → true   ← 'Rowing Machine' carries the key
+ *                                           'row' and sits first in MACHINES,
+ *                                           so every barbell, cable and upright
+ *                                           row resolves to a rowing machine.
+ *   isCardioName('Cycling')      → false  ← the key is 'cycle', and 'cycling'
+ *                                           does not contain it.
+ *
+ * Both of those are the wrong answer for a plan, and the first is much the
+ * worse: a distance box on a barbell row invites a figure that then reclassifies
+ * the whole entry as cardio. An exact match can only ever miss an oddly-named
+ * bike, which costs one box that was not offered; a loose one puts a distance
+ * on a deadlift day. So this errs at the safe end on purpose.
+ *
+ * (`isCardioName`'s looseness is not only mine to worry about: `muscleFor` runs
+ * through the same first-match, so a barbell row is labelled "Full body ·
+ * cardio" rather than Back wherever that is drawn. Left alone here because
+ * MACHINES' order is load-bearing for QR resolution in scan-machine.tsx, which
+ * says so in a comment, and that is not a thing to change in passing.)
+ */
+const CARDIO_MOVEMENTS: ReadonlySet<string> = new Set(
+  [...CARDIO_ACTS.map((a) => a.name), ...MACHINES.filter((m) => m.cardio).map((m) => m.name)]
+    .map((n) => n.trim().toLowerCase()),
+);
+const isCardioMovement = (name: string) => CARDIO_MOVEMENTS.has((name ?? '').trim().toLowerCase());
 const SESSION_TYPES: Record<'cardio' | 'hiit' | 'mobility' | 'recovery', string[]> = {
   cardio: CARDIO,
   hiit: names(HIIT_ACTS),
@@ -3222,9 +3252,14 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
    */
   const rebuildZonesFromWatch = useCallback(async (): Promise<void> => {
     try {
-      const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
-      const fetchSamples = apple?.fetchHeartRateSamples;
-      if (!fetchSamples || !apple || !apple.isAvailable()) return;
+      // Whichever connected source can actually hand back samples — HealthKit
+      // on iOS, Health Connect on Android. Not pinned to Apple: the Android
+      // read exists now, and a cloud vendor deliberately does not offer this
+      // method at all, because WHOOP, Oura and Fitbit return day aggregates and
+      // there is nothing per-second in them to rebuild a breakdown from.
+      const source = PROVIDERS.find((p) => typeof p.fetchHeartRateSamples === 'function' && p.isAvailable());
+      const fetchSamples = source?.fetchHeartRateSamples;
+      if (!fetchSamples || !source) return;
       const startISO = new Date(startedAtRef.current).toISOString();
       const endISO = new Date(Date.now()).toISOString();
       const pts = await fetchSamples(startISO, endISO);

@@ -225,6 +225,12 @@ export async function requestTrainingAccess(): Promise<TrainingRecord[]> {
 /* ── reading ──────────────────────────────────────────────────────────────── */
 
 /** Local midnight today, as Health Connect wants it: an instant, not a date. */
+/** Any window, for a read that is not about today — a session that started
+ *  before midnight, or one being rebuilt after the fact. */
+function windowBetween(startISO: string, endISO: string): { operator: 'between'; startTime: string; endTime: string } {
+  return { operator: 'between', startTime: startISO, endTime: endISO };
+}
+
 function todayWindow(): { operator: 'between'; startTime: string; endTime: string } {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -239,7 +245,7 @@ const PAGE_SIZE = 1000;
 /** Every record of one type in a window, or null when the read did not answer.
  *  Null is not an empty day — that distinction is the whole of src/ui/loadStatus
  *  and it is why this does not return `[]` on failure. */
-async function read(recordType: TrainingRecord, window: ReturnType<typeof todayWindow>): Promise<any[] | null> {
+async function read(recordType: TrainingRecord, window: ReturnType<typeof windowBetween>): Promise<any[] | null> {
   const k = hcModule();
   if (!k || typeof k.readRecords !== 'function') return null;
   try {
@@ -559,4 +565,50 @@ export async function fetchTrainingSleep(sinceDays = 7): Promise<SleepRead> {
     status: 'ready',
     readings: [...byNight.values()].sort((x, y) => (x.night < y.night ? 1 : -1)),
   };
+}
+
+
+/**
+ * Every heart-rate sample Health Connect holds for a window, flattened.
+ *
+ * The Android half of the zone rebuild. `app/(client)/workouts.tsx` banks a
+ * second at a time while the session is on screen, and Android suspends timers
+ * for a backgrounded app exactly as iOS does — so the breakdown it counts is a
+ * fraction of the ride, and the watch has the rest.
+ *
+ * Records are INTERVALS carrying a `samples` array; the same shape
+ * `fetchTrainingToday` already averages over, and for the same reason it
+ * averages over samples rather than records — a writing app batches at whatever
+ * cadence it likes, so the records say nothing about when the beats happened.
+ *
+ * Returns [] both when there is nothing and when the read fails, deliberately.
+ * Everywhere else in this file that distinction is kept, because an empty day
+ * and an unread one are different claims about somebody's health. Here they are
+ * the same instruction to the caller — keep the count you already have — and
+ * the caller's own board already says how much of the session is unaccounted
+ * for. A rebuild is an improvement on a real figure or it is nothing.
+ */
+export async function fetchTrainingHeartRateSamples(startISO: string, endISO: string): Promise<{ t: string; bpm: number }[]> {
+  // `trainingReadable()` is the module-available check; the grant is a separate
+  // question and both have to pass. Reading a record type this member has not
+  // granted throws inside `read`, which would return null and be indistinguish-
+  // able from a store that answered with nothing.
+  if (!trainingReadable()) return [];
+  const granted = await grantedTrainingRecords();
+  if (!granted || !granted.includes('HeartRate')) return [];
+  const rows = await read('HeartRate', windowBetween(startISO, endISO));
+  if (rows == null) return [];
+  const out: { t: string; bpm: number }[] = [];
+  for (const r of rows) {
+    for (const sample of (Array.isArray(r?.samples) ? r.samples : [])) {
+      const bpm = num(sample?.beatsPerMinute);
+      const t = String(sample?.time ?? '');
+      if (bpm == null || bpm <= 0 || !t) continue;
+      const ms = Date.parse(t);
+      if (!Number.isFinite(ms)) continue;
+      out.push({ t: new Date(ms).toISOString(), bpm: Math.round(bpm) });
+    }
+  }
+  out.sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+  return out;
 }

@@ -15,7 +15,7 @@ import { connectVendor, fetchVendorDay, disconnectVendor, fetchVendorWorkouts, f
 import { linkFor, noteMetric } from '../wearableLinkLedger';
 import {
   fetchTrainingSleep, fetchTrainingToday, fetchTrainingWorkouts,
-  requestTrainingAccess, trainingReadable,
+  requestTrainingAccess, trainingReadable, fetchTrainingHeartRateSamples,
 } from './healthConnectTraining';
 
 export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
@@ -238,6 +238,17 @@ export function makeCloudProvider(meta: ProviderMeta): WearableProvider {
       // screen names the device the way the person connected it.
       return { provider: meta.id, status: 'ready', readings: parseVendorSleep(meta.id, res.records, meta.name) };
     },
+    /** Android's half of the session zone rebuild. Health Connect only, and
+     *  absent on a cloud vendor: WHOOP, Oura and Fitbit return day-level
+     *  aggregates, so there are no per-second samples to rebuild anything
+     *  from and offering the method would promise a precision they do not
+     *  have. See `zonesFromSamples` for what the caller does with these. */
+    ...(isHealthConnect ? {
+      async fetchHeartRateSamples(startISO: string, endISO: string) {
+        return fetchTrainingHeartRateSamples(startISO, endISO);
+      },
+    } : {}),
+
     async fetchToday(): Promise<DailyMetrics | null> {
       if (isHealthConnect) {
         // Null for every outcome except a read that worked — which is what the
