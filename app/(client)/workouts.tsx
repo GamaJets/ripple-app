@@ -4270,7 +4270,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
         // machine was not read, which is not the same as a zero, and `dist: 0`
         // would print "0 km" over an hour somebody rode.
         ...((): { cardio?: { mins: number; dist: number; unit: string; watts?: number } } => {
-          if (!isCardioName(nameOf(exercises[i]))) return {};
+          if (!isCardioMovement(nameOf(exercises[i]))) return {};
           const raw = cardioAt(i);
           const d = raw.dist.trim() === '' ? 0 : (parseFloat(raw.dist) || 0);
           const w = raw.watts.trim() === '' ? 0 : (parseInt(raw.watts, 10) || 0);
@@ -4627,7 +4627,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
           {(() => {
             const done = results
               .map((sets, i) => ({ i, sets }))
-              .filter(({ i, sets }) => sets.length > 0 && isCardioName(nameOf(exercises[i])));
+              .filter(({ i, sets }) => sets.length > 0 && isCardioMovement(nameOf(exercises[i])));
             if (!done.length) return null;
             return (<>
               <Section>
