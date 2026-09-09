@@ -172,8 +172,8 @@ import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, read
 // The distance unit a cardio log opens on. Derived from the member's length
 // unit rather than defaulted to km — see src/lib/distance.ts.
 import { distanceUnitFor, distanceUnitName, type DistanceUnit } from '../../src/lib/distance';
-// The cardio machines by their own names. NOT `isCardioName`, and that is the
-// whole point — see CARDIO_MOVEMENTS below.
+// The cardio machines by their own names, matched exactly — see the note on
+// CARDIO_MOVEMENTS below for why this asks no matcher at all.
 import { MACHINES } from '../../src/lib/machines';
 import { WEEK_DAYS, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 import { BACK_ICON, FORWARD_ARROW, FORWARD_ICON, turn } from '../../src/ui/direction';
@@ -244,27 +244,24 @@ const CARDIO = names(CARDIO_ACTS);
  *
  * Matched on the WHOLE name against the two lists this app already keeps — the
  * cardio activities the timer offers, and the cardio machines by their own
- * names. Deliberately NOT `isCardioName`, which is right for a scanned machine
- * and wrong here, in both directions:
+ * names. It does NOT ask a matcher, and the reason is worth keeping even though
+ * the matcher has since been repaired.
  *
- *   isCardioName('Barbell Row')  → true   ← 'Rowing Machine' carries the key
- *                                           'row' and sits first in MACHINES,
- *                                           so every barbell, cable and upright
- *                                           row resolves to a rowing machine.
- *   isCardioName('Cycling')      → false  ← the key is 'cycle', and 'cycling'
- *                                           does not contain it.
+ * `isCardioName` used to live in src/lib/machines.ts and answered this question
+ * wrongly in both directions — true for 'Barbell Row', because 'Rowing Machine'
+ * leads that catalogue carrying the bare key 'row'; false for 'Cycling',
+ * because the bike's key is 'cycle' and 'cycling' does not contain it. Both are
+ * the wrong answer for a movement in a plan, and the first is much the worse: a
+ * distance box on a barbell row invites a figure that then reclassifies the
+ * whole entry as cardio.
  *
- * Both of those are the wrong answer for a plan, and the first is much the
- * worse: a distance box on a barbell row invites a figure that then reclassifies
- * the whole entry as cardio. An exact match can only ever miss an oddly-named
- * bike, which costs one box that was not offered; a loose one puts a distance
- * on a deadlift day. So this errs at the safe end on purpose.
- *
- * (`isCardioName`'s looseness is not only mine to worry about: `muscleFor` runs
- * through the same first-match, so a barbell row is labelled "Full body ·
- * cardio" rather than Back wherever that is drawn. Left alone here because
- * MACHINES' order is load-bearing for QR resolution in scan-machine.tsx, which
- * says so in a comment, and that is not a thing to change in passing.)
+ * That function is now deleted, and `identifyMachine` takes the best match
+ * rather than the first, so the row no longer resolves to a rower. This list
+ * stays exact anyway, because the two questions are genuinely different: that
+ * one asks what a scanned machine IS and may answer null and let somebody pick,
+ * while this one decides which boxes to draw on a plan and has nobody to ask.
+ * An exact match here can only ever miss an oddly-named bike, which costs one
+ * box nobody was offered; a loose one puts a distance on a deadlift day.
  */
 const CARDIO_MOVEMENTS: ReadonlySet<string> = new Set(
   [...CARDIO_ACTS.map((a) => a.name), ...MACHINES.filter((m) => m.cardio).map((m) => m.name)]

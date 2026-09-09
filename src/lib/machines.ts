@@ -16,7 +16,7 @@ export const MACHINES: MachineDef[] = [
   { name: 'Ski Erg', group: 'Full body · cardio', cardio: true, keys: ['ski', 'skierg', 'ski erg'] },
   { name: 'Air Bike', group: 'Full body · cardio', cardio: true, keys: ['assault', 'air bike', 'airbike', 'echo bike', 'fan bike'] },
   { name: 'Treadmill', group: 'Legs · cardio', cardio: true, keys: ['tread', 'run', 'running'] },
-  { name: 'Upright Bike', group: 'Legs · cardio', cardio: true, keys: ['bike', 'cycle', 'spin', 'spinning'] },
+  { name: 'Upright Bike', group: 'Legs · cardio', cardio: true, keys: ['bike', 'cycle', 'cycling', 'spin', 'spin bike', 'spinning', 'stationary bike', 'exercise bike'] },
   { name: 'Elliptical', group: 'Full body · cardio', cardio: true, keys: ['elliptical', 'cross trainer', 'crosstrainer'] },
   { name: 'Stair Climber', group: 'Legs · cardio', cardio: true, keys: ['stair', 'stepmill', 'stairmaster', 'step'] },
   // Strength machines
@@ -58,37 +58,83 @@ export function looksLikeSerial(raw: string): boolean {
   return false;
 }
 
-// Try to identify a scanned/typed label as a catalogue exercise. Returns null when
-// it can't be confidently matched (caller then asks the user to pick from MACHINES).
+/**
+ * How much of a label a key must explain before it may claim it.
+ *
+ * This is the whole of the fix below. The catalogue leads with `Rowing Machine`
+ * carrying the bare key 'row', and the old matcher took the FIRST entry whose
+ * name or any key was a substring of the input in either direction — so
+ * 'Barbell Row', 'Upright Row' and 'Seated Cable Row' were all rowing machines,
+ * with 'Full body · cardio' as their muscle group and the cardio flag set.
+ *
+ * Three characters of an eleven-character label is not an identification. A key
+ * now has to account for a real share of what it is looking at, and 0.4 is
+ * where the two kinds of case separate cleanly: 'spin' in 'spin bike' is 0.44
+ * and survives; 'row' in 'barbell row' is 0.27 and does not.
+ */
+const MIN_KEY_COVERAGE = 0.4;
+
+/**
+ * Identify a scanned or photographed label as a catalogue machine, or null.
+ *
+ * Null is a real answer and the callers treat it as one: app/(client)/scan-machine.tsx
+ * asks the member to pick from the list and then REMEMBERS their pick against
+ * that QR code. So the cost of not knowing is one tap, once, for that machine
+ * forever — while the cost of a confident wrong answer is an exercise, a muscle
+ * group and a cardio flag applied silently and recalled every scan afterwards.
+ * Everything here is built on that asymmetry: it would rather ask than guess.
+ *
+ * BEST match rather than first. `MACHINES` order is still load-bearing and is
+ * still respected — it breaks ties, because a later entry must beat an earlier
+ * one strictly to displace it — but order no longer lets a short key at the top
+ * of the catalogue swallow a label that a longer key further down explains.
+ */
 export function identifyMachine(raw: string): MachineDef | null {
   const s = norm(raw);
   if (!s || looksLikeSerial(raw)) return null;
+
+  let best: MachineDef | null = null;
+  let bestScore = 0;
+
   for (const m of MACHINES) {
-    const hay = [m.name, ...(m.keys || [])].map(norm);
-    if (hay.some((h) => s === h || s.includes(h) || h.includes(s))) return m;
+    for (const h of [m.name, ...(m.keys || [])].map(norm)) {
+      if (!h) continue;
+      let score = 0;
+      if (s === h) {
+        // An exact label. Nothing loose can outrank it, whatever its length.
+        score = 1000 + h.length;
+      } else if (s.includes(h)) {
+        // The key sits inside the label: 'cable row' within 'seated cable row'.
+        // Scored by how much of the label it accounts for.
+        if (h.length / s.length >= MIN_KEY_COVERAGE) score = h.length;
+      } else if (h.includes(s)) {
+        // The label is a fragment of the key: 'concept' typed for 'concept2'.
+        // The same share test, the other way round.
+        if (s.length / h.length >= MIN_KEY_COVERAGE) score = s.length;
+      }
+      // Strictly greater, so an earlier catalogue entry keeps a tie.
+      if (score > bestScore) { bestScore = score; best = m; }
+    }
   }
-  return null;
+  return best;
 }
 
-// Best-effort muscle group for an arbitrary exercise name (used in history/trends
-// where we only stored the name). Falls back to a neutral label.
-export function muscleFor(name: string): string {
-  const def = identifyMachine(name);
-  if (def) return def.group;
-  const s = norm(name);
-  if (/(squat|lunge|leg|quad|calf)/.test(s)) return 'Legs';
-  if (/(bench|chest|push[- ]?up|dip|fly)/.test(s)) return 'Chest';
-  if (/(row|pull|lat|back|deadlift)/.test(s)) return 'Back';
-  if (/(press|shoulder|raise|ohp)/.test(s)) return 'Shoulders';
-  if (/(curl|bicep)/.test(s)) return 'Biceps';
-  if (/(tricep|pushdown|extension)/.test(s)) return 'Triceps';
-  if (/(run|row|bike|cycle|ski|elliptical|stair|cardio|treadmill)/.test(s)) return 'Cardio';
-  if (/(ab|core|crunch|plank)/.test(s)) return 'Core';
-  return 'General';
-}
+// ── Two helpers that used to live here ────────────────────────────────────
+//
+// `muscleFor(name)` and `isCardioName(name)` are gone. Both wrapped
+// `identifyMachine` and inherited its first-match looseness, so both answered
+// that a barbell row was a rowing machine — 'Full body · cardio' as its muscle
+// group, and cardio as its kind.
+//
+// They are deleted rather than corrected because neither had a caller. The one
+// screen that reached for `isCardioName` stopped in ea69951/380e71b, having
+// found it right for a scanned machine and wrong for a movement in a training
+// plan, and it now matches exact names against two lists it keeps itself. What
+// was left was a pair of wrong answers sitting in a shared module waiting to be
+// picked up — and the commit that removed the last caller says plainly how that
+// happens: it "reached for `isCardioName` because it was there".
+//
+// If a screen ever needs a muscle group for an arbitrary movement name, that is
+// a question about a training catalogue and not about the machines in a gym,
+// and `src/lib/muscleMap.ts` is where it belongs.
 
-export function isCardioName(name: string): boolean {
-  const def = identifyMachine(name);
-  if (def) return !!def.cardio;
-  return /(run|row|bike|cycle|ski|elliptical|stair|treadmill|cardio|erg)/.test(norm(name));
-}
