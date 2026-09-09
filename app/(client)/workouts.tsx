@@ -147,7 +147,9 @@ import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
 import { startGate } from '../../src/lib/startGate';
-import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, hrScaleNote, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
+import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, hrScaleNote, zonesFromSamples, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
+import { PROVIDERS } from '../../src/lib/wearables/registry';
+import { reportError } from '../../src/lib/reportError';
 // 44pt is the minimum tap target — the number and the reasoning live in one
 // place, and the controls added here take it from there rather than from a
 // literal that can drift.
@@ -3194,7 +3196,56 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [age]);
 
-  return { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone: hrZoneNo(liveSample, age) };
+  /**
+   * Throw the tick-counted breakdown away and rebuild it from the watch.
+   *
+   * The counting above banks a second at a time, and iOS stops delivering
+   * timers to an app that is not on screen — so a ride with the phone in a
+   * pocket banks a fraction of itself. The watch was recording throughout; only
+   * our counting stopped. HealthKit will hand back every sample it took, so the
+   * honest breakdown is the one rebuilt from those, not the one we managed to
+   * count while being looked at.
+   *
+   * It REPLACES rather than adds. Rebuilding covers the whole window including
+   * the part we did count, so adding would double it.
+   *
+   * The full-resolution read, not the chart one: that thins the series to keep
+   * an SVG light, which drops short bursts into zone 4 — and a splat point is a
+   * minute at zone 4 or above.
+   *
+   * Silent on failure, and that is deliberate. There is no watch on Android's
+   * Health Connect path, a member may have refused heart-rate permission, and a
+   * session may genuinely have no samples. In every one of those the tick count
+   * is the best thing anybody has, and the board already says how much of the
+   * session it does not account for. Replacing a real count with nothing
+   * because a read failed would be the loss this function exists to prevent.
+   */
+  const rebuildZonesFromWatch = useCallback(async (): Promise<void> => {
+    try {
+      const apple = PROVIDERS.find((p) => p.meta.id === 'apple');
+      const fetchSamples = apple?.fetchHeartRateSamples;
+      if (!fetchSamples || !apple || !apple.isAvailable()) return;
+      const startISO = new Date(startedAtRef.current).toISOString();
+      const endISO = new Date(Date.now()).toISOString();
+      const pts = await fetchSamples(startISO, endISO);
+      const rebuilt = zonesFromSamples(pts, age, startISO, endISO);
+      if (rebuilt) setZoneSecs(rebuilt);
+    } catch (e) {
+      reportError('liveVitals.rebuildZones', e);
+    }
+  }, [age]);
+
+  // On the way back to the screen, and once more at the finish. Coming back is
+  // when the gap has just happened and is largest; the finish is what gets
+  // written to the log, and is the one that has to be right.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') void rebuildZonesFromWatch();
+    });
+    return () => sub.remove();
+  }, [rebuildZonesFromWatch]);
+
+  return { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, rebuildZonesFromWatch, liveZone: hrZoneNo(liveSample, age) };
 }
 
 /**
@@ -3289,7 +3340,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
 }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
-  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age, restingKcalPerMin);
+  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
@@ -3308,6 +3359,20 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
   const finalMins = Math.round(finalElapsed / 60);
 
   const finish = () => {
+    // Ask the watch what actually happened, before the figures are frozen.
+    //
+    // This is the moment that matters: `finish` is what the log keeps, and the
+    // tick-counted breakdown behind it is only ever as complete as the time the
+    // screen spent being looked at. The rebuild replaces it with the samples
+    // the watch took throughout — including every minute the phone was in a
+    // pocket, which is most of a ride.
+    //
+    // Deliberately NOT awaited. The finish screen appears now, as it always
+    // has, and the zone rows fill in a moment later when the read returns; the
+    // save happens from that screen and not from here. Blocking the button on a
+    // HealthKit round trip would make finishing a session feel broken to buy an
+    // accuracy the member cannot see yet.
+    void rebuildZonesFromWatch();
     setFinalElapsed(elapsed);
     // The watch's calorie delta across the session is a real measurement, so it
     // seeds the field instead of the MET estimate — which is only ever a stand-in
@@ -3636,7 +3701,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // has had Back, Pause and Skip since it was written; this is that same row,
   // not a second idea about the same problem.
   const [paused, setPaused] = useState(false);
-  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone } = useLiveVitals(age, restingKcalPerMin, paused);
+  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin, paused);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [idx, setIdx] = useState(0);
   // `bw` marks a set the member did with their own body; `kg` is then what
@@ -4246,6 +4311,11 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
     // transition it would now also make a noise at somebody who is already
     // reading their results.
     startRest(0);
+    // The same rebuild the timed runner does, for the same reason: a lifting
+    // session spends most of itself with the phone down between sets, so the
+    // banked breakdown is the smaller half of what the watch recorded. Not
+    // awaited — the finish screen is immediate and the rows settle behind it.
+    void rebuildZonesFromWatch();
     const entries = buildEntries();
     setFinalElapsed(elapsed);
     setPendingEntries(entries);

@@ -25,7 +25,7 @@
 import {
   ZONES, ZONE_NOS, ASSUMED_AGE, maxHr, hrScaleBasis, hrScaleNote, zoneOf, zoneBands,
   zoneDef, zoneName, splatPoints, emptyZoneSeconds, zoneSecondsTotal, timeInZones,
-  uncountedSeconds, UNCOUNTED_FLOOR_SEC,
+  uncountedSeconds, UNCOUNTED_FLOOR_SEC, zonesFromSamples, MAX_SAMPLE_GAP_SEC,
   hrStats, hrZoneLabel, hrZoneNo, ageFromDob,
 } from './hr';
 
@@ -205,6 +205,68 @@ eq(uncountedSeconds(empty, Number.NaN), 0, 'and an unreadable clock is not a gap
 // A session on screen the whole time with no heart rate arriving reads the same
 // way to a member, and should: this much of it was not measured.
 eq(uncountedSeconds(empty, 900), 900, 'no readings at all is the whole session uncounted');
+
+/* ── 6. the breakdown rebuilt from the watch's own samples ────────────────── */
+//
+// The case this exists for: the ride was 46 minutes, the phone was in a pocket
+// for most of it, and the timer banked 12:56. The watch recorded throughout.
+const T0 = '2026-09-09T08:00:00.000Z';
+const at = (sec: number, bpm: number) => ({ t: new Date(Date.parse(T0) + sec * 1000).toISOString(), bpm });
+
+{
+  // Ten minutes of samples every 30s at a zone-3 heart rate for a 44-year-old
+  // (max 176; zone 3 is 0.70–0.80 → 124–140).
+  const pts = [];
+  for (let sec = 0; sec <= 600; sec += 30) pts.push(at(sec, 132));
+  const z = zonesFromSamples(pts, 44, T0, new Date(Date.parse(T0) + 600 * 1000).toISOString());
+  ok(z != null, 'a real series rebuilds');
+  eq(z && z.z3, 600, 'and every second of the window lands in the zone the watch was in');
+  eq(z && zoneSecondsTotal(z), 600, 'with nothing credited anywhere else');
+}
+
+// The last sample runs to the END OF THE SESSION, not to a flat ten seconds.
+// This is the whole difference from timeInZones, and it is worth a case of its
+// own: a member whose watch reported once a minute would otherwise lose almost
+// every minute of their ride.
+{
+  const z = zonesFromSamples([at(0, 132), at(60, 132)], 44, T0, new Date(Date.parse(T0) + 120 * 1000).toISOString());
+  eq(z && z.z3, 120, 'the final sample is credited to the end of the window');
+}
+
+// A GAP is not credited to anybody. The watch came off for ten minutes; that
+// time is missing from the breakdown, and uncountedSeconds is what reports it.
+{
+  const end = new Date(Date.parse(T0) + 1200 * 1000).toISOString();
+  const z = zonesFromSamples([at(0, 132), at(60, 132), at(660, 132), at(720, 132)], 44, T0, end);
+  ok(z != null, 'a series with a hole still rebuilds from what it has');
+  ok(z != null && zoneSecondsTotal(z) < 1200, 'and does not fill the hole in');
+  ok(z != null && uncountedSeconds(z, 1200) > 500, 'the hole is reported as uncounted instead');
+}
+
+ok(MAX_SAMPLE_GAP_SEC > 60, 'the cap is generous enough for a watch reporting once a minute');
+
+// Samples outside the window belong to something else — the walk before, the
+// next session — and must not be counted into this one.
+{
+  const end = new Date(Date.parse(T0) + 120 * 1000).toISOString();
+  const z = zonesFromSamples([at(-600, 190), at(0, 132), at(60, 132), at(9000, 190)], 44, T0, end);
+  eq(z && z.z5, 0, 'a sample from before the session is not in it');
+  eq(z && zoneSecondsTotal(z), 120, 'and the total is the window, not the series');
+}
+
+// Nothing to rebuild from is null, NOT an empty breakdown — the caller has a
+// real tick-counted figure and must keep it rather than replace it with zeros.
+eq(zonesFromSamples([], 44, T0, '2026-09-09T08:10:00.000Z'), null, 'no samples rebuilds nothing');
+eq(zonesFromSamples([at(0, 132)], 44, T0, '2026-09-09T08:10:00.000Z'), null, 'one sample is an instant, not a duration');
+eq(zonesFromSamples([at(0, 132), at(60, 132)], 44, 'not a date', '2026-09-09T08:10:00.000Z'), null, 'an unreadable window rebuilds nothing');
+eq(zonesFromSamples([at(0, 132), at(60, 132)], 44, T0, T0), null, 'and a window of no length rebuilds nothing');
+
+// A reading of zero or a negative is a sensor artefact, not a heartbeat.
+{
+  const z = zonesFromSamples([at(0, 0), at(30, 132), at(60, -5), at(90, 132)], 44, T0, new Date(Date.parse(T0) + 120 * 1000).toISOString());
+  ok(z != null && z.z3 > 0, 'the real readings still count');
+  eq(z && zoneSecondsTotal(z), 90, 'and the artefacts contribute no time');
+}
 
 if (errors.length) {
   console.error(`hr.test.ts — ${errors.length} failure(s):`);

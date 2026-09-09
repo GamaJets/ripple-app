@@ -230,6 +230,61 @@ export function timeInZones(samples: HrSample[], age?: number | null): ZoneSecon
   return out;
 }
 
+/**
+ * The zone breakdown rebuilt from the WATCH's own samples, over a known window.
+ *
+ * `timeInZones` above is for a chart: it takes whatever series it is handed and
+ * assumes ten seconds for the last point, because a chart has no window and no
+ * stake in the total. This one is for the record. It is given the session's own
+ * start and end, so the last sample runs to the end of the session rather than
+ * to a flat guess, and nothing outside the window is credited to it.
+ *
+ * It exists because banking a second at a time cannot survive the phone leaving
+ * the screen — iOS stops delivering timers, and a 46-minute ride came back with
+ * 12:56 across the zones. The watch was recording the whole time; only our
+ * counting stopped. So the counting is thrown away and the measurement is used.
+ *
+ * A GAP IS NOT CREDITED. Where consecutive samples are more than
+ * `MAX_SAMPLE_GAP_SEC` apart the watch was not reporting — taken off, between
+ * workouts, out of range — and the zone it was in is not a fact anybody has.
+ * Those seconds fall out of the total and `uncountedSeconds` reports them,
+ * which is the same answer this file gives everywhere else: say what was
+ * measured, and say plainly how much was not.
+ *
+ * Returns null rather than an empty breakdown when there is nothing to rebuild
+ * from, so a caller can keep what it already had instead of replacing a real
+ * count with zeros. One sample is also null: a single reading says what the
+ * heart was doing at one instant and nothing about how long it did it.
+ */
+export const MAX_SAMPLE_GAP_SEC = 120;
+
+export function zonesFromSamples(
+  samples: HrSample[], age: number | null | undefined, startISO: string, endISO: string,
+): ZoneSeconds | null {
+  const t0 = Date.parse(startISO); const t1 = Date.parse(endISO);
+  if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return null;
+
+  const pts = samples
+    .map((s) => ({ ms: Date.parse(s.t), bpm: s.bpm }))
+    .filter((s) => Number.isFinite(s.ms) && Number.isFinite(s.bpm) && s.bpm > 0)
+    .filter((s) => s.ms >= t0 && s.ms <= t1)
+    .sort((a, b) => a.ms - b.ms);
+  if (pts.length < 2) return null;
+
+  const out = emptyZoneSeconds();
+  for (let i = 0; i < pts.length; i++) {
+    const until = i + 1 < pts.length ? pts[i + 1].ms : t1;
+    const dt = (until - pts[i].ms) / 1000;
+    if (!Number.isFinite(dt) || dt <= 0) continue;
+    // Beyond the cap the watch was not reporting, and what it was not
+    // reporting is not something to file under a zone.
+    if (dt > MAX_SAMPLE_GAP_SEC) continue;
+    out[KEY[zoneOf(pts[i].bpm, age)]] += dt;
+  }
+  for (const k of ['z1', 'z2', 'z3', 'z4', 'z5'] as const) out[k] = Math.round(out[k]);
+  return zoneSecondsTotal(out) > 0 ? out : null;
+}
+
 /** Low / high / average bpm across a series (null if empty). */
 export function hrStats(samples: HrSample[]): { low: number; high: number; avg: number } | null {
   const v = samples.map((s) => s.bpm).filter((n) => typeof n === 'number' && isFinite(n) && n > 0);

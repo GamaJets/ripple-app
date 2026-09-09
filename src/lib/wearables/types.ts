@@ -123,8 +123,20 @@ export interface WearableProvider {
   fetchToday(): Promise<DailyMetrics | null>;
   /** Pull recent completed workouts for import into the training log. Optional — not every provider supports it. */
   fetchWorkouts?(sinceDays?: number): Promise<WorkoutSample[]>;
-  /** Heart-rate samples between two ISO timestamps (for the zone chart). Optional. */
+  /** Heart-rate samples between two ISO timestamps, DOWNSAMPLED for drawing.
+   *  Optional. For a chart this is what you want; for arithmetic it is not —
+   *  see `fetchHeartRateSamples`. */
   fetchHeartRateSeries?(startISO: string, endISO: string): Promise<HrPoint[]>;
+  /**
+   * The same window at FULL RESOLUTION, for rebuilding a zone breakdown.
+   *
+   * Separate from `fetchHeartRateSeries` because that one thins the series to
+   * keep an SVG light, and thinning is fatal to this arithmetic: it keeps every
+   * Nth sample, so a short burst into zone 4 is dropped entirely — and a splat
+   * point is a minute at zone 4 or above. A chart that loses a spike looks
+   * almost the same; a breakdown that loses it is wrong about the session.
+   */
+  fetchHeartRateSamples?(startISO: string, endISO: string): Promise<HrPoint[]>;
   /**
    * Recent nights of sleep. Optional, and it returns a SleepRead rather than a
    * bare list precisely so that "this device recorded nothing" and "we could

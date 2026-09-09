@@ -548,9 +548,13 @@ export const appleHealth: WearableProvider = {
     return { provider: 'apple', status: 'ready', readings };
   },
 
-  // Heart-rate samples in a window (a workout session, or a whole day) for the
-  // zone chart. Downsamples to <=180 points so the SVG stays light.
-  async fetchHeartRateSeries(startISO: string, endISO: string): Promise<HrPoint[]> {
+  // Every heart-rate sample the watch recorded in a window, in full.
+  //
+  // This is the read; `fetchHeartRateSeries` below is the same read thinned for
+  // drawing. They are separate because thinning is fine for a line and wrong
+  // for a total: it keeps every Nth sample, so thirty seconds spent in zone 4
+  // can vanish, and a splat point is a minute at zone 4 or above.
+  async fetchHeartRateSamples(startISO: string, endISO: string): Promise<HrPoint[]> {
     if (!nativePresent()) return [];
     const res = await read('getHeartRateSamples', { startDate: startISO, endDate: endISO, limit: 10000, ascending: true });
     if (!Array.isArray(res)) return [];
@@ -561,6 +565,14 @@ export const appleHealth: WearableProvider = {
       if (isFinite(bpm) && bpm > 0 && t) raw.push({ t: new Date(t).toISOString(), bpm: Math.round(bpm) });
     }
     raw.sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+    return raw;
+  },
+
+  // The same window for the zone chart. Downsamples to <=180 points so the SVG
+  // stays light — see the note above on why that shape must not be used for
+  // arithmetic.
+  async fetchHeartRateSeries(startISO: string, endISO: string): Promise<HrPoint[]> {
+    const raw = await this.fetchHeartRateSamples!(startISO, endISO);
     const MAX = 180;
     if (raw.length <= MAX) return raw;
     const step = Math.ceil(raw.length / MAX);
