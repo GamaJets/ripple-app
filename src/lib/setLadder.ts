@@ -240,6 +240,9 @@ export function ladderNote(rows: LadderRow[]): string | null {
     return `Nothing ticked yet. Tick each set as you finish it — ${total === 1 ? 'the set' : 'a set'} that is not ticked is not saved.`;
   }
   const left = total - done;
+  // numbers-ok: `total` is `rows.length` — the set rows on ONE exercise the
+  // member is working through right now. It is bounded by what a person can
+  // physically do in a session, which is not four digits.
   return `${done} of ${total} sets ticked. The other ${left === 1 ? 'one is' : `${left} are`} not saved.`;
 }
 

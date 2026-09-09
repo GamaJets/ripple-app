@@ -746,7 +746,22 @@ export function summariseFollowUps(list: FollowUpRead[] | null): FollowUpTally |
 /** The sentence above the tally, or null when nothing has been tried at all. */
 export function loopHeadline(t: FollowUpTally | null): string | null {
   if (t == null || t.total === 0) return null;
+  // ── why these counts are not grouped ──────────────────────────────────────
+  //
+  // `t.total` is every follow-up contact a gym has recorded in the read window,
+  // and a chain working its retention list passes a thousand — so this WOULD be
+  // a defect anywhere else. It is not fixable here.
+  //
+  // studio-web/app/retention/page.tsx renders this sentence through `@lib/*`,
+  // and `num()` in src/lib/format.ts latches `appLocale()`, which Next.js
+  // resolves on the server during render and again in the browser during
+  // hydration. src/lib/consoleSearch.ts carries the full argument and the shape
+  // of the eventual fix — the caller passing in its own spelling function,
+  // which is a console-side change.
+  //
+  // numbers-ok: console-shared module — no reader whose locale could be asked.
   if (t.judged === 0) {
+    // numbers-ok: as above, a console-shared module has no locale to spell in.
     return `${t.total} contact${t.total === 1 ? '' : 's'} recorded, none of them old enough or backed by enough history to say what followed. That is the honest state of a loop that has just started, not a result.`;
   }
   const parts = [
@@ -755,6 +770,7 @@ export function loopHeadline(t: FollowUpTally | null): string | null {
     `${t.keptFalling} by a further fall`,
   ];
   const waiting = t.tooEarly + t.noBaseline + t.recontacted + t.outsideTheRead + t.unreadable;
+  // numbers-ok: as above, a console-shared module has no locale to spell in.
   let out = `Of ${t.total} contact${t.total === 1 ? '' : 's'}, ${t.judged} can be looked at: ${parts.join(', ')}.`;
   if (waiting) out += ` The other ${waiting} cannot be judged yet.`;
   return out;

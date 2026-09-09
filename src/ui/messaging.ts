@@ -57,8 +57,9 @@ import { classifyWrite } from '../lib/offlineQueue';
 import { useOutbox } from './outbox';
 import { resolvePeerName, type PeerName } from '../lib/threadPeer';
 import { resolvePeerAvatar } from '../lib/peerAvatar';
+import { currentReach } from '../lib/reachability';
 import {
-  blockStateOf, looksLikeThreadRefusal, REPORT_FAILED_NOTE, SEND_REFUSED_NOTE,
+  blockStateOf, looksLikeThreadRefusal, reportFailedNote, SEND_REFUSED_NOTE,
   type BlockRow, type BlockState, type ReportCategory,
 } from '../lib/threadSafety';
 import {
@@ -1527,12 +1528,19 @@ export function useThreadSafety(clientId: string | null, role: ChatRole): Thread
       });
       if (error || !data) {
         reportError('messaging.report', error ?? new Error('report_abuse returned no id'));
-        return { id: null, error: REPORT_FAILED_NOTE };
+        // `currentReach()` rather than `useReachability()`, and read HERE
+        // rather than at the top of the hook. `observedFetch` files the verdict
+        // for this very RPC before supabase-js hands the error back, so this is
+        // the freshest reading there is — and the sentence is produced once and
+        // carried in `error`, so there is nothing for a hook to re-render.
+        // Subscribing every consumer of `useThreadSafety` to reachability would
+        // re-render a chat screen on a fact it never draws.
+        return { id: null, error: reportFailedNote(currentReach()) };
       }
       return { id: String(data), error: null };
     } catch (e) {
       reportError('messaging.report', e);
-      return { id: null, error: REPORT_FAILED_NOTE };
+      return { id: null, error: reportFailedNote(currentReach()) };
     }
   };
 

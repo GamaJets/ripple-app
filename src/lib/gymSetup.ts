@@ -360,8 +360,17 @@ export function setupLine(items: readonly SetupItem[]): string | null {
   if (t.todo === 0 && t.unknown === 0) return null;
   // "All six are set" is never said while anything is unknown, because it
   // would be a claim about the two settings nobody managed to read.
+  // numbers-ok: `t.total` is `items.length` — the fixed setup checklist a gym
+  // works through once, six entries long. Not "it is small today": there is no
+  // reachable state in which a gym has a thousand settings to switch on. It is
+  // also the count the sentence above says "All six are set" about. (This
+  // module is console-shared as well — studio-web/app/page.tsx renders it — so
+  // a latched `appLocale()` would be a hydration hazard on top; see
+  // src/lib/consoleSearch.ts for that argument written out in full.)
   const head = t.todo === 0
+    // numbers-ok: as above — a fixed six-entry checklist.
     ? `${t.done} of ${t.total} set`
+    // numbers-ok: as above — a fixed six-entry checklist.
     : `${t.done} of ${t.total} set, ${t.todo} still to do`;
   if (t.unknown === 0) return `${head}.`;
   const tail = t.unknown === 1

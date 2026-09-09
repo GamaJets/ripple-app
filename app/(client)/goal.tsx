@@ -43,6 +43,8 @@ import { useNow } from '../../src/ui/today';
 // exactly like a stored one, could not be removed or ticked off, and both
 // refusals blamed the member's connection.
 import { isPending } from '../../src/lib/wellnessSync';
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   progressOf, projectionOf, goalLabel, isMeasured, isOverdue, sortGoals,
@@ -136,6 +138,7 @@ export default function Goal() {
   // same as every series they are measured against, so this only ever touches
   // what is printed and what comes back out of the entry field (TF-37).
   const wu = useSettings().weightUnit;
+  const reach = useReachability();
 
   const [kind, setKind] = useState<GoalKind>('weight');
   const [amount, setAmount] = useState('');
@@ -273,7 +276,16 @@ export default function Goal() {
     if (!ok) {
       // Saying "saved" for a write that did not land is how a goal disappears
       // overnight and the client assumes they never set it.
-      Alert.alert('Not saved', 'Your goal could not be saved just now, so it isn’t stored. Check your connection and try again.');
+      //
+      // The second half used to be "Check your connection and try again"
+      // whatever had happened, and on this screen that sentence is wrong more
+      // often than anywhere else it was printed: `setMeasuredGoal` QUEUES the
+      // request that nobody answered, so a false here is very largely the
+      // server having read the goal and refused it — an RLS check, a CHECK
+      // constraint, a row that is not theirs — and offering the same bytes
+      // again gets the same answer. `retryLine` says which of the two it was;
+      // see src/lib/reachability.ts.
+      Alert.alert('Not saved', `Your goal could not be saved just now, so it isn’t stored. ${retryLine(reach)}`);
       return;
     }
     setAmount(''); setTitle('');

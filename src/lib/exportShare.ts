@@ -28,6 +28,13 @@ import { minorFromWhole } from './coachMoney';
 // The client's unit reaches these builders as an argument. Nothing here reads a
 // provider, so a report can be built for whoever's row is in hand.
 import { weightIn, convertedNote, plainExact, type WeightUnit } from './units';
+// Every figure in a shared document is read by a person and re-parsed by
+// nobody — a PDF, a share-sheet body, an email. `num` is the reader's own
+// grouping. Nothing in this file is reachable from supabase/functions or from
+// studio-web, so `appLocale()` here is genuinely the locale of whoever pressed
+// share; see the header of scripts/check-numbers.mjs for the two trees where
+// that is not true.
+import { num } from './format';
 
 // ── Why the file share degraded, and what it took to stop it ────────────────
 //
@@ -331,10 +338,14 @@ export function mealPlanDoc(name: string, targetKcal: number, meals: PlanMealRow
   const rows = meals.map((m) => `<tr><td><b>${esc(m.slot)}</b><br><span style="color:#64748b">${esc(m.name)}</span></td><td class="r">${m.K}</td><td class="r">${m.P}g</td><td class="r">${m.C}g</td><td class="r">${m.F}g</td></tr>`).join('');
   const totK = meals.reduce((a, m) => a + m.K, 0), totP = meals.reduce((a, m) => a + m.P, 0), totC = meals.reduce((a, m) => a + m.C, 0), totF = meals.reduce((a, m) => a + m.F, 0);
   const avoidLine = avoid.length ? `<p style="color:#64748b;font-size:13px;margin-top:10px">Excludes: ${esc(avoid.join(', '))}</p>` : '';
-  const body = `<h2 style="margin-top:20px">${esc(first)}'s meal plan</h2><p style="color:#64748b;margin:0">Daily target ~${targetKcal.toLocaleString()} kcal</p>${avoidLine}
+  const body = `<h2 style="margin-top:20px">${esc(first)}'s meal plan</h2><p style="color:#64748b;margin:0">Daily target ~${num(targetKcal)} kcal</p>${avoidLine}
     <table><tr><th>Meal</th><th class="r">Kcal</th><th class="r">P</th><th class="r">C</th><th class="r">F</th></tr>
     ${rows}<tr class="tot"><td>Total</td><td class="r">${totK}</td><td class="r">${totP}g</td><td class="r">${totC}g</td><td class="r">${totF}g</td></tr></table>`;
-  const text = `${first}'s meal plan (${brand}) — target ~${targetKcal} kcal\n` +
+  // The HTML above and this line are the same figure in two formats, and they
+  // were spelled two different ways: `toLocaleString` in the document and raw
+  // in the text. A 2,400 kcal target read "2,400 kcal" in the PDF a member
+  // opened and "2400 kcal" in the message body it was attached to.
+  const text = `${first}'s meal plan (${brand}) — target ~${num(targetKcal)} kcal\n` +
     meals.map((m) => `• ${m.slot}: ${m.name} — ${m.K} kcal (P${m.P}/C${m.C}/F${m.F})`).join('\n') +
     `\nTotal: ${totK} kcal · P${totP} C${totC} F${totF}` + (avoid.length ? `\nExcludes: ${avoid.join(', ')}` : '');
   return { html: page('Meal Plan', body, brand, accent), text };
@@ -492,7 +503,11 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
     : 'The value of those sessions is blank because this gym has not set its currency, and an amount with no currency is not a figure.';
 
   const mRows = metrics.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${esc(v)}</td></tr>`).join('');
-  const cRows = d.cohorts.map((c) => `<tr><td>${esc(c.label)}</td><td class="r">${c.active}/${c.total}</td><td class="r">${c.pct}%</td></tr>`).join('');
+  // A cohort on a PLATFORM report is every account that signed up in one month
+  // across every gym on Repple, not one coach's book — four digits is the
+  // ordinary case rather than the far end of it. Both halves of the ratio are
+  // grouped: "1,204/2,500" and "1204/2,500" is worse than either spelling.
+  const cRows = d.cohorts.map((c) => `<tr><td>${esc(c.label)}</td><td class="r">${num(c.active)}/${num(c.total)}</td><td class="r">${c.pct}%</td></tr>`).join('');
   const body = `
     <table><thead><tr><th>Metric</th><th class="r">Value</th></tr></thead><tbody>${mRows}</tbody></table>
     ${valueNote ? `<p style="color:#94a3b8;margin:6px 0 0;font-size:12px">${esc(valueNote)}</p>` : ''}
@@ -501,6 +516,6 @@ export function ownerReportDoc(d: OwnerReportData, brand = 'Repple'): { html: st
   const text = `${brand} — Platform report (${d.generatedOn})\n` +
     metrics.map(([k, v]) => `${k}: ${v}`).join('\n') +
     (valueNote ? `\n\n${valueNote}` : '') +
-    (d.cohorts.length ? '\n\nCohort retention:\n' + d.cohorts.map((c) => `${c.label}: ${c.active}/${c.total} (${c.pct}%)`).join('\n') : '');
+    (d.cohorts.length ? '\n\nCohort retention:\n' + d.cohorts.map((c) => `${c.label}: ${num(c.active)}/${num(c.total)} (${c.pct}%)`).join('\n') : '');
   return { html, text };
 }

@@ -22,6 +22,12 @@ import { resetPasswordUrl } from '../lib/deepLink';
 import { reportError } from '../lib/reportError';
 import { writeFailure } from '../lib/wroteRows';
 import { phoneAuthError, digitsOnly } from '../lib/phone';
+// Read at the moment of the failure, not at the last render — `observedFetch`
+// (src/lib/supabase.ts) files the verdict for the very request that just failed
+// before supabase-js hands the error back here, so this is the freshest answer
+// there is. A hook would only be needed to re-render, and none of these
+// sentences is re-rendered: each is produced once and carried in `reason`.
+import { currentReach } from '../lib/reachability';
 import { emailCodeError, emailResendError, type OtpOutcome } from './emailOtp';
 import { checkTenantBrand, stampTenantBrand, signUpWithBrand, brandSignUpMetadata } from '../lib/tenantBrand';
 import { clearPersonalDeviceState } from './signOutState';
@@ -284,11 +290,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) return { ok: false, reason: `Not connected to ${BRAND.label}, so no code was sent.` };
     try {
       const { error } = await supabase.auth.signInWithOtp({ phone: e164, options: { shouldCreateUser: true, data: { ...brandSignUpMetadata(), role: VARIANT } } });
-      if (error) { reportError('auth.sendPhoneCode', error); return { ok: false, reason: phoneAuthError(error.message) }; }
+      if (error) { reportError('auth.sendPhoneCode', error); return { ok: false, reason: phoneAuthError(error.message, { reach: currentReach(), step: 'send' }) }; }
       return { ok: true };
     } catch (e: any) {
       reportError('auth.sendPhoneCode', e);
-      return { ok: false, reason: phoneAuthError(e?.message) };
+      return { ok: false, reason: phoneAuthError(e?.message, { reach: currentReach(), step: 'send' }) };
     }
   };
 
@@ -303,7 +309,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!USE_SUPABASE) return { ok: false, reason: `Not connected to ${BRAND.label}, so the code could not be checked.` };
     try {
       const { data, error } = await supabase.auth.verifyOtp({ phone: e164, token: code, type: 'sms' });
-      if (error) return { ok: false, reason: phoneAuthError(error.message) };
+      if (error) return { ok: false, reason: phoneAuthError(error.message, { reach: currentReach(), step: 'check' }) };
       if (!data?.session) {
         // verifyOtp resolving without a session is not success. Saying "signed
         // in" here would drop somebody into an app with no session behind it.
@@ -379,7 +385,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (refused) return { ok: false, reason: refused };
       return { ok: true };
     } catch (e: any) {
-      return { ok: false, reason: phoneAuthError(e?.message) };
+      return { ok: false, reason: phoneAuthError(e?.message, { reach: currentReach(), step: 'check' }) };
     }
   };
 

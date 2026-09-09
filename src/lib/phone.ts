@@ -18,6 +18,8 @@
 // on the way to E.164, and the display format puts it back, because a UAE
 // number shown as 50 767 1842 does not look like anyone's number to them.
 
+import { retryLine, type Reach } from './reachability';
+
 export interface Country {
   /** ISO 3166-1 alpha-2, used for the flag and as the stable key. */
   iso: string;
@@ -209,8 +211,28 @@ export function isCompleteOtp(code: string): boolean {
  * The generic ones matter here: an SMS that does not arrive is the single most
  * common support message any OTP flow gets, and "Invalid login credentials"
  * tells somebody nothing about what to do next.
+ *
+ * ── `opts`, and why the reach comes IN rather than being read here ─────────
+ *
+ * This file's header claims it is pure so the rules can be asserted on without
+ * a device or a network, and that claim is worth keeping: `currentReach()` is a
+ * module singleton that changes under a test's feet. So the caller — which is
+ * src/ui/auth.tsx, in the catch, one line after the request that filed the
+ * verdict through `observedFetch` — reads it and passes it in.
+ *
+ * `reach` defaults to 'unknown', and `retryLine('unknown')` is the sentence
+ * this function printed unconditionally before: a caller who says nothing gets
+ * exactly what it used to say, and claims nothing it cannot support.
+ *
+ * `step` exists because the last line is shared by two operations that fail
+ * differently. It said "The code could not be sent" for BOTH — so a code that
+ * was typed in and could not be CHECKED told somebody no code had gone out,
+ * and sent them back to ask for another one they did not need.
  */
-export function phoneAuthError(raw: string | null | undefined): string {
+export function phoneAuthError(
+  raw: string | null | undefined,
+  opts: { reach?: Reach; step?: 'send' | 'check' } = {},
+): string {
   const m = (raw || '').toLowerCase();
   if (m.includes('token has expired') || m.includes('expired')) {
     return 'That code has expired. Ask for a new one.';
@@ -227,5 +249,11 @@ export function phoneAuthError(raw: string | null | undefined): string {
   if (m.includes('signups not allowed') || m.includes('phone_provider_disabled')) {
     return 'Signing in by phone is not switched on yet. Use your email and password for now.';
   }
-  return raw?.trim() || 'The code could not be sent. Check your connection and try again.';
+  // Nothing recognised and nothing said. `retryLine` is then the whole of what
+  // is knowable — and it is the reason "Check your connection and try again"
+  // is no longer printed here regardless of what happened. See
+  // src/lib/reachability.ts.
+  if (raw?.trim()) return raw.trim();
+  const head = opts.step === 'check' ? 'That code could not be checked.' : 'No code was sent.';
+  return `${head} ${retryLine(opts.reach ?? 'unknown')}`;
 }

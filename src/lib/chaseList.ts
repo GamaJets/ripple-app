@@ -226,8 +226,13 @@ export function chaseMessage(group: ChaseGroup | null | undefined, from: string 
   // on the line above it and repeating it reads as a second charge.
   if (group.invoices.length > 1) {
     for (const pot of group.pots) {
-      const total = minorMoney(pot.minorUnits, pot.currency);
-      if (total) lines.push(`Outstanding in ${pot.currency}: ${total}`);
+      // `owed`, not `total`: this is `minorMoney`'s output, a STRING already
+      // grouped in the currency's own places at the point it was built, and a
+      // name ending in Total reads as a bare figure that still wants a
+      // formatter. The same rename scripts/check-numbers.mjs records for
+      // `payrollMoney` in the console, for the same confusion.
+      const owed = minorMoney(pot.minorUnits, pot.currency);
+      if (owed) lines.push(`Outstanding in ${pot.currency}: ${owed}`);
     }
     if (group.pots.length) lines.push('');
   }

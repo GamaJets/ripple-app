@@ -198,6 +198,10 @@ export function packLabel(total: number | null, name: string | null | undefined)
   const n = (name || '').trim();
   if (n) return { label: n, named: true };
   if (total == null || !Number.isFinite(total)) return { label: 'Membership', named: false };
+  // numbers-ok: the size of ONE coaching pack — 5, 10, 20 — not a tally across
+  // a book. Exactly the distinction scripts/check-numbers.mjs already draws for
+  // `packTotal` and `sessions_total` in its SMALL list; the local here is called
+  // `total` because it is the row's own column name.
   return { label: `${total}-session pack`, named: false };
 }
 

@@ -360,6 +360,9 @@ function splitPtPasses(
       // The type's own name, or a description of the pass. Never a name this
       // code made up for a thing the gym named something else — the same rule
       // `packLabel` keeps for coach packs.
+      // numbers-ok: the size of ONE gym pass — a 10- or 20-visit book — not a
+      // tally. The same figure `sessions_total` and `usesTotal` are already
+      // listed for in scripts/check-numbers.mjs.
       label: (p.passTypeName || '').trim() || `${total}-session PT pass`,
       left: Math.max(0, Math.min(total, total - spent)),
       sessions_total: total,

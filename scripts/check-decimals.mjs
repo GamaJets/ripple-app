@@ -112,6 +112,34 @@
 // fractional yen. That is the argument that has to be settled before the
 // sibling is written, and it is why this is a description and not an
 // implementation.
+//
+// ── and why src/lib is NOT in ROOTS either, for a different reason ──────────
+//
+// The night check:numbers was widened to `src/lib` — because that is where the
+// report prose and notification bodies are built, and it was reading none of
+// them — this gate was asked the same question. The answer is no, and it is not
+// the studio-web answer above.
+//
+// This rule is a JSX attribute on a React Native `<TextInput>` element. `walk`
+// below takes `.tsx` files only, and src/lib holds 475 non-test `.ts` files and
+// ZERO `.tsx` files: it is the framework-free half of this codebase, the half
+// that returns sentences and conclusions to a screen and never renders one. The
+// three occurrences of `<TextInput` under src/lib are all inside comments —
+// units.ts explaining why `plain` may not group, because the string it produces
+// goes back into a text box.
+//
+// So adding it here buys nothing and costs the passing line its meaning. It
+// would cost more than that, in fact: `assertRootFloors` would refuse the run
+// outright, because src/lib's floor is 200 files and a `.tsx`-only walk of it
+// finds none. That is the guard working — a root that produces nothing is a
+// claim about a tree nobody opened — and it is the clearest possible statement
+// that this rule has no business there.
+//
+// The half of the decimal defect that DOES live in src/lib is the reader, not
+// the keyboard: `readNumber` in units.ts, which takes the comma an EU decimal
+// pad produces. That is asserted in src/lib/units.test.ts over every half
+// kilogram to 200 kg in both spellings, which is a better instrument than a
+// regex would be.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 

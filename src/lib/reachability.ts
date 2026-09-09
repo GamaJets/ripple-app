@@ -37,9 +37,10 @@
 // src/lib/offlineQueue.ts already draws the line between a write the server
 // REFUSED and a write nobody answered, because those get opposite treatment.
 // This file is the same line drawn one level up, for the sentence a person
-// reads. "Check your connection and try again" is printed on four client
-// screens today for both halves of it, and on the refusal half it is a lie
-// that sends somebody to their router when the server has just told them no.
+// reads. "Check your connection and try again" was printed for both halves of
+// it, and on the refusal half it is a lie that sends somebody to their router
+// when the server has just told them no. See `retryLine` below for where that
+// sentence still stands, and where it no longer does.
 
 /**
  * What we currently believe about reaching the backend.
@@ -158,11 +159,36 @@ export function probeDelayMs(failures: number): number {
 /**
  * The sentence to put in front of somebody whose write did not land.
  *
- * This is the whole point of the file. Today four client screens say "Check
- * your connection and try again" whatever happened, and one of the two things
- * that happened is the server having read the request and declined it — a full
- * class, a lapsed membership, a policy. Sending that person to their wifi
- * settings wastes their time and hides the actual answer.
+ * This is the whole point of the file. "Check your connection and try again"
+ * was said whatever had happened, and one of the two things that happened is
+ * the server having read the request and declined it — a full class, a lapsed
+ * membership, a policy. Sending that person to their wifi settings wastes
+ * their time and hides the actual answer.
+ *
+ * ── Where it has got to, counted rather than remembered ───────────────────
+ *
+ * This note used to say "four client screens", and it was stale in the
+ * direction that matters: TEN client screens carried the sentence, not four.
+ * All ten now call this — bookings, calendar, challenges, classes, goal,
+ * intake, settings, standing, trainers, workouts — and so do the shared pieces
+ * they are reached through: src/ui/DeliveryModeChoice.tsx, src/ui/waiver.tsx,
+ * src/ui/emailOtp.ts, src/lib/phone.ts and src/lib/threadSafety.ts (the last
+ * three are not components, so they take the reach as an argument or read
+ * `currentReach()`; each says which, and why, where it does it).
+ *
+ * ONE site reached from a client screen deliberately does NOT use this, and it
+ * is worth knowing about before the next reader "finishes the job": the catch
+ * in `respond`, src/ui/CoachRequests.tsx. Both sentences below assert that the
+ * write did not land — "nothing was sent", "nothing has changed" — and that
+ * catch spans three writes and cannot support either claim. It says what it
+ * knows instead. This function is for a write known not to have landed; it is
+ * not a general-purpose apology.
+ *
+ * WHAT IS LEFT, as of this edit: 32 sites, in 13 files, all of them staff
+ * screens — 17 across eight files in app/(trainer)/, 15 across five in
+ * app/(owner)/. No client screen and nothing in src/ still says it. A coach
+ * sent to their router over a refused payout, or an owner over a refused rota
+ * shift, is the same lie told to somebody who is at work.
  *
  * Returns a sentence and never null, because every caller here is already
  * committed to saying something. Sentence case, no value interpolated, so it

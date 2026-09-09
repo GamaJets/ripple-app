@@ -1050,6 +1050,35 @@ function hoursNote(x: {
   if (x.deliveredHours == null) {
     return 'No outcome is recorded against any of their one-to-ones, so no hours can be counted as delivered.';
   }
+  // ── the decimal separator in these two sentences, and why it stays a full
+  //    stop ─────────────────────────────────────────────────────────────────
+  //
+  // `classHours` and `unmarkedHours` are `round1(...)` — one decimal place — and
+  // they are printed here by `String`, so a German or French owner reads
+  // "2.5 class hours" where a full stop is their THOUSANDS separator. That is
+  // the same defect check:locale's second rule was written for, and a sweep
+  // widening check:numbers over src/lib went looking for it here on purpose.
+  //
+  // `plainExact` in src/lib/units.ts is the function that fixes it, and it may
+  // not be called from this file. It asks `decimalSeparator()`, which asks
+  // `appLocale()` — the module-level latch in src/lib/locale.ts — and THIS
+  // MODULE IS THE CONSOLE'S. Nothing under app/ or src/ui imports staffView;
+  // its only reader is studio-web/app/staff/page.tsx through `@lib/*`, where
+  // Next.js resolves that latch on the server during render and again in the
+  // browser during hydration, on two machines with two locales. It is the exact
+  // hydration error studio-web/lib/num.ts duplicated `num`, `num1`, `numUpTo`
+  // and `numPlain` rather than import, and that file already answers the
+  // "it has not happened yet" objection: /staff is 'use client' and loads in an
+  // effect, so no figure reaches the prerendered HTML — which is a property of
+  // that one call site and not of this module, and one `initialData` away from
+  // being untrue.
+  //
+  // The fix is a spelling function passed IN, so the console hands over its own
+  // `numPlain` and this file keeps no locale of its own — the same shape
+  // src/lib/consoleSearch.ts describes for its row counts. That is a change to
+  // `hoursNote`, to `staffRow` above it, and to the console page that calls it,
+  // and the console page is not this file's tree to edit. Written down here so
+  // the next sweep reaches for the injection rather than for `plainExact`.
   const missing: string[] = [];
   if (x.classHours != null && x.classHours > 0) {
     missing.push(`${x.classHours} class hour${s(x.classHours)} they are down to teach`);

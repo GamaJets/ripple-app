@@ -86,6 +86,34 @@ export const spellDigits = (n: number): string =>
   ({ 4: 'four', 5: 'five', 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine' } as Record<number, string>)[n]
   ?? String(n);
 
+// ── Why this file reads `currentReach()` and not `useReachability()` ───────
+//
+// The two generic fallbacks below used to end "Check your connection and try
+// again" — the sentence src/lib/reachability.ts exists to replace, because half
+// of what lands on them is the server having read the request and declined it.
+//
+// This is not a screen, so it cannot call `useReachability`. It does not need
+// to. The hook exists to RE-RENDER a component when the answer changes; these
+// functions are called once, in a catch, and produce a sentence that is stored
+// and shown as it stood at that moment. `currentReach()` is the same store read
+// imperatively, which is what src/lib/readRefresh.ts and src/ui/offlineFlush.tsx
+// already do from outside React.
+//
+// Reading it here is in fact the BETTER instrument, and the ordering is why:
+// `observedFetch` is installed on the Supabase client itself
+// (src/lib/supabase.ts), so the very request that produced this error has
+// already filed its own verdict — `noteThrown` on a transport failure,
+// `noteReached` on a 4xx, which is the server talking — before supabase-js
+// hands the error back to `src/ui/auth.tsx` and it reaches us. A hook value
+// captured at the last render would be older than that.
+//
+// And on the sign-in path specifically, where nobody is signed in: none of this
+// needs a session. The store is a module singleton, `ReachabilityProbe` is
+// mounted in app/_layout.tsx above every gate, and the probe deliberately
+// carries no key — see the note on `knock` in src/ui/reachability.tsx. So the
+// answer is as good here as anywhere in the app.
+import { currentReach, retryLine } from '../lib/reachability';
+
 interface Failure { code: string; message: string; status: number | null }
 
 /** Pull the three things worth branching on out of whatever was thrown. */
@@ -153,7 +181,11 @@ export function emailCodeError(e: unknown): string {
   if (f.code === 'user_banned') {
     return 'That account has been suspended. Contact your gym.';
   }
-  return verbatim(f, 'The code could not be checked. Check your connection and try again.');
+  // Reached only when the failure carries no code we know AND no words of its
+  // own, so there is nothing specific left to say about the code itself.
+  // `retryLine` is then the whole of what is knowable: whether this phone
+  // reached us at all.
+  return verbatim(f, `The code could not be checked. ${retryLine(currentReach())}`);
 }
 
 /**
@@ -191,5 +223,7 @@ export function emailResendError(e: unknown): string {
   if (f.code === 'user_banned') {
     return 'No code was sent — that account has been suspended. Contact your gym.';
   }
-  return verbatim(f, 'The code could not be sent. Check your connection and try again.');
+  // As above: no code, no message, so the only honest second half is the one
+  // that says whether the request left the phone.
+  return verbatim(f, `No code was sent. ${retryLine(currentReach())}`);
 }

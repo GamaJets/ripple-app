@@ -597,7 +597,16 @@ export function buildProblems(built: BuiltRoutine, minutes: number): string[] {
   if (built.problem) problems.push('there is a routine and a problem sentence, and only one of those can be true');
 
   const total = routineTotalSec(r);
+  // numbers-ok: this figure IS four digits — 1200 seconds for a twenty-minute
+  // routine — and it is still right raw, because nobody reads it. `buildProblems`
+  // is this module's own self-check: its only callers are the assertions in
+  // src/lib/stretchBuilder.test.ts, which expect an EMPTY list, and a non-empty
+  // one is a test failure message rather than a sentence on a screen. Grouping
+  // it would put a comma in a string that is compared, and would make the one
+  // reader of it — whoever is looking at a red test — read a formatted figure
+  // where they want the arithmetic.
   if (total > minutes * 60) {
+    // numbers-ok: as above — a test failure message, read by nobody else.
     problems.push(`the routine runs ${total}s against a budget of ${minutes * 60}s — somebody who said they had ${minutes} minutes is being kept ${total - minutes * 60}s longer`);
   }
   if (routineMinutes(r) < minutes && !built.shortfall) {

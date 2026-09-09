@@ -39,6 +39,8 @@ import {
   DELIVERY_OPTIONS, DELIVERY_LABEL, DELIVERY_NOTE, deliveryStatusLine,
 } from '../lib/coachDelivery';
 import type { CoachedMode } from '../lib/types';
+import { useReachability } from './reachability';
+import { retryLine } from '../lib/reachability';
 
 /**
  * Three rows, the current answer ticked, and one line saying what it set up.
@@ -51,6 +53,7 @@ export function DeliveryModeChoice({ onPicked }: { onPicked?: (mode: CoachedMode
   const { declared, status, setDelivery } = useCoachDelivery();
   const [busy, setBusy] = useState<CoachedMode | null>(null);
   const [failed, setFailed] = useState(false);
+  const reach = useReachability();
   // A null under a read that did not come back whole is NOT an answer, so
   // nothing is ticked. See the header.
   const chosen = isWhole(status) ? declared : null;
@@ -107,10 +110,18 @@ export function DeliveryModeChoice({ onPicked }: { onPicked?: (mode: CoachedMode
       </Text>
 
       {/* crit as text measures under 4.5:1 on several palettes, so the failure
-          goes in a 6pt dot beside ink2 rather than in the words. */}
+          goes in a 6pt dot beside ink2 rather than in the words.
+
+          The second half of the sentence used to be "Check your connection and
+          tap it again" whatever had happened. `setDelivery` awaits the server,
+          so half of what lands here is the server having READ the choice and
+          refused it — a policy, a role, a row that is not this coach's — and
+          sending them to their wifi settings over that hides the answer and
+          has them tapping a control that will refuse identically every time.
+          `retryLine` says which; see src/lib/reachability.ts. */}
       {failed ? (
         <Flag tone={t.crit} style={{ marginTop: sp.sm }}>
-          That did not save, so nothing has changed. Check your connection and tap it again.
+          That did not save, so nothing has changed. {retryLine(reach)}
         </Flag>
       ) : null}
     </View>

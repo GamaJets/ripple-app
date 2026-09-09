@@ -34,6 +34,10 @@
 //
 // Pure — no react, no supabase, no clock — so all of it is assertable.
 import type { PastState } from './sessionHistory';
+// The reader's own grouping. Safe here because this module is reachable only
+// from the phone app — see scripts/check-numbers.mjs for the two trees where a
+// latched `appLocale()` belongs to nobody.
+import { num } from './format';
 
 /** The minimum a row needs to be filtered. A subset of `PtSession`, so the
  *  screen's own rows satisfy it without conversion. */
@@ -161,7 +165,11 @@ export function filterLine(
   const by = narrowed.length === 1
     ? narrowed[0]
     : `${narrowed.slice(0, -1).join(', ')} and ${narrowed[narrowed.length - 1]}`;
-  return `Showing ${shown} of the ${total} read, narrowed by ${by}.`;
+  // `total` is every session read into the screen, not a page of them — a coach
+  // two years into a full book passes a thousand and the sentence is the one
+  // place that says how much is being hidden. Both halves grouped, because
+  // "Showing 48 of the 1204 read" spells the important figure worst.
+  return `Showing ${num(shown)} of the ${num(total)} read, narrowed by ${by}.`;
 }
 
 /**
@@ -180,7 +188,7 @@ export function emptyFilterLine(total: number, f: SessionFilter): string {
     // the one moment a coach is looking for an explanation.
     return 'Nothing to show.';
   }
-  return `None of the ${total} sessions read matches what you have narrowed to. `
+  return `None of the ${num(total)} sessions read matches what you have narrowed to. `
     + 'They have not gone anywhere — clear the filters to see them again.';
 }
 

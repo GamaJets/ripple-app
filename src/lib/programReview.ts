@@ -527,7 +527,11 @@ export function reviewProgram(input: ReviewInput): ProgramReview {
       const total = setCount(ex);
       findings.push({
         id: 'warmup-volume', day: d.day, week, exercises: [nameOf(ex.name)], volume: null,
+        // numbers-ok: `total` is `setCount(ex)` — the sets on ONE exercise in
+        // one session. Three, five, occasionally ten; a programme that put a
+        // thousand sets on one movement is a different finding entirely.
         detail: sentence(`${nameOf(ex.name)} on ${whereOf(d.day, week)} is named as a ${isWarm ? 'warm-up' : 'cool-down'} but `
+          // numbers-ok: as above — the sets on one exercise.
           + `${counted} of its ${total} sets are ordinary working sets, so they will count towards this client's `
           + 'training volume.'),
       });

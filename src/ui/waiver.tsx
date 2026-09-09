@@ -22,6 +22,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthRevision } from './authRevision';
 import { useAuth } from './auth';
 import { useRouter } from 'expo-router';
+import { useReachability } from './reachability';
+import { retryLine } from '../lib/reachability';
 import {
   WAIVER_CLAUSES, WAIVER_VERSION, bothGiven, waiverGate, waiverState,
   type WaiverRead, type WaiverState,
@@ -169,6 +171,7 @@ function WaiverScreen({ state, accept, reload, insets }: {
   insets: { top: number; bottom: number };
 }) {
   const t = useTheme();
+  const reach = useReachability();
   const [ticked, setTicked] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -181,7 +184,15 @@ function WaiverScreen({ state, accept, reload, insets }: {
     // The screen stays put on failure. Letting somebody through on a release
     // that was never recorded is the one outcome this whole gate exists to
     // prevent.
-    if (!r.ok) setErr(r.error || 'That did not save. Check your connection and try again.');
+    // The server's own words first, and this fallback only when `accept`
+    // resolved with none. The second half used to be "Check your connection and
+    // try again" whatever had happened; `accept` returns `ok: false` for a
+    // refusal it READ as well as for a request nobody answered — and an insert
+    // this gate's own policy declines will decline identically on every retry,
+    // so sending somebody to their wifi settings leaves them stuck in front of
+    // a gate they cannot pass with no idea why. `retryLine` says which; see
+    // src/lib/reachability.ts.
+    if (!r.ok) setErr(r.error || `That did not save, so nothing has been recorded and you have agreed to nothing. ${retryLine(reach)}`);
   };
 
   return (

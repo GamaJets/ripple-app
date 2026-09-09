@@ -8,7 +8,7 @@
 import {
   blockStateOf, canSendInto, blockedComposerNote, blockActionLabel,
   blockConfirm, unblockConfirm, looksLikeThreadRefusal, reportCategoryLabel,
-  reportFiledLine, REPORT_OPTIONS, REPORT_EXPLAINER, REPORT_FAILED_NOTE,
+  reportFiledLine, REPORT_OPTIONS, REPORT_EXPLAINER, reportFailedNote,
   SEND_REFUSED_NOTE, type BlockState, type ReportCategory,
 } from './threadSafety';
 
@@ -119,8 +119,27 @@ ok(!/Block them/.test(reportFiledLine('sexual', 'blocked-by-me')),
   'but does not nag somebody who already has');
 ok(/still blocked/.test(reportFiledLine('sexual', 'blocked-by-me')),
   'it confirms the block is still in force instead');
-ok(/not been filed|nothing has been filed/.test(REPORT_FAILED_NOTE),
-  'a failed report says plainly that nothing was recorded — somebody who believes one is filed stops looking for help');
+for (const r of ['unknown', 'online', 'offline'] as const) {
+  ok(/not been filed|nothing has been filed/.test(reportFailedNote(r)),
+    `${r}: a failed report says plainly that nothing was recorded — somebody who believes one is filed stops looking for help`);
+  ok(/email us/.test(reportFailedNote(r)),
+    `${r}: and the escalation is still there, last, after whatever the retry sentence says`);
+}
+
+/* The middle sentence, which is the whole of why this stopped being a const.
+ *
+ * `report_abuse` raises on every refusal, so half of what reaches this note is
+ * the server having read the report and declined it — and telling THAT person
+ * to check their connection sends them to their router instead of to the other
+ * way of getting help the last sentence offers. See src/lib/reachability.ts. */
+ok(!/check your connection/i.test(reportFailedNote('online')),
+  'a report the server read and refused does not blame the phone');
+ok(/did not accept/.test(reportFailedNote('online')),
+  'it says the server answered and declined, which is the fact that changes what they do next');
+ok(/signal/.test(reportFailedNote('offline')),
+  'a report that never left the phone says so, and says what to wait for');
+ok(/Check your connection and try again/.test(reportFailedNote('unknown')),
+  'and knowing nothing keeps the sentence that claims nothing — the one this note printed unconditionally before');
 
 /* ── every state has a sentence ────────────────────────────────────────── */
 //

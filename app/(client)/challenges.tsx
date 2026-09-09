@@ -50,6 +50,8 @@ import { notifySuccess } from '../../src/ui/haptics';
 // This sentence sits where the Join/Leave control was, at the trailing edge of
 // the row, so it follows the reading direction rather than a physical side.
 import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
 
 const EMPTY_BOARD: BoardResult = { rows: [], status: 'loading', message: null };
 
@@ -61,6 +63,7 @@ export default function Challenges() {
   // way to ask again was to leave and come back. Pull to refresh is the
   // gesture people already try; see src/ui/pullToRefresh.tsx.
   const pull = usePullToRefresh(useCallback(() => { ch.reload(); }, [ch]));
+  const reach = useReachability();
   const [open, setOpen] = useState<ChallengeRow | null>(null);
   const [board, setBoard] = useState<BoardResult>(EMPTY_BOARD);
   // What went wrong with the last Join or Leave. A write that silently did not
@@ -99,10 +102,25 @@ export default function Challenges() {
     return () => { boardRun.current += 1; };
   }, [open, loadBoard]);
 
+  // Both halves of both sentences used to be the same seven words — "That did
+  // not save. Check your connection and try again." — for two opposite events.
+  //
+  // The first half now names which way round it is. `join` and `leave` both
+  // check the rows PostgREST returns, so a false is either a refusal the server
+  // read (the challenge closed, a cohort the client is not in, a row already
+  // gone) or a request nobody answered; the screen's Join/Leave control is
+  // drawn from `c.joined`, which has not moved either way, so the member is
+  // looking at a control that still says what it said before the tap and needs
+  // telling which of those two it is.
+  //
+  // The second half is `retryLine` — src/lib/reachability.ts — for the reason
+  // it exists: sending somebody to their router over a refusal the server made
+  // hides the answer. app/(client)/bookings.tsx and app/(client)/classes.tsx
+  // replaced this exact sentence with it first.
   const doJoin = async (c: ChallengeRow) => {
     setNotice(null);
     const okJoin = await ch.join(c.id);
-    if (!okJoin) { setNotice('That did not save. Check your connection and try again.'); return; }
+    if (!okJoin) { setNotice(`You are not on ${c.title} — that did not save, so nothing has changed. ${retryLine(reach)}`); return; }
     notifySuccess();
     if (open && open.id === c.id) loadBoard(c.id);
   };
@@ -110,7 +128,7 @@ export default function Challenges() {
   const doLeave = async (c: ChallengeRow) => {
     setNotice(null);
     const okLeave = await ch.leave(c.id);
-    if (!okLeave) { setNotice('That did not save. Check your connection and try again.'); return; }
+    if (!okLeave) { setNotice(`You are still on ${c.title} — that did not save, so nothing has changed. ${retryLine(reach)}`); return; }
     if (open && open.id === c.id) setOpen(null);
   };
 

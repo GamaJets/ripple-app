@@ -173,6 +173,8 @@ import { distanceUnitFor, distanceUnitName, type DistanceUnit } from '../../src/
 import { WEEK_DAYS, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 import { BACK_ICON, FORWARD_ARROW, FORWARD_ICON, turn } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
 
 /** The day strip and the month sheet's column heads, in the order
  *  src/lib/weekStart.ts draws a week. Both are on this screen, and before this
@@ -5166,6 +5168,7 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
   t: Theme; unit: WeightUnit; entry: WorkoutEntry; suggestions: string[];
   onClose: () => void; onSave: (patch: Partial<WorkoutEntry>) => Promise<boolean>;
 }) {
+  const reach = useReachability();
   const [name, setName] = useState(entry.exercise);
   // Reps and load as TEXT, in the member's unit, converted once on the way in
   // and once on the way out.
@@ -5257,7 +5260,17 @@ function EditEntrySheet({ t, unit, entry, suggestions, onClose, onSave }: {
     // left the log untouched, so closing here would both throw the correction
     // away and imply it had been taken.
     if (!saved) {
-      Alert.alert('Not saved', 'Your correction did not reach the server, so this entry still reads as it did — on this phone as well. Check your connection and save again.');
+      // The second half used to be "Check your connection and save again"
+      // whatever had happened, which `retryLine` replaces — see
+      // src/lib/reachability.ts.
+      //
+      // The first half moved one word with it, and had to. It said the
+      // correction "did not reach the server", which is only one of the two
+      // things that can be true here and flatly contradicts the sentence
+      // `retryLine` appends when the server DID read it and refuse. "did not
+      // reach your record" is true either way, and is the thing the member
+      // cares about: what their log now says.
+      Alert.alert('Not saved', `Your correction did not reach your record, so this entry still reads as it did — on this phone as well. ${retryLine(reach)}`);
     }
   };
 

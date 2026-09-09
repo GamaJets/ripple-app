@@ -103,6 +103,8 @@ import { readSessionFee, sessionFeeAmount, sessionFeeShort, sessionFeeNote, type
 import { avatarSource } from '../../src/lib/avatarImage';
 import { useToday, useNow } from '../../src/ui/today';
 import { BACK_ICON, END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
+import { useReachability } from '../../src/ui/reachability';
+import { retryLine } from '../../src/lib/reachability';
 
 // `n.split(' ').map((x) => x[0]).join('')` is the obvious version and it is
 // the `String(null)` mistake in another costume: any run of two spaces yields
@@ -195,6 +197,7 @@ export default function FindTrainer() {
   const cd = useClientData();
   const { received, acceptInvite, declineInvite, reload: reloadInvites } = useInvites();
   const gym = useGymInvites();
+  const reach = useReachability();
   // Which one is mid-accept, so the button says so and no second tap can fire a
   // second redemption at the same row.
   const [acceptingGym, setAcceptingGym] = useState<string | null>(null);
@@ -651,6 +654,12 @@ export default function FindTrainer() {
 
   const request = useCallback(async (coach: Coach, mode: CoachedMode) => {
     setSel(null);
+    // Whether the row is on the server, read by the catch below. The `try` runs
+    // past the insert — a profile read and a push — so a throw after this point
+    // is a request that HAS been made, and telling that member their coach was
+    // never asked would send them to ask again and stack a second row against
+    // the unique index.
+    let stored = false;
     try {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth?.user?.id;
@@ -708,6 +717,7 @@ export default function FindTrainer() {
         return;
       }
 
+      stored = true;
       setSent((s) => ({ ...s, [coach.id]: true }));
       notifySuccess();
 
@@ -761,9 +771,28 @@ export default function FindTrainer() {
       );
     } catch (e) {
       reportError('findTrainer.request', e);
-      Alert.alert('Could not send request', 'Check your connection and try again.');
+      // The whole of this alert used to be "Check your connection and try
+      // again" — a sentence with no first half at all, so it did not say the
+      // one thing the member needed, which is whether the coach has been asked.
+      //
+      // It is now answered from `stored` rather than assumed, because both
+      // answers are reachable here: a throw before the insert means nothing was
+      // written, and a throw after it — the profile read, the push — means the
+      // request is sitting with the coach and only the notification failed.
+      // Telling the second member to try again is how a second row gets stacked
+      // against the unique index and comes back as "Already asked".
+      //
+      // `retryLine` is the second half where there is something to retry — it
+      // says whether the phone or the server is the reason, rather than sending
+      // somebody to their router over a refusal. See src/lib/reachability.ts.
+      Alert.alert(
+        stored ? 'Request sent, but not notified' : 'Could not send request',
+        stored
+          ? `${coach.name} has your ${COACHED_MODE_SHORT[mode].toLowerCase()} coaching request and will see it the next time they open their app — we couldn't reach their phone just now. Do not ask again: it is already with them.`
+          : `${coach.name} has not been asked and nothing has been sent anywhere. ${retryLine(reach)}`,
+      );
     }
-  }, []);
+  }, [reach]);
 
   /**
    * The tap. Asks first when there is a coach to lose.

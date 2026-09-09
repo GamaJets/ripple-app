@@ -37,6 +37,14 @@
 // import of ./supabase drags in AsyncStorage, which throws "window is not
 // defined" outside a React Native runtime.
 
+// The one thing this file imports at the top level. `num` is `toLocaleString`
+// at `appLocale()`, and it is safe HERE because nothing under supabase/functions
+// or studio-web can reach this module: an edge function has no reader whose
+// locale it could ask, and a latched locale under Next.js resolves on the
+// server during render and again in the browser. Both arguments are written out
+// in the header of scripts/check-numbers.mjs.
+import { num } from './format';
+
 /** What the server did. `ended: false` is a real answer, not a failure: the
  *  two were never linked, and nothing was written. */
 export type EndCoachingResult =
@@ -734,7 +742,11 @@ export function departureTally(rows: readonly EndedRelationship[] | null): Depar
  */
 export function departureLine(tally: DepartureTally | null, windowDays: number): string | null {
   if (tally == null || tally.total === 0) return null;
-  const people = `${tally.total} ${tally.total === 1 ? 'person has' : 'people have'} left your book in the last ${windowDays} days`;
+  // Every figure in this sentence goes through the same formatter, including
+  // the two that are bounded by the first. Grouping only the headline count is
+  // how the reported defect looked in the first place — "2,860 on the hero and
+  // 2860 four lines down", one paragraph, two spellings.
+  const people = `${num(tally.total)} ${tally.total === 1 ? 'person has' : 'people have'} left your book in the last ${windowDays} days`;
   // "in six months", not "in March". The deadline was written as a named month
   // and the sentence is read all year: seen on an iPhone 17 Pro on 4 September,
   // where a coach was told the answers "will not be in March" — a month six
@@ -746,7 +758,7 @@ export function departureLine(tally: DepartureTally | null, windowDays: number):
     return `${people}, and nothing is recorded about why any of them did. Every one of those answers is still gettable, and none of them will be in six months.`;
   }
   const top = tally.counts[0];
-  const lead = `${people}. The commonest reason recorded is ${END_REASON_LABEL[top.reason].toLowerCase()}, against ${top.n} of them.`;
+  const lead = `${people}. The commonest reason recorded is ${END_REASON_LABEL[top.reason].toLowerCase()}, against ${num(top.n)} of them.`;
   if (tally.unrecorded === 0) return lead;
-  return `${lead} ${tally.unrecorded} ${tally.unrecorded === 1 ? 'has' : 'have'} nothing recorded at all, which is not the same as ${END_REASON_LABEL.unsaid.toLowerCase()}.`;
+  return `${lead} ${num(tally.unrecorded)} ${tally.unrecorded === 1 ? 'has' : 'have'} nothing recorded at all, which is not the same as ${END_REASON_LABEL.unsaid.toLowerCase()}.`;
 }

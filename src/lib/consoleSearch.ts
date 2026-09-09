@@ -117,9 +117,35 @@ export function searchNote(
   if (!t.length) return null;
   const q = t.join(' ');
   if (total === 0) return null;
+  // ── why the three counts below are NOT grouped ────────────────────────────
+  //
+  // They should be. A members table on a club with four thousand people reads
+  // "the other 3952 do not match", and that is exactly what check:numbers is
+  // for. There is no formatter this module may call.
+  //
+  // This file is imported by nine studio-web pages through `@lib/*`, which
+  // resolves to `../src/lib/*`. `num()` in src/lib/format.ts spells through
+  // `appLocale()` — a module-level latch in src/lib/locale.ts, seeded once —
+  // and Next.js resolves that on the SERVER during render and again in the
+  // BROWSER during hydration, on two machines with two locales. That is the
+  // silent hydration error studio-web/lib/num.ts duplicated the whole formatter
+  // to avoid rather than import. Every page calling this is 'use client' and
+  // loads its rows in an effect, so nothing reaches the prerendered HTML today
+  // — which is a property of those call sites and not of this module, and is
+  // precisely the reasoning num.ts refused to lean on. The console's own `num`
+  // cannot be taken the other way either: src/lib may not depend on studio-web.
+  //
+  // The fix is for `searchNote` to be handed a spelling function by its caller,
+  // so the phone passes `num` and the console passes its own. That changes a
+  // signature nine console pages call, and the console is not this file's tree.
+  //
+  // numbers-ok: console-shared module — no reader whose locale could be asked.
   if (shown === 0) {
+    // numbers-ok: as above, a console-shared module has no locale to spell in.
     return `Nothing here matches “${q}”. That is this search box hiding ${total} ${total === 1 ? 'row' : 'rows'}, not an empty gym — clear it to see them again.`;
   }
+  // numbers-ok: as above, a console-shared module has no locale to spell in.
   if (shown === total) return `All ${total} match “${q}”.`;
+  // numbers-ok: as above, a console-shared module has no locale to spell in.
   return `${shown} of ${total} shown — the other ${total - shown} do not match “${q}”.`;
 }

@@ -249,7 +249,30 @@ export function CoachRequests({ reload }: { reload?: number } = {}) {
         coachAnswerConfirmation(accept, r.name, told));
     } catch (e) {
       reportError('coachRequests.respond', e);
-      Alert.alert('Something went wrong', 'Check your connection and try again.');
+      // ── why this one does NOT take `retryLine` ────────────────────────────
+      //
+      // "Something went wrong. Check your connection and try again." blamed the
+      // coach's network for something this code has no evidence about, so it is
+      // gone. But the replacement is not `retryLine`, and that is a decision
+      // rather than an oversight.
+      //
+      // `retryLine` is documented as "the sentence to put in front of somebody
+      // whose write did not land", and BOTH of its answers assert that — "so
+      // nothing was sent", "so nothing has changed". This catch cannot support
+      // either. The `try` above spans `link_coaching`, the status update and
+      // the push, and the two errors it can name are already handled and
+      // returned on above; what lands here is a throw at an unknown point, so
+      // the client may be linked with the request still pending, or the request
+      // answered with the client never told. Appending a sentence that says
+      // nothing happened would be a claim beyond what the code knows, printed
+      // in the same alert as the sentence saying we do not know.
+      //
+      // What IS true is where the answer is kept: a request still on this card
+      // has not been answered. That is the thing a coach can act on.
+      Alert.alert(
+        'Not sure that went through',
+        `We could not tell whether ${r.name}'s request was answered. Pull down to read the list again — if it is still there, they are still waiting.`,
+      );
     }
     setBusy(null);
   }, []);
