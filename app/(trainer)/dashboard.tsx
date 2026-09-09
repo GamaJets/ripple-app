@@ -3426,7 +3426,15 @@ export default function TrainerClients() {
                   <Text style={{ ...ty.body, color: t.ink }}>Also send a push</Text>
                   <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>{pushConsequence('coach', null)}</Text>
                 </View>
-                <Switch value={bcPush} onValueChange={setBcPush} />
+                {/* The same control app/(owner)/ops.tsx already fixed, and the
+                    note there applies here word for word: this switch is the
+                    difference between a note in the app and a push to every
+                    client, and it announced "switch, on" with no statement of
+                    what was on. The sentence beside it is a sibling, so it is
+                    sighted-only. */}
+                <Switch value={bcPush} onValueChange={setBcPush}
+                  accessibilityLabel="Also send this as a push notification to every client"
+                  accessibilityHint={pushConsequence('coach', null)} />
               </View>
 
               {/* Awaited, and the answer read. `addAnnouncement` reaches a server

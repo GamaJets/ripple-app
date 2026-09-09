@@ -303,6 +303,21 @@ export default function Glucose() {
               // showing "off" stops somebody turning ON what may already be on,
               // and stops the switch asserting a state nobody has confirmed.
               disabled={g.sharedWithCoach === null}
+              // The words beside this control are a SIBLING of it, not a parent,
+              // so a screen reader arriving here read out a switch and its
+              // on/off state with no name at all — on the one control that
+              // decides who may see a member's blood sugar. The visible line
+              // says "these", which the eye resolves from the readings above it
+              // and a reader cannot, so the spoken name says what "these" are.
+              accessibilityLabel="Let my coach see my glucose readings"
+              // The consequence, not a restatement: turning it off is not
+              // merely "stop sharing from now on".
+              accessibilityHint={
+                g.sharedWithCoach === null
+                  ? 'Unavailable: whether this is on could not be read just now.'
+                  : 'Turning it off again hides the readings already shared as well as the next one.'
+              }
+              accessibilityState={{ disabled: g.sharedWithCoach === null }}
             />
           </View>
           {g.sharedWithCoach === null ? (
