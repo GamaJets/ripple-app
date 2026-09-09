@@ -2366,9 +2366,14 @@ export default function Scans() {
           </View>
         </View>
       </Modal>
-      {/* ── end of the Add sheet, which the date wheel above sits inside ── */}
-      </Modal>
-
+      {/* Nested here for the reason the date wheel above is: "Take Photo"
+          and "Upload scan" are inside THIS sheet, and while this question
+          was a sibling of it iOS presented the question beneath the sheet
+          already on screen — so tapping Take Photo did nothing anybody
+          could see. Same defect as the date wheel, same fix, twenty lines
+          apart; that one was found and this one was not, because a date
+          that does not change is visible and a camera that never opens
+          looks like a camera that is slow. */}
       {/* ── the question, asked before the camera opens ────────────────────
           Nothing has been photographed and nothing has been sent at the moment
           this is on screen. `askSheet` holds which button was pressed and no
@@ -2415,6 +2420,10 @@ export default function Scans() {
           </ScrollView>
         </View>
       </Modal>
+      {/* ── end of the Add sheet, which the date wheel and the consent
+          question above BOTH sit inside, for the same iOS reason ── */}
+      </Modal>
+
 
       {/* ── Correcting or removing one scan ────────────────────────────────
           A separate sheet from Add rather than a mode on it. Add is a long
