@@ -3211,11 +3211,14 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
  * Deliberately not a link to the settings: leaving mid-session to go and pair a
  * device would abandon the workout being logged.
  */
-function ZonePanel({ t, liveZone, liveSample, zoneSecs, age }: {
+function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed }: {
   t: Theme; liveZone: ZoneNo | null; liveSample: number | null; zoneSecs: ZoneSeconds;
   /** The member's age, or null when the app has no date of birth for them —
    *  which is the case this panel now has to say something about. */
   age: number | null;
+  /** The session clock. Passed through so the board can say how much of the
+   *  session these five rows do not account for. */
+  elapsed?: number | null;
 }) {
   const hasZones = zoneSecondsTotal(zoneSecs) > 0;
   // Whose scale this is. Every band on this panel is a percentage of 220 − age,
@@ -3248,7 +3251,7 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs, age }: {
       <ZoneNow zone={liveZone} bpm={liveSample ?? null} compact />
       {hasZones ? (
         <View style={{ marginTop: sp.lg }}>
-          <ZoneBoard seconds={zoneSecs} current={liveZone} />
+          <ZoneBoard seconds={zoneSecs} current={liveZone} elapsed={elapsed} />
         </View>
       ) : null}
       {scaleNote ? (
@@ -3344,7 +3347,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           {zoneSecondsTotal(zoneSecs) > 0 ? (<>
             <Section>
               <SectionHead title="Time in Zone" note={`${splatPoints(zoneSecs)} splat`} />
-              <ZoneBoard seconds={zoneSecs} showSplat={false} />
+              <ZoneBoard seconds={zoneSecs} showSplat={false} elapsed={elapsed} />
             </Section>
             <Rule />
           </>) : null}
@@ -3458,7 +3461,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           </Text>
         ) : null}
 
-        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} age={age} />
+        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account
@@ -4759,7 +4762,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
 
         {/* Live effort, and the same empty state as a timed session when there
             is no watch feeding it — see ZonePanel. */}
-        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} age={age} />
+        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account

@@ -133,6 +133,40 @@ export const zoneKey = (no: ZoneNo): keyof ZoneSeconds => KEY[no];
 export const zoneSecondsTotal = (z: ZoneSeconds): number => z.z1 + z.z2 + z.z3 + z.z4 + z.z5;
 
 /**
+ * The part of a session that is NOT in the zone breakdown.
+ *
+ * The elapsed clock is wall time — `Date.now()` minus the start minus anything
+ * paused — so it stays true whatever the phone is doing. The zone breakdown is
+ * banked a second at a time by a timer, and iOS stops delivering timers to an
+ * app that is not on screen. So a 46-minute ride with the phone in a pocket
+ * came back as 46:07 on the clock and 12:56 across the five zones, and the
+ * screen printed both without a word about why they disagree.
+ *
+ * The gap is not guessable. While the app was away there were no readings, so
+ * there is no zone to credit — and crediting the last one seen would invent the
+ * evidence, which is the one thing this figure must not do: splat points are
+ * minutes at zone 4 or above, and a fabricated minute is a fabricated splat.
+ *
+ * So it is reported instead. `zoneSecondsTotal + uncountedSeconds = elapsed`,
+ * which is what makes the two numbers on the screen add up to the same session.
+ * It also covers the other way to bank nothing — the session on screen with no
+ * heart rate arriving at all — because to a reader those are the same fact:
+ * this much of it was not measured.
+ */
+export function uncountedSeconds(z: ZoneSeconds, elapsedSec: number): number {
+  if (!Number.isFinite(elapsedSec) || elapsedSec <= 0) return 0;
+  return Math.max(0, Math.round(elapsedSec) - zoneSecondsTotal(z));
+}
+
+/** Below this the gap is timer jitter rather than a missing stretch of the
+ *  session, and saying so would be noise on every ride. */
+export const UNCOUNTED_FLOOR_SEC = 5;
+
+/** What the screen says when a real part of the session was never measured. */
+export const UNCOUNTED_NOTE =
+  'Zones are counted only while this session is on screen and a heart rate is arriving. The rest of the time is not credited to any zone, because nothing was measured to say which one it was.';
+
+/**
  * Splat points — one per whole minute spent at or above zone 4, the same rule a
  * studio uses. Returns 0 rather than a fraction: a partial minute is not a splat.
  */

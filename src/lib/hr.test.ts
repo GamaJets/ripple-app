@@ -25,6 +25,7 @@
 import {
   ZONES, ZONE_NOS, ASSUMED_AGE, maxHr, hrScaleBasis, hrScaleNote, zoneOf, zoneBands,
   zoneDef, zoneName, splatPoints, emptyZoneSeconds, zoneSecondsTotal, timeInZones,
+  uncountedSeconds, UNCOUNTED_FLOOR_SEC,
   hrStats, hrZoneLabel, hrZoneNo, ageFromDob,
 } from './hr';
 
@@ -172,6 +173,38 @@ eq(ageFromDob('1990-09-05', new Date(2026, 8, 5, 12).getTime()), 36,
 // living member is refused rather than drawn against.
 eq(ageFromDob('2027-01-01', Date.parse('2026-09-05T10:00:00.000Z')), null,
   'a date of birth in the future is not an age');
+
+/* ── 5. the part of the session that was never measured ───────────────────── */
+//
+// The real case: a 46:07 ride with the phone in a pocket came back with 12:56
+// across the zones, because iOS stops delivering timers to an app that is not
+// on screen. 10:23 in zone 3 and 2:33 in zone 1 is exactly the 12:56 that was
+// on the screen beside a clock reading 46:07.
+{
+  const ride = { ...empty, z1: 153, z3: 623 };   // 2:33 + 10:23 = 12:56
+  eq(zoneSecondsTotal(ride), 776, 'the zones hold what was actually measured');
+  eq(uncountedSeconds(ride, 2767), 1991, 'and the rest of the ride is reported, not credited');
+  // The whole point: the two figures on the screen add up to the session.
+  eq(zoneSecondsTotal(ride) + uncountedSeconds(ride, 2767), 2767, 'counted plus uncounted is the clock');
+}
+
+// A session measured all the way through has nothing to report, and must not
+// grow a line saying so.
+eq(uncountedSeconds({ ...empty, z2: 600 }, 600), 0, 'a fully measured session has no gap');
+ok(uncountedSeconds({ ...empty, z2: 600 }, 602) < UNCOUNTED_FLOOR_SEC, 'and two seconds of jitter is under the floor');
+
+// Never negative. A timer that fired one extra time, or a clock read a moment
+// after the last bank, must not produce a session that was measured for longer
+// than it lasted.
+eq(uncountedSeconds({ ...empty, z2: 600 }, 598), 0, 'more banked than elapsed is nothing to report, not a negative');
+
+// Nothing elapsed is not a gap.
+eq(uncountedSeconds(empty, 0), 0, 'a session that has not started has no uncounted time');
+eq(uncountedSeconds(empty, Number.NaN), 0, 'and an unreadable clock is not a gap either');
+
+// A session on screen the whole time with no heart rate arriving reads the same
+// way to a member, and should: this much of it was not measured.
+eq(uncountedSeconds(empty, 900), 900, 'no readings at all is the whole session uncounted');
 
 if (errors.length) {
   console.error(`hr.test.ts — ${errors.length} failure(s):`);

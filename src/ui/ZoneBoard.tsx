@@ -13,6 +13,7 @@ import { sp, radius, hairline, type as ty, numeric, value, grown } from '../them
 import { readableInkOn } from '../lib/a11y';
 import {
   ZONES, type ZoneNo, type ZoneSeconds, zoneKey, zoneSecondsTotal, splatPoints, zoneName, zoneColor,
+  uncountedSeconds, UNCOUNTED_FLOOR_SEC, UNCOUNTED_NOTE,
 } from '../lib/hr';
 
 const dur = (sec: number): string => {
@@ -98,11 +99,22 @@ export function ZoneNow({ zone, bpm, compact }: { zone: ZoneNo | null; bpm?: num
  * Five rows, one per zone: numeral, name, a proportional bar, and time in it.
  * The row you are currently in is marked with a dot, not by colour alone.
  */
-export function ZoneBoard({ seconds, current, showSplat = true }: {
+export function ZoneBoard({ seconds, current, showSplat = true, elapsed }: {
   seconds: ZoneSeconds; current?: ZoneNo | null; showSplat?: boolean;
+  /** The session clock, when the caller has one. Given it, the board can say
+   *  how much of the session is not in these five rows — see `uncounted`. */
+  elapsed?: number | null;
 }) {
   const t = useTheme();
   const total = zoneSecondsTotal(seconds);
+  // What the clock says happened and these rows do not account for. iOS stops
+  // delivering timers to an app that is not on screen, so a ride with the phone
+  // in a pocket banks a fraction of itself — and this board used to print that
+  // fraction as "total", beside a clock that said otherwise, with nothing to
+  // reconcile them. The gap cannot be credited to a zone: there were no
+  // readings while it happened.
+  const uncounted = elapsed != null ? uncountedSeconds(seconds, elapsed) : 0;
+  const showUncounted = uncounted >= UNCOUNTED_FLOOR_SEC;
   const splat = splatPoints(seconds);
   const peak = Math.max(1, ...ZONES.map((z) => seconds[zoneKey(z.no)] || 0));
 
@@ -117,7 +129,24 @@ export function ZoneBoard({ seconds, current, showSplat = true }: {
             splat point{splat === 1 ? '' : 's'}
           </Text>
           <View style={{ flex: 1 }} />
-          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{dur(total)} total</Text>
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
+            {dur(total)}{showUncounted ? ' counted' : ' total'}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* The half of the session these rows are not about. Drawn whenever a
+          caller passes the clock and the two disagree by more than jitter, so
+          the figures on screen add up to one session instead of contradicting
+          each other in silence. */}
+      {showUncounted ? (
+        <View accessible
+          accessibilityLabel={`${spokenDur(uncounted)} of this session was not counted. ${UNCOUNTED_NOTE}`}
+          style={{ marginBottom: sp.lg }}>
+          <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>
+            {dur(uncounted)} not counted
+          </Text>
+          <Text style={{ ...ty.micro, color: t.ink3, marginTop: 3 }}>{UNCOUNTED_NOTE}</Text>
         </View>
       ) : null}
 
