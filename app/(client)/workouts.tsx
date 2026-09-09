@@ -147,8 +147,9 @@ import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { injuryFlag, areaLabel, type Injury } from '../../src/lib/injuries';
 import { warmupSets, deloadCheck } from '../../src/lib/training';
 import { startGate } from '../../src/lib/startGate';
-import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, hrScaleNote, zonesFromSamples, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
+import { hrColor, hrZoneNo, zoneOf, zoneKey, emptyZoneSeconds, splatPoints, zoneSecondsTotal, hrScaleNote, zonesFromSamples, hrStats, type ZoneSeconds, type ZoneNo } from '../../src/lib/hr';
 import { PROVIDERS } from '../../src/lib/wearables/registry';
+import { hrKcal, hrKcalNote } from '../../src/lib/hrKcal';
 import { reportError } from '../../src/lib/reportError';
 // 44pt is the minimum tap target — the number and the reasoning live in one
 // place, and the controls added here take it from there rather than from a
@@ -168,7 +169,7 @@ import { attributionLine } from '../../src/lib/workoutAttribution';
 import { dayKeyOf, instantForDay, readWorkoutEdit, type WorkoutDraftSet } from '../../src/lib/entryEdit';
 import { useSettings } from '../../src/ui/settings';
 import { WeightUnitToggle } from '../../src/ui/WeightUnitToggle';
-import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, readNumber, type WeightUnit } from '../../src/lib/units';
+import { liftIn, liftLabel, readLift, plain, plainExact, volumeHeadline, convertedNote, readNumber, type WeightUnit } from '../../src/lib/units';
 // The distance unit a cardio log opens on. Derived from the member's length
 // unit rather than defaulted to km — see src/lib/distance.ts.
 import { distanceUnitFor, distanceUnitName, type DistanceUnit } from '../../src/lib/distance';
@@ -3041,6 +3042,8 @@ export default function Train() {
             age={ageFromDob(cd.dob)}
             restingKcalPerMin={restingKcalPerMin}
             defaultUnit={unit}
+            weightKg={cd.weightKg}
+            sex={cd.sex}
             // Closed only once the row is on the server. `commitSession`
             // already says so when it is not; leaving the sheet up is what
             // makes saying so useful, because the Save button is still there.
@@ -3214,6 +3217,11 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
   // Time in zone, accumulated a second at a time against the latest reading.
   // `hrRef` keeps the tick reading the current bpm without re-arming the interval.
   const [zoneSecs, setZoneSecs] = useState<ZoneSeconds>(emptyZoneSeconds);
+  /** The session's OWN average heart rate, from the samples the rebuild
+   *  fetches. `w.today.heartRateAvg` is the whole day's — a morning ride
+   *  averaged with eight hours at a desk — and a calorie model fed that would
+   *  describe a different session. Null until a rebuild has run. */
+  const [sessionAvgBpm, setSessionAvgBpm] = useState<number | null>(null);
   const hrRef = useRef<number | null>(null);
   hrRef.current = typeof liveSample === 'number' && liveSample > 0 ? liveSample : null;
   useEffect(() => {
@@ -3270,6 +3278,11 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
       const pts = await fetchSamples(startISO, endISO);
       const rebuilt = zonesFromSamples(pts, age, startISO, endISO);
       if (rebuilt) setZoneSecs(rebuilt);
+      // The same samples answer a second question for free: what this session
+      // actually averaged. Only from a real series — one reading is an instant
+      // and says nothing about a session.
+      const stats = pts.length >= 2 ? hrStats(pts) : null;
+      if (stats) setSessionAvgBpm(stats.avg);
     } catch (e) {
       reportError('liveVitals.rebuildZones', e);
     }
@@ -3285,7 +3298,7 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
     return () => sub.remove();
   }, [rebuildZonesFromWatch]);
 
-  return { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, rebuildZonesFromWatch, liveZone: hrZoneNo(liveSample, age) };
+  return { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, rebuildZonesFromWatch, sessionAvgBpm, liveZone: hrZoneNo(liveSample, age) };
 }
 
 /**
@@ -3366,11 +3379,15 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed }: {
  * genuinely share is the vitals hook and the zone panel above, so those are
  * shared and the rest is not.
  */
-function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, defaultUnit, onSave, onClose }: {
+function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, defaultUnit, weightKg, sex, onSave, onClose }: {
   // `DistanceUnit`, not `string`. The toggle inside this runner reads the unit
   // back out in words for a screen reader, and a bare string would let a caller
   // seed it with anything and have the sentence say "miles" about it.
   t: Theme; kind: SessionKind; activity: string; age: number | null; restingKcalPerMin: number | null; defaultUnit: DistanceUnit;
+  /** For the heart-rate calorie estimate offered when no watch put a figure on
+   *  the session. Both nullable and neither defaulted: src/lib/hrKcal.ts
+   *  declines to produce a figure rather than assume a body. */
+  weightKg: number | null; sex: 'male' | 'female' | null;
   /** Resolves whether the server took it. It used to return void and the
    *  caller closed the modal on the tap, so a refused write shut the one
    *  screen holding the session's heart-rate zones — the single thing in
@@ -3380,7 +3397,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
 }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
-  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin);
+  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch, sessionAvgBpm } = useLiveVitals(age, restingKcalPerMin);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
@@ -3397,6 +3414,29 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
   // nothing. Rather than round it up to a minute it never lasted, the save is
   // withheld and says why — a session too short to record is not a session.
   const finalMins = Math.round(finalElapsed / 60);
+
+  /**
+   * A second calorie figure, from this member's own body and their own heart
+   * rate — offered, never applied.
+   *
+   * The ask was to take the machine's number and correct it for heart rate,
+   * age, height and weight. That is not a thing that can be done honestly: a
+   * machine's figure is already an estimate made without knowing who is on it,
+   * and there is no way to undo an assumption nobody told us. So this computes
+   * an INDEPENDENT figure and puts it beside the box, and the member decides.
+   *
+   * The average comes from the session's own samples, not from
+   * `w.today.heartRateAvg` — that is the whole day, a morning ride averaged
+   * with eight hours at a desk, and a model fed that describes a different
+   * session. It is therefore null until the rebuild has answered, which is why
+   * this is a suggestion under the field rather than something `finish` writes:
+   * finish runs before the samples are back.
+   */
+  const hrEstimate = useMemo(() => {
+    if (recovery) return null;
+    const mins = Math.round(finalElapsed / 60);
+    return hrKcal({ avgBpm: sessionAvgBpm ?? undefined, minutes: mins, age: age ?? undefined, weightKg: weightKg ?? undefined, sex: sex ?? undefined });
+  }, [recovery, finalElapsed, sessionAvgBpm, age, weightKg, sex]);
 
   const finish = () => {
     // Ask the watch what actually happened, before the figures are frozen.
@@ -3484,6 +3524,23 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
                   <TextInput value={kcalIn} onChangeText={setKcalIn} keyboardType="numeric" style={inp} />
                 </Field>
               </View>
+              {/* Offered, not applied. If the watch measured the session its
+                  figure is already in the box above; this is the other opinion,
+                  and a member who knows their machine reads high can take it. */}
+              {hrEstimate != null && String(hrEstimate) !== kcalIn.trim() ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use ${hrEstimate} calories, worked out from your heart rate`}
+                  onPress={() => { setKcalIn(String(hrEstimate)); tapLight(); }}
+                  style={{ marginTop: sp.sm }}>
+                  <Text style={{ ...ty.caption, color: t.brand, fontWeight: '500' }}>
+                    Use {plainExact(hrEstimate)} kcal from your heart rate
+                  </Text>
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>
+                    {hrKcalNote(hrEstimate, sessionAvgBpm)}
+                  </Text>
+                </Pressable>
+              ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
                 {sessionKcal != null && sessionKcal > 0
                   ? 'Calories came from your watch for this session — change them if you would rather use the machine’s figure. Nothing here is required; leave a box empty and it is left out rather than saved as a zero.'

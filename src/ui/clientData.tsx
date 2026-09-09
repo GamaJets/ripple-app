@@ -62,6 +62,8 @@ interface Value {
   /** null until the client tells us. Defaulted to 170 and rendered on their
    *  profile as their own height. */
   heightCm: number | null; setHeightCm: (v: number) => void;
+  /** null unless the stored value is one of the two the calorie equations have. */
+  sex: 'male' | 'female' | null;
   goal: Goal; setGoal: (v: Goal) => void;
   coachingMode: CoachingMode; setCoachingMode: (v: CoachingMode) => void;
   /** Whether a coach is actually LINKED, which is a different question from
@@ -208,6 +210,12 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
   const [dob, setDob] = useState('');
   const [photo, setPhoto] = useState<string | null>(null);
   const [heightCm, setHeightCm] = useState<number | null>(null);
+  /** Read for the heart-rate calorie model in src/lib/hrKcal.ts, which is
+   *  sex-specific — the two published equations differ enough that the weight
+   *  term changes sign, so there is no defensible default and this stays null
+   *  until the column says otherwise. The column has existed on `clients` all
+   *  along and nothing had ever read it. */
+  const [sex, setSex] = useState<'male' | 'female' | null>(null);
   const [goal, setGoal] = useState<Goal>('muscle');
   const [coachingMode, setCoachingMode] = useState<CoachingMode>('online');
   const [diet, setDiet] = useState<Diet>('meat');
@@ -442,6 +450,11 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
           const r = c as any;
           if (typeof r.dob === 'string' && r.dob) setDob(r.dob);
           if (r.height_cm != null && !Number.isNaN(Number(r.height_cm))) setHeightCm(Number(r.height_cm));
+          // Only the two values the equations have. Anything else — an empty
+          // string, a spelling this app does not know — leaves it null, and a
+          // null means the model declines to produce a figure rather than
+          // guessing at a body.
+          if (r.sex === 'male' || r.sex === 'female') setSex(r.sex);
           if (typeof r.goal === 'string' && r.goal) setGoal(r.goal as Goal);
           // `readDiet`, not `as Diet`. The column is plain text; the union is
           // five values; and a value outside it reaches `mealAt`, whose pools
@@ -991,7 +1004,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<Value>(() => ({
     id: sbUid ?? 'unknown', name, init: initials(name), setName,
-    dob, setDob, photo, setPhoto, heightCm, setHeightCm,
+    dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex,
     goal, setGoal, diet, setDiet, avoid, setAvoid,
     injuries,
     focusAreas, setFocusAreas,
@@ -1008,7 +1021,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     profileStatus: publishedProfileStatus, scansStatus: publishedScansStatus, saveFailed, reload,
     status,
   }), [
-    sbUid, name, setName, dob, setDob, photo, setPhoto, heightCm, setHeightCm,
+    sbUid, name, setName, dob, setDob, photo, setPhoto, heightCm, setHeightCm, sex,
     goal, setGoal, diet, setDiet, avoid, setAvoid, injuries, focusAreas, setFocusAreas,
     addInjuryStable, updateInjuryStable, removeInjuryStable,
     coachingMode, setCoachingMode, coachLinked, mealsPerDay, setMealsPerDay,
