@@ -60,6 +60,7 @@ import { reportError } from '../../src/lib/reportError';
 // note above `ocrInBody` for the assumption this replaces.
 import {
   parseInBodySheet, sheetMassKg, ASSUMED_METRIC_NOTE, CONVERTED_FROM_LB_NOTE, type SheetRead,
+  muscleUnitDoubt,
 } from '../../src/lib/inbodySheet';
 // And which unit the AI READER's figures are in, which its answer does not say.
 // The vision model is asked for a field called `weightKg` and hands back a bare
@@ -848,7 +849,13 @@ export default function Scans() {
       }
     }
   };
-  const saveScan = async () => {
+  /**
+   * `unitSettled` is set only by the answer to the question below, and carries
+   * the muscle figure the member confirmed. It is an argument rather than state
+   * because the question is an Alert: the answer arrives in a callback, and the
+   * save has to start again from the top with it rather than resume mid-way.
+   */
+  const saveScan = async (unitSettled?: { muscleKg: number | null }) => {
     // The two weights come back as the kilograms the scan row stores, whatever
     // unit they were typed in. This is the write that used to file a client's
     // 180 lb as 180 kg — and because the newest scan re-tunes the meal plan,
@@ -865,6 +872,47 @@ export default function Scans() {
     const mNum = weightToKg(sm, wu);
     const m = sm.trim() && mNum != null && mNum > 0 ? mNum : null;
     if (!w || !f) { Alert.alert('Add the numbers', 'Enter at least weight and body-fat % from your InBody report.'); return; }
+
+    // ── the muscle figure, against the weight beside it ───────────────────
+    //
+    // The box is labelled with the member's own display unit, and an InBody
+    // prints its skeletal muscle in kilograms whatever the reader prefers. A
+    // member reading pounds sees a box marked lb, types the 35.0 on the paper,
+    // and 35 lb — 15.9 kg on a 74 kg body — is filed and shown beside a
+    // fabricated loss of 41 lb, because the scan before it held the same figure
+    // read correctly.
+    //
+    // Nobody is at fault in that: the box says what it wants and the member
+    // typed what the sheet said. What was missing is the app noticing the two
+    // numbers cannot both be true of one body. It ASKS — converting silently
+    // would be this screen making the same guess it is here to prevent, one
+    // direction over — and the member can say the figure is right, in which
+    // case it is saved exactly as typed.
+    const muscleDoubt = unitSettled ? null : muscleUnitDoubt(m, w);
+    if (muscleDoubt) {
+      const typed = weightLabel(m, wu);
+      const other = weightLabel(muscleDoubt.asKg, wu);
+      // Both directions are possible and they are not the same sentence. A
+      // reader on pounds typing the sheet's kilograms lands too LOW; a reader on
+      // kilograms typing a pounds sheet lands too HIGH. Naming the wrong one
+      // would send somebody to check a unit that was never the problem.
+      const tooLow = muscleDoubt.typedLooksMetric;
+      Alert.alert(
+        'Check the muscle figure',
+        `You have ${typed} of muscle against ${weightLabel(w, wu)} of body weight, which is ${tooLow ? 'less' : 'more'} than a body usually carries. `
+        + (tooLow
+          ? `InBody sheets print muscle in kilograms, and read that way your figure is ${other}. Which does your sheet say?`
+          : `Read as pounds instead, your figure is ${other}. Which does your sheet say?`),
+        [
+          { text: tooLow ? `The sheet says kilograms` : `The sheet says pounds`,
+            onPress: () => { void saveScan({ muscleKg: muscleDoubt.asKg }); } },
+          { text: 'The figure is right', onPress: () => { void saveScan({ muscleKg: m }); } },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
+      return;
+    }
+    const mFinal = unitSettled ? unitSettled.muscleKg : m;
     const newISO = scanDateISO();
     // The meal plan follows your MOST RECENT-dated scan only. A back-dated scan is
     // stored for history/graphs but must not re-tune the plan.
@@ -904,7 +952,7 @@ export default function Scans() {
     // rather than being filed twice. See src/lib/recordQueue.ts · ScanIntent.
     const scanId = newScanId();
     const source = scanMx ? 'InBody (OCR)' : 'InBody (manual)';
-    const saved = await cd.addScan({ id: scanId, takenAt: newISO, weightKg: w, bodyFatPct: f, skeletalMuscleKg: m, source, image: img || undefined, metrics: scanMx ?? undefined });
+    const saved = await cd.addScan({ id: scanId, takenAt: newISO, weightKg: w, bodyFatPct: f, skeletalMuscleKg: mFinal, source, image: img || undefined, metrics: scanMx ?? undefined });
     if (!saved) {
       // Not lost, and no longer typed again.
       //

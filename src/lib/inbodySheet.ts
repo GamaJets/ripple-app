@@ -34,7 +34,7 @@
 // one: no InBody sheet prints one in pounds and the other in kilograms.
 //
 // Pure, so scans.test can argue with the rules rather than with an OCR service.
-import { lbToKg } from './units';
+import { lbToKg, KG_PER_LB } from './units';
 
 /** Which unit the sheet's masses are printed in. Null is a real answer: the
  *  sheet did not say, and that is not the same as saying kilograms. */
@@ -197,3 +197,80 @@ export const ASSUMED_METRIC_NOTE =
  *  why the figure in the box is not the one on the paper. */
 export const CONVERTED_FROM_LB_NOTE =
   'Your printout is in pounds — the figures were converted, so they may not read the same as the paper.';
+
+/* ── The same confusion, on the path nobody guarded ────────────────────────
+ *
+ * Everything above this guards the PHOTOGRAPHED sheet: `sheetUnit` reads the
+ * word the printout put next to the figure, because vision alone once filed a
+ * US-configured printout's 180.4 lb as 180 kg.
+ *
+ * The typed path had no such guard and did not need vision to go wrong. An
+ * InBody prints its skeletal muscle mass in kilograms — the 370S sheet that
+ * produced this rule reads "SMM (kg) 35.0" — while the Add sheet labels its
+ * box with the member's own display unit. A member reading pounds sees a box
+ * marked lb, types the 35 in front of them, and the app files 35 lb: 15.9 kg
+ * of muscle on a 74 kg body. The screen then showed 35 lb beside "−41 lb since
+ * Aug 25", because the scan before it held the same figure read correctly.
+ *
+ * The box is labelled and the member typed what the paper said, so neither is
+ * at fault. What was missing is the app noticing that the two numbers it was
+ * given cannot both be true of one body.
+ *
+ * The test is a RATIO, and it is deliberately not a range on muscle alone: 35
+ * is an ordinary number of kilograms and an ordinary number of pounds, and only
+ * the weight beside it says which this is. Skeletal muscle runs about 38–52% of
+ * body mass in adult men and 30–42% in women, so the band below is wider than
+ * either at both ends — it is drawn to catch a factor of 2.2, not to have an
+ * opinion about anybody's physiology. A very lean athlete and a sarcopenic
+ * eighty-year-old both sit inside it.
+ *
+ * It answers with a QUESTION and never a correction. Converting silently would
+ * be this module making the same class of guess it exists to prevent, one
+ * direction over.
+ */
+
+/** Skeletal muscle as a fraction of body mass, outside which one of the two
+ *  figures is likely to be in the other unit. Wider than any real physiology at
+ *  both ends, on purpose: this is a unit check, not a health judgement. */
+export const SMM_FRACTION_MIN = 0.25;
+export const SMM_FRACTION_MAX = 0.60;
+
+export type MassUnitDoubt = {
+  /** What the member typed, read the other way, in kg. */
+  readonly asKg: number;
+  /** The fraction their figures give as they stand. */
+  readonly fraction: number;
+  /** True when the typed figure looks like kilograms in a pounds box. */
+  readonly typedLooksMetric: boolean;
+};
+
+/**
+ * Whether a typed muscle figure disagrees with the weight beside it.
+ *
+ * Both arguments are already in kg — the caller converts from whatever the box
+ * was labelled, so this function does not need to know the display unit, only
+ * whether the two numbers fit one body. Returns null when they do, when either
+ * is missing, or when reading the figure the other way does not help: a number
+ * that is implausible in both units is not a unit problem and must not be
+ * reported as one.
+ */
+export function muscleUnitDoubt(muscleKg: number | null | undefined, weightKg: number | null | undefined): MassUnitDoubt | null {
+  if (muscleKg == null || weightKg == null) return null;
+  if (!Number.isFinite(muscleKg) || !Number.isFinite(weightKg)) return null;
+  if (muscleKg <= 0 || weightKg <= 0) return null;
+
+  const fraction = muscleKg / weightKg;
+  if (fraction >= SMM_FRACTION_MIN && fraction <= SMM_FRACTION_MAX) return null;
+
+  // Read the typed figure as the other unit and see whether that lands inside.
+  // Only these two readings are considered, because they are the only two the
+  // box can produce: the member typed one number under one label.
+  // A figure that reads too LOW was typed in kilograms under a pounds label, so
+  // undo the lb→kg the caller applied: divide by KG_PER_LB. Too HIGH is the
+  // mirror — a pounds figure typed under a kilograms label — so apply it.
+  const asKg = fraction < SMM_FRACTION_MIN ? muscleKg / KG_PER_LB : muscleKg * KG_PER_LB;
+  const otherFraction = asKg / weightKg;
+  if (otherFraction < SMM_FRACTION_MIN || otherFraction > SMM_FRACTION_MAX) return null;
+
+  return { asKg, fraction, typedLooksMetric: fraction < SMM_FRACTION_MIN };
+}

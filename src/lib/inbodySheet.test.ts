@@ -11,6 +11,7 @@
 // wrong line, or an unknown unit being quietly treated as a known one.
 import {
   parseInBodySheet, sheetUnit, sheetMassKg, ASSUMED_METRIC_NOTE, CONVERTED_FROM_LB_NOTE,
+  muscleUnitDoubt, SMM_FRACTION_MIN, SMM_FRACTION_MAX,
 } from './inbodySheet';
 
 const errors: string[] = [];
@@ -109,6 +110,53 @@ eq(sheetMassKg(undefined, null), null, 'and so for an absent figure');
 // "lb" inside a word — a member's name in a header, an ID — does not decide the
 // unit of their scan.
 eq(sheetUnit('Albert Halbrook\nWeight 82.4', 'Weight 82.4'), null, 'lb inside a word is not a unit');
+
+// ── The same confusion on the typed path ──────────────────────────────────
+//
+// Every figure below is off one real InBody 370S printout, dated 09.09.2026:
+// weight 74.0 kg, SMM 35.0 kg, PBF 16.0%. The member's display unit is pounds,
+// so the Add sheet labelled its muscle box "lb", and 35 was typed into it. The
+// app filed 35 lb — 15.876 kg — and the home screen then read "35 lb" beside
+// "−41 lb since Aug 25", because the scan before it held 34.6 kg read rightly.
+const TYPED_35_AS_LB_KG = 35 * 0.45359237; // 15.8757…, what the app stored
+const WEIGHT_KG = 74.0;
+
+{
+  const d = muscleUnitDoubt(TYPED_35_AS_LB_KG, WEIGHT_KG);
+  ok(d != null, 'a kilogram figure typed into a pounds box is doubted');
+  ok(d != null && d.typedLooksMetric, 'and it is named as the metric-in-imperial direction');
+  ok(d != null && Math.abs(d.asKg - 35) < 0.001, 'and read the other way it is the 35 kg the sheet printed');
+  ok(d != null && d.fraction < SMM_FRACTION_MIN, 'because as it stands it is under a quarter of the body');
+}
+
+// The same member typing the figure the box actually asked for. 35.0 kg is
+// 77.2 lb, and nothing is doubted — this is the case that must stay silent, or
+// the check is a nag rather than a guard.
+eq(muscleUnitDoubt(35.0, WEIGHT_KG), null, 'the correct figure is not doubted');
+
+// A member whose display unit IS kilograms, typing the pounds number. The
+// mirror of the first case, and the reason the band has an upper end at all.
+{
+  const d = muscleUnitDoubt(77.2, WEIGHT_KG);
+  ok(d != null, 'a pounds figure typed into a kilograms box is doubted too');
+  ok(d != null && !d.typedLooksMetric, 'and named as the other direction');
+  ok(d != null && Math.abs(d.asKg - 35.0) < 0.1, 'and reads back as the sheet figure');
+}
+
+// Implausible in BOTH readings is not a unit problem, and saying it is would
+// send somebody to change a unit that was never wrong.
+eq(muscleUnitDoubt(2, WEIGHT_KG), null, 'a figure wrong in both units is not reported as a unit slip');
+eq(muscleUnitDoubt(300, WEIGHT_KG), null, 'and neither is one far too large to be either');
+
+// Nothing to compare against is not a doubt.
+eq(muscleUnitDoubt(null, WEIGHT_KG), null, 'no muscle figure, no doubt');
+eq(muscleUnitDoubt(35, null), null, 'no weight to judge it against, no doubt');
+eq(muscleUnitDoubt(0, WEIGHT_KG), null, 'and zero is not a ratio');
+
+// The band is wider than any real physiology at both ends, which is the whole
+// design: it catches a factor of 2.2 and has no opinion about anybody's body.
+ok(SMM_FRACTION_MIN < 0.30, 'the floor sits below a woman\'s ordinary range');
+ok(SMM_FRACTION_MAX > 0.52, 'and the ceiling above a very muscular man\'s');
 
 if (errors.length) {
   console.error(`inbodySheet.test.ts — ${errors.length} failure(s):`);
