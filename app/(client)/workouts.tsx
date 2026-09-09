@@ -170,6 +170,11 @@ import { liftIn, liftLabel, readLift, plain, volumeHeadline, convertedNote, read
 // The distance unit a cardio log opens on. Derived from the member's length
 // unit rather than defaulted to km — see src/lib/distance.ts.
 import { distanceUnitFor, distanceUnitName, type DistanceUnit } from '../../src/lib/distance';
+// Whether a movement in a plan is something you ride, row or run rather than
+// something you lift. The programme runner needs it for the same reason the
+// standalone cardio timer does — see the note above the cardio boxes in
+// SessionRunner's finish screen.
+import { isCardioName } from '../../src/lib/machines';
 import { WEEK_DAYS, startOfWeek, weekIndexOf } from '../../src/lib/weekStart';
 import { BACK_ICON, FORWARD_ARROW, FORWARD_ICON, turn } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
@@ -2985,7 +2990,7 @@ export default function Train() {
             a shared handset can belong to whoever used it last, and a coach
             congratulating the wrong person by name is worse than one told "a
             client". */}
-        <SessionRunner t={t} unit={wu} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} distanceUnit={unit} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
@@ -3603,7 +3608,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   );
 }
 
-function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, injuryStatus, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; /** Replace one movement for the rest of the plan, through the same `swaps` map the plan screen writes. Optional so a caller with no plan to write to still gets a runner. */ onSwap?: (e: ProgramExercise, alt: string) => void; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; /** How the read that produced `injuries` went. An empty list under anything but 'ready' means UNKNOWN, and the caution line below is drawn off that list — so without this the runner draws "no injury applies here" for a member whose disclosure never arrived. */ injuryStatus: LoadStatus; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
+function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, injuryStatus, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; /** The distance unit the cardio boxes open on, the member's own — same source the standalone cardio timer uses. */ distanceUnit: DistanceUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; /** Replace one movement for the rest of the plan, through the same `swaps` map the plan screen writes. Optional so a caller with no plan to write to still gets a runner. */ onSwap?: (e: ProgramExercise, alt: string) => void; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; /** How the read that produced `injuries` went. An empty list under anything but 'ready' means UNKNOWN, and the caution line below is drawn off that list — so without this the runner draws "no injury applies here" for a member whose disclosure never arrived. */ injuryStatus: LoadStatus; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   // The same split the plan screen makes: `nameOf` is the identity written
@@ -3646,6 +3651,24 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
   // a runner that opens on a reps box for a set written as '45 sec' is asking
   // the member to fix the app before they can record what it told them to do.
   const [timedOn, setTimedOn] = useState(false);
+  /* WHAT A BIKE DID, WHICH REPS AND KILOGRAMS CANNOT SAY.
+   *
+   * A cardio movement inside a plan came through here and left as sets. The
+   * standalone cardio timer has asked for distance and average watts since it
+   * was written, and `scan-machine.tsx` asks for both as well — but a bike that
+   * arrived as the fourth line of a programme had nowhere to put either, so the
+   * one number a cyclist actually trains against was not recordable on the
+   * screen they were most likely to be looking at.
+   *
+   * Kept per exercise rather than per session: a session can hold a row and a
+   * bike, and one distance across both would be a figure that describes
+   * neither. Strings, not numbers, for the same reason the other two runners
+   * keep strings — a blank box is "not measured" and must not become a zero.
+   */
+  const [cardioExtra, setCardioExtra] = useState<Record<number, { dist: string; watts: string }>>({});
+  const cardioAt = (i: number) => cardioExtra[i] ?? { dist: '', watts: '' };
+  const setCardioAt = (i: number, patch: Partial<{ dist: string; watts: string }>) =>
+    setCardioExtra((prev) => ({ ...prev, [i]: { ...(prev[i] ?? { dist: '', watts: '' }), ...patch } }));
   const showLoad = (kg: number) => (kg ? plain(liftIn(kg, unit) ?? 0) : '');
   const [rest, setRest] = useState(0);
   // Whether the demonstration is on screen for the current exercise.
@@ -4137,6 +4160,20 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
         t: nowISO,
         exercise: nameOf(exercises[i]),
         sets: sets.map((s) => [s.reps, s.kg]) as [number, number][],
+        // The bike's own numbers, on the entry the bike is already on, in the
+        // shape `logCardio` writes so every reader of a cardio block — the
+        // month strip, the records screen, the coach's report — sees one thing
+        // and not two. Absent unless something was typed: a blank box means the
+        // machine was not read, which is not the same as a zero, and `dist: 0`
+        // would print "0 km" over an hour somebody rode.
+        ...((): { cardio?: { mins: number; dist: number; unit: string; watts?: number } } => {
+          if (!isCardioName(nameOf(exercises[i]))) return {};
+          const raw = cardioAt(i);
+          const d = raw.dist.trim() === '' ? 0 : (parseFloat(raw.dist) || 0);
+          const w = raw.watts.trim() === '' ? 0 : (parseInt(raw.watts, 10) || 0);
+          if (d <= 0 && w <= 0) return {};
+          return { cardio: { mins, dist: d, unit: distanceUnit, ...(w > 0 ? { watts: w } : {}) } };
+        })(),
         // Absent rather than an array of false, for the reason on the column
         // itself: a missing flag means nobody was asked, and that is the only
         // thing true of every session logged before this existed.
@@ -4463,6 +4500,70 @@ function SessionRunner({ t, unit, exercises, focus, nameOf, onSwap, age, resting
             </Section>
             <Rule />
           </>) : null}
+
+          {/* WHAT THE MACHINE SAID, for the movements where reps and kilograms
+              cannot say it. A cardio movement inside a plan came through this
+              runner and left as sets: the standalone cardio timer has asked for
+              distance and average watts since it was written, and scan-machine
+              asks for both, but a bike that arrived as the fourth line of a
+              programme had nowhere to put either — so the one number a cyclist
+              trains against was not recordable on the screen they were most
+              likely to be looking at.
+
+              One line per movement, not one per session: a row and a bike on
+              the same day are two distances and a single figure describes
+              neither. Drawn only for cardio movements actually trained, so a
+              session of squats never grows a distance box. Nothing is required
+              — the clock was measured, these were not, and an empty box is
+              written as "not measured" rather than as a zero. */}
+          {(() => {
+            const done = results
+              .map((sets, i) => ({ i, sets }))
+              .filter(({ i, sets }) => sets.length > 0 && isCardioName(nameOf(exercises[i])));
+            if (!done.length) return null;
+            return (<>
+              <Section>
+                <SectionHead title="Anything to Add" />
+                {done.map(({ i }) => {
+                  const raw = cardioAt(i);
+                  return (
+                    <View key={i} style={{ marginBottom: sp.md }}>
+                      <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.xs }}>{nameOf(exercises[i])}</Text>
+                      <View style={{ flexDirection: 'row', gap: sp.sm }}>
+                        <View style={{ flex: 1 }}>
+                          <Field label="Distance" hint={distanceUnit}>
+                            <TextInput
+                              value={raw.dist}
+                              onChangeText={(v) => setCardioAt(i, { dist: v })}
+                              keyboardType="decimal-pad"
+                              accessibilityLabel={`Distance for ${nameOf(exercises[i])}, in ${distanceUnitName(distanceUnit)}`}
+                              style={inp}
+                            />
+                          </Field>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Field label="Avg watts" hint="optional">
+                            <TextInput
+                              value={raw.watts}
+                              onChangeText={(v) => setCardioAt(i, { watts: v })}
+                              keyboardType="numeric"
+                              accessibilityLabel={`Average watts for ${nameOf(exercises[i])}`}
+                              style={inp}
+                            />
+                          </Field>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+                <Text style={{ ...ty.caption, color: t.ink3 }}>
+                  The clock was measured; these were not. Nothing here is required — leave a box empty and it is
+                  left out rather than saved as a zero.
+                </Text>
+              </Section>
+              <Rule />
+            </>);
+          })()}
           {/* Said only when it is true. This sentence was printed
               unconditionally, including over a write the server had refused —
               which is how an hour of training becomes a screenshot of a
