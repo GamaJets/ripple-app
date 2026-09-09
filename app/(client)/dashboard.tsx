@@ -565,6 +565,24 @@ export default function Home() {
   // wDelta comes off the weight series and is always finite, so the null
   // branch of weightDeltaIn cannot be reached here.
   const wDeltaShown = weightDeltaIn(wDelta, wu) ?? 0;
+  /**
+   * Weight, on the SAME question its two neighbours answer.
+   *
+   * The tile used to draw `wDeltaShown`, which is `ws[last] − ws[0]` — the
+   * change across every scan on record — while Body Fat and Muscle beside it
+   * drew the change since the PREVIOUS scan. Three tiles in one row, two
+   * different questions, and nothing to tell them apart but two dates a reader
+   * has no reason to compare: a member who scanned this morning read "+2 lb
+   * since Feb 4" next to "−0.2% since Aug 25" and reasonably took the row for
+   * one comparison.
+   *
+   * Null until there are two scans, which is the honest answer to "what has
+   * changed" for somebody who has been measured once. The all-time figure is
+   * not lost: it is what the WEIGHT section below still shows, over the chart
+   * that makes a span of months mean something.
+   */
+  const wScanD = scPrev && scLast ? +(scLast.weightKg - scPrev.weightKg).toFixed(1) : null;
+  const wScanDShown = weightDeltaIn(wScanD, wu);
   const muDShown = weightDeltaIn(muD, wu);
   // The day each of those changes is measured FROM. Two different baselines
   // used to sit side by side in the Body row with neither of them named —
@@ -887,7 +905,7 @@ export default function Home() {
               // an unchanged reading got it too. `movementIsProgress` asks
               // their own goal, and returns undefined where the goal does not
               // settle it, which draws a neutral mark rather than a verdict.
-              { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu, route: '/(client)/scans', good: movementIsProgress(wDeltaShown, c.goal, 'weight'), delta: deltaMoved(wDeltaShown) ? deltaLabel(wDeltaShown, { since: wSince, unit: wu }) : undefined },
+              { label: 'Weight', value: fig(weightIn(c.weightKg, wu)), unit: wu, route: '/(client)/scans', good: movementIsProgress(wScanDShown, c.goal, 'weight'), delta: deltaMoved(wScanDShown) ? deltaLabel(wScanDShown, { since: scanSince, unit: wu }) : undefined },
               // Body fat is a proportion of the body, not an amount of it, and
               // stays a percentage under every unit preference. Nothing on this
               // line converts.
