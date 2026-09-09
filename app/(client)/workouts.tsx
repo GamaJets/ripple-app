@@ -3444,14 +3444,14 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
             <MetricCols t={t} items={strip} />
           </Section>
           <Rule />
-          {zoneSecondsTotal(zoneSecs) > 0 ? (<>
-            <Section>
-              <SectionHead title="Time in Zone" note={`${splatPoints(zoneSecs)} splat`} />
-              <ZoneBoard seconds={zoneSecs} showSplat={false} elapsed={elapsed} />
-            </Section>
-            <Rule />
-          </>) : null}
-
+          {/* The boxes come FIRST, and the zone board after them.
+              They were the other way round, and the report was that a finished
+              cycling session gave no way to enter distance or average watts. It
+              did — under a five-row zone board, a splat line and, as of this
+              morning, a paragraph about time that was not counted. The one
+              section on this screen that asks for anything was the last thing
+              on it. What is above it now is a summary somebody reads; what is
+              below is a result they look at. */}
           {recovery ? (
             <Section>
               <Text style={{ ...ty.caption, color: t.ink3 }}>
@@ -3486,6 +3486,14 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
               </Text>
             </Section>
           )}
+
+          {zoneSecondsTotal(zoneSecs) > 0 ? (<>
+            <Section>
+              <SectionHead title="Time in Zone" note={`${splatPoints(zoneSecs)} splat`} />
+              <ZoneBoard seconds={zoneSecs} showSplat={false} elapsed={elapsed} />
+            </Section>
+            <Rule />
+          </>) : null}
 
           {finalMins > 0 ? (
             // Guarded against a second tap. The sheet no longer closes on the
