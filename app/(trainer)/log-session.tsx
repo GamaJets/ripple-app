@@ -803,6 +803,49 @@ export default function LogSession() {
   const patchSet = (key: string, i: number, patch: Partial<{ reps: string; kg: string }>) =>
     setRows((p) => p.map((r) => (r.key === key ? { ...r, sets: r.sets.map((s, x) => (x === i ? { ...s, ...patch } : s)) } : r)));
   const removeRow = (key: string) => setRows((p) => p.filter((r) => r.key !== key));
+  /**
+   * Take one set off an exercise, leaving the rest.
+   *
+   * Reported from the floor: "need to be able to remove a set from an exercise
+   * not just able to delete the entire exercise." A coach who loaded a four-set
+   * day their client only got three sets into had one control — Remove — and it
+   * took the whole movement with it, so the three sets they HAD done were
+   * retyped from scratch.
+   *
+   * Never the last one. An exercise with no sets writes nothing and reads as a
+   * broken row; a coach who wants the movement gone has Remove, which says so.
+   * The screen hides the control at one set and this refuses it as well, because
+   * the two must not be able to disagree.
+   */
+  const removeSet = (key: string, i: number) =>
+    setRows((p) => p.map((r) => (
+      r.key === key && r.sets.length > 1
+        ? { ...r, sets: r.sets.filter((_, x) => x !== i) }
+        : r
+    )));
+  /**
+   * Remove a set, asking first if it carries anything.
+   *
+   * This screen has no undo — the rule `loadPlanDay` and the tick are both
+   * written under — and this control sits next to the tick, which is the thing
+   * a coach taps repeatedly with one hand mid-session. A mis-tap that silently
+   * deletes a typed set is the cost of getting that adjacency wrong.
+   *
+   * An EMPTY set goes without a question, because there is nothing to lose and
+   * a confirmation on every tap is how people learn to dismiss confirmations.
+   */
+  const askRemoveSet = (key: string, i: number, name: string, s: { reps: string; kg: string }) => {
+    const typed = (s.reps ?? '').trim() !== '' || (s.kg ?? '').trim() !== '';
+    if (!typed) { removeSet(key, i); return; }
+    Alert.alert(
+      `Remove set ${i + 1}?`,
+      `${name} set ${i + 1} has figures in it, and this screen has no undo.`,
+      [
+        { text: 'Keep it', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => removeSet(key, i) },
+      ],
+    );
+  };
 
   /** Empty the form once the write has been taken responsibility for.
    *
@@ -1604,6 +1647,10 @@ export default function LogSession() {
                   <View style={{ width: 44, alignItems: 'center' }}>
                     <Text style={{ ...ty.micro, color: t.ink3 }}>Done</Text>
                   </View>
+                  {/* The remove column has no heading — a word over a column of
+                      minus signs reads as an instruction rather than a label —
+                      but it needs the width, or the two rows stop lining up. */}
+                  <View style={{ width: 30 }} />
                 </View>
                 {r.sets.map((s, i) => (
                   <View key={i}>
@@ -1678,6 +1725,28 @@ export default function LogSession() {
                           </Pressable>
                         );
                       })()}
+                      {/* ── taking one set off ────────────────────────────────
+                          "Need to be able to remove a set from an exercise not
+                          just able to delete the entire exercise."
+
+                          Offered only from the second set on. At one set the
+                          thing to remove is the exercise, and that control is
+                          already at the top of the row saying so — a minus here
+                          that emptied a movement would leave a named exercise
+                          with nothing under it, which writes nothing and reads
+                          as a fault. The spacer keeps the columns aligned so a
+                          row does not jump sideways as sets come and go. */}
+                      {r.sets.length > 1 ? (
+                        <Pressable onPress={() => askRemoveSet(r.key, i, movement(r.name), s)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove ${movement(r.name)} set ${i + 1}`}
+                          hitSlop={{ top: hitSlopFor(30), bottom: hitSlopFor(30), left: 7, right: 7 }}
+                          style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="minus" size={16} color={t.ink3} />
+                        </Pressable>
+                      ) : (
+                        <View style={{ width: 30 }} />
+                      )}
                     </View>
                     {/* What the coach WROTE for this set, in their own words,
                         under the boxes they are typing into. It is a caption
