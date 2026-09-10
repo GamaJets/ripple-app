@@ -481,14 +481,20 @@ badly.
   broader rule would be deleted within a week — but it is the honest size of
   the claim. A gate passing is not a pass having been made.
 
-  *And a gate that runs nowhere.* `check:a11y` is defined in `package.json` and
-  is in **no** run list: not `check:all`, not `scripts/publish.sh`, not
-  `.github/workflows/ci.yml`. `grep -rn "check:a11y"` over the repo returns
-  exactly one line, its own definition. `check:contrast` is in `check:all`;
-  this one is not, and neither uses `scripts/gate-floor.mjs`. This is precisely
-  the failure `check:all`'s own note in `package.json` was written about —
-  "a gate nobody runs is not a gate, it is a file". Wiring it is one line in a
-  file this lane does not own.
+  ~~*And a gate that runs nowhere.* `check:a11y` is defined in `package.json`
+  and is in **no** run list.~~ **CLOSED by `4b72fcc`, "The accessibility gate
+  that was wired into nothing".** `check:a11y` is now the 25th entry in
+  `check:all` (`package.json:79`, between `check:numbers` and `check:contrast`),
+  and `check:all` is what `scripts/publish.sh:116` and
+  `.github/workflows/ci.yml:104` both run — so all four of its rules are
+  enforced on every CI run and immediately before every OTA. Verified by eye in
+  the publish of 10 Sep 2026, which printed `check:a11y` between the two.
+  Neither it nor `check:contrast` uses `scripts/gate-floor.mjs`; that part
+  still stands and is not a defect. What this paragraph used to be about — the
+  failure `check:all`'s own note in `package.json` was written for, "a gate
+  nobody runs is not a gate, it is a file" — is no longer true of this gate.
+  The **coverage** claim above it is untouched by any of that: a gate that now
+  runs still only reaches a verdict on 13% of the touchables.
 - Load and permission testing per role. **Permission side partly covered**
   (`src/lib/staffRoles.test.ts`, `src/lib/consoleRoutes.test.ts`); **load
   testing is still open, and is now open for a written reason rather than for
@@ -769,9 +775,12 @@ two vendors, not two gaps; **12** is deferred by the owner. Numbering is kept
 stable — rows 1 and 2 are struck rather than removed — so a brief that already
 says "#9" still means load testing. Of the seven, **6, 7 and 8 should not be
 worked yet** for the reason in the next section, and **4 and 5** are the only
-ones that are a straightforward build. Two more pieces of work sit in *Partly
+ones that are a straightforward build. ~~Two more pieces of work sit in *Partly
 done* below rather than here, and both are small: wiring `check:a11y` into a run
-list, and the 87% of the client app's touchables no accessibility rule examines.
+list, and~~ **one** more piece of work sits in *Partly done* below rather than
+here, and it is not small: the 87% of the client app's touchables no
+accessibility rule examines. Wiring `check:a11y` into a run list was the other
+half of that sentence and was done in `4b72fcc`.
 
 ### Deliberately not started, and correctly so
 
@@ -796,13 +805,15 @@ not ready to be worked.
   claim, and the remaining 87% needs a person with a screen reader, not a
   regex.
 
-  **Two second-order facts a brief should carry.** First, `check:a11y` is
-  defined in `package.json` and is in **no** run list — not `check:all`, not
-  `scripts/publish.sh`, not `.github/workflows/ci.yml`; `grep -rn "check:a11y"`
-  over the repo returns its own definition and nothing else, so today a
-  regression on any of its four rules fails no run. `scripts/check-contrast.mjs`,
-  the other half of the same pass, *is* in `check:all`. Second, its `ROOTS` are
-  `['app', 'src']`, which excludes the console — partly on purpose, since a
+  **Two second-order facts a brief should carry — the first of which has since
+  been fixed.** ~~First, `check:a11y` is defined in `package.json` and is in
+  **no** run list.~~ It is in `check:all` as of `4b72fcc` (`package.json:79`),
+  and `check:all` is what `scripts/publish.sh:116` and
+  `.github/workflows/ci.yml:104` run, so a regression on any of its four rules
+  now fails CI and refuses an OTA. `scripts/check-contrast.mjs`, the other half
+  of the same pass, was already there and still is. Second — **and this one is
+  still true** — its `ROOTS` are
+  `['app', 'src']`, which excludes the console: partly on purpose, since a
   unitless `line-height` in a browser is correct and is the very behaviour React
   Native lacks, but Rules 1 and 3 have no such excuse. Neither is a new roadmap
   item; both are why "the gates exist" was never the same claim as "the pass was
