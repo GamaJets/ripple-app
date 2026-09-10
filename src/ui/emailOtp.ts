@@ -74,6 +74,29 @@ export const EMAIL_OTP_LENGTH = 6;
 export const MIN_OTP_SUBMIT = 4;
 
 /**
+ * The most digits the field will HOLD, as opposed to expect.
+ *
+ * The braces to MIN_OTP_SUBMIT's belt, and the half of that argument which was
+ * missing. The screen already refused to give up on a code SHORTER than the
+ * boxes it drew; it silently truncated a LONGER one, because the input sliced
+ * what it was given down to the drawn length and then auto-submitted the
+ * truncation. An eight-digit code arriving at a six-box screen became a
+ * six-digit code, was sent, and came back refused — "that code was not right"
+ * about a code that was entirely right.
+ *
+ * That path is not hypothetical and it is not rare: it is exactly what AUTOFILL
+ * does. A person typing reveals the problem one digit at a time and stops; the
+ * keyboard's one-time-code suggestion delivers the whole thing in a single
+ * `onChangeText`, so the truncation and the wrong answer happen together with
+ * nothing on screen to explain them.
+ *
+ * Ten rather than the drawn length, because the point is to stop guessing:
+ * Supabase's setting goes to eight, this leaves headroom above that, and
+ * `verifyOtp` remains the only thing that decides whether a code is right.
+ */
+export const MAX_OTP_ENTRY = 10;
+
+/**
  * The length as a WORD, for prose.
  *
  * The defect this exists to prevent is not the number, it is the number

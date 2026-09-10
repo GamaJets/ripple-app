@@ -42,21 +42,49 @@ gyms you have spoken to. It is not defensible when strangers can sign up:
 unverified addresses mean password resets can be aimed at accounts somebody
 else owns, and it lets one person squat on another's email.
 
-**The link shape is fixed already — 27 Aug 2026.** The Confirm sign up template
-must be changed at the same time as the toggle, or this comes straight back:
+**Confirm sign up is a CODE now, not a link — and the template decides whether
+it works at all.** The app calls `verifyOtp({ type: 'signup' })` with six digits
+the member reads out of the message (`src/ui/auth.tsx`, `src/ui/emailOtp.ts`).
+If the template has no `{{ .Token }}` in it, no code arrives, and the confirm
+screen cannot be completed by anybody. There is nothing in this repository that
+fails when that is wrong — the template lives in the dashboard.
 
-    <a href="https://repplefitness.com/confirmed?token_hash={{ .TokenHash }}&amp;type=signup">Confirm my email</a>
+Auth → Emails → Confirm sign up. The code must appear as a bare run of digits
+with the words next to it:
 
-It must be the ONLY link in that template. `{{ .ConfirmationURL }}` routes
-through `/auth/v1/verify`, which spends the token server-side the moment
-*anything* fetches the URL — and a scanning mail filter fetches it before the
-person reads the message. `web/confirmed.html` now holds a `token_hash` and
-spends it when somebody presses the button, which a scanner does not do. Reset
-password was moved to this shape on 27 Aug and is the working example.
+    <p>Your Repple verification code is</p>
+    <p style="font-size:32px;letter-spacing:4px"><strong>{{ .Token }}</strong></p>
+    <p>It expires in an hour. If you did not ask for it, ignore this email.</p>
 
-Note that until that template changes, `web/confirmed.html` is still correct for
-the old `#access_token` shape — both are handled. Nothing breaks by waiting; the
-scanner problem simply persists.
+Three things about that shape are load-bearing:
+
+- **`{{ .Token }}` and not `{{ .ConfirmationURL }}`.** The link routes through
+  `/auth/v1/verify`, which spends the token server-side the moment *anything*
+  fetches the URL — and a scanning mail filter fetches it before the person
+  reads the message. That is what took confirmation offline on 26 Aug; a code
+  removes the problem rather than working around it, because there is no URL to
+  fetch and nothing a machine can press. The argument is written out at the top
+  of `src/ui/emailOtp.ts`.
+- **Digits unbroken.** Not `123 456`, not `123-456`. iOS reads verification
+  codes out of Mail and offers them above the keyboard, and a code split by a
+  space or a hyphen is not recognised as one — the member gets no suggestion to
+  tap and has to swap apps and memorise it. It also breaks a plain copy-paste.
+  Letter-spacing is CSS and is safe; a literal separator character is not.
+- **The words "verification code" beside it.** That, and the code being near
+  the top, is what the detection keys on. There is no formal markup for email
+  the way `@domain #code` exists for SMS.
+
+`src/ui/OtpCodeEntry.tsx` holds up the app's end: one full-size field marked
+`oneTimeCode` behind the painted boxes, so the suggestion has somewhere to land.
+
+**Reset password is still the link shape**, moved there on 27 Aug and working:
+
+    <a href="https://repplefitness.com/confirmed?token_hash={{ .TokenHash }}&amp;type=recovery">Reset my password</a>
+
+It must be the ONLY link in that template, for the same scanner reason.
+`web/confirmed.html` holds the `token_hash` and spends it when somebody presses
+the button, which a scanner does not do. It also still handles the older
+`#access_token` shape, so nothing breaks in transit.
 
 **Also before flipping it back**, fix the rest of what made it necessary:
 
