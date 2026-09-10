@@ -3466,7 +3466,12 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
   const discard = () => {
     Alert.alert(
       `Discard this ${KIND_LABEL[kind].toLowerCase()} session?`,
-      `${clock(elapsed)} on the clock. Nothing is written to your log.`,
+      // The clock the member is LOOKING at. Once `finish` has run the screen
+      // shows `finalElapsed`, frozen at the tap, while `elapsed` keeps
+      // counting underneath — so this dialog said "1:50 on the clock" over a
+      // screen reading 1:31. Two numbers for one session, in the sentence
+      // asking somebody to throw it away.
+      `${clock(finished ? finalElapsed : elapsed)} on the clock. Nothing is written to your log.`,
       [{ text: 'Keep going', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: onClose }],
     );
   };
@@ -3497,7 +3502,17 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
               section on this screen that asks for anything was the last thing
               on it. What is above it now is a summary somebody reads; what is
               below is a result they look at. */}
-          {recovery ? (
+          {/* Nothing to fill in when nothing can be saved.
+              Reproduced in the simulator: on a session under a minute this
+              screen drew Distance, Avg watts and Calories as ordinary editable
+              boxes, said "nothing here is required", and then offered only
+              Close — no Save. A member could type a distance and a wattage and
+              there was no button that kept them. Asking for input and then
+              refusing to take it is worse than not asking: it reads as the
+              boxes being broken, which is exactly how it was reported.
+              The sentence below explains why the session is not being kept, and
+              it should be the only thing here. */}
+          {finalMins <= 0 ? null : recovery ? (
             <Section>
               <Text style={{ ...ty.caption, color: t.ink3 }}>
                 Recovery records how long it lasted, and nothing else. A sauna raises your heart rate, but the cost is
