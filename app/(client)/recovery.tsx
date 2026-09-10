@@ -376,11 +376,11 @@ export default function Recovery() {
 
   {/* ── header ──────────────────────────────────────────────────────── */}
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
    <View style={{ flex: 1 }}>
     <Text style={{ ...ty.micro, color: t.ink3 }}>Heart rate, hydration, sleep &amp; mobility</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Recovery</Text>
    </View>
-   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
   </View>
 
   {/* ── readiness: the number the home screen leads with, taken apart ─

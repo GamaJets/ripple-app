@@ -196,11 +196,11 @@ export default function Measurements() {
 
   {/* ── header ──────────────────────────────────────────────────────── */}
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
    <View style={{ flex: 1 }}>
     <Text style={{ ...ty.micro, color: t.ink3 }}>Tape measurements in {lu}</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Body Measurements</Text>
    </View>
-   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
   </View>
 
   {/* ── the hero: waist, when there is one ──────────────────────────── */}

@@ -69,6 +69,7 @@ import {
   type CoachSessionRow, type ReportScan, type ReportMeasureEntry, type ReportInjury,
 } from '../../src/lib/coachClientReport';
 import { BACK_ICON } from '../../src/ui/direction';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 // Written out here rather than imported from a shared constant:
 // scripts/check-schema.mjs resolves a select list that arrives as a named
@@ -111,6 +112,7 @@ const EMPTY: Reads = {
 
 export default function ClientReport() {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const router = useRouter();
   const r = useRoster();
   const { appName } = useBrand();
@@ -447,7 +449,7 @@ export default function ClientReport() {
           already fills the container it pads.
           220 rather than 40 because the note is the last thing on this screen and the button
           that sends the report is under it. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 220 }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>

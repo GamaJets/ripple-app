@@ -30,9 +30,11 @@ import {
 } from '../src/lib/phone';
 import { deviceRegion } from '../src/lib/unitPreference';
 import { BACK_ICON } from '../src/ui/direction';
+import { useScrollPad } from '../src/ui/keyboardPad';
 
 export default function PhoneSignIn() {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const router = useRouter();
   const auth = useAuth();
   const { appName } = useBrand();
@@ -99,7 +101,7 @@ export default function PhoneSignIn() {
           followed only by the button that submits it, and the code stage puts
           six boxes and a countdown in the same place — both have to clear the
           keyboard, not stop under it. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: 220 }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
 

@@ -579,11 +579,11 @@ export default function Devices() {
 
   {/* ── header ──────────────────────────────────────────────────────── */}
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
    <View style={{ flex: 1 }}>
     <Text style={{ ...ty.micro, color: t.ink3 }}>Wearables</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Watch &amp; Devices</Text>
    </View>
-   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
   </View>
 
   {/* ── the hero: today's live burn, when a device is feeding it ─────── */}

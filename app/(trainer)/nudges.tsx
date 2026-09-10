@@ -81,6 +81,7 @@ import { paceNote } from '../../src/lib/interventions';
 import { cadenceLine, overdueNote } from '../../src/lib/cadence';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { BACK_ICON } from '../../src/ui/direction';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 /** The mark beside a verdict. A coloured dot beside ink text, never coloured
  *  text: the scale reserves status colour for status and none of these clears
@@ -559,6 +560,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
   onSent: (body: string, queued: boolean, reason: string | null) => Promise<string>;
 }) {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const { send } = useThread(nudge.clientId, 'coach');
   const [body, setBody] = useState(nudge.draft);
   const [sending, setSending] = useState(false);
@@ -613,7 +615,7 @@ function DraftSheet({ nudge, onClose, onSent }: {
           already fills the container it pads.
           220 rather than 40 because the message body is what this screen is for, and Send is
           directly under it. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 220 }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>

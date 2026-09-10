@@ -54,6 +54,7 @@ import {
 } from '../../src/lib/accountSecurity';
 import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 /** Have we read the account's own state, and what did it say. `'failed'` is
  *  kept apart from `null` for the reason settings.tsx keeps them apart: a read
@@ -76,6 +77,7 @@ function signInAddress(email: string): string {
 
 export default function CoachAccount() {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const router = useRouter();
   const auth = useAuth();
   const email = auth.user?.email || '';
@@ -217,7 +219,7 @@ export default function CoachAccount() {
           already fills the container it pads.
           220 rather than 40 because the password fields are the LAST thing on this screen and
           the button under them has to come up with them. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 220 }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 

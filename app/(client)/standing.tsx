@@ -420,6 +420,7 @@ export default function StandingAppointments() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Standing Appointments</Text>
@@ -427,7 +428,6 @@ export default function StandingAppointments() {
               The same hour every week, booked for you without either of you asking again.
             </Text>
           </View>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         <Rule />

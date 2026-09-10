@@ -209,6 +209,7 @@ import { num } from '../../src/lib/format';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { BACK_ICON } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 /** The same starter list the program builder offers. */
 const LIB = [
@@ -248,6 +249,7 @@ const mkKey = () => `ex-${SEQ++}`;
 
 export default function LogSession() {
   const t = useTheme();
+  const scrollPad = useScrollPad(220);
   // `x.name` and `r.name` are what gets WRITTEN into the client's log, so they
   // stay the English identity — `addExercise(x.name)` below is untouched.
   // `movement()` is the same movement in the coach's own language, which is
@@ -1163,7 +1165,7 @@ export default function LogSession() {
             still scroll above the keyboard rather than stopping under it —
             40pt was enough when nothing was ever hidden and is not now. */}
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 260 }}
+          contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }}
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets
           keyboardDismissMode="interactive"

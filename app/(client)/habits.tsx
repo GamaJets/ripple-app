@@ -38,6 +38,7 @@ import { isWhole } from '../../src/ui/loadStatus';
 import { readNumber } from '../../src/lib/units';
 import { hitSlopFor } from '../../src/lib/a11y';
 import { BACK_ICON } from '../../src/ui/direction';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 // The same bounds clients_step_goal_check, clients_sleep_goal_hours_check
 // (supabase/parts/60) and clients_water_goal_glasses_check (part 70) enforce.
@@ -52,6 +53,7 @@ const WATER_MIN = 1, WATER_MAX = 30;
 
 export default function Habits() {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const router = useRouter();
   const h = useHabits();
   // The checklist's training row names today's session, and that name comes
@@ -106,7 +108,7 @@ export default function Habits() {
           KeyboardAvoidingView with behavior="padding" does nothing when the ScrollView
           already fills the container it pads.
           220 rather than 40 because the water goal is the last field on the screen. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 220 }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 

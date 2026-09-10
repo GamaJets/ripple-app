@@ -57,9 +57,11 @@ import {
   SIGNING_RULE, NOT_REPPLE, type MemberAgreement,
 } from '../../src/lib/gymSigning';
 import { BACK_ICON } from '../../src/ui/direction';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 export default function ClientGymAgreementsScreen() {
   const t = useTheme();
+  const scrollPad = useScrollPad(160);
   const router = useRouter();
 
   const [rows, setRows] = useState<MemberAgreement[]>([]);
@@ -193,7 +195,7 @@ export default function ClientGymAgreementsScreen() {
           already fills the container it pads.
           The field is the name somebody signs a gym agreement with, and the button that signs it
           is directly under it — both have to be visible at once. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 200 }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 

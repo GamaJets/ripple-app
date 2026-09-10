@@ -173,11 +173,11 @@ export default function Muscles() {
   const G = layout.gutter;
   const header = (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+      <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
       <View style={{ flex: 1 }}>
         <Text style={{ ...ty.micro, color: t.ink3 }}>What you have actually worked</Text>
         <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Your Muscles</Text>
       </View>
-      <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
     </View>
   );
 

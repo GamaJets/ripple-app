@@ -150,11 +150,11 @@ export default function Records() {
 
   {/* ── header ──────────────────────────────────────────────────────── */}
   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
    <View style={{ flex: 1 }}>
     <Text style={{ ...ty.micro, color: t.ink3 }}>Best estimated 1-rep max per lift</Text>
     <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Personal Records</Text>
    </View>
-   <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
   </View>
 
   {/* An empty PR board has three causes and only one of them is "you have not

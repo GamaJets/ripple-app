@@ -51,6 +51,7 @@ import { isWhole, type LoadStatus } from './loadStatus';
 import { appLocale } from '../lib/locale';
 import { num } from '../lib/format';
 import { BACK_ICON } from './direction';
+import { useScrollPad } from './keyboardPad';
 
 /* ── the sheet ─────────────────────────────────────────────────────────────── */
 
@@ -97,6 +98,7 @@ export function EndReasonSheet({
   heading?: string;
 }) {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const [reason, setReason] = useState<EndReason | null>(null);
   const [note, setNote] = useState('');
 
@@ -111,7 +113,7 @@ export function EndReasonSheet({
 
           220 rather than 40 because the note is the last field and the button that records the
           ending is under it. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 220 }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>

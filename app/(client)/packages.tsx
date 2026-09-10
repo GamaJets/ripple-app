@@ -52,9 +52,11 @@ import {
   openSubscriptionPortal, pkgMoney, pkgPriceLine, statusLabel, isLive, type ClientSubscription,
 } from '../../src/lib/subscriptions';
 import { BACK_ICON } from '../../src/ui/direction';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 export default function ClientPackages() {
   const t = useTheme();
+  const scrollPad = useScrollPad(160);
   const router = useRouter();
   // null is not []. [] is somebody who has bought nothing; null is a purchase
   // history we could not read — and telling a paying customer they have no
@@ -464,18 +466,18 @@ export default function ClientPackages() {
           already fills the container it pads.
           200 rather than 40 because the discount code belongs to the LAST package in the list,
           and the Buy button under it has to come up with the field. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 200 }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} refreshControl={pull}>
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>Connect</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Memberships &amp; Packs</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What you've bought from your coach and what's left.</Text>
           </View>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {loading ? <ActivityIndicator color={t.brand} style={{ marginVertical: 30 }} accessible accessibilityRole="progressbar" accessibilityLabel="Reading what you have bought…" /> : (

@@ -210,12 +210,12 @@ export default function GymPlans() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>At the gym</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Plans &amp; Passes</Text>
             <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>What your gym sells, and what you are on now.</Text>
           </View>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {/* ── can the gym take a card at all ──────────────────────────────

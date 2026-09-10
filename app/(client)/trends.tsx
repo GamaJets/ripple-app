@@ -254,11 +254,11 @@ export default function Trends() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingTop: sp.md }}>
+          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
           <View style={{ flex: 1 }}>
             <Text style={{ ...ty.micro, color: t.ink3 }}>See your training move over time</Text>
             <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Trends</Text>
           </View>
-          <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
         </View>
 
         {/* ── the hero: this week's tonnage ──────────────────────────────── */}

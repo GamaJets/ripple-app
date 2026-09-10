@@ -66,6 +66,7 @@ import { useReviewAsks, type AskRow } from '../../src/ui/reviewAsks';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { useThread } from '../../src/ui/messaging';
 import { BACK_ICON } from '../../src/ui/direction';
+import { useScrollPad } from '../../src/ui/keyboardPad';
 
 const EMPTY: CredentialDraft = {
   kind: 'certification', title: '', issuer: '', reference: '', issuedOn: '', expiresOn: '',
@@ -699,6 +700,7 @@ function AskSheet({ row, onClose, onSent }: {
   onSent: () => Promise<void>;
 }) {
   const t = useTheme();
+  const scrollPad = useScrollPad(180);
   const { name: coachName } = useMyTrainerProfile();
   const { send } = useThread(row.clientId, 'coach');
   const [body, setBody] = useState(reviewAskDraft(row.moment, row.name, coachName));
@@ -725,7 +727,7 @@ function AskSheet({ row, onClose, onSent }: {
           already fills the container it pads.
           220 rather than 40 because the message body is what this screen is for, and Send is
           directly under it. */}
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: 220 }}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: scrollPad }}
         keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets
         keyboardDismissMode="interactive">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
