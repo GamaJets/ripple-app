@@ -524,7 +524,18 @@ export default function LogSession() {
   // names nobody rather than an array that happens not to equal `picked`.
   const pickedName = pickedRow?.name
     ?? (picked && picked === subjectOf(clientId) ? (typeof name === 'string' ? name : '') || null : null);
-  const first = (pickedName || 'your client').split(' ')[0];
+  // The first name, or a noun phrase that reads in the same slots.
+  //
+  // This was `(pickedName || 'your client').split(' ')[0]`, which takes the
+  // FIRST WORD of the fallback and hands back "your" — so every sentence built
+  // on it read "Goes into your's record", "Add what your actually did" and
+  // "Log to your's record". Seen on screen the moment the screen was opened
+  // without a client, which is how it opens from the tab bar.
+  //
+  // Only a real name is split. The fallback is a whole noun phrase and stays
+  // one, because it has to work as a subject ("Add what your client actually
+  // did") and as a possessive ("your client's record") in the same file.
+  const first = pickedName ? pickedName.split(' ')[0] : 'your client';
 
   /* ── the session this coach already wrote for them ──────────────────────
    *
@@ -673,15 +684,33 @@ export default function LogSession() {
   const [histStatus, setHistStatus] = useState<LoadStatus>('loading');
   const histFor = useRef<string | null>(null);
 
+  /**
+   * Whether this client HAS a log that could be read at all.
+   *
+   * Found on a device, and it is the fault src/lib/clientRecord.ts was written
+   * for. A hand-added client has no Repple account and no `workouts` rows, so
+   * the read is skipped — and the first version of this screen then set the
+   * status to `ready` and rendered "First time Tamer has done this one" under
+   * every movement on the sheet. That is a statement about a person, made from
+   * a read that never happened, in front of them.
+   *
+   * `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`, so a hand-added
+   * client's id is indistinguishable from a real one's downstream; `handAdded`
+   * is marked in src/ui/roster.tsx at the only place that knows which table the
+   * row came out of, and `clientIsQueryable` is the one reader of it. The same
+   * similarity once told coaches that people with no account had disclosed no
+   * injuries and not filled in their intake.
+   */
+  const historyAskable = USE_SUPABASE && clientIsQueryable(picked, pickedRow?.handAdded);
+
   useEffect(() => {
-    // A client added by hand has no account and therefore no log to read. Not
-    // an error and not an empty history: there is no such person to ask about,
-    // and `clientIsQueryable` is the one reader of that distinction.
     const id = picked;
-    if (!id || !USE_SUPABASE || !clientIsQueryable(id, pickedRow?.handAdded)) {
+    if (!id || !historyAskable) {
       histFor.current = id ?? null;
       setHist(null);
-      setHistStatus(id ? 'ready' : 'loading');
+      // Deliberately NOT 'ready'. Nothing was asked, so nothing landed, and a
+      // status meaning "the read came back empty" would be the lie above.
+      setHistStatus('loading');
       return;
     }
     let live = true;
@@ -710,7 +739,7 @@ export default function LogSession() {
       setHistStatus(page.truncated ? 'partial' : 'ready');
     })();
     return () => { live = false; };
-  }, [picked, pickedRow?.handAdded]);
+  }, [picked, historyAskable]);
 
   /**
    * The newest outing of each movement on the sheet.
@@ -1479,18 +1508,23 @@ export default function LogSession() {
                     about the connection. Saying "first time" off a read that
                     was cut would be telling a coach something false about their
                     client while standing next to them. */}
-                {histStatus === 'loading' ? (
-                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                {!historyAskable ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                    {first} was added by hand and has no Repple account, so there is no training history to compare
+                    this against. What you log here is still kept on their record.
+                  </Text>
+                ) : histStatus === 'loading' ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
                     Reading what {first} did last time…
                   </Text>
                 ) : histStatus === 'error' ? (
-                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
                     {first}’s history could not be read, so there is nothing to compare this against. That is a
                     connection problem — log the session as normal.
                   </Text>
                 ) : last ? (
                   <View style={{ marginTop: sp.xs }}>
-                    <Text style={{ ...ty.micro, color: t.ink2 }}>
+                    <Text style={{ ...ty.caption, color: t.ink2 }}>
                       {`Last time · ${last.day ? historyDayLabel(last.day) : 'date unknown'}`}
                       {last.topLoadKg != null && last.topReps != null
                         ? ` · top set ${last.topReps} × ${liftLabel(last.topLoadKg, wu)}`
@@ -1507,35 +1541,48 @@ export default function LogSession() {
                         earned. The figure is stated. What it means is the
                         conversation the two of them have next. */}
                     {hasComparison(cmp) ? (
-                      <Text style={{ ...ty.micro, color: t.ink2, marginTop: 2 }}>
+                      <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
+                        {/* EVERY figure `hasComparison` counts is rendered here.
+                            The first version listed four of the six and left out
+                            total reps and set count — so a movement whose only
+                            comparable figures were those two drew an EMPTY line
+                            under "Last time". Seen on a device the moment a rep
+                            count was typed before a load: `hasComparison` said
+                            there was a comparison and the screen showed a blank,
+                            which is the "row of dashes" fault that function was
+                            written to prevent, arriving from the other side.
+                            If a figure is ever added to `SheetDelta`, it belongs
+                            in this list too. */}
                         {[
                           cmp.topLoadKg != null
-                            ? `Top load ${deltaLabel(liftDeltaIn(cmp.topLoadKg, wu), { since: null, unit: wu })}`
+                            ? `Top load ${deltaLabel(liftDeltaIn(cmp.topLoadKg, wu), { since: null, unit: wu, noChange: 'no change' })}`
                             : null,
-                          cmp.topReps != null ? `reps at it ${deltaLabel(cmp.topReps, { since: null, decimals: 0 })}` : null,
+                          cmp.topReps != null ? `reps at it ${deltaLabel(cmp.topReps, { since: null, decimals: 0, noChange: 'no change' })}` : null,
                           cmp.best1RMKg != null
-                            ? `est. 1RM ${deltaLabel(est1RMIn(cmp.best1RMKg, wu), { since: null, unit: wu, decimals: 0 })}`
+                            ? `est. 1RM ${deltaLabel(est1RMIn(cmp.best1RMKg, wu), { since: null, unit: wu, decimals: 0, noChange: 'no change' })}`
                             : null,
                           cmp.volumeKg != null
-                            ? `volume ${deltaLabel(volumeIn(cmp.volumeKg, wu), { since: null, unit: wu, decimals: 0 })}`
+                            ? `volume ${deltaLabel(volumeIn(cmp.volumeKg, wu), { since: null, unit: wu, decimals: 0, noChange: 'no change' })}`
                             : null,
+                          cmp.reps != null ? `reps ${deltaLabel(cmp.reps, { since: null, decimals: 0, noChange: 'no change' })}` : null,
+                          cmp.setCount != null ? `sets ${deltaLabel(cmp.setCount, { since: null, decimals: 0, noChange: 'no change' })}` : null,
                         ].filter(Boolean).join(' · ')}
                       </Text>
                     ) : (
-                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                         Type what they did and the difference against last time appears here.
                       </Text>
                     )}
                     {repsNote ? (
-                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{repsNote}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{repsNote}</Text>
                     ) : null}
                   </View>
                 ) : isWhole(histStatus) ? (
-                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
                     First time {first} has done this one, so there is nothing to compare it against yet.
                   </Text>
                 ) : (
-                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
                     No earlier {movement(r.name)} in the sessions that could be read — their record goes back
                     further than this, so this may not be the first time.
                   </Text>

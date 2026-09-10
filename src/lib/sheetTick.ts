@@ -171,7 +171,22 @@ export function sheetTicksLine(done: number, total: number): string | null {
   // exists because "this one cannot get big" has been wrong before, and an
   // exemption costs more to read than the call does.
   const all = num(total);
-  if (done <= 0) return `None of the ${all} sets on the sheet has a rep count yet, so nothing would be saved.`;
-  if (done >= total) return `All ${all} sets have a rep count and will be saved.`;
-  return `${num(done)} of ${all} sets have a rep count. The other ${num(total - done)} will not be saved.`;
+  // One set is the ordinary state of a freshly added exercise — it is what
+  // `addExercise` creates — so the singular is not an edge case here, it is the
+  // first thing a coach sees. "None of the 1 sets" and "All 1 sets" were both
+  // on screen within a minute of opening the screen.
+  const one = total === 1;
+  if (done <= 0) {
+    return one
+      ? 'The one set on the sheet has no rep count yet, so nothing would be saved.'
+      : `None of the ${all} sets on the sheet has a rep count yet, so nothing would be saved.`;
+  }
+  if (done >= total) {
+    return one
+      ? 'The one set has a rep count and will be saved.'
+      : `All ${all} sets have a rep count and will be saved.`;
+  }
+  const left = total - done;
+  const other = left === 1 ? 'The other one will not be saved.' : `The other ${num(left)} will not be saved.`;
+  return `${num(done)} of ${all} sets have a rep count. ${other}`;
 }

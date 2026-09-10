@@ -526,6 +526,27 @@ export function Cta({ label, onPress, tone, wide, disabled, a11yLabel }: {
       hitSlop={{ top: 2, bottom: 2, left: 0, right: 0 }}
       style={{
         backgroundColor: disabled ? t.surface2 : (tone || t.brand), borderRadius: radius.sm,
+        // A DISABLED PRIMARY ACTION HAS TO STILL LOOK LIKE A BUTTON.
+        //
+        // Reported from the gym floor: "how does a coach save a session they
+        // have logged for a client as there is no save logged session button
+        // for them to tap". There was one. It was this control, disabled,
+        // drawn as `surface2` on a `surface`/`bg` ground with `ink3` text —
+        // two greys a step apart and no edge between them — sitting below the
+        // fold at the end of a long form. A person who scrolls to the bottom
+        // and sees no button concludes there is no button, and they are not
+        // being careless: nothing on screen said otherwise.
+        //
+        // The fix is an edge, not a colour: the fill and the ink stay exactly
+        // as they were, so every contrast reading this component has ever been
+        // measured at is unchanged, and the control simply acquires a shape.
+        // "Not yet" and "not there" then look different, which is the whole
+        // distinction the disabled state exists to draw.
+        //
+        // A hairline is deliberately not enough here — it disappears on the
+        // greys involved — so this is the same 2× hairline the sheet's own tick
+        // uses for an untapped set.
+        ...(disabled ? { borderWidth: hairline * 2, borderColor: t.ring } : null),
         paddingVertical: 11, paddingHorizontal: wide ? 0 : sp.lg,
         alignItems: 'center', ...(wide ? { alignSelf: 'stretch' } : null),
       }}>

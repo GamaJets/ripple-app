@@ -134,6 +134,21 @@ eq(sheetTicksLine(4, 4), 'All 4 sets have a rep count and will be saved.', 'and 
 ok((sheetTicksLine(1, 4) ?? '').includes('other 3 will not be saved'),
   'and a part-filled sheet names what would be left behind');
 
+// One set is what `addExercise` creates, so the singular is the FIRST thing a
+// coach sees rather than an edge case. Both of these were on screen in the
+// simulator — "None of the 1 sets" and "All 1 sets" — within a minute of
+// opening the screen.
+eq(sheetTicksLine(0, 1), 'The one set on the sheet has no rep count yet, so nothing would be saved.',
+  'one empty set is not "None of the 1 sets"');
+eq(sheetTicksLine(1, 1), 'The one set has a rep count and will be saved.',
+  'and one filled set is not "All 1 sets"');
+eq(sheetTicksLine(1, 2), '1 of 2 sets have a rep count. The other one will not be saved.',
+  'and one set left behind is "the other one", not "the other 1"');
+for (const [d, t] of [[0, 1], [1, 1], [0, 4], [4, 4], [1, 4], [1, 2], [3, 7]] as const) {
+  const line = sheetTicksLine(d, t) ?? '';
+  ok(!/\b1 sets?\b/.test(line) || t !== 1, `"${line}" does not say "1 sets"`);
+}
+
 if (errors.length) {
   console.error(`sheetTick.test.ts — ${errors.length} failure(s):`);
   for (const e of errors) console.error('  · ' + e);
