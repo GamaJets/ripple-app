@@ -6,7 +6,7 @@
 // no opinion anywhere about whether a change is good.
 //
 // Compile with tsc, then run under plain node.
-import { sheetTally, compareToLast, topRepsNote, hasComparison } from './sheetProgress';
+import { sheetTally, compareToLast, topRepsNote, hasComparison, previousSets } from './sheetProgress';
 import { est1RM } from './streaks';
 
 const errors: string[] = [];
@@ -145,6 +145,59 @@ eq(sheetTally(undefined).reps, 0, 'either way round');
   const note = topRepsNote(d) ?? '';
   ok(!/worse|drop|down|regress|fail/i.test(note), 'and nothing calls it a decline');
 }
+
+/* ── 7. the PREVIOUS column, aligned set by set ───────────────────────────── */
+
+// One entry per row of the CURRENT sheet, in order. This is the shape the
+// column is drawn from, so a mismatch in length is a mis-drawn table.
+{
+  const last = { sets: [[12, 42.5], [12, 42.5], [10, 42.5]] as [number, number | null][] };
+  const p = previousSets(last, 3);
+  eq(p.length, 3, 'one entry per row on the sheet');
+  eq(p[0]?.reps, 12, 'set one is set one');
+  eq(p[2]?.reps, 10, 'and the set that dropped a rep keeps its own figure');
+  eq(p[2]?.loadKg, 42.5, 'with its own load, in kilograms and unconverted');
+}
+
+// A fourth set today against three last time. The extra row is a dash, which
+// means "there was no set there", and it is the only thing it means.
+{
+  const last = { sets: [[12, 40], [12, 40]] as [number, number | null][] };
+  const p = previousSets(last, 4);
+  eq(p.length, 4, 'the column is as long as the sheet');
+  ok(p[1] != null, 'the rows that existed last time are filled');
+  eq(p[2], null, 'and the ones that did not are blank');
+  eq(p[3], null, 'however many of them there are');
+}
+
+// Fewer today than last time: the extra history is simply not drawn. Nothing is
+// squeezed upward, because set 2 must stay opposite set 2.
+{
+  const last = { sets: [[12, 40], [10, 45], [8, 50]] as [number, number | null][] };
+  const p = previousSets(last, 2);
+  eq(p.length, 2, 'only as many as there are rows');
+  eq(p[1]?.loadKg, 45, 'and position is kept — set 2 is last time’s set 2, not its best');
+}
+
+// Bodyweight: the reps happened, the load is unknown. Null and not nought, so
+// the screen can say "12 reps" rather than "0 kg × 12".
+{
+  const p = previousSets({ sets: [[12, null]] as [number, number | null][] }, 1);
+  eq(p[0]?.reps, 12, 'the reps are real');
+  eq(p[0]?.loadKg, null, 'and the load is unknown rather than zero');
+}
+
+// No history at all, and the degenerate inputs.
+eq(previousSets(null, 3).length, 3, 'no outing still fills the column');
+ok(previousSets(null, 3).every((x) => x === null), 'entirely with blanks');
+eq(previousSets(undefined, 2).length, 2, 'and undefined reads the same as null');
+eq(previousSets({ sets: [] }, 2).filter(Boolean).length, 0, 'an outing with no sets fills nothing');
+eq(previousSets({ sets: [[12, 40]] as [number, number | null][] }, 0).length, 0, 'a sheet with no rows has no column');
+eq(previousSets({ sets: [[12, 40]] as [number, number | null][] }, -1).length, 0, 'and neither has a nonsense one');
+
+// A zero-rep row in the history is not a set that happened.
+eq(previousSets({ sets: [[0, 40], [8, 40]] as [number, number | null][] }, 2)[0], null,
+  'a set of no repetitions is blank, not "0 x 40"');
 
 if (errors.length) {
   console.error(`sheetProgress.test.ts — ${errors.length} failure(s):`);

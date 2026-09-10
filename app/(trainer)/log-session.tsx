@@ -134,7 +134,7 @@ import { useSettings } from '../../src/ui/settings';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
-import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, numeric, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
 import { useRoster } from '../../src/ui/roster';
 import { searchRoster, rosterSearchLine, rosterPickerLine } from '../../src/lib/rosterSearch';
@@ -192,9 +192,8 @@ import {
 // other screen reads; what this adds is the other side of the comparison — the
 // sets being typed, which are not in the log yet and cannot be.
 import { exerciseOutings, type ExerciseOuting } from '../../src/lib/exerciseHistory';
-import { sheetTally, compareToLast, topRepsNote, hasComparison } from '../../src/lib/sheetProgress';
-import { deltaLabel } from '../../src/lib/deltaLabel';
-import { liftLabel, liftDeltaIn, est1RMIn, volumeIn } from '../../src/lib/units';
+import { previousSets, sheetTally } from '../../src/lib/sheetProgress';
+import { liftLabel, volumeIn } from '../../src/lib/units';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
@@ -1175,19 +1174,73 @@ export default function LogSession() {
               style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
               <Icon name={BACK_ICON} size={18} color={t.ink} />
             </Pressable>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={{ ...ty.micro, color: t.ink3 }}>Log a session</Text>
               {/* The person's name once there is one, and an honest heading
                   before that. It used to read "Client" over a screen that had
                   nobody and could not be given anybody. */}
-              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>{pickedName || 'Log a Session'}</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }} numberOfLines={1}>{pickedName || 'Log a Session'}</Text>
             </View>
+            {/* ── Finish, where it can always be reached ────────────────────
+                Reported as missing entirely: "how does a coach save a session
+                they have logged for a client as there is no save logged
+                session button for them to tap". The button at the foot of the
+                form was real, but it was below the fold at the end of a long
+                sheet and drawn in two greys. Giving its disabled state an edge
+                made it visible; putting a second one HERE makes it findable,
+                which is a different problem and the one that was actually
+                reported.
+                Both press `save`. There is no second write path and no second
+                set of guards — `ready` is the same predicate, so the two cannot
+                disagree about whether this session may be filed. */}
+            <Cta label={busy ? 'Saving…' : 'Finish'} disabled={!ready || busy} onPress={save}
+              a11yLabel={picked ? `Finish and log this session to ${first}'s record` : 'Finish — pick a client first'} />
           </View>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
             {picked
               ? `Goes into ${first}’s own record, marked as logged by you.`
               : 'Pick who this was with, then add what they did. It goes into their own record, marked as logged by you.'}
           </Text>
+
+          {/* ── what is on the sheet, as it is typed ──────────────────────────
+              Volume and Sets, the two running totals a coach can check against
+              what they just watched. Duration is deliberately absent: this
+              screen writes up a session that has already finished, and a
+              stopwatch on it would be counting how long the typing took.
+
+              Both come from `sheetTally`, the same fold the Previous column's
+              history is measured with, so the strip cannot disagree with the
+              table under it. SETS is the count that will actually be SAVED —
+              the same rule the ticks draw — which is why a sheet of empty rows
+              reads 0 rather than however many rows are on screen. */}
+          {rows.length ? (() => {
+            const all = sheetTally(rows.flatMap((r) => r.sets.reduce<[number, number | null][]>((acc, st) => {
+              const n = parseInt(st.reps, 10);
+              if (!Number.isFinite(n) || n <= 0) return acc;
+              const load = readLift(st.kg, wu);
+              acc.push([n, load.ok && load.kg != null ? load.kg : null]);
+              return acc;
+            }, [])));
+            const vol = volumeIn(all.volumeKg, wu);
+            return (
+              <View style={{ flexDirection: 'row', gap: sp.lg, marginTop: sp.md }}>
+                <View>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Volume</Text>
+                  {/* A dash, not a nought. A session of bodyweight sets moved a
+                      real amount that this app cannot price, and printing 0 kg
+                      over it would be a measurement of something that did not
+                      happen. */}
+                  <Text style={{ ...ty.body, color: t.ink, marginTop: 2, ...numeric }}>
+                    {vol == null ? '—' : `${num(vol)} ${wu}`}
+                  </Text>
+                </View>
+                <View>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Sets</Text>
+                  <Text style={{ ...ty.body, color: t.ink, marginTop: 2, ...numeric }}>{num(all.setCount)}</Text>
+                </View>
+              </View>
+            );
+          })() : null}
 
           <Rule />
 
@@ -1524,10 +1577,10 @@ export default function LogSession() {
                 acc.push([n, load.ok && load.kg != null ? load.kg : null]);
                 return acc;
               }, []);
-              const now = sheetTally(nowSets);
               const last = lastByName.get(r.name) ?? null;
-              const cmp = compareToLast(now, last);
-              const repsNote = topRepsNote(cmp);
+              // One entry per row of THIS sheet, so the column and the table
+              // cannot fall out of step as sets are added and removed.
+              const prev = previousSets(last, r.sets.length);
               return (
               <View key={r.key} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md }}>
@@ -1540,21 +1593,21 @@ export default function LogSession() {
                   </Pressable>
                 </View>
 
-                {/* ── last time, and the difference ──────────────────────────
-                    Under the name and above the boxes: it is context for what
-                    is about to be typed, not a result of it.
+                {/* ── what could not be read, when that is the fact ──────────
+                    The PREVIOUS column below carries the ordinary case, set by
+                    set. What a column of dashes cannot say is WHY it is empty,
+                    and there are four different reasons — so the three that are
+                    not "they have not done this before" are said in words.
 
-                    Four different silences, and they are four different facts.
-                    Only a read that LANDED may say a movement has not been done
-                    before — under a truncated read the honest statement is
-                    about the rows that came back, and under a failed one it is
-                    about the connection. Saying "first time" off a read that
-                    was cut would be telling a coach something false about their
-                    client while standing next to them. */}
+                    Only a read that LANDED may call something a first time.
+                    Under a truncated read the honest statement is about the
+                    rows that came back, and under a failed one it is about the
+                    connection. Saying "first time" off a read that was cut
+                    would be telling a coach something false about their client
+                    while standing next to them. */}
                 {!historyAskable ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
-                    {first} was added by hand and has no Repple account, so there is no training history to compare
-                    this against. What you log here is still kept on their record.
+                    {first} was added by hand and has no Repple account, so there is no history to compare against.
                   </Text>
                 ) : histStatus === 'loading' ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
@@ -1562,67 +1615,17 @@ export default function LogSession() {
                   </Text>
                 ) : histStatus === 'error' ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
-                    {first}’s history could not be read, so there is nothing to compare this against. That is a
-                    connection problem — log the session as normal.
+                    {first}’s history could not be read, so the Previous column is empty for a reason that is
+                    nothing to do with them. Log the session as normal.
                   </Text>
                 ) : last ? (
-                  <View style={{ marginTop: sp.xs }}>
-                    <Text style={{ ...ty.caption, color: t.ink2 }}>
-                      {`Last time · ${last.day ? historyDayLabel(last.day) : 'date unknown'}`}
-                      {last.topLoadKg != null && last.topReps != null
-                        ? ` · top set ${last.topReps} × ${liftLabel(last.topLoadKg, wu)}`
-                        : ''}
-                      {` · ${last.setCount} set${last.setCount === 1 ? '' : 's'}, ${last.reps} reps`}
-                      {last.volumeKg != null ? ` · ${num(volumeIn(last.volumeKg, wu))} ${wu}` : ''}
-                    </Text>
-                    {/* The comparison itself. Every movement goes through
-                        `deltaLabel`, which gives a movement of nothing no sign
-                        at all — and nothing here is coloured, arrowed or worded
-                        by direction. The request said "improvement"; a screen
-                        that assumes it greets a client on a fat-loss block whose
-                        bench has held steady with a disappointment they had not
-                        earned. The figure is stated. What it means is the
-                        conversation the two of them have next. */}
-                    {hasComparison(cmp) ? (
-                      <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>
-                        {/* EVERY figure `hasComparison` counts is rendered here.
-                            The first version listed four of the six and left out
-                            total reps and set count — so a movement whose only
-                            comparable figures were those two drew an EMPTY line
-                            under "Last time". Seen on a device the moment a rep
-                            count was typed before a load: `hasComparison` said
-                            there was a comparison and the screen showed a blank,
-                            which is the "row of dashes" fault that function was
-                            written to prevent, arriving from the other side.
-                            If a figure is ever added to `SheetDelta`, it belongs
-                            in this list too. */}
-                        {[
-                          cmp.topLoadKg != null
-                            ? `Top load ${deltaLabel(liftDeltaIn(cmp.topLoadKg, wu), { since: null, unit: wu, noChange: 'no change' })}`
-                            : null,
-                          cmp.topReps != null ? `reps at it ${deltaLabel(cmp.topReps, { since: null, decimals: 0, noChange: 'no change' })}` : null,
-                          cmp.best1RMKg != null
-                            ? `est. 1RM ${deltaLabel(est1RMIn(cmp.best1RMKg, wu), { since: null, unit: wu, decimals: 0, noChange: 'no change' })}`
-                            : null,
-                          cmp.volumeKg != null
-                            ? `volume ${deltaLabel(volumeIn(cmp.volumeKg, wu), { since: null, unit: wu, decimals: 0, noChange: 'no change' })}`
-                            : null,
-                          cmp.reps != null ? `reps ${deltaLabel(cmp.reps, { since: null, decimals: 0, noChange: 'no change' })}` : null,
-                          cmp.setCount != null ? `sets ${deltaLabel(cmp.setCount, { since: null, decimals: 0, noChange: 'no change' })}` : null,
-                        ].filter(Boolean).join(' · ')}
-                      </Text>
-                    ) : (
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                        Type what they did and the difference against last time appears here.
-                      </Text>
-                    )}
-                    {repsNote ? (
-                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{repsNote}</Text>
-                    ) : null}
-                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                    Previous · {last.day ? historyDayLabel(last.day) : 'date unknown'}
+                    {last.entryCount > 1 ? ` · written up in ${num(last.entryCount)} goes` : ''}
+                  </Text>
                 ) : isWhole(histStatus) ? (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
-                    First time {first} has done this one, so there is nothing to compare it against yet.
+                    First time {first} has done this one.
                   </Text>
                 ) : (
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
@@ -1637,9 +1640,23 @@ export default function LogSession() {
                     load were never on screen — and the load column's unit is
                     the coach's own kg/lb setting, not a constant. */}
                 <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
-                  <View style={{ width: 46 }} />
-                  <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3, width: 24 }}>Set</Text>
+                  {/* What that set WAS, on the line of the set it was. Asked for
+                      after seeing it done this way elsewhere, and it is better
+                      than the sentence it replaces: set 3's figure sits on set
+                      3's row instead of having to be held in the head while
+                      typing into it. */}
+                  <Text style={{ ...ty.micro, color: t.ink3, flex: 1.7 }}>Previous</Text>
+                  {/* KG before REPS, matching the Previous column's own phrasing
+                      ("42.5 kg × 12") so the eye reads the row in one direction.
+                      Safe to reorder because both columns are LABELLED — the
+                      header row exists precisely because sets after the first
+                      are seeded from the one above and the words would otherwise
+                      be off screen — and because `patchSet` addresses the fields
+                      by name, so nothing about the write depends on their
+                      position. */}
                   <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{wu.toUpperCase()}</Text>
+                  <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps</Text>
                   {/* The tick's column, named. A bare column of circles is a
                       control nobody knows the meaning of until they press one,
                       and the one thing this must not be is a mystery on a
@@ -1655,8 +1672,34 @@ export default function LogSession() {
                 {r.sets.map((s, i) => (
                   <View key={i}>
                     <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm, alignItems: 'center' }}>
-                      <Text style={{ ...ty.caption, color: t.ink3, width: 46 }}>Set {i + 1}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, width: 24 }}>{i + 1}</Text>
+                      {/* The same set, last time. A dash means there was no set
+                          in that position — nothing about the read, which the
+                          line above the table says in words when it is the
+                          case. Kilograms out of the history, converted HERE and
+                          once, like every other load on this screen. */}
+                      <Text style={{ ...ty.caption, color: t.ink3, flex: 1.7 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                        {(() => {
+                          const pv = prev[i];
+                          if (!pv) return '—';
+                          const load = liftLabel(pv.loadKg, wu);
+                          // A bodyweight set has reps and no knowable load, and
+                          // "0 kg × 12" would be a lift nobody did.
+                          return load ? `${load} × ${pv.reps}` : `${pv.reps} reps`;
+                        })()}
+                      </Text>
+                      <TextInput value={s.kg} onChangeText={(v) => patchSet(r.key, i, { kg: v })}
+                        keyboardType="decimal-pad"
+                        accessibilityLabel={`${movement(r.name)} set ${i + 1} weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}`} style={[inp, { flex: 1 }]} />
                       <TextInput value={s.reps} onChangeText={(v) => patchSet(r.key, i, { reps: v })}
+                        // decimal-ok: a rep count is whole — nobody performs 8.5
+                        // repetitions, and `entriesToWrite` reads this box with
+                        // parseInt. Only flagged at all because the columns were
+                        // reordered to KG then REPS to match the Previous
+                        // column's own phrasing, which puts this box directly
+                        // after the weight field's label; the gate matches a
+                        // field to the nearest name and picks up "weight". The
+                        // keyboard here is right and the attribution is not.
                         keyboardType="numeric"
                         accessibilityLabel={`${movement(r.name)} set ${i + 1} reps`}
                         // The prescription, spoken. A coach using VoiceOver
@@ -1668,9 +1711,6 @@ export default function LogSession() {
                           ? `You wrote ${s.target} for this set. Type what they actually did.`
                           : undefined}
                         style={[inp, { flex: 1 }]} />
-                      <TextInput value={s.kg} onChangeText={(v) => patchSet(r.key, i, { kg: v })}
-                        keyboardType="decimal-pad"
-                        accessibilityLabel={`${movement(r.name)} set ${i + 1} weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}`} style={[inp, { flex: 1 }]} />
                       {/* ── the tick ──────────────────────────────────────────
                           "There should be a check mark to the right of the
                           exercise set being performed that logs this set as

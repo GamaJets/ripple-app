@@ -237,3 +237,54 @@ export function hasComparison(d: SheetDelta): boolean {
   return d.topLoadKg != null || d.topReps != null || d.volumeKg != null
     || d.reps != null || d.setCount != null || d.best1RMKg != null;
 }
+
+/**
+ * What each set of this movement was LAST time, aligned to the sheet's rows.
+ *
+ * The shape a coach asked for after seeing it elsewhere: a PREVIOUS column
+ * beside the boxes, so set 3's target sits on set 3's line rather than in a
+ * sentence above the table that has to be held in the head while typing.
+ *
+ * Returns one entry per row of the CURRENT sheet, in order, each either the
+ * matching set from the last outing or null. Null is drawn as a dash and means
+ * exactly one thing: there was no set in that position last time. It does NOT
+ * mean the history could not be read — that is a different fact, it is about
+ * the read rather than about the person, and the screen says it in words
+ * instead of leaving a column of dashes to be interpreted.
+ *
+ * Position, not best-effort matching. Set 3 last time is what set 3 is compared
+ * against, even when last time was a ramp and today is not; anything cleverer
+ * would be this file guessing which set a coach means, and being wrong on a drop
+ * set is worse than being literal.
+ *
+ * KILOGRAMS, and no formatting. `loadKg` is null for a set whose load is not
+ * knowable — a bodyweight set, or one logged before the flag existed — and the
+ * screen decides how to say that in the reader's own unit. Converting here
+ * would put the render boundary in two places, which src/ui/ExerciseHistory.tsx
+ * argues at length against.
+ *
+ * Holds are not in `ExerciseOuting.sets` and so cannot appear: their first
+ * number is seconds, and a coach's sheet that printed "45 × 10 kg" over a plank
+ * would be inviting somebody to type forty-five reps.
+ */
+export interface PreviousSet {
+  reps: number;
+  loadKg: number | null;
+}
+
+export function previousSets(
+  last: { sets?: readonly (readonly [number, number | null])[] } | null | undefined,
+  count: number,
+): (PreviousSet | null)[] {
+  const n = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+  const src = last?.sets ?? [];
+  const out: (PreviousSet | null)[] = [];
+  for (let i = 0; i < n; i++) {
+    const s = src[i];
+    const reps = s?.[0];
+    if (typeof reps !== 'number' || !Number.isFinite(reps) || reps <= 0) { out.push(null); continue; }
+    const load = s?.[1];
+    out.push({ reps, loadKg: typeof load === 'number' && Number.isFinite(load) ? load : null });
+  }
+  return out;
+}
