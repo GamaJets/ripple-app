@@ -124,7 +124,7 @@
 //     FOR the person whose training this is, so a picker that could point an
 //     hour at somebody else's booking is a refused insert at best. With a
 //     session in hand the client is the session's, stated and not chosen.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -181,6 +181,32 @@ import type { MyCurrency } from '../../src/lib/currencySource';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { planOffer, prefillDay, prefillLine, targetLine } from '../../src/lib/planPrefill';
 import { notifySuccess } from '../../src/ui/haptics';
+// Ticking a set off standing next to the person doing it, and the one rule that
+// makes a tick safe on a screen that writes to somebody else's permanent
+// record: it may only put a figure in a box where the plan states a definite
+// one. src/lib/sheetTick.ts holds the reasoning and the refusals.
+import {
+  sheetTick, sheetTickLabel, sheetTicksLine, willSave, isTappable,
+} from '../../src/lib/sheetTick';
+// This movement against the last time they did it. The trail is the one every
+// other screen reads; what this adds is the other side of the comparison — the
+// sets being typed, which are not in the log yet and cannot be.
+import { exerciseOutings, type ExerciseOuting } from '../../src/lib/exerciseHistory';
+import { sheetTally, compareToLast, topRepsNote, hasComparison } from '../../src/lib/sheetProgress';
+import { deltaLabel } from '../../src/lib/deltaLabel';
+import { liftLabel, liftDeltaIn, est1RMIn, volumeIn } from '../../src/lib/units';
+import { supabase } from '../../src/lib/supabase';
+import { USE_SUPABASE } from '../../src/lib/config';
+import { reportError } from '../../src/lib/reportError';
+// `capped` is aliased: this file already has a local `capped` for the roster
+// picker's own truncation flag, and two different meanings under one name in
+// one component is a bug waiting for whoever reads it next.
+import { capLimit, capped as cappedRows } from '../../src/lib/rowCap';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { rowToEntry, WORKOUT_COLS, type WorkoutRow } from '../../src/lib/workoutRow';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { dayLabel as historyDayLabel } from '../../src/lib/adherence';
+import { num } from '../../src/lib/format';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { BACK_ICON } from '../../src/ui/direction';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
@@ -568,6 +594,149 @@ export default function LogSession() {
     setLoadedDays((prev) => (prev.includes(opt.key) ? prev : [...prev, opt.key]));
     setPlanNote(prefillLine(p));
   };
+
+  /* ── putting it on the sheet without being asked ───────────────────────────
+   *
+   * "When a coach is logging a session for a client the planned workout for
+   * that day should automatically populate."
+   *
+   * Every piece of this already existed — `planOffer` resolves which day the
+   * date schedules and `loadPlanDay` puts it on the sheet — and between them
+   * sat a button the coach had to find and press. This closes that gap, under
+   * four conditions, none of which is fussiness:
+   *
+   *   1. ONLY THE SCHEDULED DAY. `planKey` falls back to the first day of the
+   *      week so the picker always has something selected, and auto-loading
+   *      THAT would put a session on the sheet the client was never due — on a
+   *      rest day, silently, ready to save. An automatic action may only take
+   *      the answer the programme actually gives.
+   *   2. ONLY ONTO AN EMPTY SHEET. `loadPlanDay` appends, deliberately, and an
+   *      effect that appends is an effect that can double. Whatever the coach
+   *      has typed is theirs and this screen is the only thing holding it.
+   *   3. ONCE. `loadedDays` already records what has been put on; the same key
+   *      is never loaded twice, so a re-render, a refetch, or the coach
+   *      switching the date away and back cannot stack two copies of a day.
+   *   4. NOT FROM A READ THAT DID NOT LAND. `offer.caveat` marks a programme
+   *      resolved from the phone's last copy rather than a confirmed one. Shown
+   *      with its caveat and loaded on a tap, that is a coach choosing to work
+   *      from what is in hand. Loaded automatically it is a possibly-stale
+   *      session appearing on screen as fact, which is precisely the class of
+   *      quiet wrongness this codebase refuses.
+   *
+   * The coach remains able to change any of it: pick another day, edit any
+   * figure, remove a row, add a movement. None of that touches the programme —
+   * this screen records what happened, and what the client is due next week is
+   * still what the coach wrote in the builder.
+   */
+  const autoLoadRef = useRef<(() => void) | null>(null);
+  const scheduledDay = offer && offer.state === 'ready' && offer.scheduledKey
+    ? (offer.days.find((d) => d.key === offer.scheduledKey) ?? null)
+    : null;
+  const mayAutoLoad =
+    !!scheduledDay && !offer?.caveat && scheduledDay.exercises > 0
+    && rows.length === 0 && !loadedDays.includes(scheduledDay.key) && pickedPlanDay == null;
+  autoLoadRef.current = mayAutoLoad && scheduledDay ? () => loadPlanDay(scheduledDay) : null;
+  // Primitive deps only, and the work goes through the ref. `scheduledDay` is a
+  // fresh object on every render and `loadPlanDay` closes over the coach's unit
+  // setting, so either in the dependency list would re-run this on every
+  // render — and an effect that appends and re-runs is the doubling that
+  // condition 3 exists to prevent, arriving by a different door.
+  const autoKey = mayAutoLoad && scheduledDay ? `${picked}|${logDay}|${scheduledDay.key}` : null;
+  useEffect(() => {
+    if (autoKey) autoLoadRef.current?.();
+  }, [autoKey]);
+
+  /* ── what they did last time, so the two of them can see the difference ────
+   *
+   * "Show the progress from the last time this exercise was done and show the
+   * difference / improvement between the 2 sessions."
+   *
+   * The arithmetic is not here. `exerciseOutings` folds a log into one outing
+   * per day and `compareToLast` diffs the sheet against the newest of them;
+   * this is only the read that feeds them, and it is the same read
+   * app/(trainer)/client-training.tsx makes, ordered the same way and for the
+   * same reason — `id` settles the ties because one session writes every
+   * exercise with the SAME `performed_at`, and at the cap the server may break
+   * those ties differently on each read.
+   *
+   * NEWEST FIRST IS LOad-BEARING HERE, not a preference. The read is capped,
+   * and a capped read drops the OLDEST rows — so the newest outing of any
+   * movement that appears at all is the one thing truncation cannot take. That
+   * is what makes "last time" safe to state off a partial read, and it is why
+   * `whole` is carried separately: it does not qualify the comparison, it
+   * qualifies the SILENCE. A movement with no outing in a whole read has not
+   * been done before; a movement with no outing in a truncated read simply was
+   * not in the rows that came back, and saying "first time" about it would be
+   * telling a coach something false about their client in front of them.
+   */
+  const [hist, setHist] = useState<WorkoutEntry[] | null>(null);
+  const [histStatus, setHistStatus] = useState<LoadStatus>('loading');
+  const histFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    // A client added by hand has no account and therefore no log to read. Not
+    // an error and not an empty history: there is no such person to ask about,
+    // and `clientIsQueryable` is the one reader of that distinction.
+    const id = picked;
+    if (!id || !USE_SUPABASE || !clientIsQueryable(id, pickedRow?.handAdded)) {
+      histFor.current = id ?? null;
+      setHist(null);
+      setHistStatus(id ? 'ready' : 'loading');
+      return;
+    }
+    let live = true;
+    histFor.current = id;
+    setHist(null);
+    setHistStatus('loading');
+    (async () => {
+      const res = await supabase.from('workouts').select(WORKOUT_COLS)
+        .eq('user_id', id)
+        .order('performed_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(capLimit());
+      // The coach may have moved on to another client while this was in the
+      // air. Landing an answer about the wrong person under their name is the
+      // failure this guard exists for, and it is checked on both the closure
+      // and the ref so a remount cannot resurrect a stale one.
+      if (!live || histFor.current !== id) return;
+      if (res.error) {
+        reportError('logSession.history', res.error);
+        setHist(null);
+        setHistStatus('error');
+        return;
+      }
+      const page = cappedRows((res.data ?? []) as unknown as WorkoutRow[]);
+      setHist(page.rows.map(rowToEntry));
+      setHistStatus(page.truncated ? 'partial' : 'ready');
+    })();
+    return () => { live = false; };
+  }, [picked, pickedRow?.handAdded]);
+
+  /**
+   * The newest outing of each movement on the sheet.
+   *
+   * Keyed by the row's own name because that is what the coach is looking at;
+   * `exerciseOutings` resolves the identity by slug underneath, so a client who
+   * logged "Bench-Press" is still found under "Bench Press".
+   *
+   * No bodyweight history is passed. That is a real limitation and it is
+   * deliberate rather than forgotten: pricing a chin-up needs the client's
+   * weigh-ins (src/lib/bodyweightSets.ts), which is a second read this screen
+   * does not make. The consequence is contained — a bodyweight movement's sets
+   * land in `unpricedSets` and its load-derived figures come back null, so the
+   * comparison shows reps and sets and withholds tonnage rather than inventing
+   * a body. Withholding is the correct failure.
+   */
+  const lastByName = useMemo(() => {
+    const m = new Map<string, ExerciseOuting | null>();
+    if (!hist) return m;
+    for (const row of rows) {
+      if (m.has(row.name)) continue;
+      const outings = exerciseOutings(hist, row.name);
+      m.set(row.name, outings.length ? outings[0] : null);
+    }
+    return m;
+  }, [hist, rows]);
 
   /* ── the picker ────────────────────────────────────────────────────────────
    *
@@ -1262,7 +1431,32 @@ export default function LogSession() {
               </Text>
             ) : null}
 
-            {rows.map((r) => (
+            {rows.map((r) => {
+              /* ── this movement, against the last time they did it ──────────
+               *
+               * Built per row and per render, off the boxes as they stand, so
+               * the comparison moves as the coach types. Every figure in it is
+               * kilograms — this is the render boundary and the only place a
+               * conversion happens, which is the rule src/ui/ExerciseHistory.tsx
+               * states and the reason a genuine 2.5 kg progression does not read
+               * "+5 lb" one week and "+6 lb" the next.
+               *
+               * A set with no rep count is not in the tally, exactly as it is
+               * not in `entriesToWrite`. A load box that will not parse is not
+               * a load of nothing either: `readLift` refuses it, and it comes
+               * through as an unknown load rather than as zero. */
+              const nowSets = r.sets.reduce<[number, number | null][]>((acc, s) => {
+                const n = parseInt(s.reps, 10);
+                if (!Number.isFinite(n) || n <= 0) return acc;
+                const load = readLift(s.kg, wu);
+                acc.push([n, load.ok && load.kg != null ? load.kg : null]);
+                return acc;
+              }, []);
+              const now = sheetTally(nowSets);
+              const last = lastByName.get(r.name) ?? null;
+              const cmp = compareToLast(now, last);
+              const repsNote = topRepsNote(cmp);
+              return (
               <View key={r.key} style={{ paddingVertical: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sp.md }}>
                   <Text style={{ ...ty.body, fontWeight: '500', color: t.ink, flex: 1 }}>{movement(r.name)}</Text>
@@ -1274,6 +1468,79 @@ export default function LogSession() {
                   </Pressable>
                 </View>
 
+                {/* ── last time, and the difference ──────────────────────────
+                    Under the name and above the boxes: it is context for what
+                    is about to be typed, not a result of it.
+
+                    Four different silences, and they are four different facts.
+                    Only a read that LANDED may say a movement has not been done
+                    before — under a truncated read the honest statement is
+                    about the rows that came back, and under a failed one it is
+                    about the connection. Saying "first time" off a read that
+                    was cut would be telling a coach something false about their
+                    client while standing next to them. */}
+                {histStatus === 'loading' ? (
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                    Reading what {first} did last time…
+                  </Text>
+                ) : histStatus === 'error' ? (
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                    {first}’s history could not be read, so there is nothing to compare this against. That is a
+                    connection problem — log the session as normal.
+                  </Text>
+                ) : last ? (
+                  <View style={{ marginTop: sp.xs }}>
+                    <Text style={{ ...ty.micro, color: t.ink2 }}>
+                      {`Last time · ${last.day ? historyDayLabel(last.day) : 'date unknown'}`}
+                      {last.topLoadKg != null && last.topReps != null
+                        ? ` · top set ${last.topReps} × ${liftLabel(last.topLoadKg, wu)}`
+                        : ''}
+                      {` · ${last.setCount} set${last.setCount === 1 ? '' : 's'}, ${last.reps} reps`}
+                      {last.volumeKg != null ? ` · ${num(volumeIn(last.volumeKg, wu))} ${wu}` : ''}
+                    </Text>
+                    {/* The comparison itself. Every movement goes through
+                        `deltaLabel`, which gives a movement of nothing no sign
+                        at all — and nothing here is coloured, arrowed or worded
+                        by direction. The request said "improvement"; a screen
+                        that assumes it greets a client on a fat-loss block whose
+                        bench has held steady with a disappointment they had not
+                        earned. The figure is stated. What it means is the
+                        conversation the two of them have next. */}
+                    {hasComparison(cmp) ? (
+                      <Text style={{ ...ty.micro, color: t.ink2, marginTop: 2 }}>
+                        {[
+                          cmp.topLoadKg != null
+                            ? `Top load ${deltaLabel(liftDeltaIn(cmp.topLoadKg, wu), { since: null, unit: wu })}`
+                            : null,
+                          cmp.topReps != null ? `reps at it ${deltaLabel(cmp.topReps, { since: null, decimals: 0 })}` : null,
+                          cmp.best1RMKg != null
+                            ? `est. 1RM ${deltaLabel(est1RMIn(cmp.best1RMKg, wu), { since: null, unit: wu, decimals: 0 })}`
+                            : null,
+                          cmp.volumeKg != null
+                            ? `volume ${deltaLabel(volumeIn(cmp.volumeKg, wu), { since: null, unit: wu, decimals: 0 })}`
+                            : null,
+                        ].filter(Boolean).join(' · ')}
+                      </Text>
+                    ) : (
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>
+                        Type what they did and the difference against last time appears here.
+                      </Text>
+                    )}
+                    {repsNote ? (
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: 2 }}>{repsNote}</Text>
+                    ) : null}
+                  </View>
+                ) : isWhole(histStatus) ? (
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                    First time {first} has done this one, so there is nothing to compare it against yet.
+                  </Text>
+                ) : (
+                  <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.xs }}>
+                    No earlier {movement(r.name)} in the sessions that could be read — their record goes back
+                    further than this, so this may not be the first time.
+                  </Text>
+                )}
+
                 {/* Column headers rather than placeholders. Every set after the
                     first is seeded from the one above it, so from set two on
                     the two words that said which column was reps and which was
@@ -1283,6 +1550,13 @@ export default function LogSession() {
                   <View style={{ width: 46 }} />
                   <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>Reps</Text>
                   <Text style={{ ...ty.micro, color: t.ink3, flex: 1 }}>{wu.toUpperCase()}</Text>
+                  {/* The tick's column, named. A bare column of circles is a
+                      control nobody knows the meaning of until they press one,
+                      and the one thing this must not be is a mystery on a
+                      screen that writes to somebody else's record. */}
+                  <View style={{ width: 44, alignItems: 'center' }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>Done</Text>
+                  </View>
                 </View>
                 {r.sets.map((s, i) => (
                   <View key={i}>
@@ -1303,6 +1577,60 @@ export default function LogSession() {
                       <TextInput value={s.kg} onChangeText={(v) => patchSet(r.key, i, { kg: v })}
                         keyboardType="decimal-pad"
                         accessibilityLabel={`${movement(r.name)} set ${i + 1} weight in ${wu === 'kg' ? 'kilograms' : 'pounds'}`} style={[inp, { flex: 1 }]} />
+                      {/* ── the tick ──────────────────────────────────────────
+                          "There should be a check mark to the right of the
+                          exercise set being performed that logs this set as
+                          being completed."
+
+                          It logs it by FILLING THE BOX, and it is drawn as done
+                          when the box holds a count. That is the whole design
+                          and src/lib/sheetTick.ts argues it: a `done` flag
+                          beside the reps would be a second answer to a question
+                          the reps already answer, and the two disagree the
+                          first time somebody ticks a set and clears it. So the
+                          invariant on screen is the one a coach can rely on —
+                          A FILLED TICK IS A SET THAT WILL BE SAVED.
+
+                          Not offered where the plan is a range, an AMRAP or a
+                          hold: one tap would have to decide what '6-8' meant,
+                          and the fastest control on the screen must not make
+                          that call on the coach's behalf. Nor may it erase a
+                          figure the coach typed by hand — this screen has no
+                          undo. */}
+                      {(() => {
+                        const tick = sheetTick(s.target, s.reps);
+                        const on = willSave(tick);
+                        const tappable = isTappable(tick);
+                        return (
+                          <Pressable
+                            onPress={tappable
+                              ? () => patchSet(r.key, i, {
+                                  reps: tick.state === 'fill' ? String(tick.reps) : '',
+                                })
+                              : undefined}
+                            disabled={!tappable}
+                            accessibilityRole="checkbox"
+                            accessibilityState={{ checked: on, disabled: !tappable }}
+                            accessibilityLabel={sheetTickLabel(tick, movement(r.name), i + 1)}
+                            hitSlop={{ top: hitSlopFor(28), bottom: hitSlopFor(28), left: 6, right: 6 }}
+                            style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
+                            <View style={{
+                              width: 26, height: 26, borderRadius: 13,
+                              alignItems: 'center', justifyContent: 'center',
+                              backgroundColor: on ? t.brand : 'transparent',
+                              borderWidth: on ? 0 : hairline * 2,
+                              // A control that cannot be pressed looks like one.
+                              // The alternative — a tappable-looking circle that
+                              // does nothing — reads as the app having failed,
+                              // which is the same fault as a button with no
+                              // handler.
+                              borderColor: tappable ? t.ink3 : t.ring,
+                            }}>
+                              {on ? <Icon name="check" size={16} color={t.brandInk} /> : null}
+                            </View>
+                          </Pressable>
+                        );
+                      })()}
                     </View>
                     {/* What the coach WROTE for this set, in their own words,
                         under the boxes they are typing into. It is a caption
@@ -1322,7 +1650,27 @@ export default function LogSession() {
                   <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Add a set</Text>
                 </Pressable>
               </View>
-            ))}
+              );
+            })}
+
+            {/* What is actually going to be saved, counted.
+                The tick's whole meaning is "this set will be written", so the
+                sheet owes the coach the total in the same terms — and it is the
+                one thing a coach cannot see by scanning, because a row with an
+                empty reps box looks exactly like a row with a full one until
+                you read it. Null on an empty sheet: nought out of nought is not
+                a fact about anybody's session. */}
+            {sheetTicksLine(
+              rows.reduce((n, r) => n + r.sets.filter((st) => willSave(sheetTick(st.target, st.reps))).length, 0),
+              rows.reduce((n, r) => n + r.sets.length, 0),
+            ) ? (
+              <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
+                {sheetTicksLine(
+                  rows.reduce((n, r) => n + r.sets.filter((st) => willSave(sheetTick(st.target, st.reps))).length, 0),
+                  rows.reduce((n, r) => n + r.sets.length, 0),
+                )}
+              </Text>
+            ) : null}
 
             <View style={{ marginTop: sp.md }}>
               <Ghost label="Add Exercise" onPress={() => setPicker(true)} />

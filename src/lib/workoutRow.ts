@@ -39,6 +39,26 @@ export interface WorkoutRow {
   amended_at?: string | null;
 }
 
+/**
+ * The columns a coach's read of somebody else's `workouts` asks for.
+ *
+ * Here rather than in a screen because it belongs beside `rowToEntry`, which is
+ * the thing that decides what a row has to contain: a column added to the type
+ * and forgotten here comes back undefined and is read as absent, which on this
+ * data means a set nobody did or a session with no length.
+ *
+ * `app/(trainer)/client-training.tsx` and `app/(trainer)/client-report.tsx`
+ * still each declare their own identical literal. They predate this constant
+ * and are not touched here — three copies of a column list is a drift waiting
+ * to happen and pointing them at this one is a separate, mechanical change.
+ *
+ * Deliberately NOT the whole row: `bw` and `timed` are omitted because the
+ * screens reading this show repped work, and `user_id` because the filter
+ * already names it.
+ */
+export const WORKOUT_COLS =
+  'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
+
 export const rowToEntry = (r: WorkoutRow): WorkoutEntry => ({
   id: r.id,
   t: r.performed_at,

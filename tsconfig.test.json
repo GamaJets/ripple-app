@@ -568,6 +568,10 @@
     "src/lib/machines.test.ts",
     "src/lib/workoutKind.test.ts",
     "src/lib/hrKcal.ts",
-    "src/lib/hrKcal.test.ts"
+    "src/lib/hrKcal.test.ts",
+    "src/lib/sheetTick.ts",
+    "src/lib/sheetTick.test.ts",
+    "src/lib/sheetProgress.ts",
+    "src/lib/sheetProgress.test.ts"
   ]
 }
