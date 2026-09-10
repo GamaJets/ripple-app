@@ -116,6 +116,22 @@ export default function Onboarding() {
     return { whole: String(Math.round(c.heightCm)), inches: '' };
   })();
 
+  // How tall the Back / Continue row actually is, so the scroll can end above
+  // it instead of behind it.
+  //
+  // The last thing on every card is the sentence saying what skipping this
+  // question COSTS — "Skip this and the app assumes you have a coach and offers
+  // you check-ins nobody reads" — and it was running underneath the button,
+  // reported as the wording disappearing on scroll. It was not disappearing; it
+  // was never reachable. The footer is outside the ScrollView, so the content
+  // had no idea it was there and the fixed padding underneath it was a guess
+  // that happened to be too small.
+  //
+  // Measured rather than guessed at, because the row's height is not a constant
+  // anybody can write down: Back is absent on the first card and present after
+  // it, the label changes to Start Training on the last, and both wrap at large
+  // text sizes. A number here would be right on one card at one text size.
+  const [footerH, setFooterH] = useState(0);
   const [cmode, setCmode] = useState<CoachingMode>(c.coachingMode);
   const [goal, setGoal] = useState<Goal>(c.goal);
   // Pre-filled from a MEASUREMENT, and blank otherwise.
@@ -449,7 +465,7 @@ export default function Onboarding() {
         {/* On every card, not only the first. */}
         <Ghost label="Skip" onPress={skip} />
       </View>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: sp.xl }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingTop: sp.xl, paddingBottom: sp.xl + footerH }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} automaticallyAdjustKeyboardInsets>
         <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.md }}>Step {step + 1} of {steps.length}</Text>
         {CARDS[id]}
         {/* The reason this question is being asked, in the same words the
@@ -459,7 +475,8 @@ export default function Onboarding() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xl }}>Skip this and {q.breaks}.</Text>
         ) : null}
       </ScrollView>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingBottom: sp.lg }}>
+      <View onLayout={(e) => setFooterH(e.nativeEvent.layout.height)}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingBottom: sp.lg }}>
         {step > 0 ? <Ghost label="Back" onPress={() => { commit(id); setStep(step - 1); }} /> : null}
         <View style={{ flex: 1 }}>
           <Cta label={last ? 'Start Training' : 'Continue'} onPress={() => { if (last) { void finish(); } else { commit(id); setStep(step + 1); } }} wide />

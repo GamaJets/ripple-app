@@ -172,7 +172,18 @@ export default function ClientLayout() {
       <Tabs.Screen name="trainers" options={{ href: null, title: 'Find a Trainer' }} />
       <Tabs.Screen name="explore" options={{ href: null, title: 'Explore' }} />
       <Tabs.Screen name="challenges" options={{ href: null, title: 'Challenges' }} />
-      <Tabs.Screen name="onboarding" options={{ href: null, title: 'Get Started' }} />
+      {/* ── setup is a door, not a tab ────────────────────────────────────
+          `href: null` takes the BUTTON out of the bar; it does not take the
+          BAR off the screen. So a member part-way through setup still had Home,
+          Train, Meals, Progress and Me sitting under the Continue button, and
+          one tap dropped them into an app configured by whatever the questions
+          had defaulted to — the coaching mode, the units, the goal — with no
+          route back to the questions they had abandoned.
+          Hiding the bar here is what "lock the tabs until they have been
+          through onboarding" means in practice: while this screen is up there
+          is nothing to tap. Nobody is trapped by it, because Skip is on every
+          card and both Skip and Start Training leave for the app proper. */}
+      <Tabs.Screen name="onboarding" options={{ href: null, title: 'Get Started', tabBarStyle: { display: 'none' } }} />
       <Tabs.Screen name="getting-started" options={{ href: null, title: 'Getting Started' }} />
       <Tabs.Screen name="progression" options={{ href: null, title: 'Progression' }} />
       <Tabs.Screen name="trends" options={{ href: null, title: 'Trends' }} />
