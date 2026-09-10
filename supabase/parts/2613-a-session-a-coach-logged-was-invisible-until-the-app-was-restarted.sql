@@ -51,6 +51,24 @@
 -- Adding a table to a publication is not a privilege change: nothing here
 -- grants anybody a row they could not already select, and every subscriber is
 -- still filtered by `workouts_own` / `workouts_coach_read`.
+--
+-- ── Verified end to end, and one wrong turn on the way ───────────────────
+--
+-- With this applied, a row inserted for the signed-in member by somebody else
+-- reached the app while it sat untouched in the foreground: the subscription
+-- delivered it, the debounce collapsed it into one refetch, and the member's
+-- own Home went from "0 day streak · 0 of 3 this week" to "1 day streak · 1 of
+-- 3 this week" with nothing tapped.
+--
+-- REPLICA IDENTITY DEFAULT is confirmed sufficient for this, which is the claim
+-- made above and it is worth saying it was actually checked. It was briefly set
+-- to FULL during the investigation on the theory that Realtime needed the
+-- non-primary-key `user_id` present to evaluate `workouts_own`. That was wrong,
+-- and it was wrong because the test behind it was invalid: the phone under test
+-- was signed in as a DIFFERENT account from the one the rows were being written
+-- for, so nothing could ever have arrived. FULL was reverted once the test was
+-- corrected and delivery worked without it. Recorded because the next person to
+-- see an empty subscription will reach for the same theory.
 
 do $$
 begin
