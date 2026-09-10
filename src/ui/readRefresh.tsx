@@ -28,6 +28,7 @@ import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { onReconnect } from '../lib/reachability';
 import { refreshStale, registerRefresh } from '../lib/readRefresh';
+import { refreshLive, registerLive } from '../lib/liveRead';
 import type { LoadStatus } from './loadStatus';
 
 let installed = 0;
@@ -41,14 +42,26 @@ function installTriggers(): void {
   // The signal coming back. The strongest reason there is to re-run a read
   // that failed, and the one trigger that gives a provider its attempts back —
   // see MAX_ATTEMPTS in src/lib/readRefresh.ts.
-  offReconnect = onReconnect(() => { void refreshStale('reconnect'); });
+  offReconnect = onReconnect(() => {
+    void refreshStale('reconnect');
+    // And the reads that WORKED. A phone with no signal cannot have heard about
+    // a row somebody else wrote, so the moment it can hear again is a moment
+    // its landed answers may be out of date. src/lib/liveRead.ts holds why that
+    // is a separate registry from the one above.
+    refreshLive('reconnect');
+  });
 
   // Returning to the foreground. Not news about the network, but it is the
   // moment somebody is looking at the screen, and a phone that was in a pocket
   // on the walk home has made no requests and so raised no edge to hear.
   // Floored at FOREGROUND_GAP_MS so flicking between apps does not re-read.
   const onAppState = (next: AppStateStatus) => {
-    if (next === 'active') void refreshStale('foreground');
+    if (next !== 'active') return;
+    void refreshStale('foreground');
+    // Both registries, one transition. `refreshLive` applies the SAME floor
+    // from the same constant, so a member flicking between apps does not
+    // re-read either set.
+    refreshLive('foreground');
   };
   appStateSub = AppState.addEventListener('change', onAppState);
 }
@@ -94,5 +107,34 @@ export function useRecoverRead(key: string, status: LoadStatus, refetch: () => v
     // Deliberately keyed on `key` alone. Both moving parts are refs, so a
     // re-registration on every render would churn the map for no gain and
     // would race the unregister's identity check.
+  }, [key]);
+}
+
+/**
+ * Keep this provider's LANDED read current when somebody else can change it.
+ *
+ * The twin of `useRecoverRead` above and deliberately a separate call, because
+ * they answer different questions: that one asks "did our read fail?", this one
+ * asks "did the answer change under us?". A provider whose rows only its own
+ * phone writes wants the first and not the second; a provider reading rows a
+ * coach can write wants both.
+ *
+ * Same key rules, same refs, same reason: the registration made on mount has to
+ * see the current status, and registering by key replaces so a re-run effect
+ * cannot leave the previous account's refetch behind.
+ */
+export function useLiveRead(key: string, status: LoadStatus, refetch: () => void): void {
+  const statusRef = useRef<LoadStatus>(status);
+  statusRef.current = status;
+  const refetchRef = useRef(refetch);
+  refetchRef.current = refetch;
+
+  useEffect(() => {
+    const off = registerLive(key, {
+      status: () => statusRef.current,
+      refetch: () => refetchRef.current(),
+    });
+    installTriggers();
+    return () => { off(); removeTriggers(); };
   }, [key]);
 }

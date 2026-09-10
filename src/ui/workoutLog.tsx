@@ -74,6 +74,7 @@ import { useReadDeadline } from './readDeadline';
 import { capLimit, capped } from '../lib/rowCap';
 import { isPending, localId } from '../lib/wellnessSync';
 import { classifyWrite, registerFlush, serverRows, unsentCount, type WriteOutcome } from '../lib/offlineQueue';
+import { CHANGE_DEBOUNCE_MS, refreshLive } from '../lib/liveRead';
 // The queue's own rules, out here where a test can hold both ends of each —
 // src/lib/workoutRow.ts makes that argument at length about the row converters
 // it took out of this same file, having found two fields that had never once
@@ -83,7 +84,7 @@ import {
   readQueue, serverId, sessionKey, toQueueRows, withoutStored,
 } from '../lib/workoutQueue';
 import { useAuthRevision } from './authRevision';
-import { useRecoverRead } from './readRefresh';
+import { useLiveRead, useRecoverRead } from './readRefresh';
 
 interface WorkoutLogValue {
   log: WorkoutEntry[];
@@ -207,6 +208,10 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   // `waterStatus` apart from `status`. What screens read is the worse of the
   // two, because a list is only as complete as its worst source.
   const [serverStatus, setServerStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  /** The signed-in account, as STATE as well as a ref. The ref is read inside
+   *  callbacks; this is what the realtime subscription below keys on, and a
+   *  ref cannot start an effect. */
+  const [uid, setUid] = useState<string | null>(null);
   const [queueStatus, setQueueStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [reloadTick, setReloadTick] = useState(0);
 
@@ -272,15 +277,16 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
         // the provider behind "We couldn't read your training log" on Home. The
         // queue is left alone rather than read: it is keyed by account, and
         // there is no account to key it by.
-        if (!sess?.session) { uidRef.current = null; setServerStatus('ready'); setQueueStatus('ready'); return; }
+        if (!sess?.session) { uidRef.current = null; setUid(null); setServerStatus('ready'); setQueueStatus('ready'); return; }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
         if (authErr) { reportError('workoutLog.hydrate.auth', authErr); setServerStatus('error'); return; }
         const id = auth?.user?.id;
         // Genuinely signed out: there is no history to fetch, and saying so is
         // accurate rather than a swallowed failure.
-        if (!id) { uidRef.current = null; setServerStatus('ready'); setQueueStatus('ready'); return; }
+        if (!id) { uidRef.current = null; setUid(null); setServerStatus('ready'); setQueueStatus('ready'); return; }
         uidRef.current = id;
+        setUid(id);
         cacheable.current = true;
 
         // ── the device's queue, first and fast ────────────────────────────
@@ -682,6 +688,73 @@ export function WorkoutLogProvider({ children }: { children: React.ReactNode }) 
   // — see the ordering note in src/lib/readRefresh.ts — so the rows that come
   // back already contain the session they just logged in the basement.
   useRecoverRead('workoutLog', status, reload);
+  /* ── and the other half: a read that WORKED but has gone out of date ──────
+   *
+   * A coach logs a session into their client's record and it is the client's
+   * own row — their streak, their records, their week. This provider read it on
+   * mount and nothing has asked since, so it was invisible until the app was
+   * cold-started. See src/lib/liveRead.ts; this is the registration, and the
+   * foreground and reconnect triggers are the ones src/ui/readRefresh.tsx was
+   * already installing. */
+  useLiveRead('workoutLog', status, reload);
+
+  /* ── hearing about a coach's write while the app is open ──────────────────
+   *
+   * The foreground trigger above covers somebody picking their phone up. This
+   * covers the case that produced the report: the member is IN the app, their
+   * coach saves the session standing next to them, and the screen goes on
+   * showing a list that was correct a minute ago.
+   *
+   * Three things make this narrow on purpose.
+   *
+   * 1. THE FILTER IS THE MEMBER'S OWN ROWS. `user_id=eq.<id>` is evaluated on
+   *    the server, so this subscription is not a firehose of everybody's sets.
+   *
+   * 2. IT IGNORES THE MEMBER'S OWN WRITES. `logged_by` is null on a row the
+   *    member logged themselves, and this provider ALREADY has those — it
+   *    inserts optimistically and adopts the ids the server assigns
+   *    (`addWorkouts`). Refetching on top of that races the adoption over the
+   *    same list, which is the exact hazard `refreshLive` refuses a read in
+   *    flight for. So only a row somebody ELSE wrote is news.
+   *
+   * 3. A BURST IS ONE REFETCH. A coach's save is one row per set, so a
+   *    six-exercise day arrives as twenty-odd events inside a second.
+   *    `CHANGE_DEBOUNCE_MS` gathers them.
+   *
+   * What it does NOT catch: a coach DELETING a row. A delete payload carries
+   * only the primary key unless the table is set to REPLICA IDENTITY FULL, so
+   * `logged_by` is not there to test and the event cannot be told from the
+   * member's own deletion. Left uncaught rather than guessed at — the next
+   * foreground picks it up, and the alternative is refetching on every delete
+   * the member performs themselves.
+   */
+  useEffect(() => {
+    if (!USE_SUPABASE || !uid) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const bump = (payload: { new?: { logged_by?: string | null } | null }) => {
+      const by = payload?.new?.logged_by ?? null;
+      // Somebody else, or nobody: a row with no `logged_by` is the member's own
+      // and this provider already has it.
+      if (!by || by === uid) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        refreshLive('changed', { only: 'workoutLog' });
+      }, CHANGE_DEBOUNCE_MS);
+    };
+    const ch = supabase
+      .channel(`workouts:${uid}`)
+      .on(
+        'postgres_changes' as any,
+        { event: 'INSERT', schema: 'public', table: 'workouts', filter: `user_id=eq.${uid}` } as any,
+        bump as any,
+      )
+      .subscribe();
+    return () => {
+      if (timer) clearTimeout(timer);
+      void supabase.removeChannel(ch);
+    };
+  }, [uid]);
 
   // ── Why the implementations below are handed out through a ref ────────────
   //

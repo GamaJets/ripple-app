@@ -572,6 +572,8 @@
     "src/lib/sheetTick.ts",
     "src/lib/sheetTick.test.ts",
     "src/lib/sheetProgress.ts",
-    "src/lib/sheetProgress.test.ts"
+    "src/lib/sheetProgress.test.ts",
+    "src/lib/liveRead.ts",
+    "src/lib/liveRead.test.ts"
   ]
 }
