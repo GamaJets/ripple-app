@@ -67,8 +67,28 @@ export async function connectVendor(id: ProviderId): Promise<void> {
       // vendor's own dashboard rather than anywhere in this app: every provider
       // here declares which scopes it may request, and asking for one that is
       // not on that list is refused before the user ever sees a consent screen.
+      //
+      // `invalid_request` gets the same treatment, and it earned it. Oura
+      // returned exactly that and nothing else — the member saw "invalid
+      // request" over a screen about their ring, which reads as their ring
+      // being the problem. It was not, and neither was their account, and
+      // neither was anything in this app.
+      //
+      // Established by asking Oura's authorize endpoint one parameter at a
+      // time. WITHOUT a redirect_uri the client id reaches Oura's real consent
+      // page, so the id is valid and the request is well formed; WITH one —
+      // the custom scheme, an https URL, any value at all — it is 400
+      // invalid_request. That is what a provider does when the redirect URI
+      // being sent is not on the application's registered list, and the only
+      // place it can be added is the vendor's dashboard.
+      //
+      // The URI is named in the message because it is the thing that has to be
+      // pasted there, and a remedy that does not say the exact string is a
+      // remedy somebody has to guess at.
       const hint = /invalid.?scope/i.test(err) || /scope/i.test(desc)
         ? ` Repple asked ${v.id} for a permission its developer app is not registered for — the scope has to be enabled in the ${v.id} developer dashboard before this can work.`
+        : /invalid.?request/i.test(err) || /invalid request/i.test(desc)
+        ? ` This is Repple's setup rather than your ${v.id} account or your device: the address Repple sends people back to (${redirectUri}) has to be registered on Repple's ${v.id} developer application, and until it is, ${v.id} refuses the sign-in before you ever see a consent screen.`
         : '';
       throw new Error(`${v.id} refused the sign-in: ${desc || err}.${hint}`);
     }
