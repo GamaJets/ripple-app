@@ -9,6 +9,15 @@
 // api.anthropic.com. So every field of `context` is read by a third party, and
 // this file is the door it goes through.
 //
+// ── one qualification, since the gateway was wired in ─────────────────────
+//
+// "api.anthropic.com" above is true of a deploy that has ANTHROPIC_API_KEY set
+// and nothing else, which is every deploy today. src/lib/llmGateway.ts adds a
+// second possible destination, reached by setting CHEAPER_INFERENCE_API_KEY,
+// and the sentence stops being true the moment somebody does. The copy in this
+// file names ONE company, so that secret must not be set until this file has
+// been rewritten to name whichever company is actually receiving the data.
+//
 // Two doors, in fact, and the difference is who the data is about:
 //
 //   askCoachForMember   the member's own AI Coach chat. The member is the

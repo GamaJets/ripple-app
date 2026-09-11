@@ -136,7 +136,7 @@
 //     THE SITE. Not because they cannot be wrong, but because no file in this
 //     repo decides them, so there is nothing to compare them to.
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, relative, extname } from 'node:path';
+import { join, relative, extname, dirname, resolve } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
@@ -388,6 +388,12 @@ function checkTrial(page, lines) {
 
 const HOST_OWNERS = new Map([
   ['api.anthropic.com', 'Anthropic'],
+  // The gateway Repple can be pointed at instead of Anthropic, per
+  // src/lib/llmGateway.ts. It is a RESELLER: it answers the request itself and
+  // forwards it to whichever company runs the model asked for, so what it
+  // receives is everything Anthropic would have, and who it hands that on to
+  // depends on the model an operator names in a secret.
+  ['api.cheaperinference.com', 'Cheaper Inference'],
   ['api.ocr.space', 'OCR.space'],
   ['exp.host', 'Expo'],
   ['api.prod.whoop.com', 'WHOOP'],
@@ -411,21 +417,42 @@ const NOT_PROCESSORS = new Map([
   ['esm.sh', 'a module CDN. It serves the edge function its own JavaScript at cold start; nothing about a person is sent to it.'],
 ]);
 
+// ── the scan follows the functions OUT of supabase/functions ───────────────
+//
+// It used to read that directory and stop there, which was true of the code for
+// as long as every `fetch` was written inline in a function. It stopped being
+// true the day the three AI functions started sharing src/lib/llmGateway.ts:
+// `api.anthropic.com` moved one file sideways and this gate would have reported
+// one fewer processor than the product has, with nothing failing.
+//
+// That is the same walk scripts/check-functions.mjs makes for the same reason —
+// a function's behaviour is not bounded by its own file — so it is made here
+// too. Relative imports only: a module this repo owns is code that runs on
+// Repple's server on Repple's key, and a host named in one is a host contacted.
+const RELATIVE_IMPORT = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)[\s\S]{0,400}?from\s+['"](\.[^'"]+)['"]/g;
+
 function edgeFunctionHosts() {
   const dir = join(ROOT, 'supabase/functions');
-  const files = [];
+  const entries = [];
   (function w(d) {
     let es; try { es = readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of es) {
       const p = join(d, e.name);
       if (e.isDirectory()) w(p);
-      else if (/\.tsx?$/.test(e.name)) files.push(p);
+      else if (/\.tsx?$/.test(e.name)) entries.push(p);
     }
   })(dir);
+
   const hosts = new Map();                       // host → "rel:line" first seen
-  for (const f of files) {
+  const seen = new Set();
+  const queue = [...entries];
+  while (queue.length) {
+    const f = queue.shift();
+    if (seen.has(f)) continue;
+    seen.add(f);
+    let src; try { src = readFileSync(f, 'utf8'); } catch { continue; }
     const rel = relative(ROOT, f);
-    readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+    src.split('\n').forEach((line, i) => {
       // A URL in a comment is documentation, not a request. `wearable-day`
       // cites developer.whoop.com and dev.fitbit.com in its header for exactly
       // that reason, and neither is a call.
@@ -435,6 +462,10 @@ function edgeFunctionHosts() {
         if (!hosts.has(h)) hosts.set(h, `${rel}:${i + 1}`);
       }
     });
+    for (const m of src.matchAll(RELATIVE_IMPORT)) {
+      const target = resolve(dirname(f), m[1]);
+      if (existsSync(target)) queue.push(target);
+    }
   }
   return hosts;
 }

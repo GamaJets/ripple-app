@@ -152,7 +152,15 @@ export interface ScanRecipient {
   role: string;
 }
 
-/** supabase/functions/vision-analyze/index.ts POSTs here. */
+/** supabase/functions/vision-analyze/index.ts POSTs here.
+ *
+ * True while ANTHROPIC_API_KEY is the only AI key set, which is every deploy
+ * today. src/lib/llmGateway.ts will send the same page to a different company
+ * — and a different endpoint — if CHEAPER_INFERENCE_API_KEY is set instead, and
+ * this constant is what the member is SHOWN before the page leaves their phone.
+ * It names one vendor, so it has to be made to follow the provider before that
+ * secret is ever set. See the AI section of web/privacy.html.
+ */
 export const SCAN_VISION_RECIPIENT: ScanRecipient = {
   vendor: 'Anthropic',
   endpoint: 'https://api.anthropic.com/v1/messages',

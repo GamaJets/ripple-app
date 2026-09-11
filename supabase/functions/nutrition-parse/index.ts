@@ -1,6 +1,7 @@
 // Supabase Edge Function: nutrition-parse
 // Natural-language food logging: "chicken burrito and a coke" -> itemized macros.
-// Uses the same ANTHROPIC_API_KEY secret. Deploy:
+// Uses the same ANTHROPIC_API_KEY secret — or the Cheaper Inference gateway
+// when CHEAPER_INFERENCE_API_KEY is set. See src/lib/llmGateway.ts. Deploy:
 //   supabase functions deploy nutrition-parse
 // Request JSON:  { text: string }
 // Response JSON: { items: [{ name, kcal, protein, carbs, fat }] }
@@ -11,6 +12,7 @@
 // check below, anybody who unpacked the app could spend Repple's Anthropic
 // quota through this endpoint with no account at all.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { providerFor, modelFor, buildCall, readReply, replyProblem } from '../../../src/lib/llmGateway.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -18,7 +20,6 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
-const MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-5';
 
 const PROMPT =
   'You are a nutrition estimator. The user describes what they ate in plain language. ' +
@@ -35,8 +36,12 @@ function extractJson(text: string): any {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
-  const key = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!key) return json({ error: 'ANTHROPIC_API_KEY not set' }, 500);
+  // Which provider, and on whose key. See the header.
+  const gatewayKey = Deno.env.get('CHEAPER_INFERENCE_API_KEY');
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const provider = providerFor(gatewayKey, anthropicKey);
+  if (!provider) return json({ error: 'No AI provider is configured on the server.' }, 500);
+  const key = (provider === 'cheaper-inference' ? gatewayKey : anthropicKey) as string;
 
   // Signed-in users only — this spends a metered quota. See the header.
   const service = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -53,17 +58,21 @@ Deno.serve(async (req: Request) => {
   if (!text.trim()) return json({ error: 'text required' }, 400);
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: MODEL, max_tokens: 500,
-        messages: [{ role: 'user', content: PROMPT + '\n\nWhat they ate: ' + text }],
-      }),
+    const call = buildCall(provider, key, {
+      messages: [{ role: 'user', content: PROMPT + '\n\nWhat they ate: ' + text }],
+      maxTokens: 500,
+      model: modelFor(provider, 'text', Deno.env.get(
+        provider === 'cheaper-inference' ? 'CHEAPER_INFERENCE_MODEL' : 'ANTHROPIC_MODEL')),
     });
+    const res = await fetch(call.url, { method: 'POST', headers: call.headers, body: call.body });
     if (!res.ok) return json({ error: 'Parse API error', detail: await res.text() }, 502);
-    const data = await res.json();
-    const out = extractJson((data?.content?.[0]?.text) ?? '');
+
+    // A truncation is said out loud rather than being handed to `extractJson`,
+    // which would throw on a half-written object — or, worse, parse a SHORTER
+    // one and silently log a meal missing its last item.
+    const reply = readReply(provider, await res.json());
+    if (!reply.ok) return json({ error: replyProblem(reply.why) }, 502);
+    const out = extractJson(reply.text);
     return json({ items: Array.isArray(out.items) ? out.items : [] });
   } catch (e) {
     return json({ error: 'Parse failed', detail: String(e) }, 500);

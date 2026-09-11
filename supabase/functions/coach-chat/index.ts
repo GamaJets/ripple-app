@@ -2,7 +2,10 @@
 // Repple's in-app AI coach. Knows the client's stats/goal/program (passed as
 // context) and answers training + nutrition questions. Deploy:
 //   supabase functions deploy coach-chat
-// Uses the same ANTHROPIC_API_KEY secret you already set.
+// Uses the same ANTHROPIC_API_KEY secret you already set — or, when
+// CHEAPER_INFERENCE_API_KEY is set, the Cheaper Inference gateway instead. That
+// choice, the two wire formats and the model defaults live in one place, in
+// src/lib/llmGateway.ts, because all three AI functions face it.
 //
 // Request JSON: { messages: [{role:'user'|'assistant', content:string}], context: object }
 // Response JSON: { reply: string }
@@ -30,6 +33,7 @@
 // there is no other person's record for a server-side check to protect here.
 // What the check protects is the KEY.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { providerFor, modelFor, buildCall, readReply, replyProblem } from '../../../src/lib/llmGateway.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -37,7 +41,6 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, 'Content-Type': 'application/json' } });
-const MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-sonnet-5';
 
 function systemPrompt(ctx: any): string {
   const c = ctx || {};
@@ -139,8 +142,13 @@ function systemPrompt(ctx: any): string {
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
-  const key = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!key) return json({ error: 'ANTHROPIC_API_KEY not set' }, 500);
+  // Which provider, and on whose key. Unset CHEAPER_INFERENCE_API_KEY and this
+  // is byte-for-byte the Anthropic call it always was; that is the rollback.
+  const gatewayKey = Deno.env.get('CHEAPER_INFERENCE_API_KEY');
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const provider = providerFor(gatewayKey, anthropicKey);
+  if (!provider) return json({ error: 'No AI provider is configured on the server.' }, 500);
+  const key = (provider === 'cheaper-inference' ? gatewayKey : anthropicKey) as string;
 
   // Signed-in users only — this spends a metered quota on Repple's account.
   // `getUser` RESOLVES with a null user for a token it cannot turn into a
@@ -163,20 +171,28 @@ Deno.serve(async (req: Request) => {
   if (!messages.length) return json({ error: 'messages required' }, 400);
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 500,
-        system: systemPrompt(context),
-        messages: messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
-      }),
+    const call = buildCall(provider, key, {
+      system: systemPrompt(context),
+      messages: messages.map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+        content: String(m.content || ''),
+      })),
+      maxTokens: 500,
+      model: modelFor(provider, 'text', Deno.env.get(
+        provider === 'cheaper-inference' ? 'CHEAPER_INFERENCE_MODEL' : 'ANTHROPIC_MODEL')),
     });
+    const res = await fetch(call.url, { method: 'POST', headers: call.headers, body: call.body });
     if (!res.ok) return json({ error: 'Coach API error', detail: await res.text() }, 502);
-    const data = await res.json();
-    const reply = (data?.content?.[0]?.text) ?? "I couldn't come up with a reply — try again?";
-    return json({ reply });
+
+    // A reply, or the NAMED reason there is none. This used to answer every
+    // failure with "I couldn't come up with a reply — try again?", which reads
+    // to a member as the model having nothing to say. On a reasoning model that
+    // spent its whole budget thinking, the truth is that the answer was cut in
+    // half and thrown away, and a member acting on half a training instruction
+    // is the failure worth telling them about.
+    const reply = readReply(provider, await res.json());
+    if (!reply.ok) return json({ error: replyProblem(reply.why) }, 502);
+    return json({ reply: reply.text });
   } catch (e) {
     return json({ error: 'Coach failed', detail: String(e) }, 500);
   }

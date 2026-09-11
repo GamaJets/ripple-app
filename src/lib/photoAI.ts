@@ -15,7 +15,16 @@
 //
 // `analyzeMachine` and `analyzeMeal` in src/lib/vision.ts post the image to the
 // `vision-analyze` edge function, which posts it to api.anthropic.com — see
-// supabase/functions/vision-analyze/index.ts. Before this, the ONLY thing
+// supabase/functions/vision-analyze/index.ts, and the qualification below.
+//
+// ── one qualification, since the gateway was wired in ─────────────────────
+//
+// "api.anthropic.com" above is true of a deploy that has ANTHROPIC_API_KEY set
+// and nothing else, which is every deploy today. src/lib/llmGateway.ts adds a
+// second possible destination, reached by setting CHEAPER_INFERENCE_API_KEY,
+// and the sentence stops being true the moment somebody does. The copy in this
+// file names ONE company, so that secret must not be set until this file has
+// been rewritten to name whichever company is actually receiving the data. Before this, the ONLY thing
 // either screen said was a camera permission — "Allow camera access to identify
 // a machine by photo", "Allow camera to log a meal by photo" — which describes
 // the camera and not the destination. A permission dialog about hardware is not

@@ -217,6 +217,7 @@ addEventListener('DOMContentLoaded', function () {
         <li><strong>Cloudflare</strong> — serving this website.</li>
         <li><strong>Anthropic</strong> — reading the things Repple asks a model to read. This is set out in full under <a href="#ai">What the AI features send, and where</a> below, because it is the part of this list most worth knowing about.</li>
         <li><strong>OCR.space</strong> — turning a photographed or uploaded document into text. Also covered below.</li>
+        <li><strong>Cheaper Inference</strong> — a second, alternative route to the same model reading, which Repple can be switched to instead of contacting Anthropic directly. It is not in use unless we switch it on, and it is set out beside Anthropic under <a href="#ai">What the AI features send, and where</a> below, because what it receives and what it retains are not the same as Anthropic&rsquo;s.</li>
         <li><strong>Stripe</strong> — payments, where a trainer or gym takes them. Stripe handles card details directly; we never receive them.</li>
         <li><strong>Open Food Facts</strong> — barcode and food-name lookups. Your phone asks them directly, so they see the barcode you scanned and your IP address, but nothing that identifies your account.</li>
         <li><strong>WHOOP, Oura, Spotify</strong> — only if you connect them, and only for what you connected them for. Spotify is the one that goes outwards rather than inwards: it creates a playlist in your own Spotify account.</li>
@@ -261,7 +262,31 @@ addEventListener('DOMContentLoaded', function () {
       </ul>
       <p><strong>OCR.space</strong> receives the whole of any document you ask Repple to read: an InBody printout, or an injury document such as a physiotherapy report or a scan result. It is sent as an image, page by page, to be turned back into text.</p>
       <p>Two things about that are worth saying plainly rather than leaving you to assume them. Repple asks you before sending an injury document, names OCR.space when it asks, and keeps a record of your answer — so an injury document is only ever sent because you said yes to that document. But Repple does not currently ask OCR.space to avoid retaining the upload, so we cannot tell you how long a copy sits on their side. If you would rather not send a document at all, decline and type the detail in by hand; the injury feature works either way.</p>
-      <p>Repple does not use anything you record to train a model, and does not give any of these services permission to use it for their own purposes.</p>
+      <h3>The alternative route, and why it is described separately</h3>
+      <p>Repple can be configured to send all of the above through <strong>Cheaper Inference</strong> rather than
+         to Anthropic directly. It is off unless we switch it on, and this section is here so that the page
+         describes what the app is capable of doing rather than only what it happens to be doing today. If we do
+         switch it on, everything listed above goes to them instead, in the same detail.</p>
+      <p>Three things about that arrangement are different from the one above, and worth stating plainly rather
+         than leaving inside the phrase &ldquo;a service we rely on&rdquo;:</p>
+      <ul>
+        <li><strong>It is a reseller, not the company that runs the model.</strong> It receives the request and
+            forwards it to whichever company operates the model we have asked for &mdash; which may be Anthropic,
+            and may be another company entirely. So it sees everything Anthropic would see, and it is not the
+            last party to see it.</li>
+        <li><strong>Its requests are answered by further companies again.</strong> A reply Repple received while
+            this route was being tested recorded that it had been served by a separate compute provider. The
+            chain is therefore at least three companies long, and which companies are in it depends on the model
+            we name.</li>
+        <li><strong>It does not offer zero retention.</strong> Its own published catalogue of models records, for
+            every one of the sixty-five it offers, that zero data retention is not available, and lists no route
+            that would provide it. That is a weaker guarantee than the direct arrangement described above, and it
+            is the reason this route is off rather than on.</li>
+      </ul>
+      <p>We have not verified their retention practices beyond what that catalogue states, and we would rather
+         record the limit of what we know than describe a guarantee we have not seen.</p>
+
+      <p>Repple does not use anything you record to train a model, and does not give any of these services permission to use it for their own purposes. Where that rests on a retention guarantee rather than on our own instruction, the paragraph above says which route carries one and which does not.</p>
 
       <h2 id="security">Keeping it safe</h2>
       <p>Every connection is encrypted in transit, and Supabase encrypts the disks underneath the database and the file store. Access is enforced at the database itself: every table carries row-level rules, so one person's records are not reachable by another account even if the app asked. No individual column carries a second layer of encryption on top of that, so what protects your row from another account is the rule rather than a key. Nobody at Repple browses your training data as a matter of routine. <a href="/security">Security &amp; data</a> sets out the mechanism in detail &mdash; who can read what, and why a progress photo reaches a coach only when you share that photo.</p>

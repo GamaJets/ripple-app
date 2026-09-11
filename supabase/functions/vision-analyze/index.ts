@@ -3,6 +3,12 @@
 // into body stats. Uses Claude vision. Deploy:
 //   supabase functions deploy vision-analyze
 //   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   (from console.anthropic.com)
+// or, to send this through the Cheaper Inference gateway instead:
+//   supabase secrets set CHEAPER_INFERENCE_API_KEY=ci_live_...
+// Which provider, which endpoint and which model all live in one place, in
+// src/lib/llmGateway.ts — and the endpoint in particular is NOT a per-function
+// choice, because the gateway answers on an Anthropic-shaped path that accepts
+// this function's image and then silently discards it.
 // The app calls it via supabase.functions.invoke('vision-analyze', { body }).
 //
 // Request  JSON: { mode: 'meal' | 'inbody', imageBase64: string, mediaType?: string }
@@ -16,6 +22,7 @@
 // `physique` mode a person's body — to api.anthropic.com on Repple's key, and
 // it did so for anybody holding a string that ships inside the app bundle.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { providerFor, modelFor, buildCall, readReply, replyProblem, mediaTypeOr } from '../../../src/lib/llmGateway.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -25,9 +32,6 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 
-// Default to a broadly-available vision-capable model. Override with the
-// ANTHROPIC_MODEL secret to use a newer one your account has (e.g. claude-sonnet-4-5).
-const MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-3-5-sonnet-latest';
 
 const PROMPTS: Record<string, string> = {
   meal:
@@ -57,12 +61,14 @@ const PROMPTS: Record<string, string> = {
     'takenAt is the scan/test date. The date printed on the sheet is in DAY/MONTH/YEAR order (international format) — e.g. "05/07/2026" or "05.07.2026" means 5 July 2026, NOT 7 May. Convert it and return takenAt as YYYY-MM-DD (so 5 July 2026 -> "2026-07-05"). Use null for any field not present. Return numbers as numbers.',
 };
 
-/** The image types Anthropic's vision API accepts, and the only values that
- *  may reach it from a request body. `mediaType` was taken verbatim — a caller
- *  string placed straight into a call to a third party — and while Anthropic
- *  refuses an unknown one, a field that is passed through unread is a field
- *  nobody is checking. The app sends 'image/jpeg' and nothing else. */
-const MEDIA_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+/** The image types the vision API accepts, and the only values that may reach
+ *  it from a request body. `mediaType` was taken verbatim — a caller string
+ *  placed straight into a call to a third party — and while the vendor refuses
+ *  an unknown one, a field that is passed through unread is a field nobody is
+ *  checking. The app sends 'image/jpeg' and nothing else. The list itself moved
+ *  to src/lib/llmGateway.ts, which is the file that has to build the two
+ *  different image parts out of it.
+ */
 
 function extractJson(text: string): any {
   const a = text.indexOf('{'), b = text.lastIndexOf('}');
@@ -74,8 +80,12 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const key = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!key) return json({ error: 'ANTHROPIC_API_KEY not set on the function' }, 500);
+  // Which provider, and on whose key. See the header.
+  const gatewayKey = Deno.env.get('CHEAPER_INFERENCE_API_KEY');
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const provider = providerFor(gatewayKey, anthropicKey);
+  if (!provider) return json({ error: 'No AI provider is configured on the function' }, 500);
+  const key = (provider === 'cheaper-inference' ? gatewayKey : anthropicKey) as string;
 
   // Signed-in users only — this spends a metered quota and sends a photograph
   // to a third party. See the header.
@@ -94,30 +104,29 @@ Deno.serve(async (req: Request) => {
     imageBase64 = String(b.imageBase64 || '').replace(/^data:image\/\w+;base64,/, '');
     // Named, not passed through. Anything the vision API does not take is
     // 'image/jpeg', which is what every caller in this repo sends anyway.
-    if (b.mediaType && MEDIA_TYPES.has(String(b.mediaType))) mediaType = String(b.mediaType);
+    mediaType = mediaTypeOr(b.mediaType);
   } catch { return json({ error: 'Invalid JSON body' }, 400); }
   if (!imageBase64) return json({ error: 'imageBase64 required' }, 400);
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 400,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-            { type: 'text', text: PROMPTS[mode] },
-          ],
-        }],
-      }),
+    const call = buildCall(provider, key, {
+      messages: [{ role: 'user', content: PROMPTS[mode] }],
+      image: { base64: imageBase64, mediaType },
+      maxTokens: 400,
+      model: modelFor(provider, 'vision', Deno.env.get(
+        provider === 'cheaper-inference' ? 'CHEAPER_INFERENCE_MODEL' : 'ANTHROPIC_MODEL')),
     });
+    const res = await fetch(call.url, { method: 'POST', headers: call.headers, body: call.body });
     if (!res.ok) return json({ error: 'Vision API error', detail: await res.text() }, 502);
-    const data = await res.json();
-    const text = (data?.content?.[0]?.text) ?? '';
-    return json({ mode, result: extractJson(text) });
+
+    // A truncation is named rather than parsed. On a body-composition sheet the
+    // dangerous shape is not the throw — it is a shorter object that PARSES,
+    // with weight and body fat present and the segmental fields cut off, which
+    // lands in a member's health record looking like a scan that simply did not
+    // print those rows.
+    const reply = readReply(provider, await res.json());
+    if (!reply.ok) return json({ error: replyProblem(reply.why) }, 502);
+    return json({ mode, result: extractJson(reply.text) });
   } catch (e) {
     return json({ error: 'Analysis failed', detail: String(e) }, 500);
   }
