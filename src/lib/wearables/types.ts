@@ -31,7 +31,21 @@ export interface DailyMetrics {
   totalKcal: number | null;
   steps: number | null;
   heartRateAvg: number | null;  // bpm, mean of today's samples
-  heartRateLatest: number | null; // bpm, most recent sample (live-ish during a workout)
+  heartRateLatest: number | null; // bpm, most recent sample
+  /**
+   * WHEN that sample was taken, ISO, or null when the source cannot say.
+   *
+   * It used to be thrown away, and the comment on the line above used to read
+   * "live-ish during a workout". That hedge was the whole defect: an Apple
+   * Watch only streams heart rate while a workout is running ON THE WATCH, so
+   * away from one this figure can be many minutes old — and with no time
+   * attached, the runner drew a ten-minute-old reading exactly like a
+   * five-second-old one. Reported as the heart rate never updating.
+   *
+   * src/lib/hrFreshness.ts is what reads this and decides what the screen may
+   * call live.
+   */
+  heartRateLatestAt: string | null;
   heartRateResting: number | null;
   heartRateMax: number | null;    // bpm, peak of today's workouts
   /** Seconds per training zone (z1..z5, the Orange-Theory scale in src/lib/hr).
@@ -150,5 +164,5 @@ export interface WearableProvider {
 export function emptyMetrics(source: ProviderId): DailyMetrics {
   const d = new Date();
   const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return { date, activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateResting: null, heartRateMax: null, zoneSeconds: null, workoutMins: null, hrv: null, recoveryPct: null, recoverySource: null, strain: null, updatedAt: d.toISOString(), source };
+  return { date, activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateLatest: null, heartRateLatestAt: null, heartRateResting: null, heartRateMax: null, zoneSeconds: null, workoutMins: null, hrv: null, recoveryPct: null, recoverySource: null, strain: null, updatedAt: d.toISOString(), source };
 }

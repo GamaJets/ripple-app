@@ -574,6 +574,9 @@
     "src/lib/sheetProgress.ts",
     "src/lib/sheetProgress.test.ts",
     "src/lib/liveRead.ts",
-    "src/lib/liveRead.test.ts"
+    "src/lib/liveRead.test.ts",
+    "src/lib/hrFreshness.test.ts",
+    "src/lib/llmGateway.ts",
+    "src/lib/llmGateway.test.ts"
   ]
 }

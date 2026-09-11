@@ -354,6 +354,8 @@ export async function fetchTrainingToday(): Promise<TrainingRead> {
       m.heartRateAvg = n ? Math.round(sum / n) : null;
       m.heartRateMax = max > 0 ? Math.round(max) : null;
       m.heartRateLatest = latest ? Math.round(latest.bpm) : null;
+      // Same rule as Apple: a reading with no time cannot be called live.
+      m.heartRateLatestAt = (latest && (latest as any).at) ? String((latest as any).at) : null;
     }
   }
 

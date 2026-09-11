@@ -71,7 +71,7 @@ interface Value {
   /** Re-sync every connected+available provider now (used by the live workout view). */
   syncAll: () => void;
   /** Combined "today" roll-up across every connected device (for the dashboard). */
-  today: { activeKcal: number | null; totalKcal: number | null; steps: number | null; heartRateAvg: number | null; heartRateLatest: number | null };
+  today: { activeKcal: number | null; totalKcal: number | null; steps: number | null; heartRateAvg: number | null; heartRateLatest: number | null; heartRateLatestAt: string | null };
   /**
    * Which device each figure on `today` actually came from — the provider id,
    * or null where there is no figure.
@@ -367,11 +367,24 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
     const hrTop = highest('heartRateAvg');
     // The LAST reading rather than the highest, so its source is the last device
     // in the list that published one — the same one `heartRateLatest` takes.
-    const hrlLast = (() => {
+    // The device, AND the moment its sample was taken, chosen in one pass.
+    //
+    // Separately would let them drift, and this file already argues at length
+    // why a figure and the name beside it must come from the same device. A
+    // timestamp is the same kind of claim: an age that described a different
+    // watch's sample would be a worse lie than no age at all, because it would
+    // look like an answer.
+    const hrlPick = (() => {
       let last: string | null = null;
-      for (const { id, m } of connectedPairs) if (typeof m.heartRateLatest === 'number') last = id;
-      return last;
+      let at: string | null = null;
+      for (const { id, m } of connectedPairs) {
+        if (typeof m.heartRateLatest !== 'number') continue;
+        last = id;
+        at = typeof m.heartRateLatestAt === 'string' ? m.heartRateLatestAt : null;
+      }
+      return { id: last, at };
     })();
+    const hrlLast = hrlPick.id;
     const today = {
       activeKcal: kcals ? Math.max(...kcals) : null,
       // Kept apart from activeKcal rather than folded into it. WHOOP publishes
@@ -399,6 +412,10 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
       // true of it, it is a number a device really reported.
       heartRateAvg: hrs ? Math.round(Math.max(...hrs)) : null,
       heartRateLatest: hrl && hrl.length ? Math.round(hrl[hrl.length - 1]) : null,
+      // Null when the device did not stamp it. Never `now` — a reading whose
+      // age is unknown is not a reading that just happened, and treating it as
+      // one is exactly the defect this was added to fix.
+      heartRateLatestAt: hrlPick.at,
     };
     // Computed from the same pass that chose each figure, so the name beside a
     // number and the number cannot come from two different devices.

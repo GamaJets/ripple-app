@@ -23,6 +23,7 @@ import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvo
 import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { hrFreshness, staleHrNote } from '../../src/lib/hrFreshness';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { restSecondsFor, restClock, shouldTick, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
@@ -3161,7 +3162,20 @@ export default function Train() {
  */
 function useLiveVitals(age: number | null, restingKcalPerMin: number | null, paused = false) {
   const w = useWearables();
-  const liveSample = w.today.heartRateLatest;          // a real, current reading
+  // A real reading — and, separately, whether it is a CURRENT one.
+  //
+  // These were one thing, and the comment here called the sample "a real,
+  // current reading". The first half was true. The second was an assumption,
+  // and it is the whole of the report that a cardio session shows a heart rate
+  // which never changes: an Apple Watch only streams to HealthKit while a
+  // workout runs ON THE WATCH, so away from one this is the same sample for
+  // minutes at a time. src/lib/hrFreshness.ts holds the argument.
+  const liveSample = w.today.heartRateLatest;
+  const hrFresh = hrFreshness(w.today.heartRateLatestAt, Date.now());
+  // Zones, peak and the session average are built from a sample only while it
+  // is MOVING. A stale one repeated into a zone timer banks minutes in a zone
+  // the member has left, and these figures reach the health record.
+  const freshSample = hrFresh.state === 'live' ? liveSample : null;
   const liveHr = liveSample ?? w.today.heartRateAvg;   // display only
   const startKcalRef = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -3212,7 +3226,7 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
     return () => { clearInterval(tick); clearInterval(q); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => { if (typeof liveSample === 'number' && liveSample > 0) setHrPeak((p) => (p == null || liveSample > p ? liveSample : p)); }, [liveSample]);
+  useEffect(() => { if (typeof freshSample === 'number' && freshSample > 0) setHrPeak((p) => (p == null || freshSample > p ? freshSample : p)); }, [freshSample]);
 
   // Time in zone, accumulated a second at a time against the latest reading.
   // `hrRef` keeps the tick reading the current bpm without re-arming the interval.
@@ -3223,7 +3237,7 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
    *  describe a different session. Null until a rebuild has run. */
   const [sessionAvgBpm, setSessionAvgBpm] = useState<number | null>(null);
   const hrRef = useRef<number | null>(null);
-  hrRef.current = typeof liveSample === 'number' && liveSample > 0 ? liveSample : null;
+  hrRef.current = typeof freshSample === 'number' && freshSample > 0 ? freshSample : null;
   useEffect(() => {
     const z = setInterval(() => {
       // Nothing is banked while the session is paused. Time in zone is minutes
@@ -3298,7 +3312,7 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
     return () => sub.remove();
   }, [rebuildZonesFromWatch]);
 
-  return { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, rebuildZonesFromWatch, sessionAvgBpm, liveZone: hrZoneNo(liveSample, age) };
+  return { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, rebuildZonesFromWatch, sessionAvgBpm, liveZone: hrZoneNo(freshSample, age) };
 }
 
 /**
@@ -3397,7 +3411,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
 }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
-  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch, sessionAvgBpm } = useLiveVitals(age, restingKcalPerMin);
+  const { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch, sessionAvgBpm } = useLiveVitals(age, restingKcalPerMin);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
@@ -3644,9 +3658,18 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
             That bpm is today&apos;s average from your connected device, not a live reading — it can&apos;t be used for zones.
             Live zones need an Apple Watch.
           </Text>
+        ) : hrFresh.state !== 'live' ? (
+          /* The third state, which did not exist. A real sample, and not a
+             current one — drawn identically to a streaming one until now, which
+             is why a heart rate that had stopped moving looked like a heart
+             that had. It says how old, and it does NOT say reconnect the watch:
+             that was tried, it changed nothing, and it could not have. */
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {staleHrNote(hrFresh.ageMs)}
+          </Text>
         ) : null}
 
-        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
+        <ZonePanel t={t} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account
@@ -3821,7 +3844,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // has had Back, Pause and Skip since it was written; this is that same row,
   // not a second idea about the same problem.
   const [paused, setPaused] = useState(false);
-  const { w, elapsed, liveSample, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin, paused);
+  const { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin, paused);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [idx, setIdx] = useState(0);
   // `bw` marks a set the member did with their own body; `kg` is then what
@@ -4948,11 +4971,20 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             That bpm is today&apos;s average from your connected device, not a live reading — it can&apos;t be used for zones.
             Live zones need an Apple Watch.
           </Text>
+        ) : hrFresh.state !== 'live' ? (
+          /* The third state, which did not exist. A real sample, and not a
+             current one — drawn identically to a streaming one until now, which
+             is why a heart rate that had stopped moving looked like a heart
+             that had. It says how old, and it does NOT say reconnect the watch:
+             that was tried, it changed nothing, and it could not have. */
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {staleHrNote(hrFresh.ageMs)}
+          </Text>
         ) : null}
 
         {/* Live effort, and the same empty state as a timed session when there
             is no watch feeding it — see ZonePanel. */}
-        <ZonePanel t={t} liveZone={liveZone} liveSample={liveSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
+        <ZonePanel t={t} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account

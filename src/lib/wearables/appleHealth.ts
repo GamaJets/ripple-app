@@ -221,6 +221,26 @@ function newestValue(res: any, ascending: boolean): number | null {
   return Math.round(Number(r?.value) || 0);
 }
 
+/**
+ * WHEN the newest sample was taken, ISO, or null when it does not say.
+ *
+ * The same row `newestValue` reads, for its time instead of its number. Every
+ * HealthKit sample carries one; this file simply never kept it, which is what
+ * let a stale heart rate be drawn as a live one.
+ *
+ * `startDate` before `endDate`: a heart-rate sample is an instant and the two
+ * are equal, but a sample type that spans time is stamped by when it BEGAN,
+ * and taking the end would age it by its own duration.
+ */
+function newestAt(res: any, ascending: boolean): string | null {
+  if (!Array.isArray(res) || res.length === 0) return null;
+  const r = ascending ? res[res.length - 1] : res[0];
+  const raw = r?.startDate ?? r?.start ?? r?.endDate ?? r?.end ?? null;
+  if (!raw) return null;
+  const ms = Date.parse(String(raw));
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
 // ── Sleep ───────────────────────────────────────────────────────────────────
 //
 // HealthKit is not one device. It is the phone's record of whatever every app
@@ -460,6 +480,7 @@ export const appleHealth: WearableProvider = {
     m.steps = steps && typeof steps.value === 'number' ? Math.round(steps.value) : sumValues(steps);
     m.heartRateAvg = avgValues(hr);
     m.heartRateLatest = newestValue(hr, false);
+    m.heartRateLatestAt = newestAt(hr, false);
     m.heartRateResting = newestValue(rhr, false);
     if (Array.isArray(workouts) && workouts.length) {
       const mins = workouts.reduce((s: number, w: any) => {
