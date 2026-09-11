@@ -25,6 +25,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hrFreshness, staleHrNote } from '../../src/lib/hrFreshness';
 import { parseLiveSession, mayRestore, type LiveSession } from '../../src/lib/liveSession';
+import { startLiveActivity, endLiveActivity } from '../../modules/workout-activity';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { restSecondsFor, restClock, shouldTick, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
@@ -647,6 +648,9 @@ export default function Train() {
       if (!rec) return;
       if (!mayRestore(rec, Date.now())) { rememberSession(null); return; }
       setResumeAt({ startedAt: rec.startedAt, pausedMs: rec.pausedMs ?? 0 });
+      // The Activity does not survive the app being killed, so a restored
+      // session puts it back — at the moment it actually started, not now.
+      void startLiveActivity(rec.activity ?? 'Workout', rec.startedAt, rec.pausedMs ?? 0);
       if (rec.kind === 'timed' && rec.activity) {
         setTimed({ kind: (rec.sessionKind as SessionKind) ?? 'cardio', activity: rec.activity });
       } else if (rec.kind === 'guided') {
@@ -1941,7 +1945,7 @@ export default function Train() {
             note="So nothing in today's plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet — if something is hurt, take it easy on it or skip it, and pull down to try again." />
         ) : null}
         {start.canStart ? (
-          <Cta label="Start Workout" wide onPress={() => { setResumeAt(null); rememberSession({ kind: 'guided', startedAt: Date.now() }); setSession(true); }} />
+          <Cta label="Start Workout" wide onPress={() => { const at = Date.now(); setResumeAt(null); rememberSession({ kind: 'guided', startedAt: at }); void startLiveActivity(workout.focus || 'Workout', at); setSession(true); }} />
         ) : start.note && start.safety ? (
           // A heading rather than a footnote, because this one is the app
           // having taken today's session away from them for their own safety.
@@ -2579,7 +2583,7 @@ export default function Train() {
                   starts — the chip selected directly above — is on screen with
                   it; the hero up there is about today's lifting plan and would
                   make "Start Sauna" underneath it read as part of that. */}
-              <Cta label={`Start ${ctype}`} wide onPress={() => { setResumeAt(null); rememberSession({ kind: 'timed', sessionKind: mode, activity: ctype, startedAt: Date.now() }); setTimed({ kind: mode as SessionKind, activity: ctype }); tapLight(); }} />
+              <Cta label={`Start ${ctype}`} wide onPress={() => { const at = Date.now(); setResumeAt(null); rememberSession({ kind: 'timed', sessionKind: mode, activity: ctype, startedAt: at }); void startLiveActivity(ctype, at); setTimed({ kind: mode as SessionKind, activity: ctype }); tapLight(); }} />
               <Text style={{ ...ty.micro, color: t.ink3, marginTop: layout.section, marginBottom: sp.md }}>Or log one you have already done</Text>
 
               {/* Recovery is not cardio, and this form used to treat it as if it
@@ -3072,7 +3076,7 @@ export default function Train() {
         {showCal ? overlays : null}
       </Modal>
 
-      <Modal visible={session} animationType="slide" onRequestClose={() => { rememberSession(null); setSession(false); }}>
+      <Modal visible={session} animationType="slide" onRequestClose={() => { rememberSession(null); void endLiveActivity(); setSession(false); }}>
         {/* `clientId` is null rather than 'unknown': that placeholder is what
             this screen carries before the profile has resolved, and a
             notification routed to `?clientId=unknown` opens a coach's screen at
@@ -3080,12 +3084,12 @@ export default function Train() {
             a shared handset can belong to whoever used it last, and a coach
             congratulating the wrong person by name is worse than one told "a
             client". */}
-        <SessionRunner t={t} unit={wu} distanceUnit={unit} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} resumeAt={resumeAt} onClose={() => { rememberSession(null); setResumeAt(null); setSession(false); }} />
+        <SessionRunner t={t} unit={wu} distanceUnit={unit} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} resumeAt={resumeAt} onClose={() => { rememberSession(null); void endLiveActivity(); setResumeAt(null); setSession(false); }} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
           every time rather than carrying the last one's elapsed time. */}
-      <Modal visible={timed != null} animationType="slide" onRequestClose={() => { rememberSession(null); setTimed(null); }}>
+      <Modal visible={timed != null} animationType="slide" onRequestClose={() => { rememberSession(null); void endLiveActivity(); setTimed(null); }}>
         {timed ? (
           <TimedSessionRunner
             t={t}
@@ -3099,9 +3103,9 @@ export default function Train() {
             // Closed only once the row is on the server. `commitSession`
             // already says so when it is not; leaving the sheet up is what
             // makes saying so useful, because the Save button is still there.
-            onSave={async (v) => { const ok = await commitSession(timed.kind, timed.activity, v.mins, v); if (ok) { rememberSession(null); setResumeAt(null); setTimed(null); } return ok; }}
+            onSave={async (v) => { const ok = await commitSession(timed.kind, timed.activity, v.mins, v); if (ok) { rememberSession(null); void endLiveActivity(); setResumeAt(null); setTimed(null); } return ok; }}
             resumeAt={resumeAt}
-            onClose={() => { rememberSession(null); setResumeAt(null); setTimed(null); }}
+            onClose={() => { rememberSession(null); void endLiveActivity(); setResumeAt(null); setTimed(null); }}
           />
         ) : null}
       </Modal>
