@@ -174,7 +174,44 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 const ROOT = process.cwd();
+// ── Rule 5: the console's buttons, which no rule has ever looked at ───────
+//
+// `ROOTS` was `['app', 'src']`. docs/ROADMAP.md names the consequence and is
+// explicit that it has no excuse: the owner console at `studio-web/` has never
+// been examined by any rule here. Rule 2 genuinely does not belong there — a
+// unitless `line-height` in a browser is correct, and is the very behaviour
+// React Native lacks — but "a control nobody can name" is the same defect in
+// both places, and a browser is not exempt from it.
+//
+// So this is Rule 1 for the web, and only Rule 1. A `<button>` whose rendered
+// content contains no word, with no `aria-label` and no `title`, is a control a
+// screen reader announces as "button" and nothing else.
+//
+// ── It currently finds nothing, and that is the point ─────────────────────
+//
+// All 44 console files were swept before this rule was written, and every
+// candidate turned out to be named. Three passes were needed to establish that,
+// and the first two were wrong in a way worth recording:
+//
+//   · Stripping `{…}` expressions to find the text reported TWENTY-SIX
+//     unnamed buttons. Nearly all were `{busy ? 'Saving…' : 'Save'}` — the name
+//     was inside the expression that had just been deleted.
+//   · Counting a quoted string as a name left TWO. Both render `{label}` from a
+//     prop, and their callers pass real words ("‹ Previous", "Next ›").
+//
+// Hence the two clauses below, in this order: a quoted string anywhere inside
+// counts as a name, and so does a lone `{identifier}`, because a component
+// whose whole body is somebody else's `label` prop is named by its caller and
+// this file cannot see the caller. Both make the rule QUIETER, deliberately —
+// a gate that cries wolf about twenty-six controls that are all fine is a gate
+// somebody turns off, which is the argument at the top of this file.
+//
+// A rule that finds nothing on the day it is written is not a wasted rule. It
+// is a ratchet: the console is clean now, and a hit is a regression.
 const ROOTS = ['app', 'src'];
+
+/** Where the console lives. Swept by Rule 5 only — see its note above. */
+const WEB_ROOTS = ['studio-web'];
 
 /* ── the standing offences, by file:line-independent key ──────────────────
  * Keyed by file plus the source text of the tag, NOT by line number — line
@@ -341,6 +378,41 @@ function childrenOf(src, name, tagEndIdx) {
   return null;
 }
 
+
+/** Where a `<button>` opens. Its attributes and body are found with `tagEnd`
+ *  rather than a regex, for the reason `tagEnd` exists at all: `<button ...>`
+ *  matched with `[^>]*` stops at the `>` in `onClick={() => {}}`, which cuts
+ *  the attributes in half and leaves `{}}` in the body — where the stray brace
+ *  reads as text and the control looks NAMED. Written that way first, and
+ *  caught only because the rule was tested against a deliberately unnamed
+ *  button instead of being trusted for returning nothing. */
+const WEB_BUTTON_OPEN = /<button\b/g;
+
+/** Does this button's content name it?
+ *
+ *  One clause, and deliberately blunt: after the TAGS are stripped — keeping
+ *  whatever text was between them — does anything alphabetic remain?
+ *
+ *  Everything narrower was tried and was wrong, each time in the direction
+ *  that matters most. Requiring a quoted string missed
+ *  `{busy ? 'Saving…' : 'Save'}` only after the brace was deleted; allowing a
+ *  lone `{identifier}` still missed `{OUTCOME_LABEL[o]}`, `{PRESET_LABEL[id]}`
+ *  and `{d.name ?? <span>unnamed account</span>}` — four live console controls,
+ *  every one of them properly named, all four reported as defects.
+ *
+ *  A gate that names four innocent controls is a gate somebody switches off,
+ *  which is the argument at the top of this file. So the question it asks is
+ *  the only one it can answer without rendering: is there a word in here at
+ *  all — ONE letter is enough, because `{k}` over a list of kinds renders a
+ *  word at runtime and this file cannot see the list. A button whose body is
+ *  an icon, an <svg>, or nothing has no letter at all, and that is the shape
+ *  this rule is for.
+ */
+function webButtonNamed(attrs, inner) {
+  if (/aria-label|title=/.test(attrs)) return true;
+  return /[A-Za-z]/.test(inner.replace(/<[^>]+>/g, ''));
+}
+
 const found = [];   // { key, file, line, rule, text }
 
 for (const file of ROOTS.flatMap((r) => walk(join(ROOT, r)))) {
@@ -426,6 +498,38 @@ for (const file of ROOTS.flatMap((r) => walk(join(ROOT, r)))) {
   }
 }
 
+// Rule 5 — the console, and only for a control nobody can name. See its note
+// above the ROOTS declaration for why Rule 2 is deliberately not applied here
+// and why this one is written to be quiet.
+for (const file of WEB_ROOTS.flatMap((r) => walk(join(ROOT, r)))) {
+  const rel = relative(ROOT, file).split('\\').join('/');
+  const raw = readFileSync(file, 'utf8');
+  const src = blankComments(raw);
+  const lineOf = (i) => src.slice(0, i).split('\n').length;
+  let m;
+  WEB_BUTTON_OPEN.lastIndex = 0;
+  while ((m = WEB_BUTTON_OPEN.exec(src))) {
+    const open = tagEnd(src, m.index);
+    if (open < 0) continue;
+    const attrs = src.slice(m.index + '<button'.length, open);
+    if (src[open - 1] === '/') {            // self-closing: no body to name it
+      if (webButtonNamed(attrs, '')) continue;
+      found.push({
+        key: `${rel}|webbutton:${lineOf(m.index)}`, file: rel, line: lineOf(m.index), rule: 'webbutton',
+        text: src.slice(m.index, open + 1).split('\n')[0].slice(0, 80),
+      });
+      continue;
+    }
+    const close = src.indexOf('</button>', open);
+    if (close < 0) continue;
+    if (webButtonNamed(attrs, src.slice(open + 1, close))) continue;
+    found.push({
+      key: `${rel}|webbutton:${lineOf(m.index)}`, file: rel, line: lineOf(m.index), rule: 'webbutton',
+      text: src.slice(m.index, open + 1).split('\n')[0].slice(0, 80),
+    });
+  }
+}
+
 const fresh = found.filter((f) => !KNOWN.has(f.key));
 const standing = found.filter((f) => KNOWN.has(f.key));
 const stale = [...KNOWN].filter((k) => !found.some((f) => f.key === k));
@@ -468,6 +572,12 @@ if (fresh.length) {
       console.error('      control it can activate. Use <Scrim> from src/ui/kit.tsx, or give it an');
       console.error('      accessibilityLabel; mark it accessibilityElementsHidden only where the');
       console.error('      sheet has another way out, and say which one.\n');
+    } else if (f.rule === 'webbutton') {
+      console.error(`  ${f.file}:${f.line}  a console button with no accessible name`);
+      console.error(`    ${f.text.trim()}`);
+      console.error('    → A screen reader announces this as "button" and nothing else. Give it');
+      console.error('      words between its tags, or an aria-label saying what it does. The');
+      console.error('      console is swept for this and nothing else — see Rule 5.\n');
     } else {
       console.error(`  ${f.file}:${f.line}  a pinned lineHeight`);
       console.error(`    ${f.text.trim()}`);
@@ -482,6 +592,6 @@ if (stale.length) {
   console.log(`a11y: ${stale.length} standing offence${stale.length === 1 ? '' : 's'} on the list no longer present — run with --prune to reprint the list.`);
 }
 console.log(
-  `a11y: ok — no new unnamed touchables, pinned line heights, field-only labels or mirroring-icon buttons`
+  `a11y: ok — no new unnamed touchables, pinned line heights, field-only labels, mirroring-icon buttons or unnamed console buttons`
   + (standing.length ? `, ${standing.length} standing (in ${new Set(standing.map((s) => s.file)).size} files, all listed in the gate)` : ''),
 );

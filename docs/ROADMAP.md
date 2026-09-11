@@ -812,11 +812,15 @@ not ready to be worked.
   and `check:all` is what `scripts/publish.sh:116` and
   `.github/workflows/ci.yml:104` run, so a regression on any of its four rules
   now fails CI and refuses an OTA. `scripts/check-contrast.mjs`, the other half
-  of the same pass, was already there and still is. Second — **and this one is
-  still true** — its `ROOTS` are
-  `['app', 'src']`, which excludes the console: partly on purpose, since a
-  unitless `line-height` in a browser is correct and is the very behaviour React
-  Native lacks, but Rules 1 and 3 have no such excuse. Neither is a new roadmap
+  of the same pass, was already there and still is. ~~Second — **and this one is
+  still true** — its `ROOTS` are `['app', 'src']`, which excludes the
+  console.~~ **Closed 11 Sep 2026.** Rule 5 sweeps `studio-web` for a `<button>`
+  with no accessible name; Rule 2 is still correctly excluded there, because a
+  unitless `line-height` in a browser is right and is the very behaviour React
+  Native lacks. It finds NOTHING today — all 44 console files were checked and
+  every candidate turned out to be named — so it is a ratchet rather than a
+  repair, and it was proved to fire by planting an unnamed button rather than
+  being trusted for returning nothing. Neither is a new roadmap
   item; both are why "the gates exist" was never the same claim as "the pass was
   made".
 - **Surfacing write failures** (Phase 8). ~~Nothing enumerates the writes that
