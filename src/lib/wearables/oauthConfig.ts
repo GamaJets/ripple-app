@@ -92,6 +92,41 @@ const env = (k: string): string => {
 // 10; this is the half of that the app is responsible for.
 export const OAUTH_REDIRECT = `${BRAND.apps.client.scheme}://wearables/callback`;
 
+/**
+ * The redirect for ONE vendor, when that vendor's dashboard holds a different
+ * one from the shared default.
+ *
+ * "Cannot connect oura ring keeps saying invalid request." Oura's application
+ * has `repple://oura/callback` registered, this file was sending
+ * `repple://wearables/callback`, and a provider refuses a redirect URI that is
+ * not on its list before the member is ever shown a consent screen. Confirmed
+ * by asking Oura's authorize endpoint both ways: the registered one answers
+ * 302 to the real consent page and the shared one answers 400.
+ *
+ * The fix is HERE rather than in the dashboard deliberately. Both would work —
+ * adding the shared URI to Oura's application would have done it — but one is
+ * a code change that goes through the gates and ships with everything else,
+ * and the other is a setting in somebody's browser that nothing in this
+ * repository can check. Between two fixes of equal effect, the one that can be
+ * tested is the one to take.
+ *
+ * `OAUTH_REDIRECT` remains the default and is what WHOOP and Fitbit use. It is
+ * not changed to match Oura: their registrations are what they are, and this
+ * file does not get to assume they agree with each other.
+ *
+ * Brand-aware for the same reason OAUTH_REDIRECT is — see above. A new brand
+ * needs its own URI added to each vendor, which is docs/WHITE-LABEL.md step 10.
+ */
+const VENDOR_REDIRECT: Partial<Record<ProviderId, string>> = {
+  oura: `${BRAND.apps.client.scheme}://oura/callback`,
+};
+
+/** Where `id` sends people back to. The shared default unless that vendor's
+ *  dashboard says otherwise. */
+export function redirectFor(id: ProviderId): string {
+  return VENDOR_REDIRECT[id] ?? OAUTH_REDIRECT;
+}
+
 export const OAUTH_VENDORS: Partial<Record<ProviderId, OAuthVendor>> = {
   fitbit: {
     id: 'fitbit',

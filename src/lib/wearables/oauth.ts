@@ -5,7 +5,7 @@
 // secret (server-side only) and stores the refresh token per user. No secret
 // ever touches the app.
 import { supabase } from '../supabase';
-import { vendorFor, isConfigured, OAUTH_REDIRECT } from './oauthConfig';
+import { vendorFor, isConfigured, redirectFor } from './oauthConfig';
 import type { ProviderId } from './types';
 import { reportError } from '../reportError';
 import { classifyRefusal } from '../wearableLink';
@@ -31,7 +31,9 @@ export async function connectVendor(id: ProviderId): Promise<void> {
   if (WB?.maybeCompleteAuthSession) { try { WB.maybeCompleteAuthSession(); } catch { /* ignore */ } }
 
   const discovery = { authorizationEndpoint: v.authorizeUrl, tokenEndpoint: v.tokenUrl };
-  const redirectUri = OAUTH_REDIRECT;
+  // Per-vendor, because Oura's application registers a different path from
+  // the shared default. See redirectFor in ./oauthConfig.
+  const redirectUri = redirectFor(id);
 
   const request = new AuthSession.AuthRequest({
     clientId: v.clientId,
