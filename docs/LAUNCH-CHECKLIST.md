@@ -42,21 +42,32 @@ gyms you have spoken to. It is not defensible when strangers can sign up:
 unverified addresses mean password resets can be aimed at accounts somebody
 else owns, and it lets one person squat on another's email.
 
-**Confirm sign up is a CODE now, not a link — and the template decides whether
-it works at all.** The app calls `verifyOtp({ type: 'signup' })` with six digits
-the member reads out of the message (`src/ui/auth.tsx`, `src/ui/emailOtp.ts`).
-If the template has no `{{ .Token }}` in it, no code arrives, and the confirm
-screen cannot be completed by anybody. There is nothing in this repository that
-fails when that is wrong — the template lives in the dashboard.
+**Confirm sign up is a CODE now, not a link — and it is already set correctly.
+Checked by eye on 11 Sep 2026.** The app calls `verifyOtp({ type: 'signup' })`
+with six digits the member reads out of the message (`src/ui/auth.tsx`,
+`src/ui/emailOtp.ts`). If the template had no `{{ .Token }}` in it, no code
+would arrive and the confirm screen could not be completed by anybody. Nothing
+in this repository fails when that is wrong — the template lives in the
+dashboard, which is exactly why it is recorded here rather than assumed.
 
-Auth → Emails → Confirm sign up. The code must appear as a bare run of digits
-with the words next to it:
+What Auth → Emails → Confirm sign up actually contains today, read off the
+dashboard rather than inferred from this file:
 
-    <p>Your Repple verification code is</p>
-    <p style="font-size:32px;letter-spacing:4px"><strong>{{ .Token }}</strong></p>
-    <p>It expires in an hour. If you did not ask for it, ignore this email.</p>
+    <h2>Confirm your email address</h2><p>Enter this code in the Repple app to
+    finish signing up:</p><h1>{{ .Token }}</h1><p>This code expires in 60
+    minutes. If you did not sign up, you can ignore this email.</p>
 
-Three things about that shape are load-bearing:
+That satisfies everything below and needs no change. This section previously
+described the LINK shape, which was correct before the scanner problem moved
+confirmation to a code and stale afterwards — and a stale instruction here is
+worse than none, because following it would have replaced a working code
+template with a link and broken sign-up for everybody. The lesson is the one
+the toggle paragraph above already makes: a sentence in a document is not
+evidence of a setting that lives somewhere else. So this one says when it was
+looked at.
+
+Three things about that shape are load-bearing, and the live template has all
+three:
 
 - **`{{ .Token }}` and not `{{ .ConfirmationURL }}`.** The link routes through
   `/auth/v1/verify`, which spends the token server-side the moment *anything*
