@@ -576,6 +576,7 @@
     "src/lib/liveRead.ts",
     "src/lib/liveRead.test.ts",
     "src/lib/hrFreshness.test.ts",
+    "src/lib/liveSession.test.ts",
     "src/lib/llmGateway.ts",
     "src/lib/llmGateway.test.ts"
   ]

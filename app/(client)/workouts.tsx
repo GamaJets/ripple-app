@@ -24,6 +24,7 @@ import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hrFreshness, staleHrNote } from '../../src/lib/hrFreshness';
+import { parseLiveSession, mayRestore, type LiveSession } from '../../src/lib/liveSession';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { tapLight } from '../../src/ui/haptics';
 import { restSecondsFor, restClock, shouldTick, DEFAULT_REST_SEC } from '../../src/lib/restTimer';
@@ -600,11 +601,61 @@ export default function Train() {
     return () => { live = false; };
   }, [cd.id]);
   const [session, setSession] = useState(false);
+  // What the runner should resume at, when there is a session to resume.
+  // Null for a session started just now.
+  const [resumeAt, setResumeAt] = useState<{ startedAt: number; pausedMs: number } | null>(null);
   // The started cardio / HIIT / mobility / recovery session, or null when none
   // is running. The kind is captured here rather than read from `mode` while the
   // modal is open, so a session that began as Recovery is still saved as
   // recovery even if the chips underneath are touched behind it.
   const [timed, setTimed] = useState<{ kind: SessionKind; activity: string } | null>(null);
+
+  /* ── the workout that was still running when the app went away ────────────
+   *
+   * "If you close the tab or if you lock the phone, that workout that's being
+   * timed disappears."
+   *
+   * The clock was never the problem — `useLiveVitals` reads elapsed off the
+   * wall clock precisely so a locked phone cannot under-report a duration
+   * that reaches somebody's health record. What was lost is that a session
+   * was HAPPENING: `session` and `timed` are useState in this screen and
+   * nothing outside the tree remembered them.
+   *
+   * Written on start and cleared on finish, so the record exists exactly as
+   * long as the session does. src/lib/liveSession.ts holds the rules,
+   * including the refusal that matters: a record older than six hours is
+   * dropped rather than re-opened, because a session nobody has touched since
+   * this morning coming back as a nine-hour workout would put a figure in a
+   * health record that describes an afternoon at a desk.
+   */
+  const LIVE_SESSION_KEY = 'repple.liveSession.v1';
+  const rememberSession = useCallback((rec: LiveSession | null) => {
+    if (!rec) { AsyncStorage.removeItem(LIVE_SESSION_KEY).catch(() => {}); return; }
+    AsyncStorage.setItem(LIVE_SESSION_KEY, JSON.stringify(rec)).catch(() => {});
+  }, []);
+
+  // Restored once, on mount. A failure to read is a session that does not come
+  // back, which is the same as today and is not worth an error in front of
+  // somebody about to train.
+  useEffect(() => {
+    let gone = false;
+    (async () => {
+      let raw: string | null = null;
+      try { raw = await AsyncStorage.getItem(LIVE_SESSION_KEY); } catch { return; }
+      if (gone) return;
+      const rec = parseLiveSession(raw);
+      if (!rec) return;
+      if (!mayRestore(rec, Date.now())) { rememberSession(null); return; }
+      setResumeAt({ startedAt: rec.startedAt, pausedMs: rec.pausedMs ?? 0 });
+      if (rec.kind === 'timed' && rec.activity) {
+        setTimed({ kind: (rec.sessionKind as SessionKind) ?? 'cardio', activity: rec.activity });
+      } else if (rec.kind === 'guided') {
+        setSession(true);
+      }
+    })();
+    return () => { gone = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The routine being followed, or null. Held here rather than inside the
   // runner so the modal is MOUNTED only while one is running — the same reason
   // the timed runner is, and for the same effect: a routine reopened starts at
@@ -1890,7 +1941,7 @@ export default function Train() {
             note="So nothing in today's plan has been swapped or held back for them, and no movement below carries a caution. This is a connection problem, not a clean sheet — if something is hurt, take it easy on it or skip it, and pull down to try again." />
         ) : null}
         {start.canStart ? (
-          <Cta label="Start Workout" wide onPress={() => setSession(true)} />
+          <Cta label="Start Workout" wide onPress={() => { setResumeAt(null); rememberSession({ kind: 'guided', startedAt: Date.now() }); setSession(true); }} />
         ) : start.note && start.safety ? (
           // A heading rather than a footnote, because this one is the app
           // having taken today's session away from them for their own safety.
@@ -2528,7 +2579,7 @@ export default function Train() {
                   starts — the chip selected directly above — is on screen with
                   it; the hero up there is about today's lifting plan and would
                   make "Start Sauna" underneath it read as part of that. */}
-              <Cta label={`Start ${ctype}`} wide onPress={() => { setTimed({ kind: mode as SessionKind, activity: ctype }); tapLight(); }} />
+              <Cta label={`Start ${ctype}`} wide onPress={() => { setResumeAt(null); rememberSession({ kind: 'timed', sessionKind: mode, activity: ctype, startedAt: Date.now() }); setTimed({ kind: mode as SessionKind, activity: ctype }); tapLight(); }} />
               <Text style={{ ...ty.micro, color: t.ink3, marginTop: layout.section, marginBottom: sp.md }}>Or log one you have already done</Text>
 
               {/* Recovery is not cardio, and this form used to treat it as if it
@@ -3021,7 +3072,7 @@ export default function Train() {
         {showCal ? overlays : null}
       </Modal>
 
-      <Modal visible={session} animationType="slide" onRequestClose={() => setSession(false)}>
+      <Modal visible={session} animationType="slide" onRequestClose={() => { rememberSession(null); setSession(false); }}>
         {/* `clientId` is null rather than 'unknown': that placeholder is what
             this screen carries before the profile has resolved, and a
             notification routed to `?clientId=unknown` opens a coach's screen at
@@ -3029,12 +3080,12 @@ export default function Train() {
             a shared handset can belong to whoever used it last, and a coach
             congratulating the wrong person by name is worse than one told "a
             client". */}
-        <SessionRunner t={t} unit={wu} distanceUnit={unit} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} onClose={() => setSession(false)} />
+        <SessionRunner t={t} unit={wu} distanceUnit={unit} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} resumeAt={resumeAt} onClose={() => { rememberSession(null); setResumeAt(null); setSession(false); }} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero
           every time rather than carrying the last one's elapsed time. */}
-      <Modal visible={timed != null} animationType="slide" onRequestClose={() => setTimed(null)}>
+      <Modal visible={timed != null} animationType="slide" onRequestClose={() => { rememberSession(null); setTimed(null); }}>
         {timed ? (
           <TimedSessionRunner
             t={t}
@@ -3048,8 +3099,9 @@ export default function Train() {
             // Closed only once the row is on the server. `commitSession`
             // already says so when it is not; leaving the sheet up is what
             // makes saying so useful, because the Save button is still there.
-            onSave={async (v) => { const ok = await commitSession(timed.kind, timed.activity, v.mins, v); if (ok) setTimed(null); return ok; }}
-            onClose={() => setTimed(null)}
+            onSave={async (v) => { const ok = await commitSession(timed.kind, timed.activity, v.mins, v); if (ok) { rememberSession(null); setResumeAt(null); setTimed(null); } return ok; }}
+            resumeAt={resumeAt}
+            onClose={() => { rememberSession(null); setResumeAt(null); setTimed(null); }}
           />
         ) : null}
       </Modal>
@@ -3160,7 +3212,7 @@ export default function Train() {
  * WHOOP user would finish and see "42 min in Zone 2" derived from one number
  * that had nothing to do with the workout.
  */
-function useLiveVitals(age: number | null, restingKcalPerMin: number | null, paused = false) {
+function useLiveVitals(age: number | null, restingKcalPerMin: number | null, paused = false, startedAtMs?: number | null, pausedMsSeed = 0) {
   const w = useWearables();
   // A real reading — and, separately, whether it is a CURRENT one.
   //
@@ -3204,7 +3256,12 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
   // A phone that locks or backgrounds the app stops delivering the interval, so
   // a counter would silently under-report — and for a timed session that number
   // is not just a display, it is the duration written to the log.
-  const startedAtRef = useRef(Date.now());
+  // Seeded from a restored session when there is one, so a workout that was
+  // interrupted resumes at the elapsed it had REACHED rather than at zero.
+  // Restarting the clock would be the quiet version of the same defect: the
+  // session would look continuous and report a duration that is short by
+  // however long the phone was away, into a health record.
+  const startedAtRef = useRef(startedAtMs ?? Date.now());
   // Time the member was not training, taken back off the wall clock.
   //
   // The clock is deliberately read off the wall rather than counted up, so it
@@ -3213,7 +3270,8 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
   // phone call would come back forty minutes longer. `sessionMins` is written
   // to the health record, so this is a figure that has to be true.
   const pausedAtRef = useRef<number | null>(null);
-  const pausedMsRef = useRef(0);
+  // Pauses the session had already banked before it went away.
+  const pausedMsRef = useRef(pausedMsSeed);
   const pausedRef = useRef(paused);
   if (paused && pausedAtRef.current == null) { pausedAtRef.current = Date.now(); }
   if (!paused && pausedAtRef.current != null) { pausedMsRef.current += Date.now() - pausedAtRef.current; pausedAtRef.current = null; }
@@ -3393,7 +3451,10 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed }: {
  * genuinely share is the vitals hook and the zone panel above, so those are
  * shared and the rest is not.
  */
-function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, defaultUnit, weightKg, sex, onSave, onClose }: {
+function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, defaultUnit, weightKg, sex, resumeAt, onSave, onClose }: {
+  /** Where a RESTORED session resumes — wall-clock start and the pauses it
+   *  had already banked. Null for one starting now. */
+  resumeAt?: { startedAt: number; pausedMs: number } | null;
   // `DistanceUnit`, not `string`. The toggle inside this runner reads the unit
   // back out in words for a screen reader, and a bare string would let a caller
   // seed it with anything and have the sentence say "miles" about it.
@@ -3411,7 +3472,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
 }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
-  const { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch, sessionAvgBpm } = useLiveVitals(age, restingKcalPerMin);
+  const { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch, sessionAvgBpm } = useLiveVitals(age, restingKcalPerMin, false, resumeAt?.startedAt ?? null, resumeAt?.pausedMs ?? 0);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
@@ -3819,7 +3880,7 @@ function SessionDemo({ t, name, videos, videoStatus, preferTrainerId }: {
   );
 }
 
-function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, injuryStatus, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose }: { t: Theme; unit: WeightUnit; /** The distance unit the cardio boxes open on, the member's own — same source the standalone cardio timer uses. */ distanceUnit: DistanceUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; /** Replace one movement for the rest of the plan, through the same `swaps` map the plan screen writes. Optional so a caller with no plan to write to still gets a runner. */ onSwap?: (e: ProgramExercise, alt: string) => void; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; /** How the read that produced `injuries` went. An empty list under anything but 'ready' means UNKNOWN, and the caution line below is drawn off that list — so without this the runner draws "no injury applies here" for a member whose disclosure never arrived. */ injuryStatus: LoadStatus; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void }) {
+function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap, age, restingKcalPerMin, log, logStatus, weightHistory, injuries, injuryStatus, videos, videoStatus, preferTrainerId, clientId, clientName, onComplete, onRetry, onClose, resumeAt }: { t: Theme; unit: WeightUnit; /** The distance unit the cardio boxes open on, the member's own — same source the standalone cardio timer uses. */ distanceUnit: DistanceUnit; exercises: ProgramExercise[]; focus: string; nameOf: (e: ProgramExercise) => string; /** Replace one movement for the rest of the plan, through the same `swaps` map the plan screen writes. Optional so a caller with no plan to write to still gets a runner. */ onSwap?: (e: ProgramExercise, alt: string) => void; age: number | null; restingKcalPerMin: number | null; log: WorkoutEntry[]; logStatus: LoadStatus; weightHistory: BodyweightHistory; injuries: Injury[]; /** How the read that produced `injuries` went. An empty list under anything but 'ready' means UNKNOWN, and the caution line below is drawn off that list — so without this the runner draws "no injury applies here" for a member whose disclosure never arrived. */ injuryStatus: LoadStatus; videos: VideoItem[]; videoStatus: LibraryStatus; preferTrainerId: string | null; clientId: string | null; clientName: string | null; onComplete: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onRetry: (entries: WorkoutEntry[]) => Promise<WriteOutcome>; onClose: () => void; /** Where a RESTORED session resumes. Null for one starting now. */ resumeAt?: { startedAt: number; pausedMs: number } | null }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   // The same split the plan screen makes: `nameOf` is the identity written
@@ -3844,7 +3905,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // has had Back, Pause and Skip since it was written; this is that same row,
   // not a second idea about the same problem.
   const [paused, setPaused] = useState(false);
-  const { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin, paused);
+  const { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin, paused, resumeAt?.startedAt ?? null, resumeAt?.pausedMs ?? 0);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [idx, setIdx] = useState(0);
   // `bw` marks a set the member did with their own body; `kg` is then what
