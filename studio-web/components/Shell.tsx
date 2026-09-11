@@ -209,6 +209,15 @@ export const NAV: NavItem[] = [
   // not price a plan, record a payment, import a price book or settle payroll,
   // and the console said where to go and had nowhere to send them.
   { href: '/settings', label: 'Gym', roles: ['owner'], context: 'gym' , group: 'System' },
+  // Beside Gym, because "which gyms are mine" is the same kind of fact as the
+  // gym's own settings and a different one from anything on the floor.
+  //
+  // It renders for every owner, including the great majority with one gym —
+  // and for them it is one row and no totals, because a roll-up of one gym is
+  // that gym. Hiding it below a threshold would mean the rail changed shape
+  // the day somebody's second site was recorded, which is the moment they are
+  // least well served by a console that has moved.
+  { href: '/sites', label: 'Sites', roles: ['owner'], context: 'gym' , group: 'System' },
   // Beside Gym rather than beside Members, because it is not about any one
   // member: it is what the gym can PRODUCE when somebody asks — an insurer, a
   // regulator, or the member themselves. Owner-only, and the strongest case for

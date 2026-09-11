@@ -240,8 +240,35 @@ const WORD_NUMBERS = new Map(Object.entries({
   fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
   nineteen: 19, twenty: 20, thirty: 30, forty: 40, sixty: 60, ninety: 90,
 }));
-const NUM = '\\d+|' + [...WORD_NUMBERS.keys()].join('|');
-const asNumber = (s) => (/^\d+$/.test(s) ? Number(s) : WORD_NUMBERS.get(s.toLowerCase()));
+/**
+ * The alternation a claim's number is matched with.
+ *
+ * COMPOUNDS FIRST — `thirty-one` before `one`, or the regex alternates its way
+ * to the shortest match and a page saying "thirty-one pages" is read as a
+ * claim about ONE. That is not hypothetical: the console grew to 31 pages, the
+ * sentence was updated to "thirty-one", and this gate reported that the page
+ * "says the console has one pages".
+ *
+ * Tens are listed before units for the same reason.
+ */
+const TENS = ['twenty', 'thirty', 'forty', 'sixty', 'ninety'];
+const UNITS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const COMPOUNDS = TENS.flatMap((t) => UNITS.map((u) => `${t}-${u}`));
+const NUM = '\\d+|' + [...COMPOUNDS, ...[...WORD_NUMBERS.keys()].sort((a, b) => b.length - a.length)].join('|');
+
+/** A written number, compound or not. `thirty-one` is thirty plus one; every
+ *  other form is a single word this table already holds. */
+const asNumber = (s) => {
+  const w = s.toLowerCase();
+  if (/^\d+$/.test(w)) return Number(w);
+  if (w.includes('-')) {
+    const [tens, units] = w.split('-');
+    const a = WORD_NUMBERS.get(tens);
+    const b = WORD_NUMBERS.get(units);
+    return a == null || b == null ? undefined : a + b;
+  }
+  return WORD_NUMBERS.get(w);
+};
 
 /**
  * The escape hatch: `site-claim-ok: <reason>` in the unbroken comment run
