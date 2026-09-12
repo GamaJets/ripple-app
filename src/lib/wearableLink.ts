@@ -81,10 +81,20 @@ export type TokenProof =
  * fix it once the scope is asked for, which is why it carries an action.
  * `'absent'` is a fact about Repple, not about the vendor — there is no reader
  * in this build — and no amount of reconnecting changes it.
+ *
+ * `'empty'` is the one this file was missing, and the gap let the reported bug
+ * survive the state built for it. The vendor answered, on this token, and held
+ * NOTHING: Oura's daily_activity, daily_readiness and sleep collections all
+ * return `{ data: [] }` for an account with no ring on it. That was being
+ * recorded as `'ok'` — the request had, after all, succeeded — so `everProduced`
+ * came back true and the screen said "connected and Repple is reading it" about
+ * a device that does not exist. An answer of "I have no records" is evidence of
+ * silence, not of a figure.
  */
 export type MetricProof =
   | { kind: 'none' }
   | { kind: 'ok'; at: number }
+  | { kind: 'empty'; at: number }
   | { kind: 'refused'; at: number; scope?: string }
   | { kind: 'absent'; why: string };
 
@@ -115,6 +125,20 @@ export interface LinkFacts {
    * silence" — a screen that has not looked must not report an absence.
    */
   everProduced?: boolean;
+  /**
+   * What the VENDOR says is on the account — not what we inferred from silence.
+   *
+   * `everProduced: false` can only ever produce a sentence that hedges: no
+   * device on the account, or a device that has not synced. Oura will simply
+   * tell us which. `/v2/usercollection/ring_configuration` lists the rings on
+   * the account and returns an empty list when there are none, so the reported
+   * case — "I have created an account but I have no ring associated with" it —
+   * can be stated as the fact it is instead of offered as one of two guesses.
+   *
+   * Undefined means nobody has asked, or the vendor has no such endpoint, and
+   * the hedged sentence is then the honest one.
+   */
+  hardware?: 'present' | 'absent';
 }
 
 export interface LinkView {
@@ -265,6 +289,32 @@ export function describeLink(f: LinkFacts): LinkView {
   // sentence names the two things that actually produce this — an account with
   // no device on it, and a device that has not synced to the vendor yet — and
   // points at the vendor's own app, which is where both are fixed.
+  // Definite, and checked before the inference: the vendor has been asked what
+  // is on the account and has said "nothing". No hedge, and no instruction to
+  // go and check whether a device has synced — there is no device to sync.
+  //
+  // Still 'muted' and still no action. This is not broken and a reconnect
+  // cannot help; what fixes it happens in the vendor's app, with a ring in
+  // hand. Naming the account rather than the device is the whole correction:
+  // the ACCOUNT is connected, which is true, and the ring is not, which is
+  // what the person was trying to tell us.
+  if (f.hardware === 'absent') {
+    return {
+      state: 'silent',
+      connected: true,
+      label: 'Connected',
+      // `name` is the device's display name — "Oura Ring" — so the sentence is
+      // built to read once with it and never twice in a row: "your Oura Ring
+      // account", then "pair a device", not "pair your Oura Ring in the Oura
+      // Ring app".
+      detail: `Your ${name} account is connected — and ${name} says there is no device on it yet, so there is `
+        + `nothing for Repple to read. Pair a device in the ${name} app and your figures appear here on the `
+        + `next sync. Repple reads what ${name} holds, not the device directly.`,
+      action: null,
+      tone: 'muted',
+    };
+  }
+
   if (f.everProduced === false) {
     return {
       state: 'silent',

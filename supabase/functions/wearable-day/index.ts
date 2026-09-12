@@ -193,6 +193,37 @@ async function ouraDay(token: string) {
   return out;
 }
 
+/**
+ * How many rings are on this Oura account.
+ *
+ * The answer to a report this whole file could not previously distinguish from
+ * a quiet day: "Oura ring says that my ring is connected, I have created an
+ * account but I have no ring associated with the Oura account." Every Oura
+ * collection answers `{ data: [] }` for such an account, which is byte for byte
+ * what a brand-new ring that has not synced yet returns, so the client could
+ * only ever offer the member both possibilities and ask them to go and look.
+ *
+ * `ring_configuration` is Oura's own list of the hardware on the account, and
+ * an empty list means there is none. Asked ONLY when the day came back with
+ * nothing in it — on every normal day this costs no request at all.
+ *
+ * Null, not false, when the question could not be asked: a 401 here, or a
+ * network fault, is not evidence that somebody owns no ring, and the client
+ * must not be handed a definite answer we did not get.
+ */
+async function ouraRingCount(token: string): Promise<number | null> {
+  try {
+    const res = await fetch('https://api.ouraring.com/v2/usercollection/ring_configuration', {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return Array.isArray(j?.data) ? j.data.length : null;
+  } catch {
+    return null;
+  }
+}
+
 async function whoopDay(token: string) {
   const h = { Authorization: 'Bearer ' + token };
   const out: any = { activeKcal: null, totalKcal: null, steps: null, heartRateAvg: null, heartRateResting: null, workoutMins: null, heartRateMax: null, zoneSeconds: null, hrv: null, recoveryPct: null, strain: null };
@@ -830,5 +861,15 @@ Deno.serve(async (req) => {
   }
 
   const metrics = await readVendor(provider, access);
+  // A day with not one number in it is the only case worth asking the vendor
+  // what is on the account — see `ouraRingCount`. The key is omitted entirely
+  // unless there is a definite answer, because the client reads a MISSING
+  // `hardware` as "nobody asked" and only an explicit `present: false` as "the
+  // vendor says there is no device". Telling somebody with a working ring that
+  // they have none would be a worse bug than the one this closes.
+  if (provider === 'oura' && metrics && !Object.values(metrics).some((v) => typeof v === 'number' && isFinite(v))) {
+    const rings = await ouraRingCount(access);
+    if (rings != null) return json({ metrics, connected: true, hardware: { present: rings > 0, count: rings } });
+  }
   return json({ metrics, connected: true });
 });

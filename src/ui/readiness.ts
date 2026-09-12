@@ -33,6 +33,7 @@ import { readinessScore, readinessSleep, type Readiness, type ReadinessSleep } f
 import { todayISO } from '../lib/bodyFigures';
 import { readinessBreakdown, type ReadinessBreakdown, type ReadinessSource } from '../lib/readinessBreakdown';
 import { providerById } from '../lib/wearables/registry';
+import { hardwareFor, useLinkRevision } from '../lib/wearableLinkLedger';
 import type { ProviderId } from '../lib/wearables/types';
 
 /**
@@ -62,6 +63,7 @@ export function useReadiness(): ReadinessView {
   const { water, waterGoal, waterStatus } = useHabits();
   const { log, status: logStatus } = useWorkoutLog();
   const { states: deviceStates, metrics: deviceMetrics } = useWearables();
+  const linkRev = useLinkRevision();
 
   const reads = devSleep.reads;
   const nights = devSleep.nights;
@@ -131,7 +133,15 @@ export function useReadiness(): ReadinessView {
       // member is "no connected device scores recovery" rather than "your
       // device has not reported one today", and is not sent to look for a
       // sync that was never going to happen.
-      if (id === 'whoop' || id === 'oura') recoveryDeviceConnected = true;
+      // ...unless the vendor has told us there is no device on the account, in
+      // which case this screen would commit the very error the paragraph above
+      // exists to prevent, one vendor along. A connected Oura account with no
+      // ring on it scores no recovery and never will, and counting it here
+      // produced "your device has not reported one today" — a sentence that
+      // sends somebody to look for a sync that cannot happen. See
+      // `noteHardware` in wearableLinkLedger.ts; undefined means nobody asked,
+      // and the flag stands.
+      if ((id === 'whoop' || id === 'oura') && hardwareFor(id as ProviderId) !== 'absent') recoveryDeviceConnected = true;
       if (recoveryPct != null) continue;
       const v = m?.recoveryPct;
       if (typeof v !== 'number' || !Number.isFinite(v)) continue;
@@ -175,5 +185,10 @@ export function useReadiness(): ReadinessView {
         workoutsLast2Days,
       }),
     };
-  }, [nights, typed, typedStatus, reads, deviceStatus, water, waterGoal, waterStatus, log, logStatus, deviceStates, deviceMetrics, nowMs]);
+  // `linkRev` is a dependency and not a value used in the body: `hardwareFor`
+  // above reads the link ledger, which lives outside React state on purpose,
+  // so without this the memo would hold whatever the ledger said when it last
+  // ran. The revision is what every other screen uses to re-ask after a
+  // verdict changes — see useLinkRevision in wearableLinkLedger.ts.
+  }, [nights, typed, typedStatus, reads, deviceStatus, water, waterGoal, waterStatus, log, logStatus, deviceStates, deviceMetrics, nowMs, linkRev]);
 }

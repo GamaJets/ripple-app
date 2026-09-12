@@ -33,6 +33,8 @@ interface Entry {
   token: TokenProof;
   /** Keyed by metric name ('sleep'), because a device can be fine for one and not another. */
   metrics: Record<string, MetricProof>;
+  /** What the vendor said is on the account, when it is able to say. See `noteHardware`. */
+  hardware?: 'present' | 'absent';
 }
 
 const UNPROVEN: Entry = { token: { kind: 'none' }, metrics: {} };
@@ -57,14 +59,14 @@ function commit(id: string, next: Entry): void {
 export function noteTokenAlive(id: ProviderId, at: number = Date.now()): void {
   const e = entry(id);
   if (e.token.kind === 'alive') return; // nothing changed; do not wake every screen
-  commit(id, { token: { kind: 'alive', at }, metrics: e.metrics });
+  commit(id, { ...e, token: { kind: 'alive', at } });
 }
 
 /** The server could not use this token at all. */
 export function noteTokenDead(id: ProviderId, why: DeadReason, at: number = Date.now()): void {
   const e = entry(id);
   if (e.token.kind === 'dead' && e.token.why === why) return;
-  commit(id, { token: { kind: 'dead', at, why }, metrics: e.metrics });
+  commit(id, { ...e, token: { kind: 'dead', at, why } });
 }
 
 /**
@@ -78,7 +80,7 @@ export function noteMetric(id: ProviderId, metric: string, proof: MetricProof): 
   const e = entry(id);
   const was = e.metrics[metric];
   if (was && was.kind === proof.kind) return;
-  commit(id, { token: e.token, metrics: { ...e.metrics, [metric]: proof } });
+  commit(id, { ...e, metrics: { ...e.metrics, [metric]: proof } });
 }
 
 /**
@@ -98,6 +100,30 @@ export function noteReauthorised(id: ProviderId): void {
 /** Forget a device entirely, on an explicit disconnect. */
 export function forgetLink(id: ProviderId): void {
   commit(id, { token: { kind: 'none' }, metrics: {} });
+}
+
+/**
+ * What the vendor says is on the account.
+ *
+ * Not an inference from silence — `everProducedFor` below already makes that
+ * one, and it can only ever produce a sentence offering two possibilities.
+ * This is the vendor answering the question directly: Oura's
+ * ring_configuration collection lists the rings on an account, and the
+ * `wearable-day` function asks it when a day comes back with nothing in it.
+ *
+ * Kept out of `metrics` on purpose. A ring's existence is not a metric, it does
+ * not become 'refused' or 'absent', and putting it in there would make
+ * `everProducedFor` count it as a reading that never arrived.
+ */
+export function noteHardware(id: ProviderId, hardware: 'present' | 'absent'): void {
+  const e = entry(id);
+  if (e.hardware === hardware) return;
+  commit(id, { ...e, hardware });
+}
+
+/** What the vendor last said is on the account. Undefined until it is asked. */
+export function hardwareFor(id: ProviderId): 'present' | 'absent' | undefined {
+  return entry(id).hardware;
 }
 
 /** What the server has proven about this device's token. Never null. */
@@ -153,6 +179,10 @@ export function linkFor(
     // screen that has not looked yet must not tell somebody their ring is not
     // sending anything.
     everProduced: everProducedFor(id),
+    // Undefined for every vendor that has not been asked, which is every vendor
+    // but Oura today. `describeLink` falls back to the two-possibility sentence
+    // there, which is the honest answer when nobody has checked.
+    hardware: entry(id).hardware,
   });
 }
 

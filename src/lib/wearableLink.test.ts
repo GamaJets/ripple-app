@@ -289,6 +289,44 @@ ok(describeLink(facts({ token: { kind: 'alive', at: NOW }, everProduced: true })
 ok(describeLink(facts({ token: { kind: 'alive', at: NOW } })).state === 'live',
   'undefined is not false — a screen that has not looked claims no absence');
 
+// ── The vendor answering the question directly ─────────────────────────────
+//
+// `everProduced: false` can only offer two possibilities. When Oura has been
+// asked what is on the account and has said "nothing", the app must say that
+// instead of sending somebody to go and check whether a ring they do not own
+// has synced.
+{
+  const v = describeLink(facts({ providerName: 'Oura', token: { kind: 'alive', at: NOW }, hardware: 'absent' }));
+  ok(v.state === 'silent', 'no device on the account is silence, not a live read');
+  ok(v.connected, 'the ACCOUNT is connected, and saying otherwise is the bug in the other direction');
+  ok(/no device on it/.test(v.detail), 'and it states the fact rather than two possibilities');
+  ok(!/has not synced/.test(v.detail), 'so it does not also offer the guess it has replaced');
+  ok(!/Repple is reading it/.test(v.detail), 'and never claims a reading');
+  ok(v.action === null, 'a reconnect cannot conjure a ring');
+  ok(v.tone !== 'warn', 'nothing is broken');
+}
+
+// The definite answer outranks the inference, in the one direction that matters:
+// a ring that exists and has simply not synced yet must not be reported as no
+// ring at all.
+{
+  const v = describeLink(facts({ providerName: 'Oura', token: { kind: 'alive', at: NOW }, hardware: 'present', everProduced: false }));
+  ok(v.state === 'silent', 'a paired ring that has sent nothing is still silent');
+  ok(!/no device on it/.test(v.detail), 'but it is never told there is no device');
+}
+
+// An empty answer is not a reading. This is what the ledger records now for a
+// vendor that answered with no records, and 'empty' must not read as 'ok'.
+{
+  const v = describeLink(facts({
+    providerName: 'Oura', token: { kind: 'alive', at: NOW },
+    metric: { name: 'day', proof: { kind: 'empty', at: NOW } }, everProduced: false,
+  }));
+  ok(v.state === 'silent', 'a metric that came back empty leaves the device silent');
+  ok(v.connected, 'and the account stays connected — an empty answer is the endpoint working');
+  ok(v.action === null, 'with nothing to reconnect');
+}
+
 if (errors.length) {
   console.error(`wearableLink.test: ${errors.length} failure(s)`);
   for (const e of errors) console.error('  · ' + e);

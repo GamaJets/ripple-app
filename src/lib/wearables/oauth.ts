@@ -9,7 +9,7 @@ import { vendorFor, isConfigured, redirectFor } from './oauthConfig';
 import type { ProviderId } from './types';
 import { reportError } from '../reportError';
 import { classifyRefusal } from '../wearableLink';
-import { accountProvenAlive, noteMetric, noteReauthorised, noteTokenAlive, noteTokenDead } from '../wearableLinkLedger';
+import { accountProvenAlive, noteHardware, noteMetric, noteReauthorised, noteTokenAlive, noteTokenDead } from '../wearableLinkLedger';
 
 function authSession(): any {
   try { return require('expo-auth-session'); } catch { return null; }
@@ -158,7 +158,37 @@ export async function fetchVendorDay(id: ProviderId): Promise<any | null> {
   // that lets a 403 on one endpoint be read as a scope gap rather than as a
   // disconnected account.
   noteTokenAlive(id);
-  return payload?.metrics ?? null;
+  const metrics = payload?.metrics ?? null;
+  // ── The daily roll-up was the one read that recorded nothing ──────────────
+  //
+  // "Oura ring says that my ring is connected, I have created an account but I
+  // have no ring associated with the Oura account."
+  //
+  // Every word of that was consistent with what the app was told: the OAuth
+  // succeeded, the token refreshes, and Oura answers `{ data: [] }` on every
+  // collection because there is no ring writing to them. The ledger's 'silent'
+  // state exists precisely for this — and it could never fire, because the ONLY
+  // read an Oura member's Watch & Devices row depends on is this one, and this
+  // one wrote no metric proof at all. With an empty ledger `everProduced` is
+  // undefined, which `describeLink` correctly treats as "do not claim silence",
+  // so the row fell through to 'live': "connected and Repple is reading it".
+  //
+  // 'day' rather than a per-figure name: the roll-up is asked for as one
+  // document and a vendor holding nothing returns nothing for all of it. A
+  // single number anywhere in it is a device that is working.
+  if (metrics && typeof metrics === 'object') {
+    const produced = Object.values(metrics as Record<string, unknown>).some((v) => typeof v === 'number' && isFinite(v));
+    noteMetric(id, 'day', produced ? { kind: 'ok', at: Date.now() } : { kind: 'empty', at: Date.now() });
+  }
+  // And when the vendor can say WHY there is nothing, it outranks the inference
+  // above — see `noteHardware`. Absent only on an explicit answer: a payload
+  // from an older deploy carries no `hardware` key, and guessing 'absent' from
+  // its absence would tell somebody with a working ring that they have none.
+  const hw = payload?.hardware;
+  if (hw && typeof hw === 'object' && typeof hw.present === 'boolean') {
+    noteHardware(id, hw.present ? 'present' : 'absent');
+  }
+  return metrics;
 }
 
 /** Recent workouts from a cloud vendor, for importing into the training log. */
@@ -259,8 +289,19 @@ export async function fetchVendorSleep(id: ProviderId, sinceDays = 7): Promise<V
     // connection starts working, which is what "reconnecting must visibly
     // resolve" comes down to.
     noteTokenAlive(id);
-    noteMetric(id, 'sleep', { kind: 'ok', at: Date.now() });
-    return { ok: true, records: Array.isArray(sleep.records) ? sleep.records : [] };
+    const records = Array.isArray(sleep.records) ? sleep.records : [];
+    // 'ok' only when a night actually came back. An answer of "I hold no
+    // records" was being recorded as a reading produced, which is the second
+    // half of the ringless-Oura report: Oura's sleep collection returns
+    // `{ data: [] }` for an account with no ring, that arrives here as
+    // `ok: true` with nothing in it, and one 'ok' in the ledger is enough to
+    // make `everProduced` true and the row read "Repple is reading it".
+    //
+    // The token verdict above is written either way and deliberately so —
+    // answering "nothing" IS the endpoint working, and it is the evidence that
+    // tells a scope gap from a dead account apart.
+    noteMetric(id, 'sleep', records.length ? { kind: 'ok', at: Date.now() } : { kind: 'empty', at: Date.now() });
+    return { ok: true, records };
   }
   // A non-2xx that was NOT 401/403 — the vendor is down, or we sent something
   // it did not like. The token is not implicated either way, so no verdict is
@@ -323,17 +364,18 @@ export async function fetchVendorBody(id: ProviderId): Promise<VendorBodyResult>
   }
   if (body.ok === true) {
     noteTokenAlive(id);
-    noteMetric(id, 'body', { kind: 'ok', at: Date.now() });
     const num = (v: unknown): number | null => {
       const n = Number(v);
       return Number.isFinite(n) && n > 0 ? n : null;
     };
-    return {
-      ok: true,
-      weightKg: num(body.weightKg),
-      heightM: num(body.heightM),
-      maxHeartRate: num(body.maxHeartRate),
-    };
+    const measured = { weightKg: num(body.weightKg), heightM: num(body.heightM), maxHeartRate: num(body.maxHeartRate) };
+    // Same distinction the sleep read above now makes. A vendor that answers
+    // with three nulls — WHOOP does exactly that for a client who has never
+    // entered a weight — has demonstrated that the endpoint works and that it
+    // is holding nothing, and only the first of those is a figure produced.
+    const any = measured.weightKg != null || measured.heightM != null || measured.maxHeartRate != null;
+    noteMetric(id, 'body', any ? { kind: 'ok', at: Date.now() } : { kind: 'empty', at: Date.now() });
+    return { ok: true, ...measured };
   }
   return { ok: false, reason: String(body.reason || 'unknown') };
 }
