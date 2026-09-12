@@ -65,7 +65,8 @@ import {
   type WeightUnit,
 } from '../../src/lib/units';
 import { est1RM } from '../../src/lib/streaks';
-import { BARS, loadBar } from '../../src/lib/plateMath';
+import { BARS, PLATES, loadBar } from '../../src/lib/plateMath';
+import { warmupRamp, warmupNote, warmupRefusal } from '../../src/lib/warmupRamp';
 import { BACK_ICON } from '../../src/ui/direction';
 
 function OneRM({ t, wu }: { t: Theme; wu: WeightUnit }) {
@@ -160,6 +161,13 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  const read = readLift(target, wu);
  const asked = read.ok ? liftIn(read.kg, wu) : null;
  const load = loadBar(asked, bar, wu);
+ /* The smallest change the BAR can make, which is a PAIR of the smallest
+    plates — 1.25 a side is a 2.5 jump. Derived from `PLATES` rather than
+    written down, so a rack that gains a smaller fractional plate one day
+    changes the ramp with it instead of leaving a second copy of the fact
+    here to go stale. */
+ const rampStep = 2 * Math.min(...PLATES[wu]);
+ const ramp = warmupRamp(asked ?? 0, rampStep);
  const inp = { ...ty.body, ...numeric, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 11, flex: 1, textAlign: 'center' } as const;
  return (
  <View>
@@ -202,6 +210,36 @@ function PlateCalc({ t, wu }: { t: Theme; wu: WeightUnit }) {
  { label: 'Loadable Total', value: fig(load.total), unit: wu },
  ]} />
  </Section>
+
+ {/* ── the sets before the set ──────────────────────────────────────────
+     Off the weight already typed above, because asking for it twice is the
+     thing this feature exists to remove: the ramp is worked out standing at a
+     rack between sets, and the reason people skip a warm-up is rarely that
+     they do not know they should. src/lib/warmupRamp.ts rounds every rung
+     DOWN to a weight the bar can actually hold — 40% of 102.5 is 41, and
+     there is no 41 kg. */}
+ {asked != null ? (<>
+ <Rule />
+ <Section>
+ <SectionHead title="Warm-up Ramp" note={`to ${plain(asked)} ${wu}`} />
+ {ramp.length ? (<>
+ {ramp.map((r, i) => (
+ <View key={r.pct}>
+ {i > 0 ? <Rule /> : null}
+ <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: sp.md }}>
+ <Text style={{ ...ty.body, ...numeric, color: t.ink2 }}>{r.pct}%</Text>
+ <Text style={{ ...ty.body, ...numeric, fontWeight: '600', color: t.ink }}>
+ {plain(r.weight)} {wu} × {r.reps}
+ </Text>
+ </View>
+ </View>
+ ))}
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{warmupNote(ramp, wu)}</Text>
+ </>) : (
+ <Text style={{ ...ty.label, color: t.ink3 }}>{warmupRefusal(asked, rampStep)}</Text>
+ )}
+ </Section>
+ </>) : null}
 
  {load.plates.length ? (<>
  <Rule />
