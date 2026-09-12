@@ -45,6 +45,8 @@ import { capLimit, capped } from '../lib/rowCap';
 import {
   END_REASONS, END_REASON_LABEL, END_REASON_NOTE, MAX_END_NOTE, isEndReason,
   recordEndReason, departureTally, type EndReason,
+  fetchEndRecord, endNoteLine, endReasonPrompt, reasonAttribution,
+  END_RECORD_UNREADABLE, type EndRecordRead,
 } from '../lib/endCoaching';
 import { departureSectionNote } from '../lib/departureSection';
 import { isWhole, type LoadStatus } from './loadStatus';
@@ -359,6 +361,62 @@ export function UnexplainedDepartures({ reload }: { reload?: number }) {
   // `!= null`, so a value this build does not recognise is asked about rather
   // than silently counted as answered.
   const unexplained = useMemo(() => (rows ?? []).filter((r) => !isEndReason(r.reason)), [rows]);
+  /**
+   * The ones somebody DID answer, which nothing has ever read back.
+   *
+   * `departureTally` below counts these into buckets and that is all the coach
+   * ever saw: "Too expensive: 2". The sentence a client typed — the most useful
+   * thing this feature collects, and the only part that is in their own words —
+   * reached no screen at all, and `fetchEndRecord` sat on the dead-export
+   * ratchet because of it.
+   */
+  const explained = useMemo(() => (rows ?? []).filter((r) => isEndReason(r.reason)), [rows]);
+  /** Which row is open. One at a time: these are paragraphs, not fields. */
+  const [openId, setOpenId] = useState<string | null>(null);
+  /**
+   * The full record per client, read on demand.
+   *
+   * Not fetched for the whole list on mount. A coach with a quiet quarter has
+   * two of these and a busy one has thirty, and thirty reads to fill text
+   * nobody has asked to see is the shape `useDepartures` avoids by reading the
+   * list in one query. 'loading' is held in the same map so a second tap while
+   * a read is in flight does not start another.
+   */
+  const [detail, setDetail] = useState<Record<string, EndRecordRead | 'loading'>>({});
+  /**
+   * The coach's own id, which decides whose account a reason is.
+   *
+   * `fetchEndRecord` compares it against `end_reason_by` to answer "did I write
+   * this or did they", and `reasonAttribution` turns that into the sentence.
+   * Without it the function returns 'unreadable' rather than guessing, which is
+   * the right refusal: an unattributed reason must never be shown to a coach as
+   * the client's own words.
+   */
+  const [meId, setMeId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    let live = true;
+    void (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (live) setMeId(data?.session?.user?.id ?? null);
+      } catch { /* leaves meId null, which reads as unreadable rather than as theirs */ }
+    })();
+    return () => { live = false; };
+  }, []);
+
+  const openOne = useCallback(async (d: Departure) => {
+    if (openId === d.clientId) { setOpenId(null); return; }
+    setOpenId(d.clientId);
+    if (detail[d.clientId] && detail[d.clientId] !== 'loading') return;
+    setDetail((p) => ({ ...p, [d.clientId]: 'loading' }));
+    // `meId ?? ''` rather than a guard that skips the read: the function's own
+    // first line refuses an empty id and answers END_RECORD_UNREADABLE, which
+    // is the sentence this state deserves. Skipping would leave the row open
+    // and blank.
+    const r = await fetchEndRecord(d.clientId, meId ?? '');
+    setDetail((p) => ({ ...p, [d.clientId]: r }));
+  }, [openId, detail, meId]);
 
   if (!rows || rows.length === 0) return null;
 
@@ -419,6 +477,61 @@ export function UnexplainedDepartures({ reload }: { reload?: number }) {
             </View>
           ))}
         </View>
+        ) : null}
+
+        {/* ── and the answers already given, in their own words ───────────
+            Above the tally, deliberately. The tally is nine buckets and this is
+            what somebody actually wrote; a coach who reads the counts first has
+            already formed the conclusion the sentence would have corrected.
+            Collapsed, because these are paragraphs and a list of them is a wall
+            — and read on the tap, so a quiet quarter costs no requests at all. */}
+        {explained.length > 0 ? (
+          <View style={{ marginTop: sp.lg }}>
+            <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>WHAT THEY SAID</Text>
+            {explained.map((d, i) => {
+              const open = openId === d.clientId;
+              const rec = detail[d.clientId];
+              return (
+                <View key={d.clientId} style={{ borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                  <Pressable onPress={() => { void openOne(d); }}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: open }}
+                    accessibilityLabel={`${d.name ?? 'A former client'}, ${d.reason && isEndReason(d.reason) ? END_REASON_LABEL[d.reason] : 'reason unknown'}. ${open ? 'Collapse' : 'Read what they said'}`}
+                    style={{ paddingVertical: sp.md, flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>{d.name ?? 'A former client'}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                        {d.reason && isEndReason(d.reason) ? END_REASON_LABEL[d.reason] : 'Reason unknown'}
+                        {d.endedAt ? ` \u00b7 ${new Date(d.endedAt).toLocaleDateString(appLocale(), { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+                      </Text>
+                    </View>
+                    <Text style={{ ...ty.caption, color: t.ink3 }}>{open ? 'Hide' : 'Read'}</Text>
+                  </Pressable>
+                  {open ? (
+                    <View style={{ paddingBottom: sp.md }}>
+                      {rec === 'loading' || rec === undefined ? (
+                        <Text style={{ ...ty.label, color: t.ink3 }}>Reading what was recorded\u2026</Text>
+                      ) : rec === END_RECORD_UNREADABLE || rec == null ? (
+                        // Both of these are sentences about OUR record rather
+                        // than about the person, and endReasonPrompt keeps them
+                        // apart — "could not be read" is not "nothing ended".
+                        <Text style={{ ...ty.label, color: t.ink2 }}>{endReasonPrompt(rec)}</Text>
+                      ) : (<>
+                        <Text style={{ ...ty.body, color: t.ink }}>{endNoteLine(rec)}</Text>
+                        {/* Whose account this is, every time. A reason the coach
+                            typed is a belief about somebody who has gone; a
+                            reason the client typed is evidence. Printing them
+                            identically is how the second becomes the first. */}
+                        {reasonAttribution(rec) ? (
+                          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{reasonAttribution(rec)}</Text>
+                        ) : null}
+                      </>)}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
         ) : null}
 
         {/* ── and the answers already given, counted ──────────────────────

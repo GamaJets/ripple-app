@@ -168,7 +168,6 @@ const CONSUMER_ROOTS = ['app', 'src', 'scripts', 'studio-web', 'supabase/functio
  */
 const KNOWN = new Map([
   // ── the phone app's own unwired features ────────────────────────────────
-  ['src/lib/endCoaching.ts', { count: 1, fix: 'fetchEndRecord loads ONE ended relationship between two people, including `end_note` — the words a client typed when they left — and `end_reason_by`, which says whether the reason is the client\'s own account or the coach\'s guess. Neither reaches a screen. The coach sees a TALLY by category in src/ui/EndReasonSheet.tsx ("Too expensive: 2") and never the sentence somebody actually wrote, which is the most useful thing the feature collects; `endReasonPrompt` and `reasonAttribution` are the copy for it and are also undrawn. The build is a second block in UnexplainedDepartures listing the EXPLAINED departures, each expanding to this read. Not done here because it cannot be verified without an ended relationship carrying a note, and the only accounts that could carry one belong to real people.' }],
   ['src/lib/spotify.ts', { count: 1, fix: 'spotifyPlaylistTracks — the track list of a playlist the member already owns. The screen builds its own list from a search; nothing reads back what is in a saved playlist. (spotifyDevices and spotifyTransfer came off this list when app/(client)/music.tsx grew the device picker.)' }],
 
   // ── the console and the shared UI kit ───────────────────────────────────

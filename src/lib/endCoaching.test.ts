@@ -19,7 +19,7 @@ import {
   departureTally, departureLine, END_REASON_LABEL,
   END_REASONS, CLIENT_END_REASONS, CLIENT_END_REASON_LABEL, CLIENT_END_REASON_NOTE,
   CLIENT_END_EXPLAINER, clientEndConfirmBody, clientEndOutcomeLine,
-  endReasonPrompt, END_RECORD_UNREADABLE, END_REASON_NOTE,
+  endReasonPrompt, END_RECORD_UNREADABLE, END_REASON_NOTE, endNoteLine,
   type EndCoachingResult, type EndedRelationship, type EndRecord,
 } from './endCoaching';
 
@@ -285,6 +285,40 @@ ok(!/passed on to them/i.test(lost), 'and never claims the coach was told');
   eq(endReasonPrompt({ ...rec, reason: 'cost' }), END_REASON_NOTE.cost,
     'a recorded reason gets its own line and none of the three silences');
 }
+
+/* ── the words, as opposed to the bucket ──────────────────────────────────── */
+
+// The whole point of the feature: a coach reading a tally has the category and
+// not the sentence. This is the sentence, and it is quoted because it is
+// somebody else's writing.
+{
+  const rec = { reason: 'cost', note: 'The 6am slot stopped working when I changed jobs.', recordedByMe: false, endedByMe: false, endedAt: null } as const;
+  const line = endNoteLine(rec);
+  ok(line.includes('6am slot'), 'the note is returned');
+  ok(/^\u201c/.test(line) && /\u201d$/.test(line), 'and is quoted, so it never reads as our own summary');
+  ok(line !== END_REASON_NOTE.cost, 'it is not the category blurb wearing the note\u2019s place');
+}
+
+// A reason with nothing typed beside it is its own answer, not a blank.
+{
+  const line = endNoteLine({ reason: 'cost', note: null, recordedByMe: false, endedByMe: null, endedAt: null });
+  ok(/wrote nothing/.test(line), 'an absent note is stated rather than left empty');
+  ok(!/\u201c/.test(line), 'and nothing is quoted, because nothing was said');
+}
+
+// 'unsaid' is the one category where an empty note is the MEANING rather than
+// an omission, and saying "they wrote nothing" over it would be redundant and
+// slightly accusatory.
+{
+  const line = endNoteLine({ reason: 'unsaid', note: null, recordedByMe: false, endedByMe: null, endedAt: null });
+  ok(/chose not to say/.test(line), 'declining to say is reported as a choice');
+  ok(!/wrote nothing beside/.test(line), 'and not as a missing note');
+}
+
+// A note on 'unsaid' still wins: somebody who declined a category and then
+// typed a sentence has said the thing that matters.
+ok(endNoteLine({ reason: 'unsaid', note: 'I would rather not go into it, sorry.', recordedByMe: false, endedByMe: null, endedAt: null }).includes('rather not go into it'),
+  'a written note always outranks the category sentence');
 
 if (errors.length) {
   console.error(`endCoaching: ${errors.length} failure${errors.length === 1 ? '' : 's'}`);

@@ -461,6 +461,31 @@ export const END_RECORD_UNREADABLE = 'unreadable' as const;
 export type EndRecordRead = EndRecord | null | typeof END_RECORD_UNREADABLE;
 
 /**
+ * The words somebody actually wrote when they left, or the fact that there are
+ * none.
+ *
+ * `endReasonPrompt` above answers "was a reason recorded", and for a record
+ * that HAS one it returns `END_REASON_NOTE` — the general meaning of that
+ * category. This answers the different question, and it is the one the whole
+ * feature was collecting for: what did this person say. A category is a bucket
+ * chosen from nine; the note is a sentence in their own words, and a coach
+ * reading "Too expensive: 2" has been handed the bucket and not the sentence.
+ *
+ * Quoted, because it is somebody else's writing and must not read as this
+ * app's own summary of them. An empty note is its own answer and is said out
+ * loud: a reason chosen with nothing typed beside it is a person who declined
+ * to elaborate, which a coach can act on differently from a person who was
+ * never asked.
+ */
+export function endNoteLine(rec: EndRecord): string {
+  if (rec.note) return `\u201c${rec.note}\u201d`;
+  if (rec.reason === 'unsaid') {
+    return 'They were asked and chose not to say. Nothing further was written.';
+  }
+  return 'They picked a reason and wrote nothing beside it.';
+}
+
+/**
  * What to say where a reason could be recorded and is not.
  *
  * Four states and they are not interchangeable. The third one is the point: an
