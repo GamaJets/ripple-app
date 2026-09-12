@@ -755,7 +755,14 @@ export function ageingBook(rows: readonly CoachInvoice[], status: LoadStatus, to
   // Longest overdue first, then by number so the order cannot flap between two
   // invoices that are equally late.
   overdue.sort((a, b) => (b.age.daysOverdue ?? 0) - (a.age.daysOverdue ?? 0) || a.invoice.seq - b.invoice.seq);
-  upcoming.sort((a, b) => String(a.invoice.dueOn ?? '').localeCompare(String(b.invoice.dueOn ?? '')) || a.invoice.seq - b.invoice.seq);
+  // Sorted on the date `invoiceAge` actually judged against, which is `dueOn`
+  // when there is one and `chaseFrom` when there is not (see its own note). On
+  // `dueOn` alone a dueless invoice sorted as an empty string and went FIRST —
+  // so a list headed "soonest first" opened with one due at the end of October
+  // above one due in three days.
+  const judgedOn = (r: { invoice: { dueOn?: string | null; chaseFrom?: string | null } }) =>
+    String(r.invoice.dueOn ?? r.invoice.chaseFrom ?? '');
+  upcoming.sort((a, b) => judgedOn(a).localeCompare(judgedOn(b)) || a.invoice.seq - b.invoice.seq);
   undated.sort((a, b) => b.invoice.seq - a.invoice.seq);
 
   const withheld = status === 'ready'

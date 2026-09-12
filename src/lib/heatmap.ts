@@ -61,11 +61,22 @@ export function heatmapColumnLabel(col: Date[], prev: Date[] | null): string | n
   const first = col[0];
   if (!first) return null;
   const month = (x: Date) => x.toLocaleDateString(appLocale(), { month: 'short' });
-  if (!prev || !prev[0]) return month(first);
   // The month of a week is the month its last day falls in as often as its
   // first, so the change is judged on the whole column: a column is labelled
   // when it CONTAINS the first day of a month.
   const startsMonth = col.some((x) => x.getDate() === 1);
+  // ── the first column follows the same rule, and used to not ────────────
+  //
+  // It returned `month(first)` — the month of its first DAY — while every
+  // other column is named for the month it ENTERS. When the oldest week
+  // straddles a month start, which is roughly one week in four, those two
+  // disagree: a column running 29 Jun to 5 Jul was labelled "Jun", and because
+  // it had already consumed July's 1st, no later column could label July
+  // either. A whole month disappeared from the axis of a consistency chart.
+  //
+  // The same column with any `prev` returns "Jul". Now so does this one — it
+  // simply also guarantees a label, because the axis needs a left-hand anchor.
+  if (!prev || !prev[0]) return startsMonth ? month(col[col.length - 1] ?? first) : month(first);
   return startsMonth ? month(col[col.length - 1] ?? first) : null;
 }
 

@@ -284,7 +284,13 @@ export function paceFor(baselinePerWeek: number | null, bounds?: PaceBounds | nu
       // With no pattern the number is a convention rather than a measurement —
       // and where the coach has stated their own convention, theirs is the one
       // that applies. Only when they have not does the module's fortnight stand.
-      cooldownDays: bounds?.minCooldownDays != null && floor !== MIN_COOLDOWN_DAYS
+      // `floor !== MIN_COOLDOWN_DAYS` was standing in for "the coach's
+      // preference was accepted", and it is not the same test: `cooldownFloor`
+      // also RETURNS the minimum when it accepts a preference of exactly that.
+      // So a coach who typed 7 — which `parseCooldown` accepts and
+      // `cooldownNote` prints back as "Never inside 7 days" — silently got 14,
+      // while 6 and 8 were honoured either side of it.
+      cooldownDays: bounds?.minCooldownDays != null && floor === Math.round(bounds.minCooldownDays)
         ? floor
         : DEFAULT_COOLDOWN_DAYS,
       judgeAfterDays: null,

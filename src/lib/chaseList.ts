@@ -118,7 +118,7 @@ export function chaseGroups(book: AgeingBook | null | undefined, status: LoadSta
         ? 'Still reading your invoices, so nothing here is grouped by who owes it yet.'
         : 'Your invoices could not be read, so nothing here is grouped by who owes it. An empty list is not a statement that nobody owes you anything.';
 
-  const by = new Map<string, { billTo: string; clientId: string | null; rows: AgedInvoice[] }>();
+  const by = new Map<string, { billTo: string; clientId: string | null; rows: AgedInvoice[]; issuedOn: string }>();
   for (const r of rows) {
     const inv = r.invoice;
     const id = String(inv.clientId ?? '').trim();
@@ -129,9 +129,20 @@ export function chaseGroups(book: AgeingBook | null | undefined, status: LoadSta
       g.rows.push(r);
       // The most recently issued spelling wins, so a coach who corrected a name
       // on a later invoice sees the correction rather than the first attempt.
-      if (String(inv.issuedOn ?? '') >= String(g.rows[0]?.invoice.issuedOn ?? '')) g.billTo = name || g.billTo;
+      //
+      // Compared against the DATE ALREADY WINNING, not against `rows[0]`. Rows
+      // arrive in whatever order the read returned them, so `rows[0]` is the
+      // first one filed and not the newest — and any row issued after THAT one
+      // overwrote the name, including a row older than the winner. Three
+      // invoices spelled Old / Newest / Middle, in that filing order, left
+      // "Middle" standing.
+      //
+      // That string is the greeting in `chaseMessage`, so the failure is a
+      // chase email addressed to a spelling the coach had already corrected.
+      const issued = String(inv.issuedOn ?? '');
+      if (issued >= g.issuedOn) { g.billTo = name || g.billTo; g.issuedOn = issued; }
     } else {
-      by.set(key, { billTo: name, clientId: id || null, rows: [r] });
+      by.set(key, { billTo: name, clientId: id || null, rows: [r], issuedOn: String(inv.issuedOn ?? '') });
     }
   }
 
