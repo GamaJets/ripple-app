@@ -202,9 +202,19 @@ for ch in "${CHANNELS[@]}"; do
   esac
 done
 # Deduplicated, because production and preview are the same app.
-while IFS= read -r b; do
-  [ -n "$b" ] && node scripts/check-testflight.mjs "$b"
-done < <(printf '%s\n' "${tf_bundles[@]}" | sort -u)
+#
+# The length test is not defensive padding. This script runs under `set -u`,
+# and `"${tf_bundles[@]}"` on an EMPTY array is an unbound variable there — so a
+# publish narrowed to channels this mapping does not know (an example-brand
+# channel, say) would abort the whole run with "tf_bundles[@]: unbound
+# variable", after the gates had passed and before anything was published. The
+# case above already says such a channel is not checked; this is what makes
+# that true rather than fatal.
+if [ "${#tf_bundles[@]}" -gt 0 ]; then
+  while IFS= read -r b; do
+    [ -n "$b" ] && node scripts/check-testflight.mjs "$b"
+  done < <(printf '%s\n' "${tf_bundles[@]}" | sort -u)
+fi
 
 echo
 echo "── publish ──"
