@@ -279,6 +279,11 @@ export const CLIENT_FEATURES: Feature[] = [
   //
   // 'hacked', 'someone else' and 'security' are in the keywords because that is
   // what somebody types at the moment this matters most.
+  // The gym's own paperwork, which was the ONE non-tab client screen absent
+  // from this registry. Its only way in was a single row on the Me hub, so the
+  // screen a member signs their gym waiver on was one deletion from gone, and
+  // searching "waiver" found nothing. `WaiverGate` does not link to it either.
+  { key: 'agreements', label: "Your Gym's Paperwork", note: 'Waivers and consents your gym asks you to sign', route: '/(client)/agreements', icon: 'check', area: 'me', keywords: 'waiver waivers gym waiver paperwork agreement agreements consent consents sign signature terms liability release par-q parq health questionnaire membership terms' },
   { key: 'account', label: 'Password & Email', note: 'Change the password or the address you sign in with', route: '/(client)/account', icon: 'lock', area: 'me', keywords: 'password change password new password reset email change email email address sign in signin login credentials security account hacked someone else knows my password forgot old email new address' },
   { key: 'feedback', label: 'Send Feedback', note: 'Tell us what to improve', route: '/(client)/feedback', icon: 'message', area: 'me', keywords: 'feedback bug idea report suggest' },
   // Reported as "Repple Coach has a Getting Started, however Client doesn't."
@@ -573,6 +578,24 @@ export const TRAINER_NAV: NavItem[] = [
   { key: 'profile', label: 'Profile', note: 'Your bio, offers, rate & how you coach', route: '/(trainer)/profile', icon: 'me', keywords: 'bio rate offers public profile how i coach how you coach online in person inperson hybrid remote delivery mode both change how i work set up' },
   // Sign out lives here, and it was findable from nowhere.
   { key: 'settings', label: 'Settings', note: 'Account, sign out, your data & version', route: '/(trainer)/settings', icon: 'settings', keywords: 'settings account sign out signout log out logout export my data delete account version build units' },
+  // ── the screen a locked-out coach needs, and could not search for ──────
+  //
+  // `app/(trainer)/account.tsx` had ONE inbound link in the whole app —
+  // Profile → Settings → "Change Password or Email", three levels down — and no
+  // row here at all, so searching Explore for "password", "change email",
+  // "locked out" or "account hacked" returned nothing to a coach.
+  //
+  // Its own call site says what it is for: a coach previously "had to sign out
+  // and trigger a reset email for a password they had not forgotten — and had
+  // no route at all to a new address, which is the only way back in if they
+  // lose it." The person in that situation is exactly the person who searches,
+  // and `settings` above carries only the word "account".
+  //
+  // The client app has had this entry since the beginning (see 'account' in
+  // CLIENT_FEATURES); the coach's was simply never written. scripts/
+  // check-reachable.mjs names the shape in its own error text: a screen in the
+  // hub but not in search is half-reachable; do both.
+  { key: 'account', label: 'Password & Email', note: 'Change the password or the address you sign in with', route: '/(trainer)/account', icon: 'lock', keywords: 'password change password new password reset email change email email address sign in signin login credentials security two factor 2fa locked out cannot sign in account hacked someone else knows my password forgot old email new address' },
   // The coach's own Getting Started, and it is listed for the same reason the
   // client's is: the dashboard row disappears the moment the list is finished,
   // and a screen reachable only from a row that removes itself is a screen that

@@ -295,6 +295,36 @@ const HUB_GROUPS: { title: string; items: { label: string; note: string; route: 
     // describes the OS share sheet, which is the whole of what happens.
     { label: 'Share & Social', note: 'Share your progress from the share sheet', route: '/(client)/social' },
   ] },
+  // ── the gym, which was three levels down under a heading about coaches ──
+  //
+  // Seven screens — the entry barcode, payments, buying a plan, approving
+  // delivered sessions, redeeming a gym code, inviting a friend and attendance
+  // — were reachable only through `membership.tsx`, and the real way into THAT
+  // was two rows at the very bottom of a 111 KB "Book Sessions" screen, under a
+  // SectionHead reading "Your Coach". A gym membership and an entry pass filed
+  // under a heading about a coach.
+  //
+  // src/lib/features.ts already files every one of these under `area: 'me'`, so
+  // Explore and this hub disagreed about where they live. That disagreement is
+  // the hazard profile.tsx:533 already warns is standing; this closes the
+  // largest part of it.
+  //
+  // Above Account, because these are things a member DOES — at the turnstile,
+  // at renewal, when a session needs approving — and Account is where they go
+  // to change a setting.
+  { title: 'Your Gym', items: [
+    // First, because it is the one opened while standing at a door.
+    { label: 'Entry Barcode', note: 'The code you scan to get in', route: '/(client)/access' },
+    { label: 'Membership', note: 'Your plan, passes and what they include', route: '/(client)/membership' },
+    { label: 'Buy or Renew a Plan', note: "Plans and passes your gym sells", route: '/(client)/gym-plans' },
+    // An action OWED rather than a place to browse: a session a coach has
+    // recorded is waiting on the member to confirm it happened.
+    { label: 'Sessions to Approve', note: 'Confirm sessions your coach has recorded', route: '/(client)/pt-sessions' },
+    { label: 'Payments & Receipts', note: 'What you have paid your gym', route: '/(client)/receipts' },
+    { label: 'Class Attendance', note: 'The classes you have actually been to', route: '/(client)/attendance' },
+    { label: 'Offers', note: 'Redeem a code your gym has given you', route: '/(client)/offers' },
+    { label: 'Invite a Friend', note: 'Your referral link', route: '/(client)/referral' },
+  ] },
   { title: 'Account', items: [
     { label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance' },
     { label: 'Settings', note: 'Account, notifications, units, legal & version', route: '/(client)/settings' },

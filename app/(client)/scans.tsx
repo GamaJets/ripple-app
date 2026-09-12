@@ -2222,6 +2222,23 @@ export default function Scans() {
               ['chart', 'Standards', '/(client)/standards'],
               ['flame', 'Consistency', '/(client)/consistency'],
               ['target', 'Goal', '/(client)/goal'],
+              // ── what a member means by "progress" and could not find here ──
+              //
+              // src/lib/features.ts files SEVENTEEN screens under Progress &
+              // Insights; this list held nine. The eight missing were training
+              // history, the long view, trend graphs, badges, challenges, the
+              // weekly check-in, the activity feed and gym attendance — so
+              // "how often did I actually go" had no route from the tab named
+              // Progress, while "how strong am I" did.
+              //
+              // Four of them are added here rather than all eight: Activity is
+              // already on Train (under the name History, which is its own
+              // problem), and Check-in belongs to the coaching relationship on
+              // Me. These four are the ones a member opens Progress to find.
+              ['clock', 'History', '/(client)/history'],
+              ['trending', 'Trends', '/(client)/trends'],
+              ['trophy', 'Badges', '/(client)/achievements'],
+              ['calendar', 'Attendance', '/(client)/attendance'],
             ] as const).map(([ic, label, route]) => (
               <Pressable key={route} onPress={() => router.push(route as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: sp.sm }}>
                 <Icon name={ic} size={14} color={t.ink2} /><Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{label}</Text>
