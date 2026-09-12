@@ -85,12 +85,35 @@ export function summariseClassRows(rows: ClassSummaryRow[]): ClassRates {
   // and rows that do not would report a total that is the walk-ins from part of
   // the month, stated as the walk-ins from all of it.
   const walkKnown = rows.length > 0 && rows.every((r) => typeof r.waitlistAttended === 'number');
+  // The rows a fill rate can honestly be built from: those that recorded what
+  // they could hold. Null capacity and zero capacity are the same thing here —
+  // neither states a number of places — and a class with no places has no
+  // proportion of them filled.
+  const priced = rows.filter((r) => typeof r.capacity === 'number' && r.capacity > 0);
+  const fillCapacity = priced.reduce((a, r) => a + r.capacity, 0);
+  const fillBooked = priced.reduce((a, r) => a + r.booked, 0);
   return {
     classes: rows.length,
     capacity,
     booked,
     attended,
-    fill: capacity > 0 ? booked / capacity : null,
+    // ── both sides over the SAME rows ────────────────────────────────────
+    //
+    // `capacity` adds `r.capacity || 0`, so a class whose capacity was never
+    // recorded contributes nothing to the denominator — while `booked` adds
+    // every row, so its bookings DO reach the numerator. Twelve of twelve, nine
+    // of twelve and seven-with-no-capacity came out as 1.167, and
+    // app/(owner)/class-analytics.tsx printed "Avg Fill 117%".
+    //
+    // A rate over rows that cannot be in its denominator is not a rate. The
+    // console already worked around this by hand
+    // (studio-web/app/classes/page.tsx filters `r.capacity > 0` before calling);
+    // the owner app did not, and a workaround at one of two call sites is how
+    // two screens come to disagree about one month.
+    //
+    // `capacity` and `booked` above are left alone: they are totals in their
+    // own right and a screen asking for bookings wants all of them.
+    fill: fillCapacity > 0 ? fillBooked / fillCapacity : null,
     show: booked > 0 ? attended / booked : null,
     waitlistAttended: walkKnown ? rows.reduce((a, r) => a + (r.waitlistAttended || 0), 0) : null,
   };
