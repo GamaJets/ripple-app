@@ -25,7 +25,7 @@ interface Native {
   end(): Promise<void>;
 }
 
-const native = requireOptionalNativeModule<Native>('WorkoutActivity');
+const native = requireOptionalNativeModule<Native>('WorkoutLiveActivity');
 
 /** Whether the lock-screen clock can appear at all. False on Android, on iOS
  *  below 16.2, and for a member who has switched Live Activities off. */

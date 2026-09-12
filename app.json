@@ -18,7 +18,8 @@
         "NSMicrophoneUsageDescription": "Repple uses the microphone only while you are recording a coaching clip with the camera, so the video has your voice on it. Nothing is recorded at any other time, and Repple never listens in the background.",
         "NSPhotoLibraryUsageDescription": "Repple lets you upload InBody scans and progress photos.",
         "ITSAppUsesNonExemptEncryption": false,
-        "NSHealthUpdateUsageDescription": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written."
+        "NSHealthUpdateUsageDescription": "Repple writes the workouts you log back to Apple Health, so your rings and history include training you did in the gym. Only sessions with a recorded length are written.",
+        "NSSupportsLiveActivities": true
       }
     },
     "android": {
@@ -95,7 +96,8 @@
             "minSdkVersion": 26
           }
         }
-      ]
+      ],
+      "@bacons/apple-targets"
     ],
     "extra": {
       "router": {},
