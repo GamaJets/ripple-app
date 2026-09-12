@@ -42,24 +42,27 @@ export async function classRoster(classId: string): Promise<RosterMember[] | nul
   } catch { return null; }
 }
 
-/**
- * Mark a member present or absent for a class. Returns whether it actually
- * saved.
- *
- * This used to return void and swallow every failure, which made the calling
- * screen structurally incapable of knowing whether a tick stuck — it moved the
- * row optimistically and told the trainer "Check-ins are saved as you tap".
- * That is the same defect the header of this file describes: attendance is what
- * the trainer is paid on, so a tick that did not save costs someone money, and
- * silence is the one response that guarantees nobody notices.
- */
-export async function setAttendance(classId: string, userId: string, present: boolean): Promise<boolean> {
-  if (!USE_SUPABASE || !classId || classId === UNLINKED_CLASS) return false;
-  try {
-    const { error } = await supabase.rpc('set_class_attendance', { p_class: classId, p_user: userId, p_present: present });
-    return !error;
-  } catch { return false; }
-}
+// ── `setAttendance` lived here, and is gone ──────────────────────────────
+//
+// It called `set_class_attendance` directly and returned a boolean, and the
+// boolean was the defect: it collapsed the two answers that matter in a gym
+// basement into one. A refusal the server MADE and a request that never reached
+// it both came back `false`, the screen said "that change did not save" for
+// both, and a coach with no signal was right to believe it and wrong about what
+// to do next. Attendance is what a trainer is paid on.
+//
+// `app/(trainer)/class-checkin.tsx` now ticks through the floor queue
+// (`{ kind: 'class-attendance' }`), which keeps them apart: a refusal leaves the
+// row where it was, and a request nobody answered is kept on the phone and goes
+// up on the next launch with signal — with a banner saying plainly that the gym
+// cannot see it yet, because a trainer who believes the gym has the attendance
+// does not check it.
+//
+// The dead-export ratchet carried this as "either the register saves through
+// this or it goes". It is the second half: the register already saves through
+// something better, and wiring this would route the one write the queue exists
+// for straight past it. `UNLINKED_CLASS` is still refused by name — the queue's
+// sender does it, on the same argument this function made.
 
 // ── Owner analytics + payroll ──────────────────────────────────────────────
 // The row shape and the rate maths live in classRates.ts, which imports

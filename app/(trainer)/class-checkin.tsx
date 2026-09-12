@@ -74,7 +74,7 @@ export default function ClassCheckin() {
   const branch = String(params.branch || '');
 
   // Routed to without an id, `classId` falls back to UNLINKED_CLASS — and both
-  // classRoster and setAttendance refuse that id by name. The screen then
+  // classRoster refuses that id by name, and so does the queue's sender. The screen then
   // rendered an empty roster under "No one has booked this class yet", which is
   // a statement about a class, and offered ticks that went nowhere while the
   // footnote promised "Check-ins are saved as you tap". Neither is a claim this
@@ -316,8 +316,9 @@ export default function ClassCheckin() {
   // 'ready' an empty box speaks for itself.
   const rateNote = rate.trim() ? null : rateFieldNote(rateStatus);
 
-  // The tick used to move before anything was written, and `setAttendance`
-  // swallowed every failure — so a refused check-in looked exactly like a saved
+  // The tick used to move before anything was written, and the direct write it
+  // went through (`setAttendance`, since removed from
+  // src/lib/classAttendance.ts) swallowed every failure — so a refused check-in looked exactly like a saved
   // one. Attendance is what the trainer is paid on, so the row moves only once
   // this phone has actually taken responsibility for it, and the banner says
   // whether the GYM has it.
@@ -326,7 +327,7 @@ export default function ClassCheckin() {
     tapLight();
     // ── the tick, and the basement it is usually made in ──────────────────
     //
-    // `setAttendance` returns a boolean, which collapses the only two answers
+    // That direct write returned a boolean, which collapses the only two answers
     // that matter here into one: a refusal the server MADE, and a request that
     // never reached it. The screen said the same sentence for both — "that
     // change did not save" — and the coach, standing in a room with no signal,

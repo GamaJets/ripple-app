@@ -168,7 +168,6 @@ const CONSUMER_ROOTS = ['app', 'src', 'scripts', 'studio-web', 'supabase/functio
  */
 const KNOWN = new Map([
   // ── the phone app's own unwired features ────────────────────────────────
-  ['src/lib/classAttendance.ts', { count: 1, fix: 'setAttendance writes class_attendance and no screen calls it; the coach-side register reads through src/lib/classRegister.ts instead. Either the register saves through this or it goes.' }],
   ['src/lib/connect.ts', { count: 1, fix: 'packageCurrencies reads which currencies a coach has priced packages in. Nothing asks. It is the check a coach\'s Connect payout screen needs before offering a currency.' }],
   ['src/lib/endCoaching.ts', { count: 1, fix: 'fetchEndRecord loads the permanent record of an ended coaching relationship. The end-coaching flow writes it and no screen reads it back.' }],
   ['src/lib/spotify.ts', { count: 1, fix: 'spotifyPlaylistTracks — the track list of a playlist the member already owns. The screen builds its own list from a search; nothing reads back what is in a saved playlist. (spotifyDevices and spotifyTransfer came off this list when app/(client)/music.tsx grew the device picker.)' }],
