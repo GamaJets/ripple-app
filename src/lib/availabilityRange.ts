@@ -190,6 +190,19 @@ export function remainderNote(r: RangeInput): string | null {
   for (let at = r.fromMin; at + r.durationMin <= r.toMin; at += step) last = at + r.durationMin;
   const left = r.toMin - last;
   if (left <= 0) return null;
+  // `left` is measured to the end of the window, but the fit test is
+  // `duration + gap` — so with 55 minutes left, a 50-minute session and a
+  // 10-minute gap, the sentence read "the remaining 55 minutes is not long
+  // enough for another 50-minute session". It plainly is; the gap is the
+  // obstacle, and a coach reading that would shorten the session rather than
+  // the gap and find nothing had changed.
+  const gap = r.gapMin || 0;
+  const needed = r.durationMin + gap;
+  if (gap > 0 && left >= r.durationMin) {
+    return `The last session ends at ${HHMM(last)}. The remaining ${left} minute${left === 1 ? '' : 's'} `
+      + `would fit another ${r.durationMin}-minute session but not the ${gap}-minute gap before it `
+      + `(${needed} minutes are needed), so nothing is offered then.`;
+  }
   return `The last session ends at ${HHMM(last)}. The remaining ${left} minute${left === 1 ? '' : 's'} `
     + `is not long enough for another ${r.durationMin}-minute session, so nothing is offered then.`;
 }

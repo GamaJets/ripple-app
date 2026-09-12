@@ -585,7 +585,14 @@ export function assessFollowUp(input: FollowUpInput, now: number = Date.now()): 
     return blank(
       'no-baseline',
       baselineActive === 0
-        ? `Nothing recorded in the ${Math.round(windows.historyDays)} days before this contact, so there is no pattern to compare anything against. Not "no effect" — no measurement.`
+        // The window ACTUALLY measured, which is not `historyDays`.
+        // `baselineActive` is counted over [at − historyDays, at − recentDays)
+        // — it deliberately stops short of the contact so the baseline is not
+        // contaminated by it — and the sentence named the whole span anyway. A
+        // member with seven active days in the fortnight before the contact was
+        // told "nothing recorded in the 56 days before this contact", which is
+        // false about their record. The verdict is right; the sentence was not.
+        ? `Nothing recorded in the ${Math.round(baselineSpan)} days up to ${Math.round(windows.recentDays)} days before this contact, so there is no pattern to compare anything against. Not "no effect" — no measurement.`
         : `Only ${baselineActive} active day${baselineActive === 1 ? '' : 's'} before this contact — no settled pattern to judge a change against.`,
       pace,
       { baselinePerWeek: null },
