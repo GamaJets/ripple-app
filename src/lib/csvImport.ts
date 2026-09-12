@@ -152,7 +152,12 @@ export function parseMoneyCents(raw: string, currency?: string | null): Parsed<n
       // the same rule `parseDate` applies to 03/04/2026.
       return {
         ok: false,
-        reason: `"${raw}" could be ${cur} 1,250 or ${cur} 1.250 — write the amount with all ${dp} decimal places`,
+        // Both readings derived from what was TYPED. It used to quote a fixed
+        // "1,250 or 1.250" regardless, so an owner staring at 9,999 in their
+        // own spreadsheet was shown a refusal about a number that is not in
+        // their file — which reads as a bug in the importer rather than as a
+        // question about their cell.
+        reason: `"${raw}" could be ${cur} ${raw.replace(/[.,]/g, '')} or ${cur} ${raw.replace(/[.,]/g, (m, i) => (i === raw.lastIndexOf(m) ? '.' : ''))} — write the amount with all ${dp} decimal places`,
       };
     }
   }

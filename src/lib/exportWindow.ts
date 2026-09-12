@@ -104,7 +104,25 @@ export function instantOf(v: string | null | undefined): number | null {
     // is UTC and `new Date('2026/03/31')` is local, and only one of those two
     // spellings is ever more than a typo away.
     const ms = Date.UTC(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
-    return Number.isFinite(ms) ? ms : null;
+    if (!Number.isFinite(ms)) return null;
+    // `Date.UTC` never returns NaN for numeric arguments — it ROLLS FORWARD, so
+    // 2026-02-30 becomes 2 March and 2026-13-01 becomes January of 2027. That
+    // made `windowBlocker`'s own "One of those days does not exist." branch
+    // unreachable, and a window asked for from 30 February came back silently
+    // starting two days later than requested with the export labelled by the
+    // date nobody could have meant.
+    //
+    // Round-tripping is the only test that catches it: a day that does not
+    // exist does not survive being written back out.
+    //
+    // utc-day-ok: this is not a claim about anybody's day — it is a validity
+    // check on the STRING, and it compares within the one calendar the value
+    // was just built in. `ms` came from `Date.UTC` on this string's own parts
+    // three lines up, so reading it back with `toISOString` asks exactly one
+    // question: did those parts survive? A reader's zone or a gym's would break
+    // the comparison by shifting one side of it, and would answer a question
+    // nobody asked here.
+    return new Date(ms).toISOString().slice(0, 10) === s ? ms : null;
   }
   if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s)) return null;
   if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) return null;
