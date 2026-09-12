@@ -256,7 +256,7 @@ had been built. It had.
 
 What is outstanding here is not code. Stripe **Accounts v1 is enabled in TEST
 and not in LIVE**, which blocks coach onboarding — it is item 11 of
-`docs/LAUNCH-CHECKLIST.md:500`, and it is a person in a dashboard.
+`docs/LAUNCH-CHECKLIST.md:539`, and it is a person in a dashboard.
 
 ---
 
@@ -286,7 +286,7 @@ as the fields that count the excluded walk-ins out loud (`:312`, `:259`).
 *Rewritten 8 Sep 2026 after the sweep described above.*
 
 Phases 1, 2, 3 and 4 are written. Phase 3's blocker is a Stripe dashboard
-setting, not a missing module (`docs/LAUNCH-CHECKLIST.md:500`). **Phase 5
+setting, not a missing module (`docs/LAUNCH-CHECKLIST.md:539`). **Phase 5
 should mostly not be started yet, and the roadmap already says why**: "Only
 meaningful once phases 1–4 have produced enough record to stand on", and
 "Seasonality — needs a full year before it says anything at all."
@@ -354,10 +354,31 @@ gyms can read one of them and the other's name. `src/lib/ownedSites.ts` exists
 to keep the console honest about that (`studio-web/components/Shell.tsx`,
 `studio-web/app/page.tsx`, `/close`, `/classes`, `/analytics`), and every copy
 function in it returns `null` for a single-site owner so nothing renders in the
-common case. **There is no roll-up and no drill-down**, and per-site staff,
-timetables and pricing are not modelled: `gym_classes.branch` is free text
-inside one gym, and part 290 argues explicitly that it must not be made into
-the multi-site key.
+common case.
+
+**FINISHED 11 Sep 2026, and the two sentences that used to close this
+paragraph were both wrong.** They read "There is no roll-up and no drill-down,
+and per-site staff, timetables and pricing are not modelled", and this file
+contradicted itself about both four hundred lines further down — which is the
+exact failure its own header describes, at the worst possible distance.
+
+- **Roll-up and drill-down are built.** `studio-web/app/sites/page.tsx` renders
+  them, fed by `owner_site_figures()` (`supabase/parts/2614`) through
+  `studio-web/lib/siteFigures.ts`, with the arithmetic in
+  `src/lib/siteRollUp.ts` — 629 tested lines that already existed and had no
+  caller. Drill-down turned out NOT to mean switching which tenant the session
+  is scoped to: `drillInto` had already designed it as three honest sentences,
+  which needs no policy change and so no new SQL.
+- **Per-site staff, timetables and pricing were modelled all along**, by part
+  290's own decision that A SITE IS A TENANT. `trainers`, `gym_classes`,
+  `sessions` and `profiles` all carry `tenant_id`; session fee, currency, pay
+  policy and invoice numbering all live on `tenants`. Verified against the live
+  schema.
+
+The sentence about `gym_classes.branch` is true and stays: it is free text
+inside one gym, and part 290 argues explicitly that it must never become the
+multi-site key. It simply was never evidence that per-site anything was
+missing.
 
 ---
 
@@ -417,9 +438,13 @@ badly.
   R065 is: a status is only true at the instant it is written.
 - **Surface write failures to the user** rather than logging and moving on.
   **Substantially done, and the remainder is now counted.** `writeFailedText` is
-  used across 16 files in `app/`, `src/` and `studio-web/` (the earlier "15" was
-  right when it was written), and `assertWrote` — a write that reports success
-  while changing no rows — across 26 in `src/lib`.
+  used across 16 files — **all sixteen under `studio-web/`**, where it is defined
+  (`studio-web/lib/supabase.ts:320`). The trees named here were wrong: there are
+  **zero** callers in `app/` or `src/`, so whatever the three phone apps do about
+  a write that fails, they do not do it through this helper, and this document
+  does not say what they do instead. (The earlier "15" was right when written.)
+  `assertWrote` — a write that reports success
+  while changing no rows — across 21 non-test modules in `src/lib` (26 if you count the five test files, which is the same error this document warns about — counting the test of a thing as an instance of it).
 
   ~~Not claimed complete — nothing enumerates the writes that still do not.~~
   **That is no longer true, and this is work landing rather than a correction.**
@@ -715,6 +740,74 @@ is a claim about the whole codebase, and it was verified against only part of
 it. Anything still unstarted should be re-checked against `studio-web/` before
 work begins on it.
 
+## Phase 9 — The market, measured rather than assumed
+
+*Compiled 12 Sep 2026 against the published feature and pricing pages of
+nineteen products: Hevy, Strong, Fitbod, Whoop, Strava, MyFitnessPal, Ladder,
+Caliber (member); Trainerize, TrueCoach, Everfit, PT Distinction, My PT Hub,
+Kahunas (coach); Mindbody, Glofox, Wodify, PushPress, TeamUp, Zen Planner,
+Gymdesk (gym). This is the first section of this document written from outside
+the codebase, and it is ranked by value ÷ effort rather than by phase.*
+
+**Where Repple is ahead, because it changes what counts as a gap.** White-label
+is architectural rather than a skin (`src/lib/brands.ts` crosses brand with the
+client/coach/owner variant, so a chain gets its own listing) — TrueCoach does
+not offer it at any price, Everfit gates it to Enterprise, Trainerize wants
+$248/mo per location. Per-tenant currency and timezone run through everything.
+Three audiences share one record, which nobody in the set does — Trainerize and
+Glofox integrate as two products with the member as two records. The refusal
+discipline is itself a differentiator: a month that will not close while
+sessions are unmarked, an interventions module that publishes no success rate
+because there is no control group, a forecast that will not draw without two
+recorded months. And `vision-analyze` reads a meal photo, a physique photo, a
+gym machine and an InBody sheet — the last two exist nowhere else in the set.
+
+### The five worth doing first
+
+| # | Gap | Who | Effort | Why |
+|---|---|---|---|---|
+| **9.1** | **Class cancellation policy, late-cancel and no-show fees** | owner | SMALL | All seven gym platforms have it. `src/lib/classCancel.ts` says in its own header that Repple holds no class policy — "no column for it, no screen where an owner sets one" — while the PT path is complete (`booking.ts`, `cancelDeadline.ts`, `sessionFee.ts`). The arithmetic and the wording already exist; what is missing is a policy column, a setting screen, and reuse of `cancelWarningLine`. It is the mechanic that stops a gym's revenue leaking daily, and the first thing asked in a demo. |
+| **9.2** | **Membership freeze with dates, and a commitment term** | owner | SMALL | `memberships.status` already accepts `'frozen'` and `memberView.ts:640` correctly excludes frozen members from absence claims — but there are no `frozen_from`/`frozen_until` columns and no term extension, so a gym that freezes a member either loses the money or keeps billing them. Glofox extends the next payment date by the days paused; Wodify extends the commitment; TeamUp prorates on reactivation. Two date columns and arithmetic on `ends_on`. |
+| **9.3** | **Form-check video attached to a SET** | coach + member | SMALL–MEDIUM | The single feature that decides remote-coaching deals, and TrueCoach's whole reputation. Repple has ~90% of the plumbing: `messageAttachments.ts` already allows video with upload, downscale, signing and RLS — it simply has no foreign key to a workout, an exercise or a set. `exercise_videos` is the coach's demo library, the opposite direction. Notably NONE of the six coach platforms ships side-by-side comparison, drawing or voiceover. |
+| **9.4** | **Kisi / HybridAF door access** | owner + member | MEDIUM | Roadmap #3, and lower effort than it looks: `gym_visits` already exists as the destination (`supabase/parts/32`, `/door` console, `sweep-stale-visits`), so this is one vendor's REST API, a membership→access-group sync, and a webhook that writes the unlock. 24/7 access is the most common single reason a gym rules a platform out, and Repple's whole retention model already depends on the door log this would fill automatically. |
+| **9.5** | **A check-in / intake form the coach or gym owns** | coach + owner | MEDIUM | `check_ins` is a fixed seven-column table. Everfit, PT Distinction, My PT Hub, TrueCoach, Trainerize and TeamUp all let the coach ask their own questions, several with automatic re-asking on a schedule. A coach cannot migrate an existing practice onto a platform that will not let them ask their own questions, so this gates every competitive switch rather than just new signups. |
+
+### The strategic opening
+
+Every strength logger in the set — Hevy, Strong, Fitbod, Caliber — adapts on
+LOGGED PERFORMANCE, a lagging indicator, and Fitbod explicitly refuses HRV,
+sleep and readiness as programming inputs even when a device supplies them.
+Whoop measures recovery superbly and cannot program a lifting session.
+
+Repple already owns both halves and joins neither: `readiness.ts` (a
+transparent 0–100 from sleep, the device's own recovery verdict, hydration and
+short-term load), `readinessBreakdown.ts`, `hrvTrend.ts` and live
+WHOOP/Oura/Apple Health/Health Connect connections on one side; `progression.ts`
+and `builderProgression.ts` on the other. **Letting today's readiness modulate
+the progression suggestion — stated as a reason, never silently — is a
+medium-effort feature no competitor in any of the three categories has**, and it
+is defensible in exactly the refusing style the rest of this codebase uses.
+
+### Deliberately NOT to build
+
+- **A muscle-recovery auto-programmer to match Fitbod.** `muscleRecovery.ts`
+  refuses the word "recovered" and explains why in its header. That refusal is
+  worth more than parity.
+- **Anything chasing Whoop's 2026 passive MSK load.** That is hardware
+  research, not a feature.
+
+### The rest, ranked
+
+Author-once automation sequences (PT Distinction gives them away free at
+$19.90/mo) · retail POS and inventory · a public API and Zapier (TeamUp's is
+free on every plan) · family accounts with shared billing (locks Repple out of
+martial arts and kids' gymnastics) · **import from Strong/Hevy CSV — a weekend
+of work, and a lifter with three years of history will not retype it** · staff
+time clock · spot booking · whiteboard and in-gym TV · kiosk check-in ·
+structured hold and cancel reason codes (the input `memberChurn.ts` and
+`gymRetention.ts` are already built to consume) · Apple Watch companion ·
+accrual-basis accounting · ClassPass or Wellhub listing.
+
 ## Deferred by the owner
 
 - **R085 · Arabic alongside English** — deferred 25 Aug 2026. Approved in the
@@ -765,13 +858,16 @@ such.*
 | 7 | **Capacity modelling** (Phase 5). | `src/lib/gymEquipment.capacityFor` returns *stated* capacity from the register (and `null` where nothing is recorded). There is no model over it, and by this document's own rule it should not be built against an empty database. |
 | 8 | **Seasonality** (Phase 5). | `grep -rniE "seasonality" src studio-web` returns nothing outside comments. Needs a full year of a real gym's record before it can say anything, so this is blocked on time, not on effort. |
 | 9 | **Load testing per role** (Phase 8). **Still open — but no longer for want of an artefact.** | `grep -rniE "load test\|k6\|artillery"` over `scripts`, `src`, `studio-web` and `supabase` hits this document and a lockfile. What now exists is the written reason not to generate load yet: `supabase/parts/2612-four-lookups-with-no-index-and-the-last-policy-that-asked-per-row.sql:224` records 4,079 live rows across 159 tables, 114 of them empty, and 190 of 437 indexes never scanned. A load test needs a **population** first, must be driven through PostgREST as each app role (a superuser connection runs none of the RLS quals that cost anything), and must not read `unused_index` as "unused". The permission half *is* partly covered (`src/lib/staffRoles.test.ts`, `src/lib/consoleRoutes.test.ts`). |
-| 10 | **Stripe Accounts v1 in LIVE.** Blocks coach onboarding. | Not a code item: `docs/LAUNCH-CHECKLIST.md:500`. `supabase/functions/connect-onboard/index.ts` calls `stripe.accounts.create` and the LIVE account cannot answer it. A person in a dashboard. |
+| 10 | **Stripe Accounts v1 in LIVE.** Blocks coach onboarding. | Not a code item: `docs/LAUNCH-CHECKLIST.md:539`. `supabase/functions/connect-onboard/index.ts` calls `stripe.accounts.create` and the LIVE account cannot answer it. A person in a dashboard. |
 | 11 | **Fitbit and Garmin sleep.** | Not a gap in the read path — `src/lib/wearables/sleep.ts:46` would include either the day it could. Fitbit has no client id in `app.json`, `eas.json` or `.env`, so `isConfigured()` is false; Garmin is `special: 'partnership'` and needs Garmin's approval. Both refuse by name and reason (`src/lib/wearables/cloudProvider.ts:195`) rather than returning an empty night. Garmin's nights already arrive on iPhone through Apple Health. |
 | 12 | **R085 · Arabic alongside English.** | Deferred by the owner, not open in the backlog sense. Kept here so the list is complete — see *Deferred by the owner* below. |
 
 **The list to brief from, in one line:** items **3, 4, 6, 7, 8 and 9** are
-open in the ordinary sense — **5 is struck: it was never open**, and **4 is done**
-as of 11 Sep 2026; **10** is a person in a Stripe dashboard; **11** is
+open in the ordinary sense. **4 and 5 are both closed** — 4 was finished on
+11 Sep 2026 and 5 was never open — and the clause that used to end this
+sentence, "4 and 5 are the only ones that are a straightforward build", was
+left over from before both closed and is gone. The list to commission from is
+**3, 6, 7, 8, 9**; **10** is a person in a Stripe dashboard; **11** is
 two vendors, not two gaps; **12** is deferred by the owner. Numbering is kept
 stable — rows 1 and 2 are struck rather than removed — so a brief that already
 says "#9" still means load testing. Of the seven, **6, 7 and 8 should not be
@@ -793,6 +889,27 @@ can produce. Items 6–8 are listed above so nobody re-discovers them; they are
 not ready to be worked.
 
 ### Partly done — do not brief either half as "open"
+
+- **Built but not wired — a 13-entry ratchet this document has never cited.**
+  `npm run check:dead-exports` holds the list at
+  `scripts/check-dead-exports.mjs`, and it is precisely the class of finding
+  this file says it values most: work whose hard part is already written and
+  which nothing reaches. It was 14 until 12 Sep, when `scheduleDailyReminder`
+  was wired — a member who picked all seven days had been getting seven WEEKLY
+  notifications instead of one daily one, which is fine until the 64-slot iOS
+  budget silently drops the overflow.
+  Still open and worth pulling forward: `markMyOutcome` (a coach recording
+  their own session outcome), `setAttendance`, `fetchEndRecord`, `pauseSeries`
+  (pause a DATE RANGE — only pause-for-days is reachable), `packageCurrencies`,
+  `fetchJoinCodeStats`, `useMrrHistory`, `ZoneStrip`, `Sparkline`, `DeltaBadge`.
+- **Localisation is further along than "R085 · Arabic — deferred" implies.**
+  `check:translations` passes over 1,166 catalogue rows (583 de, 583 es) from
+  `supabase/parts/791` and `792`, with `src/lib/catalogueLocale.ts` refusing to
+  present a fallback English name as a translation. The RTL LAYOUT sweep is
+  done and gated too — `scripts/check-rtl.mjs` records 83 physical properties
+  converted across the three apps and the shared kit, with `src/ui/direction.ts`
+  as the one place that asks which way the reader reads. What is missing is
+  Arabic STRINGS, not Arabic support.
 
 - **Accessibility pass** (Phase 8). ~~What is not established anywhere in this
   repo is *coverage*.~~ **It is established now, and the number is small.**
