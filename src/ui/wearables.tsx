@@ -280,7 +280,33 @@ export function WearablesProvider({ children }: { children: ReactNode }) {
         const p = providerById(id as ProviderId);
         if (!p) continue;
         setState(id, 'connected');
-        if (p.isAvailable()) sync(id as ProviderId);
+        if (!p.isAvailable()) continue;
+        // ── ask for the permission this path never asked for ───────────────
+        //
+        // "Under Watch and Devices it says Apple Watch is connected but doesn't
+        // ask for permissions to access Apple Health."
+        //
+        // `connect()` is what requests HealthKit authorisation, and this loop
+        // does not go through it — it marks every REMEMBERED id connected, and
+        // the ids come from AsyncStorage AND from a server read. So a reinstall,
+        // a new phone, or a restore from the account rather than the device
+        // starts up saying Apple Watch is connected while iOS has never been
+        // asked anything, and every read returns nothing for ever.
+        //
+        // Only LOCAL sources. `connect()` on a cloud vendor opens an OAuth
+        // browser, and doing that unprompted on app start would be indefensible.
+        // HealthKit's request is not that: iOS shows the sheet only for a type
+        // it has no answer for, and is silent once the member has decided.
+        //
+        // Failure leaves the state alone rather than marking it an error. A
+        // refusal is a decision, not a fault, and the screens already say what
+        // they can and cannot see — src/lib/watchReach.ts holds those sentences.
+        const local = p.meta.kind === 'healthkit' || p.meta.kind === 'health-connect';
+        if (local && typeof p.connect === 'function') {
+          void p.connect().then(() => sync(id as ProviderId)).catch(() => { /* a decision, not a fault */ });
+        } else {
+          sync(id as ProviderId);
+        }
       }
     })();
   }, [sync]);

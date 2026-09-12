@@ -51,7 +51,7 @@
 import type { ConnectionState } from './wearables/types';
 
 /** The five answers. Four of them are the ones the tester met wearing one word. */
-export type LinkState = 'never' | 'connecting' | 'live' | 'expired' | 'metric-blocked';
+export type LinkState = 'never' | 'connecting' | 'live' | 'expired' | 'metric-blocked' | 'silent';
 
 /**
  * Why a token stopped working. Each of these arrives as a distinct `reason`
@@ -98,6 +98,23 @@ export interface LinkFacts {
   token: TokenProof;
   /** The metric this screen is asking about, if it is asking about one. */
   metric?: { name: string; proof: MetricProof };
+  /**
+   * Has this device EVER handed over a figure?
+   *
+   * The third of the three things "connected" can mean, and the one no state
+   * here could express. Reported: "Oura ring says that my ring is connected, I
+   * have created an account but I have no ring associated with the Oura account
+   * that I have granted permissions to."
+   *
+   * Every word of that is consistent. The OAuth succeeded, the token refreshes,
+   * the edge function answers — and there is no ring, so every read comes back
+   * empty for ever. `state: 'live'` said "connected and Repple is reading it",
+   * which was the one sentence that was not true.
+   *
+   * Undefined means the caller cannot say, and is treated as "do not claim
+   * silence" — a screen that has not looked must not report an absence.
+   */
+  everProduced?: boolean;
 }
 
 export interface LinkView {
@@ -235,6 +252,27 @@ export function describeLink(f: LinkFacts): LinkView {
       // would send somebody round a loop that cannot end — which is precisely
       // what this tester was sent round.
       detail: `${name} is connected and working. ${m.proof.why}`,
+      action: null,
+      tone: 'muted',
+    };
+  }
+
+  // Connected, alive, and it has never sent anything.
+  //
+  // Deliberately NOT 'warn' and NOT offering a reconnect: nothing is broken and
+  // signing in again changes nothing, which is exactly the loop the
+  // 'metric-blocked' branch above exists to avoid sending somebody round. The
+  // sentence names the two things that actually produce this — an account with
+  // no device on it, and a device that has not synced to the vendor yet — and
+  // points at the vendor's own app, which is where both are fixed.
+  if (f.everProduced === false) {
+    return {
+      state: 'silent',
+      connected: true,
+      label: 'Connected',
+      detail: `${name} is connected and has never sent Repple a figure. That is usually one of two things: `
+        + `no device on the ${name} account yet, or one that has not synced. Open the ${name} app and check `
+        + `a device is paired and has synced today — Repple reads what ${name} holds, not the device directly.`,
       action: null,
       tone: 'muted',
     };

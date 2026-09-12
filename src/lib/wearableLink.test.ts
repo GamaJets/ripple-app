@@ -264,6 +264,31 @@ const sane = (v: { label: string; detail: string }, where: string) => {
   ok(!/reconnect/i.test(d4.detail + r4.detail), 'step 4: nothing may still be asking for a reconnect that just happened');
 }
 
+/* ── an account that is connected and has never sent anything ─────────────── */
+//
+// "Oura ring says that my ring is connected, I have created an account but I
+// have no ring associated with the Oura account that I have granted permissions
+// to." Every word of that is consistent: the OAuth worked, the token refreshes,
+// and there is no ring — so every read is empty for ever while the badge says
+// Repple is reading it.
+{
+  const v = describeLink(facts({ providerName: 'Oura', token: { kind: 'alive', at: NOW }, everProduced: false }));
+  ok(v.state === 'silent', 'connected with nothing ever received is its own state');
+  ok(v.connected === true, 'it IS connected — the account link is real');
+  ok(!/Repple is reading it/.test(v.detail), 'and it no longer claims Repple is reading it');
+  ok(/no device on the Oura account|has not synced/.test(v.detail), 'it names the two causes');
+  ok(v.action === null, 'and offers no reconnect, because signing in again changes nothing');
+  ok(v.tone !== 'warn', 'nothing is broken, so nothing is warned about');
+}
+
+// A device that HAS produced a figure is untouched.
+ok(describeLink(facts({ token: { kind: 'alive', at: NOW }, everProduced: true })).state === 'live',
+  'a device that has sent something is live');
+
+// And a caller that cannot say must not be reported as silence.
+ok(describeLink(facts({ token: { kind: 'alive', at: NOW } })).state === 'live',
+  'undefined is not false — a screen that has not looked claims no absence');
+
 if (errors.length) {
   console.error(`wearableLink.test: ${errors.length} failure(s)`);
   for (const e of errors) console.error('  · ' + e);

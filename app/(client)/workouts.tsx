@@ -24,6 +24,7 @@ import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hrFreshness, staleHrNote } from '../../src/lib/hrFreshness';
+import { watchReach, zonesNote, type WatchReach } from '../../src/lib/watchReach';
 import { parseLiveSession, mayRestore, type LiveSession } from '../../src/lib/liveSession';
 import { startLiveActivity, endLiveActivity } from '../../modules/workout-activity';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -3374,7 +3375,14 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
     return () => sub.remove();
   }, [rebuildZonesFromWatch]);
 
-  return { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, rebuildZonesFromWatch, sessionAvgBpm, liveZone: hrZoneNo(freshSample, age) };
+  // Is there a source that can stream SAMPLES at all — HealthKit or Health
+  // Connect? A cloud vendor returns day aggregates and cannot produce zones,
+  // so it deliberately does not count as "a watch is connected".
+  const localConnected = PROVIDERS.some(
+    (p) => (p.meta.kind === 'healthkit' || p.meta.kind === 'health-connect')
+      && w.states[p.meta.id] === 'connected' && p.isAvailable());
+  const reach = watchReach(localConnected, liveSample != null, hrFresh.state);
+  return { w, reach, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, rebuildZonesFromWatch, sessionAvgBpm, liveZone: hrZoneNo(freshSample, age) };
 }
 
 /**
@@ -3391,8 +3399,12 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
  * Deliberately not a link to the settings: leaving mid-session to go and pair a
  * device would abandon the workout being logged.
  */
-function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed }: {
-  t: Theme; liveZone: ZoneNo | null; liveSample: number | null; zoneSecs: ZoneSeconds;
+function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed, reach }: {
+  t: Theme; liveZone: ZoneNo | null; liveSample: number | null;
+  /** Whether a watch can reach this panel at all, and why not. Decided by
+   *  src/lib/watchReach.ts — the panel used to assume 'none' and tell a member
+   *  with a connected watch to connect a watch. */
+  reach?: WatchReach; zoneSecs: ZoneSeconds;
   /** The member's age, or null when the app has no date of birth for them —
    *  which is the case this panel now has to say something about. */
   age: number | null;
@@ -3421,7 +3433,7 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed }: {
             which is worse than leaving it. When the catalogue is translated the
             whole sentence moves and the separator goes with it. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-          Connect a watch under Train → Watch &amp; Devices and your zones appear here live while you train.
+          {zonesNote(reach ?? 'none') ?? ''}
         </Text>
       </View>
     );
@@ -3476,7 +3488,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
 }) {
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
-  const { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch, sessionAvgBpm } = useLiveVitals(age, restingKcalPerMin, false, resumeAt?.startedAt ?? null, resumeAt?.pausedMs ?? 0);
+  const { w, reach, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch, sessionAvgBpm } = useLiveVitals(age, restingKcalPerMin, false, resumeAt?.startedAt ?? null, resumeAt?.pausedMs ?? 0);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
@@ -3717,7 +3729,11 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           <MetricCols t={t} items={liveCols} />
         </View>
         {liveHr == null ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Wear your Apple Watch for live heart rate{recovery ? '' : ' & calories'}</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+            {reach === 'connected-silent'
+              ? 'Your watch is connected and has not sent a reading yet — an Apple Watch only streams heart rate while a workout is running on the watch.'
+              : `Wear your Apple Watch for live heart rate${recovery ? '' : ' & calories'}`}
+          </Text>
         ) : liveSample == null ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             That bpm is today&apos;s average from your connected device, not a live reading — it can&apos;t be used for zones.
@@ -3734,7 +3750,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           </Text>
         ) : null}
 
-        <ZonePanel t={t} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
+        <ZonePanel t={t} reach={reach} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account
@@ -3909,7 +3925,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // has had Back, Pause and Skip since it was written; this is that same row,
   // not a second idea about the same problem.
   const [paused, setPaused] = useState(false);
-  const { w, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin, paused, resumeAt?.startedAt ?? null, resumeAt?.pausedMs ?? 0);
+  const { w, reach, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin, paused, resumeAt?.startedAt ?? null, resumeAt?.pausedMs ?? 0);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [idx, setIdx] = useState(0);
   // `bw` marks a set the member did with their own body; `kg` is then what
@@ -5049,7 +5065,7 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
 
         {/* Live effort, and the same empty state as a timed session when there
             is no watch feeding it — see ZonePanel. */}
-        <ZonePanel t={t} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
+        <ZonePanel t={t} reach={reach} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account
