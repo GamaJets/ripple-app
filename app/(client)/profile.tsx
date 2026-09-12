@@ -25,6 +25,7 @@ import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, KpiRow, ListRow, Ghost, Field, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { CLIENT_FEATURES } from '../../src/lib/features';
 import { ageFromDob } from '../../src/lib/age';
 import { macrosFor, applyCoachAdjust } from '../../src/lib/nutrition';
 import { useClientData, type CoachingMode } from '../../src/ui/clientData';
@@ -222,7 +223,27 @@ const HUB_ICON: Record<string, IconName> = {
   '/(client)/appearance': 'palette', '/(client)/settings': 'settings', '/(client)/trainers': 'people', '/(client)/feedback': 'message',
   '/(client)/coach-documents': 'pencil', '/(client)/notifications': 'bell',
   '/(client)/agreements': 'pencil',
+  // The gym group. Only the four where src/lib/features.ts says 'grid' — its
+  // default for anything without an obvious glyph — and membership.tsx has
+  // already chosen something better for the same row. The other four
+  // (pt-sessions, attendance, membership, referral) resolve from features.ts
+  // below and need no entry here.
+  '/(client)/access': 'lock', '/(client)/gym-plans': 'target',
+  '/(client)/receipts': 'clock', '/(client)/offers': 'sparkle',
 };
+
+// Eight rows were added to this hub with no HUB_ICON entry, and every one of
+// them rendered a chevron where its icon belongs — a column of identical grey
+// arrows, next to a second chevron at the row's end. Nothing caught it: the
+// fallback was `|| 'chevron'`, which is a valid IconName, so types, gates and
+// tests were all green while the screen was visibly wrong.
+//
+// src/lib/features.ts already carries an icon for every route in this app —
+// it is what Explore renders. Reading it here means a row added to HUB_GROUPS
+// without a bespoke icon gets the one Explore shows for the same destination,
+// which is right by construction. HUB_ICON above is now only an override.
+const FEATURE_ICON: Record<string, IconName> = Object.fromEntries(CLIENT_FEATURES.map((f) => [f.route, f.icon]));
+const hubIcon = (route: string): IconName => HUB_ICON[route] ?? FEATURE_ICON[route] ?? 'grid';
 const HUB_GROUPS: { title: string; items: { label: string; note: string; route: string }[] }[] = [
   // First, deliberately. Pairing a watch is not an occasional settings errand —
   // it is the thing a member opens Me to do in their first week and again every
@@ -732,7 +753,7 @@ export default function Profile() {
                 <View style={{ transform: [{ rotate: turn(gc ? 0 : 90) }] }}><Icon name={FORWARD_ICON} size={13} color={t.ink3} /></View>
               </Pressable>
               {!gc ? g.items.map((h) => (
-                <ListRow key={h.route} icon={HUB_ICON[h.route] || 'chevron'} title={h.label} note={h.note}
+                <ListRow key={h.route} icon={hubIcon(h.route)} title={h.label} note={h.note}
                   onPress={() => router.push(h.route as any)} />
               )) : null}
             </Section>

@@ -455,7 +455,15 @@ export default function History() {
           month by month, for as long as you train.
         </Text>
         <Cta label="Log a Workout" wide onPress={() => router.push('/(client)/workouts')} />
-      </Section></>
+      </Section>
+      {/* The import belonged here first and I put it only at the bottom of the
+          loaded screen, where somebody who has never logged in Repple never
+          reaches it. This empty state IS the arrival screen for a lifter with
+          three years in Hevy: "log one session and this page starts keeping
+          score" is the wrong and only answer to give them. Below the Cta, not
+          above it — logging tonight's session is still the shorter path for
+          everybody who has nothing to bring. */}
+      <ImportFromAnotherApp onImported={() => { void read(); }} /></>
     );
   }
 
