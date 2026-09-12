@@ -230,8 +230,9 @@ async function send(a: FloorAct, uid: string): Promise<WriteOutcome> {
         const patch: Record<string, unknown> = { outcome: a.outcome };
         // `undefined` means "do not touch the rate", which is not null, which
         // clears it. A coach with no rate set must not have a zero written in —
-        // `markMyOutcome` draws the same distinction and this must not flatten
-        // it on the way through a queue.
+        // This is where that distinction now lives: `markMyOutcome` drew it in
+        // src/lib/trainerSessions.ts and has been removed in favour of this
+        // sender, so nothing may flatten it on the way through the queue.
         if (a.rateCents !== undefined) patch.rate_cents = a.rateCents;
         const { data, error } = await supabase.from('sessions').update(patch)
           .eq('id', a.sessionId).eq('trainer_id', uid).select('id');

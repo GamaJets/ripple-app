@@ -700,8 +700,9 @@ export default function TrainerSessions() {
       // try again", the row stayed in the list, and a coach clearing a day's
       // sessions in a basement did it three times and got nowhere.
       //
-      // `markMyOutcome` throws on a zero-row update as well as on a transport
-      // failure, and those are not the same event — one is the session not
+      // The direct write this replaced (`markMyOutcome`, removed from
+      // src/lib/trainerSessions.ts) threw on a zero-row update as well as on a
+      // transport failure, and those are not the same event — one is the session not
       // being theirs to mark, which will be true again next time. The queue
       // separates them: `refused` keeps the row in the list and says so,
       // `unsent` takes it off the list because the coach HAS decided and this

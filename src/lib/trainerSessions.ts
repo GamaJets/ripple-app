@@ -205,44 +205,33 @@ export async function fetchMySessions(
 
 /* ── writes ────────────────────────────────────────────────────────────────── */
 
-/**
- * Record what happened to one of the coach's OWN sessions, and confirm it
- * landed.
- *
- * ── why this exists next to gymSessions.markOutcome ───────────────────────
- *
- * That one is `update(...).eq('id', id)` and checks only `error`. PostgREST
- * does not error on an UPDATE that matches nothing: a row-level-security
- * refusal, a session id that no longer exists, a session belonging to another
- * coach — all three come back `error: null`, zero rows touched. The Mark
- * Sessions screen then removes the session from the queue, plays its haptic
- * tick, and offers an Undo for a change that was never made. The outcome is
- * still unrecorded, the session reappears at the next launch, and in between
- * the coach has been told twice that it was handled.
- *
- * This is the repo's recurring bug class, so the COUNT is the answer here and
- * a zero-row update throws. The extra `.eq('trainer_id', …)` is not the
- * security boundary — the policy is — but it makes the zero-row case mean
- * something specific instead of arriving as a mystery.
- */
-export async function markMyOutcome(
-  sb: Queryable,
-  trainerId: string,
-  sessionId: string,
-  outcome: PtSession['outcome'],
-  rateCents?: number | null,
-): Promise<void> {
-  const patch: Record<string, unknown> = { outcome };
-  // `undefined` means "do not touch the rate", which is not the same as null,
-  // which clears it. A coach with no rate set must not have a zero written in.
-  if (rateCents !== undefined) patch.rate_cents = rateCents;
-  const { data, error } = await sb
-    .from('sessions').update(patch).eq('id', sessionId).eq('trainer_id', trainerId).select('id');
-  if (error) throw error;
-  if (!Array.isArray(data) || data.length === 0) {
-    throw new Error('That session was not updated — it may no longer exist, or it is not yours to mark.');
-  }
-}
+// ── `markMyOutcome` lived here, and is gone the same way ─────────────────
+//
+// It recorded an outcome on one of the coach's own sessions and threw on a
+// zero-row update — which was the right correction to `gymSessions.markOutcome`
+// checking only `error`, and is the whole argument the paragraph below makes
+// about PostgREST answering a refusal with `error: null`.
+//
+// It was then superseded rather than wired. `app/(trainer)/sessions.tsx:703`
+// records what happened: throwing on a zero-row update AND on a transport
+// failure treats two different events as one, and a coach clearing a day's
+// sessions in a basement met "check your connection and try again" three times
+// and got nowhere. The floor queue separates them — `refused` keeps the row on
+// the list and says whose session it is not, `unsent` takes it off because the
+// coach HAS decided and this phone holds that decision — so the mark goes
+// through `{ kind: 'session-outcome' }` like the retraction below it.
+//
+// The dead-export ratchet carried it as "the coach Sessions screen is where it
+// belongs". That was read as work not yet done; it is the opposite. Wiring this
+// would route the one write the floor queue exists for straight past it, which
+// is exactly the defect the note under `clearMyOutcome` describes. So the
+// statement lives in one place — that module's sender, matched on the session
+// and the coach exactly as this was, and classifying the row count rather than
+// throwing it.
+//
+// The `undefined` versus `null` rate rule it drew is unchanged and is now
+// stated where the write is: `undefined` leaves `rate_cents` untouched, `null`
+// clears it, and a coach with no rate must never have a zero written in.
 
 // ── `clearMyOutcome` lived here, and is gone ─────────────────────────────
 //

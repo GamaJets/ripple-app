@@ -14,7 +14,7 @@
 //   app/(trainer)/class-checkin.tsx  `setAttendance`  — the tick a trainer is
 //                                    PAID on, and the one the gym's payroll is
 //                                    built from.
-//   app/(trainer)/sessions.tsx       `markMyOutcome`  — the same money, one
+//   app/(trainer)/sessions.tsx       one session's outcome — the same money, one
 //                                    session at a time.
 //
 // And app/(trainer)/classes.tsx already apologises for classes that "are on
@@ -83,7 +83,7 @@ export type FloorAct =
   | { kind: 'class-attendance'; classId: string; userId: string; memberName: string | null; present: boolean }
   /** What became of a PT session, and what it was worth at the moment of
    *  marking. `rateCents` is `undefined` for "do not touch the rate" and null
-   *  for "clear it" — the distinction `markMyOutcome` already draws, and
+   *  for "clear it" — the distinction the sender in src/ui/floorQueue.ts draws, and
    *  flattening it here would write a zero that reads as a free session.
    *
    *  ── `outcome: null` is the coach taking it back ──────────────────────────
