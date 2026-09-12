@@ -209,6 +209,17 @@ export interface GymProfile {
    * replace it.
    */
   timezone: string | null;
+  /**
+   * Hours of notice before a class inside which the gym may charge, or null
+   * because they have not said. Null is NOT "no notice period" — see
+   * supabase/parts/2615, which refuses a default on this column for exactly
+   * that reason, and `CLASS_POLICY_UNKNOWN_NOTE` in src/lib/classCancel.ts,
+   * which is what a member is told while it is null.
+   */
+  classCancelHours: number | null;
+  /** What a late cancellation costs, in `currency`. Null is unstated; 0 is a
+   *  stated policy of no charge, and the two must not be collapsed. */
+  classCancelFee: number | null;
 }
 
 /**
@@ -225,7 +236,7 @@ export async function fetchGymProfile(
 ): Promise<{ profile: GymProfile | null; error: string | null }> {
   const { data, error } = await sb
     .from('tenants')
-    .select('name, currency, session_fee, session_pay_policy, brand_color, timezone')
+    .select('name, currency, session_fee, session_pay_policy, brand_color, timezone, class_cancel_hours, class_cancel_fee')
     .eq('id', tenantId)
     .single();
   if (error) {
@@ -248,6 +259,16 @@ export async function fetchGymProfile(
       // `tenants_timezone_check` already guarantees on the way in — restated
       // here for a row written before part 710 existed.
       timezone: String((r.timezone as string | null) ?? '').trim() || null,
+      // Same numeric-from-PostgREST care as `sessionFee` above, and the same
+      // refusal to invent: a value that will not parse becomes null, which the
+      // screens read as "not stated" rather than as a zero-hour window or a
+      // free cancellation.
+      classCancelHours: r.class_cancel_hours == null || r.class_cancel_hours === ''
+        ? null
+        : Number.isFinite(Number(r.class_cancel_hours)) ? Number(r.class_cancel_hours) : null,
+      classCancelFee: r.class_cancel_fee == null || r.class_cancel_fee === ''
+        ? null
+        : Number.isFinite(Number(r.class_cancel_fee)) ? Number(r.class_cancel_fee) : null,
     },
     error: null,
   };
@@ -341,6 +362,13 @@ export interface GymProfilePatch {
    *  UTC. `tenants_timezone_check` refuses anything `pg_timezone_names` does not
    *  hold, so a value that got past the client is still refused at the write. */
   timezone?: string | null;
+  /** Null clears it back to "this gym has not said", which is a real thing an
+   *  owner may want to do and is why these are nullable rather than defaulted.
+   *  `tenants_class_cancel_hours_check` refuses a negative or an absurd one
+   *  (over two weeks) at the write, so a value that got past the screen is
+   *  still refused by the database. */
+  classCancelHours?: number | null;
+  classCancelFee?: number | null;
 }
 
 /**
@@ -379,6 +407,11 @@ export async function saveGymProfile(
   // string, and `parseGymZone` exists to say so before the round trip rather
   // than to be the only thing standing in the way.
   if (patch.timezone !== undefined) row.timezone = patch.timezone;
+  // Neither column is normalised by a trigger, and both are checked by the
+  // database — a negative or >336 hours, or a negative fee, is raised rather
+  // than stored. Nothing is coerced here: `null` means the owner cleared it.
+  if (patch.classCancelHours !== undefined) row.class_cancel_hours = patch.classCancelHours;
+  if (patch.classCancelFee !== undefined) row.class_cancel_fee = patch.classCancelFee;
   if (Object.keys(row).length === 0) return;
 
   const r = await sb.from('tenants').update(row, { count: 'exact' }).eq('id', tenantId);

@@ -260,6 +260,24 @@ export default function OwnerOps() {
   const [feeBusy, setFeeBusy] = useState(false);
   const [feeMsg, setFeeMsg] = useState<{ bad: boolean; text: string } | null>(null);
 
+  /* ── what a late class cancellation costs ────────────────────────────────
+     src/lib/classCancel.ts has told every member since it was written that
+     "this app does not hold that policy", because there was no column and no
+     screen. supabase/parts/2615 is the column; this is the screen.
+
+     Two fields and both clearable, because null is a real state an owner may
+     want to return to: it produces the honest "we do not hold your gym's
+     policy" sentence rather than a claim. An empty notice field is NOT a
+     zero-hour window and an empty fee is NOT a free cancellation — both of
+     those are things a gym can state, and stating them is a different act
+     from never having said. */
+  const [noticeDraft, setNoticeDraft] = useState<string | null>(null);
+  const [cancelFeeDraft, setCancelFeeDraft] = useState<string | null>(null);
+  const noticeField = noticeDraft ?? (tenant?.classCancelHours == null ? '' : String(tenant.classCancelHours));
+  const cancelFeeField = cancelFeeDraft ?? (tenant?.classCancelFee == null ? '' : String(tenant.classCancelFee));
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [policyMsg, setPolicyMsg] = useState<{ bad: boolean; text: string } | null>(null);
+
   /* ── whether the gym can take a card at all ──────────────────────────────
      null is "no account row", which is every gym today and a real, sayable
      state. It is NOT the same as a read that failed, and `merchantStatus`
@@ -438,6 +456,50 @@ export default function OwnerOps() {
   };
 
   const feeKnown = tenantStatus === 'ready' && !!tenant;
+  /**
+   * Save the class cancellation policy, or withdraw it.
+   *
+   * Parsed here rather than trusted: an empty field is null (withdrawn), and a
+   * value that is not a number refuses IN PLACE rather than writing NaN, which
+   * PostgREST would send as a null and which would silently look like a
+   * withdrawal. The database checks the range again — negative, or over two
+   * weeks of notice, is refused there too — so a value that got past this is
+   * still refused rather than stored.
+   */
+  const savePolicy = async () => {
+    const num = (raw: string): { ok: true; v: number | null } | { ok: false } => {
+      const trimmed = raw.trim();
+      if (!trimmed) return { ok: true, v: null };
+      const n = Number(trimmed);
+      return Number.isFinite(n) && n >= 0 ? { ok: true, v: n } : { ok: false };
+    };
+    const hours = num(noticeField);
+    const fee = num(cancelFeeField);
+    if (!hours.ok || !fee.ok) {
+      setPolicyMsg({ bad: true, text: 'Those are not numbers this can save. Nothing has changed — clear a field entirely to withdraw that half of the policy.' });
+      return;
+    }
+    if (hours.v != null && hours.v > 336) {
+      setPolicyMsg({ bad: true, text: 'A notice period longer than two weeks is refused. Nothing has changed.' });
+      return;
+    }
+    setPolicyBusy(true);
+    const saved = await updateTenant({ classCancelHours: hours.v, classCancelFee: fee.v });
+    setPolicyBusy(false);
+    if (!saved) {
+      setPolicyMsg({ bad: true, text: 'Not saved. Your policy is unchanged, and members are still being told this app does not hold it.' });
+      return;
+    }
+    setNoticeDraft(null);
+    setCancelFeeDraft(null);
+    setPolicyMsg({
+      bad: false,
+      text: hours.v == null
+        ? 'Withdrawn. Members are told this app does not hold your policy, which is true again.'
+        : 'Saved. Members cancelling inside that window are now told so before they confirm.',
+    });
+  };
+
   const saveFee = async () => {
     const parsed = parseSessionFee(feeField, tenant?.currency ?? null);
     if (parsed.kind === 'bad') { setFeeMsg({ bad: true, text: parsed.reason }); return; }
@@ -773,6 +835,94 @@ export default function OwnerOps() {
                 <View style={{ marginTop: sp.lg }}>
                   <Cta wide label={feeBusy ? 'Saving…' : 'Save Session Fee'} disabled={feeBusy}
                     onPress={() => { void saveFee(); }} />
+                </View>
+              </>)}
+            </Section>
+
+            <Rule />
+
+            {/* ── what a late class cancellation costs ──────────────────────
+                Beside the session fee because they are the same kind of fact:
+                a number this gym charges, which several screens quote and
+                which nobody could set. The member-facing half is
+                src/lib/classCancel.ts, whose header has said since it was
+                written that "there is no column for it, no screen where an
+                owner sets one". This is that screen. */}
+            <Section>
+              <SectionHead title="Class Cancellations"
+                note={tenant?.classCancelHours == null ? 'not stated' : `${tenant.classCancelHours}h notice`} />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                How much notice a member must give before a class, and what you charge if they give less.
+                Until you set this, members cancelling a class are told plainly that this app does not hold
+                your policy and that they should ask you.
+              </Text>
+              {tenantStatus === 'loading' ? (
+                <Empty tone={t.ink3}>Reading your gym…</Empty>
+              ) : tenantStatus === 'error' ? (
+                <Empty tone={t.warn}>
+                  Your gym could not be read, so the policy it currently holds is not known — this is not a
+                  statement that none is set. Nothing can be changed until it can be read.
+                </Empty>
+              ) : (<>
+                <View style={{ flexDirection: 'row', gap: sp.md }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>NOTICE (HOURS)</Text>
+                    <TextInput
+                      value={noticeField}
+                      onChangeText={(v) => { setNoticeDraft(v); if (policyMsg) setPolicyMsg(null); }}
+                      placeholder="—"
+                      placeholderTextColor={t.ink3}
+                      /* decimal-ok: hours of notice are whole — a gym does not
+                         run a 12.5-hour window — and `savePolicy` reads this
+                         with Number and refuses anything that is not a
+                         non-negative number. */
+                      keyboardType="number-pad"
+                      accessibilityLabel="Hours of notice before a class"
+                      style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.micro, color: t.ink3, marginBottom: 4 }}>
+                      {cur ? `FEE (${cur})` : 'FEE'}
+                    </Text>
+                    <TextInput
+                      value={cancelFeeField}
+                      onChangeText={(v) => { setCancelFeeDraft(v); if (policyMsg) setPolicyMsg(null); }}
+                      placeholder="—"
+                      placeholderTextColor={t.ink3}
+                      keyboardType="decimal-pad"
+                      accessibilityLabel={cur ? `Late cancellation fee in ${cur}` : 'Late cancellation fee'}
+                      style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}
+                    />
+                  </View>
+                </View>
+                {/* The unit is the gym's, and without one the amount cannot be
+                    shown to a member at all — said here rather than discovered
+                    later by an owner whose fee never appears. */}
+                {/* A Flag, not coloured text. check:contrast caught the first
+                    version of both of these: status colours are tuned to the
+                    3:1 a mark needs and not the 4.5:1 text needs, so the tone
+                    goes on the mark and the words stay in ink. */}
+                {!cur ? (
+                  <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                    Your gym has no currency set, so a fee saved here cannot be shown to members as an amount —
+                    they are told you charge for it and to ask you what it is. Set a currency above and the
+                    figure appears.
+                  </Flag>
+                ) : null}
+                {policyMsg ? (
+                  policyMsg.bad
+                    ? <Flag tone={t.crit} style={{ marginTop: sp.sm }}>{policyMsg.text}</Flag>
+                    : <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{policyMsg.text}</Text>
+                ) : (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                    Clear both and save to withdraw the policy. An empty notice is not a zero-hour window, and
+                    an empty fee is not a free cancellation — both of those you can state by entering 0.
+                  </Text>
+                )}
+                <View style={{ marginTop: sp.lg }}>
+                  <Cta wide label={policyBusy ? 'Saving…' : 'Save Cancellation Policy'} disabled={policyBusy}
+                    onPress={() => { void savePolicy(); }} />
                 </View>
               </>)}
             </Section>

@@ -17,7 +17,7 @@ import { useSubmitOnce } from '../../src/ui/submitOnce';
 // screen read no status at all: a class the gym had cancelled kept its spaces
 // count and its Book button, and members turned up to it.
 import { classFillState, isCancelled, classesThatRan } from '../../src/lib/gymSchedule';
-import { classCancelBody } from '../../src/lib/classCancel';
+import { classCancelBody, fetchClassCancelPolicy } from '../../src/lib/classCancel';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty, numeric } from '../../src/theme/scale';
 import { Fetched } from '../../src/ui/fetched';
@@ -141,7 +141,7 @@ export default function Classes() {
       Alert.alert('Booked', `You're in for ${c.title} at ${c.branch}, ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}.` + reminder);
     }
   };
-  const onCancel = (c: GymClass) => {
+  const onCancel = async (c: GymClass) => {
     // `cancel()` resolves false when the server did not take the cancellation,
     // and that answer was being thrown away here — the exact mirror of the
     // book() bug fixed directly above, and the same shape of harm pointing the
@@ -171,12 +171,20 @@ export default function Classes() {
         [{ text: 'OK' }],
       );
     };
-    // What cancelling costs, or rather that this app cannot say. The PT path
-    // states a notice period, a fee and a currency, and says so plainly when
-    // the policy could not be read; this path — the one the gym actually bills
-    // — said nothing at all, and silence reads as free. See
-    // src/lib/classCancel.ts for why no notice window is invented here.
-    Alert.alert('Cancel booking?', classCancelBody(`${c.title} · ${c.branch} · ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}`, c.startsAt), [
+    // What cancelling costs. The PT path states a notice period, a fee and a
+    // currency, and says so plainly when the policy could not be read; this
+    // path — the one the gym actually bills — said nothing at all, and silence
+    // reads as free.
+    //
+    // Read BEFORE the alert rather than shown after it. A confirmation that
+    // appears and then rewrites its own body while somebody is reading it is
+    // worse than one that waits: the fee would arrive after the thumb. The
+    // read is one RPC against a class already on screen, and every failure of
+    // it returns null, which `classCancelBody` renders as the sentence this
+    // screen has always shown. So the slow path and the broken path both end
+    // where the screen already was.
+    const policy = await fetchClassCancelPolicy(c.id);
+    Alert.alert('Cancel booking?', classCancelBody(`${c.title} · ${c.branch} · ${dayLabel(c.startsAt)} ${timeLabel(c.startsAt)}`, c.startsAt, Date.now(), policy), [
       { text: 'Keep it', style: 'cancel' },
       { text: 'Cancel booking', style: 'destructive', onPress: () => { void doCancel(); } },
     ]);
@@ -313,7 +321,7 @@ export default function Classes() {
                           "Cancel" on a class the gym has already called off
                           offers to undo something that has already happened. */}
                       {off ? null : mine ? (
-                        <Ghost label={mine === 'waitlist' ? 'Leave Waitlist' : 'Cancel'} onPress={() => onCancel(c)} />
+                        <Ghost label={mine === 'waitlist' ? 'Leave Waitlist' : 'Cancel'} onPress={() => { void onCancel(c); }} />
                       ) : (
                         // Guarded. A seat is a scarce thing and `book` is a
                         // server round trip with no feedback on the button

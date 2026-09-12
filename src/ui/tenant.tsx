@@ -148,6 +148,11 @@ export interface Tenant {
    * somebody had. Ops now offers the control the copy has always pointed at.
    */
   sessionFee: number | null;
+  /** Hours of notice before a class inside which the gym may charge, and what
+   *  they charge. Both null until the owner states them — null is "not said",
+   *  never a zero-hour window or a free cancellation. supabase/parts/2615. */
+  classCancelHours: number | null;
+  classCancelFee: number | null;
   /**
    * ISO 4217, from `tenants.currency` (part 99). Null means the gym has not
    * told us: render a dash and say so. Do NOT fall back to GYM_CURRENCY —
@@ -190,7 +195,7 @@ interface TenantValue {
   brandMismatch: string | null;
   refresh: () => void;
   /** Owner-only; RLS enforces it. Returns false when the write is rejected. */
-  updateTenant: (patch: Partial<Pick<Tenant, 'name' | 'brandColor' | 'sessionFee' | 'currency'>>) => Promise<boolean>;
+  updateTenant: (patch: Partial<Pick<Tenant, 'name' | 'brandColor' | 'sessionFee' | 'currency' | 'classCancelHours' | 'classCancelFee'>>) => Promise<boolean>;
   /**
    * The OTHER way a currency gets set, and the only one a coach has.
    *
@@ -282,7 +287,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         if (!tid) { setTenant(null); setStatus('ready'); setLoading(false); return; }
 
         const { data: t, error: tErr } = await supabase
-          .from('tenants').select('id, name, brand_color, plan, session_fee, currency').eq('id', tid).maybeSingle();
+          .from('tenants').select('id, name, brand_color, plan, session_fee, currency, class_cancel_hours, class_cancel_fee').eq('id', tid).maybeSingle();
         if (cancelled) return;
         if (tErr) { reportError('tenant.load.tenant', tErr); setStatus('error'); setLoading(false); return; }
         setTenant(t ? {
@@ -291,6 +296,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           brandColor: t.brand_color ?? null,
           plan: t.plan ?? null,
           sessionFee: t.session_fee == null ? null : Number(t.session_fee),
+          // NaN becomes null rather than a figure a sentence would quote.
+          classCancelHours: t.class_cancel_hours == null || !Number.isFinite(Number(t.class_cancel_hours))
+            ? null : Number(t.class_cancel_hours),
+          classCancelFee: t.class_cancel_fee == null || !Number.isFinite(Number(t.class_cancel_fee))
+            ? null : Number(t.class_cancel_fee),
           currency: t.currency ?? null,
         } : null);
         setStatus('ready');
@@ -324,6 +334,10 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.brandColor !== undefined) row.brand_color = patch.brandColor;
     if (patch.sessionFee !== undefined) row.session_fee = patch.sessionFee;
+    // Null is a deliberate clear — an owner withdrawing a policy they had
+    // stated — and must reach the column as null rather than being skipped.
+    if (patch.classCancelHours !== undefined) row.class_cancel_hours = patch.classCancelHours;
+    if (patch.classCancelFee !== undefined) row.class_cancel_fee = patch.classCancelFee;
     // Currency was excluded from this type, and `updateTenant` is the ONLY
     // write to `tenants` in the repository — so nothing anywhere could set a
     // gym's currency. `provision_profile` inserts none and part 99 added no

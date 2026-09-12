@@ -994,7 +994,13 @@ function parseSetup(raw) {
   // so the whole statement is taken and every clause in it read. A regex that
   // stopped at the first clause reported `via_code` as undeclared when part 56
   // declares it three lines further down.
-  for (const m of code.matchAll(/\balter\s+table\s+(?:only\s+)?([\w".]+)\b/gi)) {
+  // `if exists` is allowed between `table` and the name, and was not: the regex
+  // read the word "if" as the table, so every column added by an
+  // `alter table if exists <t> add column ...` was invisible here and the app
+  // naming it was reported as naming a column declared nowhere. Caught by
+  // supabase/parts/2615 writing it that way; the part now matches the house
+  // style AND this reads both, because the next one will not think to.
+  for (const m of code.matchAll(/\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w".]+)\b/gi)) {
     const table = publicName(m[1]);
     if (!table) continue;
     const semi = code.indexOf(';', m.index);
