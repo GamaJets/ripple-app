@@ -431,33 +431,21 @@ export async function fetchTrainerPackages(trainerId: string): Promise<TrainerPa
   } catch { return null; }
 }
 
-/**
- * The currency each of a set of packages is priced in.
- *
- * `client_purchases` DOES carry its own `currency` (part 132, written at
- * checkout from the Stripe session), and this comment said the opposite for
- * long enough to be worth correcting rather than deleting: it read "records
- * `amount_cents` and no currency at all", which stopped being true the day the
- * webhook started writing the column and was still here afterwards. The
- * fallback below is what remains of it — the only rows that still need a
- * package to name their unit are the ones written BEFORE part 132 whose
- * package the backfill could not reach. That makes an amount unlabelled whenever the package row is
- * actually GONE — deleted, not merely withdrawn — and an unlabelled amount
- * renders as a dash rather than as a number in a currency we picked. A
- * withdrawn package used to land here too, because pkg_read was `active or
- * trainer_id = auth.uid()`; part 147 gives the buyer their own purchases back,
- * so a coach retiring a pack no longer un-labels the money somebody paid.
- *
- * Ids absent from the returned map are ids we could not label. A read that
- * fails returns an empty map, which lands in the same place: dashes, not
- * dollars.
- */
-export async function packageCurrencies(ids: string[]): Promise<Map<string, string>> {
-  const labelled = await packageLabels(ids);
-  const out = new Map<string, string>();
-  labelled.forEach((v, k) => { if (v.currency) out.set(k, v.currency); });
-  return out;
-}
+// ── `packageCurrencies` lived here, and is gone ──────────────────────────
+//
+// Two lines over `packageLabels` below: the same read, with the name thrown
+// away. Nothing called it, and the dead-export ratchet described it as "the
+// check a coach's Connect payout screen needs before offering a currency" —
+// which is not what it did. It takes PACKAGE IDS and answers what unit each of
+// those was priced in; it cannot answer "which currencies has this coach
+// priced in", because it is never given a coach.
+//
+// A caller that wants only the unit reads `.currency` off `packageLabels`,
+// which is what every live caller already does. The rule both were written for
+// is unchanged and is stated on that function: an id absent from the map is a
+// package we could not READ, which is a dash, and never a number in a currency
+// this app chose. See white-label multi-currency — there is no default unit
+// anywhere in this product.
 
 /**
  * The name AND the currency of a set of packages, in one read.
