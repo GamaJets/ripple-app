@@ -22,7 +22,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Hero, KpiRow, Cta, Ghost, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import type { Theme } from '../../src/theme/tokens';
 import { useTenant } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
@@ -34,7 +34,7 @@ import { readState, hasRows, canSayEmpty, staleNote, failedNote } from '../../sr
 import { readMinorAmount } from '../../src/lib/coachMoney';
 import {
   fetchPlans, fetchMemberships, fetchPayments, createMembership,
-  setMembershipStatus, recordPayment, summarise, money,
+  setMembershipStatus, setMembershipFreeze, recordPayment, summarise, money,
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -45,6 +45,10 @@ import { totalMoney, emptyTotalMoney, MIXED_CURRENCY_NOTE } from '../../src/lib/
 // for a gym that has not said which calendar that is. See `today` below.
 import { fetchGymZone } from '../../src/lib/gymZone';
 import { gymTodayWindow } from '../../src/lib/gymToday';
+import { DateSheet } from '../../src/ui/DateSheet';
+import {
+  freezeState, frozenDays, thawedEndsOn, freezeLine, freezeRefusal,
+} from '../../src/lib/membershipFreeze';
 
 /**
  * The day a membership starts is the GYM's day.
@@ -173,6 +177,17 @@ export default function OwnerMembers() {
    * bug this codebase keeps finding.
    */
   const dayWindow = gymTodayWindow(zone);
+  /* ── pausing a membership, with dates on it ──────────────────────────────
+     `status = 'frozen'` has existed since part 29 and has never had dates, so
+     a pause had to be lifted by hand and gave back none of the time it took.
+     supabase/parts/2616 is the dates; src/lib/membershipFreeze.ts is what they
+     mean. The end date moves only when the owner accepts the new one HERE —
+     see that part's header for why this is not a trigger. */
+  const [freezeFor, setFreezeFor] = useState<Membership | null>(null);
+  const [fzFrom, setFzFrom] = useState('');
+  const [fzTo, setFzTo] = useState('');
+  const [fzPicking, setFzPicking] = useState<'from' | 'to' | null>(null);
+  const [fzBusy, setFzBusy] = useState(false);
   /** Whose calendar the start date will be written on, where that needs saying.
    *  Two silences, two sentences — a failed zone read is not an unset zone. */
   const clockNote = zoneUnread
@@ -348,6 +363,46 @@ export default function OwnerMembers() {
       reportError('members.create', e);
       Alert.alert('Could not open that membership', 'Nothing was saved. Check your connection and try again.');
     } finally { setBusy(false); }
+  };
+
+  /** Record the pause the owner has chosen, and the end date it pushes to. */
+  const savePause = async () => {
+    const m = freezeFor;
+    if (!m) return;
+    const refusal = freezeRefusal(fzFrom, fzTo, dayWindow.day);
+    if (refusal) { Alert.alert('Those dates will not work', refusal); return; }
+    // Computed here and written in the same update the dates go in, so the pair
+    // cannot half-apply. Null when the membership is open-ended: there is no
+    // term to extend, and inventing one would sell somebody an end date nobody
+    // agreed to.
+    const moved = thawedEndsOn(m.endsOn, { from: fzFrom, to: fzTo });
+    setFzBusy(true);
+    try {
+      await setMembershipFreeze(supabase, m.id, fzFrom, fzTo, moved ?? undefined);
+      await load();
+      setFreezeFor(null);
+      setFzFrom(''); setFzTo('');
+    } catch (e) {
+      reportError('members.freeze', e);
+      Alert.alert('Not paused',
+        (e instanceof Error && e.message) || 'Nothing was changed. Check your connection and try again.');
+    } finally { setFzBusy(false); }
+  };
+
+  /** Lift a pause recorded in error. Leaves the end date where it is — the days
+   *  were given back when it was recorded, and taking them away again on a
+   *  correction is not something to do silently. */
+  const liftPause = (m: Membership) => {
+    Alert.alert('Remove this pause?', 'The end date stays where it is. If the pause was recorded by mistake, set the end date back yourself.', [
+      { text: 'Keep it', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: async () => {
+        try { await setMembershipFreeze(supabase, m.id, null, null); await load(); }
+        catch (e) {
+          reportError('members.unfreeze', e);
+          Alert.alert('Not removed', (e instanceof Error && e.message) || 'Nothing was changed.');
+        }
+      } },
+    ]);
   };
 
   const changeStatus = (m: Membership, next: MembershipStatus) => {
@@ -586,6 +641,36 @@ export default function OwnerMembers() {
                       <Text style={{ ...ty.micro, color: tone }}>{STATUS_LABEL[m.status]}</Text>
                     </View>
                   </View>
+                  {/* The pause, in words, on every row that has one. An
+                      unreadable pause says so rather than saying nothing:
+                      whether somebody can get in on Tuesday is not a thing to
+                      be quiet about. */}
+                  {(() => {
+                    const st = freezeState({ from: m.frozenFrom, to: m.frozenTo }, dayWindow.day);
+                    if (st === 'none') return null;
+                    const days = frozenDays({ from: m.frozenFrom, to: m.frozenTo });
+                    const line = freezeLine(st, {
+                      from: m.frozenFrom, to: m.frozenTo, days,
+                      // Already written into `endsOn` when the owner accepted
+                      // it, so the sentence names where it ALREADY runs to
+                      // rather than promising a move a second time.
+                      newEndsOn: null,
+                    });
+                    if (!line) return null;
+                    return (
+                      <Text style={{ ...ty.caption, color: st === 'unreadable' ? t.ink2 : t.ink3, marginTop: sp.sm }}>
+                        {line}
+                        {/* The one disagreement worth naming on the row: the
+                            dates say paused and the door still says active.
+                            supabase/parts/2616 is deliberate about not
+                            changing the status at midnight, so somebody has to
+                            be told when the two differ. */}
+                        {st === 'frozen' && m.status === 'active'
+                          ? ' The status still says active, so they can still get in.'
+                          : ''}
+                      </Text>
+                    );
+                  })()}
 
                   <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md, flexWrap: 'wrap' }}>
                     <Pressable onPress={() => { setPayFor(m); setAmount(''); }} hitSlop={6}
@@ -600,6 +685,25 @@ export default function OwnerMembers() {
                         <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Freeze</Text>
                       </Pressable>
                     ) : null}
+                    {/* Dates, which is the half the status flip never had. Kept
+                        as its own control rather than folded into Freeze: the
+                        status is what the door reads TODAY and the dates are
+                        what happens by itself, and an owner may well want one
+                        without the other. */}
+                    <Pressable
+                      onPress={() => {
+                        setFreezeFor(m);
+                        setFzFrom(m.frozenFrom ?? '');
+                        setFzTo(m.frozenTo ?? '');
+                      }}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Set pause dates for ${m.memberName ?? 'this membership'}`}
+                      style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>
+                        {m.frozenFrom ? 'Pause dates' : 'Pause dates…'}
+                      </Text>
+                    </Pressable>
                     {m.status === 'frozen' ? (
                       <Pressable onPress={() => changeStatus(m, 'active')} hitSlop={6}
                         accessibilityRole="button" accessibilityLabel="Reactivate membership"
@@ -773,6 +877,81 @@ export default function OwnerMembers() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── the dates a membership is paused for ──────────────────────────── */}
+      <Modal visible={!!freezeFor} transparent animationType="slide" onRequestClose={() => setFreezeFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFreezeFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, ...elevation.e2 }}>
+          {freezeFor ? (<>
+            <Text style={{ ...ty.head, color: t.ink }}>Pause this membership</Text>
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+              {freezeFor.memberName ?? 'This member'} · {freezeFor.planName ?? 'no plan'}. The days are added back on
+              the end, so they get the time they paid for.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: sp.md }}>
+              {([['from', 'FIRST DAY', fzFrom], ['to', 'LAST DAY', fzTo]] as const).map(([which, label, val]) => (
+                <Pressable key={which} onPress={() => setFzPicking(which)} disabled={fzBusy}
+                  accessibilityRole="button" accessibilityLabel={`${label}${val ? `, ${val}` : ', not chosen yet'}`}
+                  style={{ flex: 1, paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2, opacity: fzBusy ? 0.5 : 1 }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
+                  <Text style={{ ...ty.body, color: val ? t.ink : t.ink3, marginTop: 2 }}>{val || 'Choose'}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {/* What the owner is accepting, before they accept it. An end date
+                that moves without being shown is a term somebody changed
+                silently. */}
+            {(() => {
+              const days = frozenDays({ from: fzFrom, to: fzTo });
+              const moved = thawedEndsOn(freezeFor.endsOn, { from: fzFrom, to: fzTo });
+              if (days == null) return null;
+              return (
+                <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>
+                  {days === 1 ? '1 day' : `${days} days`} paused.{' '}
+                  {moved
+                    ? `The end date moves from ${freezeFor.endsOn} to ${moved}.`
+                    : 'This membership has no end date, so there is nothing to extend — it simply does not run on those days.'}
+                </Text>
+              );
+            })()}
+            <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+              <View style={{ flex: 1 }}>
+                <Cta wide label={fzBusy ? 'Saving…' : 'Save Pause'} disabled={fzBusy}
+                  onPress={() => { void savePause(); }} />
+              </View>
+              {freezeFor.frozenFrom ? (
+                <Ghost label="Remove" a11yLabel="Remove this pause"
+                  onPress={() => { const m = freezeFor; setFreezeFor(null); liftPause(m); }} />
+              ) : null}
+            </View>
+          </>) : null}
+        </View>
+      </Modal>
+
+      {/* Outside the modal above: a Modal inside a Modal is the one arrangement
+          iOS will not reliably present. Same reason as app/(client)/standing.tsx. */}
+      <DateSheet
+        visible={fzPicking != null}
+        value={fzPicking === 'to' ? fzTo : fzFrom}
+        fallback={fzPicking === 'to' ? (fzFrom || null) : null}
+        heading={fzPicking === 'to' ? 'Last day of the pause' : 'First day of the pause'}
+        note={fzPicking === 'to'
+          ? 'The last day they cannot train. It runs again the day after.'
+          : 'The first day the membership does not run.'}
+        onCancel={() => setFzPicking(null)}
+        onPick={(iso) => {
+          if (fzPicking === 'to') setFzTo(iso);
+          else {
+            setFzFrom(iso);
+            // A first day after the last one leaves a backwards range in two
+            // filled-looking fields, and the owner would meet a refusal about a
+            // mistake the app watched them make.
+            if (fzTo && fzTo < iso) setFzTo('');
+          }
+          setFzPicking(null);
+        }}
+      />
 
       {/* ── take a payment ────────────────────────────────────────────────── */}
       <Modal visible={!!payFor} transparent animationType="slide" onRequestClose={() => setPayFor(null)}>

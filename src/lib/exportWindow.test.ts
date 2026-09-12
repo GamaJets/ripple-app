@@ -148,7 +148,7 @@ const base: GymExportInput = {
   from: null, to: null,
   plans: sliceReady([{ id: 'pl1', name: 'Monthly', priceCents: 6000, currency: 'GBP', interval: 'month', active: true }]),
   memberships: sliceReady([
-    { id: 'ms1', memberId: 'm1', memberName: 'Sara', planId: 'pl1', planName: 'Monthly', startedOn: '2019-01-01', endsOn: null, status: 'active' },
+    { id: 'ms1', memberId: 'm1', memberName: 'Sara', planId: 'pl1', planName: 'Monthly', startedOn: '2019-01-01', endsOn: null, status: 'active', frozenFrom: null, frozenTo: null },
   ]),
   payments: sliceReady([
     { id: 'pIn', memberId: 'm1', memberName: 'Sara', amountCents: 6000, currency: 'GBP', method: 'card', takenAt: '2026-02-01T00:00:00Z', note: null, kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null },

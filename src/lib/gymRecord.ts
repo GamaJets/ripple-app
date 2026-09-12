@@ -51,6 +51,15 @@ export interface Membership {
   startedOn: string;
   endsOn: string | null;
   status: MembershipStatus;
+  /**
+   * The pause on this membership, both ends inclusive, or null because none is
+   * recorded. Null is NOT "never paused for ever" and it is NOT "paused with
+   * no end" — supabase/parts/2616 refuses half a range at the write, and
+   * src/lib/membershipFreeze.ts keeps 'none' and 'unreadable' apart, because
+   * the difference between them is somebody's access to a building.
+   */
+  frozenFrom: string | null;
+  frozenTo: string | null;
 }
 
 /**
@@ -199,7 +208,7 @@ export async function fetchMemberships(sb: Queryable, tenantId: string): Promise
   const rows = await readAll<any>(
     (from, to) => sb
       .from('memberships')
-      .select('id, member_id, member_label, plan_id, started_on, ends_on, status')
+      .select('id, member_id, member_label, plan_id, started_on, ends_on, status, frozen_from, frozen_to')
       .eq('tenant_id', tenantId)
       .order('started_on', { ascending: false })
       .order('id', { ascending: false })
@@ -226,7 +235,56 @@ export async function fetchMemberships(sb: Queryable, tenantId: string): Promise
     startedOn: r.started_on,
     endsOn: r.ends_on ?? null,
     status: r.status,
+    frozenFrom: r.frozen_from ?? null,
+    frozenTo: r.frozen_to ?? null,
   }));
+}
+
+/**
+ * Record or lift a pause on one membership.
+ *
+ * Both dates together or both null — there is no half a pause, and the check
+ * constraint refuses one at the write. Passing null for both is how an owner
+ * lifts a pause that was recorded in error, which is a different act from a
+ * pause that has run its course and needs nothing done to it at all.
+ *
+ * Counts the rows, for the reason `setMembershipStatus` beside it does: a
+ * PostgREST UPDATE matching zero rows is not an error, so the version that
+ * checked only `error` reported a refusal as a success — and an owner who
+ * believes they have paused a membership stops chasing the payment.
+ *
+ * The end date is NOT moved here. `thawedEndsOn` computes the new one and the
+ * owner accepts it on the screen, once: a write that moved it automatically
+ * would move it again from the already-moved value the moment somebody
+ * corrected the range, so a corrected pause would compound instead of replace.
+ */
+export async function setMembershipFreeze(
+  sb: Queryable, membershipId: string, from: string | null, to: string | null,
+  /**
+   * The end date the owner accepted, written in the SAME update.
+   *
+   * Undefined leaves `ends_on` alone, which is what lifting a pause does. One
+   * statement and not two because the pair must not half-apply: a membership
+   * with the new end date and no pause recorded is one nobody can explain, and
+   * a second round trip is exactly where that happens.
+   */
+  endsOn?: string | null,
+): Promise<void> {
+  const both = from != null && to != null;
+  const neither = from == null && to == null;
+  if (!both && !neither) {
+    throw new Error('A pause needs both a first and a last day, or neither.');
+  }
+  const patch: Record<string, unknown> = { frozen_from: from, frozen_to: to };
+  if (endsOn !== undefined) patch.ends_on = endsOn;
+  const r = await sb
+    .from('memberships')
+    .update(patch, { count: 'exact' })
+    .eq('id', membershipId);
+  if (r.error) throw r.error;
+  if ((r.count ?? 0) === 0) {
+    throw new Error('That membership was not updated — it may no longer exist, or it is not yours to change.');
+  }
 }
 
 export async function createMembership(

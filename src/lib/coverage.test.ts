@@ -231,7 +231,7 @@ const plan = (id: string, cents: number, interval: 'month'|'year'|'once'): Membe
   ({ id, name: id, priceCents: cents, currency: 'AED', interval, active: true });
 const mem = (id: string, planId: string | null, status: Membership['status'] = 'active'): Membership =>
   ({ id, memberId: 'm' + id, memberName: 'M', planId, planName: null,
-     startedOn: '2026-01-01', endsOn: null, status });
+     startedOn: '2026-01-01', endsOn: null, status, frozenFrom: null, frozenTo: null });
 const pay = (cents: number): GymPayment =>
   // The four fields supabase/parts/168 and 172 added are stated rather than
   // spread from a default, because a fixture that quietly defaults them is a
@@ -2223,7 +2223,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   const ago = (d: number) => new Date(NOW - d * 86_400_000).toISOString();
 
   const mem = (memberId: string, memberName: string | null, status: Membership['status'], startedOn: string): Membership =>
-    ({ id: 'ms-' + memberId + '-' + startedOn, memberId, memberName, planId: 'p1', planName: 'Full', startedOn, endsOn: null, status });
+    ({ id: 'ms-' + memberId + '-' + startedOn, memberId, memberName, planId: 'p1', planName: 'Full', startedOn, endsOn: null, status, frozenFrom: null, frozenTo: null });
   // `currency` is a parameter and not a constant, because it being a constant is
   // exactly why the cross-currency bug below survived: every fixture here was
   // AED, so the path where two payments disagree had never run.
@@ -2678,7 +2678,7 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   // ── what it was for ──
   const mem = (memberId: string, startedOn: string, endsOn: string | null): Membership => ({
     id: 'ms-' + memberId, memberId, memberName: memberId, planId: 'p1', planName: 'Standard',
-    startedOn, endsOn, status: 'active',
+    startedOn, endsOn, status: 'active', frozenFrom: null, frozenTo: null,
   });
   ok(purposeOf([junePay('a', 100)], null, JUNE) === null,
      'with no roster read, no payment is attributed — every payer would otherwise look like a non-member');
@@ -2993,9 +2993,9 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
   // Names chosen to break a naive writer: an inner quote, a comma, an
   // apostrophe. A gym really does have these members.
   const msIn: Membership[] = [
-    { id: 'ms1', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl1', planName: 'Monthly, full access', startedOn: '2026-01-05', endsOn: null, status: 'active' },
-    { id: 'ms2', memberId: 'u2', memberName: "O'Brien, Sean", planId: null, planName: null, startedOn: '2025-11-30', endsOn: '2026-11-29', status: 'frozen' },
-    { id: 'ms3', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl2', planName: 'Day pass', startedOn: '2024-02-02', endsOn: '2024-02-03', status: 'cancelled' },
+    { id: 'ms1', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl1', planName: 'Monthly, full access', startedOn: '2026-01-05', endsOn: null, status: 'active', frozenFrom: null, frozenTo: null },
+    { id: 'ms2', memberId: 'u2', memberName: "O'Brien, Sean", planId: null, planName: null, startedOn: '2025-11-30', endsOn: '2026-11-29', status: 'frozen', frozenFrom: null, frozenTo: null },
+    { id: 'ms3', memberId: 'u1', memberName: '"Bob" Smith', planId: 'pl2', planName: 'Day pass', startedOn: '2024-02-02', endsOn: '2024-02-03', status: 'cancelled', frozenFrom: null, frozenTo: null },
   ];
   const payIn: GymPayment[] = [
     { id: 'pay1', memberId: 'u1', memberName: '"Bob" Smith', amountCents: 45000, currency: 'AED', method: 'card', takenAt: '2026-08-02T09:14:00.000Z', note: 'Renewal; said "thanks"\nsecond line of the note', kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null },
@@ -3566,7 +3566,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
   const mem = (id: string, started: string, status: Membership['status']): Membership => ({
     id: `m-${id}-${started}`, memberId: id, memberName: id, planId: 'p1', planName: 'Gym',
-    startedOn: started, endsOn: null, status,
+    startedOn: started, endsOn: null, status, frozenFrom: null, frozenTo: null,
   });
   const vis = (id: string, daysAgo: number, classId: string | null = null): Visit => ({
     id: `v-${id}-${daysAgo}`, memberId: id, memberName: id, passId: null, classId,
@@ -3804,7 +3804,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
 
   const imem = (id: string, status: Membership['status'] = 'active'): Membership => ({
     id: `m-${id}`, memberId: id, memberName: id, planId: 'p1', planName: 'Gym',
-    startedOn: '2025-06-01', endsOn: null, status,
+    startedOn: '2025-06-01', endsOn: null, status, frozenFrom: null, frozenTo: null,
   });
 
   // ── 5 · what was tried, read back ──
@@ -4031,7 +4031,7 @@ function by2(v: ReturnType<typeof buildStaff>, id: string) {
   ): Membership => ({
     id, memberId, memberName: name, planId: plan,
     planName: plan === 'pl1' ? 'Monthly' : plan === 'pl2' ? 'Annual' : null,
-    startedOn: from, endsOn: to, status,
+    startedOn: from, endsOn: to, status, frozenFrom: null, frozenTo: null,
   });
   const pcVisit = (id: string, memberId: string | null, passId: string | null, at: string): Visit => ({
     id, memberId, memberName: null, passId, classId: null, enteredAt: at,

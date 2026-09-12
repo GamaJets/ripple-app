@@ -144,8 +144,8 @@ eq(documentBlocker('Insurance', file({ type: '' })), null,
     gymName: 'Iron House', tenantId: 'T1', generatedAt: '2026-08-26T08:00:00.000Z',
     plans: sliceReady([{ id: 'pl1', name: 'Monthly', priceCents: 6000, currency: 'GBP', interval: 'month', active: true }]),
     memberships: sliceReady([
-      { id: 'ms1', memberId: 'm1', memberName: 'Sara', planId: 'pl1', planName: 'Monthly', startedOn: '2025-01-01', endsOn: null, status: 'active' },
-      { id: 'ms2', memberId: 'm2', memberName: 'Bo', planId: null, planName: null, startedOn: '2025-06-01', endsOn: null, status: 'active' },
+      { id: 'ms1', memberId: 'm1', memberName: 'Sara', planId: 'pl1', planName: 'Monthly', startedOn: '2025-01-01', endsOn: null, status: 'active', frozenFrom: null, frozenTo: null },
+      { id: 'ms2', memberId: 'm2', memberName: 'Bo', planId: null, planName: null, startedOn: '2025-06-01', endsOn: null, status: 'active', frozenFrom: null, frozenTo: null },
     ]),
     payments: sliceReady([
       { id: 'p1', memberId: 'm1', memberName: 'Sara', amountCents: 6000, currency: 'GBP', method: 'card', takenAt: '2026-08-01T00:00:00Z', note: null, kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: 'ms1' },

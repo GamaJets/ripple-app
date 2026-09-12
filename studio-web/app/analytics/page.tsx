@@ -1460,7 +1460,7 @@ async function pageMemberships(tenantId: string): Promise<Membership[]> {
   const rows = await readAll<any>(
     (from, to) => supabase
       .from('memberships')
-      .select('id, member_id, member_label, plan_id, started_on, ends_on, status')
+      .select('id, member_id, member_label, plan_id, started_on, ends_on, status, frozen_from, frozen_to')
       .eq('tenant_id', tenantId)
       .order('started_on', { ascending: false })
       .order('id', { ascending: true })
@@ -1490,6 +1490,12 @@ async function pageMemberships(tenantId: string): Promise<Membership[]> {
     startedOn: r.started_on,
     endsOn: r.ends_on ?? null,
     status: r.status,
+    // Carried, not defaulted. supabase/parts/2616 added these and
+    // src/lib/membershipFreeze.ts reads them; a console row that hard-coded
+    // null here would report every paused membership as one that was never
+    // paused, on the surface a gym reconciles its own figures from.
+    frozenFrom: r.frozen_from ?? null,
+    frozenTo: r.frozen_to ?? null,
   }));
 }
 
