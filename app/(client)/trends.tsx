@@ -24,6 +24,8 @@ import { volumeIn, est1RMIn, weightDeltaIn, liftLabel, convertedNote } from '../
 // it is read out in. See the section at the bottom of this screen for why the
 // verdict is a reading of ONE session and is never worded as a trend.
 import { suggestProgression, ACTION_LABEL, ACTION_READING } from '../../src/lib/progression';
+import { temperByReadiness } from '../../src/lib/readyProgression';
+import { useReadiness } from '../../src/ui/readiness';
 import { deltaLabel, deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { shortDayLabel } from '../../src/lib/bodyFigures';
 import { est1RM } from '../../src/lib/streaks';
@@ -230,6 +232,12 @@ export default function Trends() {
   // of one session — the top-weight sets of it against a rep range — and it is
   // not a direction of travel, however much a screen called Trends wants it to
   // be. Nothing below is allowed to word it as one.
+  // Today's readiness, read once for the whole list. Null when there is no
+  // reading at all — no device, no sleep logged, or a read that failed — and
+  // `temperByReadiness` then leaves every line exactly as the progression rule
+  // wrote it and says nothing, because an app that cannot measure readiness
+  // must not imply that it did.
+  const { readiness } = useReadiness();
   const verdicts = useMemo(() => suggestProgression(log, wu), [log, wu]);
   // Six, because this is a summary and Targets is the list. Named as a count
   // with the rest said out loud rather than trailing off: a lift that drops
@@ -481,7 +489,20 @@ export default function Trends() {
             ) : null
           ) : (
             <>
-              {shownVerdicts.map((v, i) => (
+              {shownVerdicts.map((raw, i) => {
+                /* ── today's readiness, against what the plan was going to ask
+                     for ────────────────────────────────────────────────────
+                     `temperByReadiness` may only ever make a suggestion
+                     GENTLER. A high score is not evidence anybody can lift
+                     more — it is four signals about sleep, a wearable's own
+                     verdict, water and recent load, none of which measures
+                     strength — so a good day changes nothing here and the
+                     line reads exactly as `suggestProgression` wrote it.
+                     When it does change, the reason is printed under it:
+                     a suggestion that quietly differs from the rule that made
+                     it is indistinguishable from a broken rule. */
+                const { tip: v, note } = temperByReadiness(raw, readiness, liftLabel(raw.lastWeight, wu));
+                return (
                 <View key={v.exercise}
                   style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                   <View style={{ flex: 1 }}>
@@ -494,10 +515,14 @@ export default function Trends() {
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                       {ACTION_READING[v.action]}
                     </Text>
+                    {note ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{note}</Text>
+                    ) : null}
                   </View>
                   <Text style={{ ...ty.caption, fontWeight: '500', color: t.ink2 }}>{ACTION_LABEL[v.action]}</Text>
                 </View>
-              ))}
+                );
+              })}
               {verdicts.length > shownVerdicts.length ? (
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                   Your {shownVerdicts.length} heaviest lifts. The other {verdicts.length - shownVerdicts.length} read

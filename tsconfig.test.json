@@ -580,6 +580,7 @@
     "src/lib/watchReach.test.ts",
     "src/lib/training.test.ts",
     "src/lib/classRates.test.ts",
+    "src/lib/readyProgression.test.ts",
     "src/lib/llmGateway.test.ts"
   ]
 }
