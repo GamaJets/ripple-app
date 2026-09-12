@@ -219,6 +219,32 @@ ok(planKcal(2400, -3).floored, 'an impossible rate is reported as floored, not s
 ok(planKcal(2400, -3).kcal === 1800, 'and lands on 75% of maintenance');
 ok(planKcal(1400, -3).kcal === MIN_PLAN_KCAL, 'with the absolute 1,200 floor underneath it for a small maintenance');
 
+/* ── a bare `date` deadline is the END of that day, in the reader's zone ──── */
+//
+// `goal_targets.target_date` is a bare date column — '2026-09-12'. `Date.parse`
+// reads that as UTC midnight: the START of the day in UTC, and the day BEFORE
+// in every zone west of Greenwich. Two faults came out of it — this module
+// called a goal 'date-passed' from the first moment of its target day while
+// `goalTargets.isOverdue` said otherwise about the same goal at the same
+// instant, and the date the plan renders was a day early for every reader west
+// of Greenwich. Every fixture above uses a full Z timestamp, which is exactly
+// why neither ever showed up here.
+{
+  const now = Date.parse('2026-09-12T17:00:00.000Z');   // 13:00 in New York
+  const goal = {
+    id: 'g', kind: 'weight', targetValue: 84, targetDateISO: '2026-09-12',
+    createdAtISO: '2026-08-01T00:00:00.000Z', achievedAtISO: null,
+  } as unknown as GoalTarget;
+  const series = [
+    { t: Date.parse('2026-08-15T08:00:00.000Z'), v: 91.4 },
+    { t: Date.parse('2026-09-11T08:00:00.000Z'), v: 90.0 },
+  ] as unknown as Point[];
+
+  const plan = energyPlanFor({ goal, weightSeries: series, tdeeKcal: 2586, nowMs: now }) as { kind: string; reason?: string };
+  ok(!(plan.kind === 'enum' && plan.reason === 'date-passed'),
+    'a goal is not past its date while its target day is still running');
+}
+
 declare const process: { exit(code: number): void };
 console.log(errors.length ? 'GOAL-ENERGY FAILURES:\n' + errors.join('\n') : 'ALL GOAL-ENERGY TESTS PASSED');
 if (errors.length) process.exit(1);

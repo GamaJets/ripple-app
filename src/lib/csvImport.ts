@@ -263,6 +263,26 @@ export function parseDate(raw: string, order?: DateOrder): Parsed<string> {
       reason: `"${raw}" could be day-first or month-first — say which the file uses`,
     };
   }
+  // `'ymd'` is not an answer to this question, and it used to fall into the
+  // day-first arm and guess.
+  //
+  // The order is inferred from the file: one unambiguous row settles it. A file
+  // whose only datable rows are ISO — `2026-01-15` — is reported as `'ymd'`,
+  // which says the file writes ISO. It says NOTHING about how that file spells
+  // a slashed date, and a US export mixing ISO rows with `MM/DD` rows is
+  // ordinary. `03/04/2026` in such a file was silently filed as 3 April instead
+  // of 4 March: a payment a month out, with no date error raised, in an import
+  // that is otherwise about money.
+  //
+  // So 'ymd' is treated as "the file has not said", which is the same refusal
+  // the no-order branch above already gives. The owner is asked; nothing is
+  // guessed.
+  if (order !== 'dmy' && order !== 'mdy') {
+    return {
+      ok: false,
+      reason: `"${raw}" could be day-first or month-first — say which the file uses`,
+    };
+  }
   return order === 'mdy' ? ymdToIso(c, a, b) : ymdToIso(c, b, a);
 }
 
