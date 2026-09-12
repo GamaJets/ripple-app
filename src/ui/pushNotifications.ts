@@ -12,6 +12,7 @@ import { allows, categoryForRoute, timeToDeliver, whenToDeliver, type NotifyCate
 import { notifyPrefs } from '../lib/notifyPrefsLatch';
 import { VARIANT, type AppVariant } from '../lib/variant';
 import type { CoachChannel } from '../lib/coachNotify';
+import { reminderTrigger } from '../lib/reminderPlan';
 
 let Notifications: any = null;
 let Device: any = null;
@@ -527,9 +528,30 @@ export async function scheduleWeeklyReminders(
       if (status !== 'granted') return [];
     }
   } catch { return []; }
+  // ── every day is ONE trigger, not seven ────────────────────────────────
+  //
+  // There is no "these days" trigger, so a Mon/Wed/Fri reminder really is three
+  // scheduled notifications. Seven of them, however, is a `daily` — same
+  // behaviour, one slot instead of seven.
+  //
+  // The slot is the point. iOS holds at most 64 PENDING local notifications per
+  // app and silently drops the rest: ten all-days reminders is seventy, and the
+  // last six simply never exist with nothing on any screen to say so. Since the
+  // ids returned here are what `cancelReminders` takes back, the decision has
+  // to live on this side of the call — a caller choosing for itself would leave
+  // notifications firing for ever with nothing to cancel them by.
+  //
+  // `scheduleDailyReminder` has existed for this since the beginning and had no
+  // caller; scripts/check-dead-exports.mjs carried it as an open offence with
+  // this exact defect written in its note.
+  const trigger = reminderTrigger(weekdays);
+  if (trigger.mode === 'none') return [];
+  if (trigger.mode === 'daily') {
+    const id = await scheduleDailyReminder(title, body, hour, minute, data, category);
+    return id ? [id] : [];
+  }
   const ids: string[] = [];
-  for (const w of weekdays) {
-    if (!Number.isInteger(w) || w < 1 || w > 7) continue;
+  for (const w of trigger.days) {
     try {
       const id = await Notifications.scheduleNotificationAsync({
         content: { title, body, data: data || {} },

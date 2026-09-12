@@ -578,6 +578,7 @@
     "src/lib/hrFreshness.test.ts",
     "src/lib/liveSession.test.ts",
     "src/lib/watchReach.test.ts",
+    "src/lib/training.test.ts",
     "src/lib/llmGateway.test.ts"
   ]
 }

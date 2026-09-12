@@ -5,7 +5,6 @@ import type { WorkoutEntry } from './mockData';
 import { weekStartIso } from './weekStart';
 import { todayISO } from './bodyFigures';
 
-const DAY = 86_400_000;
 
 export interface WarmSet { kg: number; reps: number; label: string }
 
@@ -53,13 +52,33 @@ export function deloadCheck(log: WorkoutEntry[], now: number = Date.now(), thres
     (counts[wk] ||= new Set()).add(todayISO(new Date(ts)));
   }
   // Walk back week by week from LAST week (skip the current, partial week).
-  let cursor = now - 7 * DAY;
+  //
+  // A local CALENDAR step, not 604,800,000 ms. The comment on `weekKey` above
+  // makes this exact argument and then fixes only the key — the cursor kept
+  // stepping by fixed milliseconds, which is the same bug one line further on:
+  //
+  //   · autumn. `now` is Sat 23:30 after a fall-back, so `now − 168h` lands on
+  //     SUNDAY 00:30 — inside the CURRENT week, the one this loop exists to
+  //     skip. The first bucket read is the partial week, which has too few days,
+  //     and the walk breaks immediately. Thirteen weeks of accumulated fatigue
+  //     reported as "0 consecutive hard weeks".
+  //   · spring. `now` is Sun 00:30 after a spring-forward, so `now − 168h`
+  //     lands on Sat 23:30 of the week before — and the week in between is
+  //     never visited at all. A member who has just taken a deload is told
+  //     twelve straight hard weeks and offered another.
+  //
+  // Anchored at local NOON so that an hour moving in either direction cannot
+  // cross a day boundary, which is what `stepBack` in src/lib/streaks.ts does
+  // and for the same reason.
+  const cursor = new Date(now);
+  cursor.setHours(12, 0, 0, 0);
+  cursor.setDate(cursor.getDate() - 7);
   let hard = 0;
   for (let i = 0; i < 26; i++) {
-    const wk = weekKey(cursor);
+    const wk = weekKey(cursor.getTime());
     const days = counts[wk] ? counts[wk].size : 0;
     if (days >= 3) hard++; else break;
-    cursor -= 7 * DAY;
+    cursor.setDate(cursor.getDate() - 7);
   }
   const due = hard >= threshold;
   return {

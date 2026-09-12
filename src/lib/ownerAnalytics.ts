@@ -88,9 +88,17 @@ export function trainerHealth(tr: TrainerLike): Health {
   const plural = (n: number) => `${n} session${n === 1 ? '' : 's'}`;
 
   let risk: Risk, reason: string;
-  if (clients > 0 && evidenced === 0 && unmarked > 0) {
+  if (evidenced === 0 && unmarked > 0) {
     // The trap named above. Not "no sessions delivered" — that would assert
     // they delivered nothing, which is a different claim from not knowing.
+    //
+    // No `clients > 0` here, and that guard was the bug. A coach with an EMPTY
+    // roster and twenty finished-but-unmarked sessions fell past this branch to
+    // `clients === 0` and was described as "Delivering sessions but has no
+    // clients on the roster" — an assertion of delivery over twenty sessions
+    // not one of which anybody has confirmed. The unmarked branch is about the
+    // EVIDENCE, and the size of the roster has no bearing on whether the
+    // evidence exists.
     risk = 'high';
     reason = `${plural(unmarked)} finished but unmarked — no evidence any were delivered, and no pay can be computed.`;
   } else if (clients > 0 && evidenced === 0) {

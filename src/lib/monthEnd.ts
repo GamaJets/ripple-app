@@ -428,6 +428,26 @@ export function owedOf(invoices: GymInvoice[], today: string): Owed {
   let dropped = 0, droppedCents = 0;
 
   for (const inv of invoices) {
+    // ── an invoice nobody sent cannot make the figure unanswerable ────────
+    //
+    // The currency was collected from EVERY invoice, including drafts — which
+    // the branches below deliberately leave out of every figure. So a single
+    // unsent draft in another currency, or with a blank one (the column is NOT
+    // NULL and carries no ISO check), put a second entry in this set, and
+    // `mixed` then withheld the lot: settled, outstanding, overdue and dropped
+    // all became null behind a sentence about two currencies the gym never
+    // billed in.
+    //
+    // Worse in `arrears`, which reaches back over every invoice ever issued —
+    // one stale blank-currency draft blanks "what is still owed" on every
+    // future month close, and `buildClose` refuses to sign a month off over an
+    // invoice nobody sent.
+    //
+    // Only rows that REACH a figure may withhold one. `payrollOf` and
+    // `ClosePasses` already apply that rule; this is the same rule, and the
+    // `continue` is what keeps the two halves of this loop honest — a status
+    // that contributes nothing contributes no currency either.
+    if (inv.status === 'draft') continue;
     // Normalised, for the reason `incomeOf` is: this side is compared against
     // that one below, and two sets built by different rules cannot be compared
     // at all. `gym_invoices.currency` carries no ISO check either.
@@ -440,8 +460,9 @@ export function owedOf(invoices: GymInvoice[], today: string): Owed {
       outstanding += 1; outstandingCents += inv.amountCents;
       if (isOverdue(inv, today)) { overdue += 1; overdueCents += inv.amountCents; }
     }
-    // 'draft' is deliberately in none of them: an invoice nobody sent is not
-    // owed by anybody.
+    // 'draft' reaches none of these branches — it is skipped above, currency
+    // and all, because an invoice nobody sent is not owed by anybody and must
+    // not be able to silence what is.
   }
 
   const mixed = currencies.size > 1;

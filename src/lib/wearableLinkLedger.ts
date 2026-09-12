@@ -140,7 +140,28 @@ export function linkFor(
     remembered,
     token: tokenProof(id),
     metric: metric ? { name: metric, proof: metricProof(id, metric) } : undefined,
+    // Has this device ever handed over a figure at all?
+    //
+    // The ledger already holds one proof per metric it has looked for, so the
+    // question is whether ANY of them came back 'ok'. `noteMetric` is called by
+    // every read path — cloudProvider, body, sleep — so an entry with proofs
+    // recorded and not one of them 'ok' is a device that has been asked and has
+    // answered with nothing.
+    //
+    // Undefined until at least one read has happened. `describeLink` treats
+    // that as "do not claim silence", which is the important direction: a
+    // screen that has not looked yet must not tell somebody their ring is not
+    // sending anything.
+    everProduced: everProducedFor(id),
   });
+}
+
+/** Whether any metric this device was asked for has ever come back. Undefined
+ *  until something has been asked, so an unread device is never called silent. */
+function everProducedFor(id: ProviderId): boolean | undefined {
+  const proofs = Object.values(entry(id).metrics);
+  if (!proofs.length) return undefined;
+  return proofs.some((p) => p.kind === 'ok');
 }
 
 function subscribe(fn: () => void): () => void {

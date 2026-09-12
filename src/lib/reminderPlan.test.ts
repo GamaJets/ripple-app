@@ -16,7 +16,7 @@
 // `ok`/`eq` into an errors array and process.exit(1) — never node:assert.
 import {
   DAY_LABEL, EMPTY_SAVED, EVERY_DAY, WEEKDAYS_ONLY, daysLabel, plannedNotificationCount,
-  plannedReminders, savedFromStored, type SavedReminders, type Weekday,
+  plannedReminders, savedFromStored, reminderTrigger, type SavedReminders, type Weekday,
 } from './reminderPlan';
 
 const errors: string[] = [];
@@ -146,6 +146,51 @@ const saved = (over: Partial<SavedReminders> = {}): SavedReminders => ({ ...EMPT
   eq(daysLabel([1, 2, 4]), 'Sun, Mon, Wed', 'anything else lists the days in the order the week is drawn');
   eq(daysLabel([4, 1, 2]), 'Sun, Mon, Wed', 'whatever order they were toggled on in');
 }
+
+/* ── seven weekdays is one daily reminder, not seven weekly ones ──────────── */
+//
+// They arrive daily either way, so nothing LOOKS wrong. What goes wrong is the
+// budget: iOS holds 64 pending local notifications and silently drops the rest,
+// so ten all-days reminders is seventy and the last six never exist.
+{
+  const t = reminderTrigger([1, 2, 3, 4, 5, 6, 7]);
+  eq(t.mode, 'daily', 'every day is a DAILY trigger — one slot, not seven');
+}
+
+// Some days is still weekly, one per day, because there is no "these days".
+{
+  const t = reminderTrigger([2, 4, 6]);
+  eq(t.mode, 'weekly', 'a subset stays weekly');
+  eq(JSON.stringify(t.mode === 'weekly' ? t.days : null), '[2,4,6]', 'with the days it was given');
+}
+
+// Six of seven is NOT daily — the missing day is the whole point of picking.
+eq(reminderTrigger([1, 2, 3, 4, 5, 6]).mode, 'weekly', 'six days is not every day');
+
+/* ── nothing chosen schedules nothing ─────────────────────────────────────── */
+
+eq(reminderTrigger([]).mode, 'none', 'no days is no reminder');
+eq(reminderTrigger(null).mode, 'none', 'and so is null');
+eq(reminderTrigger(undefined).mode, 'none', 'and undefined');
+
+/* ── junk is dropped, never clamped ───────────────────────────────────────── */
+//
+// Clamping would move a reminder to a day nobody picked, which is worse than
+// losing it: the member sees a banner on a day they deliberately left out.
+{
+  const t = reminderTrigger([0, 8, 3, -1, 99]);
+  eq(t.mode, 'weekly', 'the one valid day survives');
+  eq(JSON.stringify(t.mode === 'weekly' ? t.days : null), '[3]', 'and nothing was clamped into range');
+}
+
+// A duplicate day must not schedule the same banner twice.
+{
+  const t = reminderTrigger([3, 3, 3]);
+  eq(JSON.stringify(t.mode === 'weekly' ? t.days : null), '[3]', 'duplicates collapse');
+}
+
+// All seven, given out of order and duplicated, is still daily.
+eq(reminderTrigger([7, 1, 3, 5, 2, 6, 4, 4]).mode, 'daily', 'order and duplicates do not hide an all-days pick');
 
 if (errors.length) {
   console.error(`reminderPlan.test.ts — ${errors.length} failures:`);
