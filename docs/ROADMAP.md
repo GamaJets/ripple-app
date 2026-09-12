@@ -1058,3 +1058,75 @@ I am looking for" — but a member has to already know it exists. A persistent
 entry point on every tab header is a change to the app's chrome rather than a
 gap in a screen, so it is the owner's call and not a defect to be quietly
 fixed.
+
+---
+
+## 12 Sep 2026, later — the deep audit, and what it found
+
+Three lanes ran in parallel against the brief "test every function, fix what
+does not work, and find where we lag the market". What follows is what they
+returned and what was done about it, including the things that turned out not
+to be true.
+
+### The pure modules
+
+Four defects, all of the same family — a figure that could lie — and three of
+them had a guard sitting beside them that the code did not consult.
+
+- **`memberView.buildDossier` summed a member's payments across currencies.**
+  A £150 and a 150 AED payment came back as 30000 with no currency field on
+  `MemberDossier` at all. `studio-web/app/members` had found this and worked
+  around it AT THE CALL SITE, which left the landmine armed for the next
+  caller. `paidCurrency` now travels with the figure and both are null when the
+  rows disagree.
+- **`payrollTotal` dropped the `currency` and `mixedCurrency` its own lines
+  carry.** Fixed on the third attempt: the first nulled the total and broke the
+  contract `closePayrollCurrency.test.ts` states outright, the second counted a
+  line with no recorded currency as a mix and would have taken payroll away
+  from every gym whose rates predate part 1010. What ships leaves the sum
+  alone, carries the label, and makes `settlementBlocker` name the currency
+  first — which the console's payroll header already gates on.
+- **`reofferSlot` returned `[]` for a failed read**, so a freed PT slot went
+  un-offered to a full roster whenever the network hiccuped, silently.
+- **`summarisePasses` dropped the mixed-currency flag** its sibling computes.
+  Latent — nothing renders it as money yet — and carried now.
+
+### The owner app and the console
+
+- **Value / Client on `app/(owner)/revenue.tsx` divides over every client on
+  the book**, including those who did nothing, and sits beside the roster count
+  inviting exactly that division. The coach's own screen refuses it and says so.
+  The owner screen has no per-client delivery data to narrow the divisor with,
+  so the figure is labelled for what it is rather than silently recomputed over
+  a population the screen cannot see.
+- **The owner app had no `<ScreenHelp>` on any of its twenty-one screens.** Two
+  added, on Trainer Health (a 0-100 composite with the scale written down
+  nowhere) and class Fill/Show (two different denominators side by side, with
+  the line explaining which is which sitting in a source comment).
+- **No orphaned screens in either surface**, verified route by route.
+
+### Still open, and named rather than half-built
+
+- **The console cannot invite a trainer.** Three of its screens tell an owner to
+  "invite one from the Repple Studio app" and the only `trainers` call in
+  `studio-web` is a select. A gym owner on the desk tablet has no in-product way
+  to add their first coach. This is a real build, not a copy fix.
+- **Form-check video on a set** is the one Phase 9 item deliberately not
+  started. `workouts` has no media column, and the work is storage RLS plus a
+  privacy decision about who may see a video of a member training — which is
+  the same question `injury-document-privacy` answered carefully for documents
+  and deserves the same care rather than a late-session guess.
+
+### Built from the market analysis
+
+A competitive pass against twenty apps produced ten concrete gaps. The two that
+were small and needed no third-party account were built: the **warm-up ramp**
+(Hevy, Strong and JEFIT all have one; every rung rounded down to a weight the
+bar can actually hold) and — from the Phase 9 list rather than the new one —
+**class cancellation policy** and **membership freeze dates**, both of which
+existed as a refusal in the code and now exist as a feature.
+
+The rest are recorded with their build sizes. Three need something only the
+owner can supply: an Apple/Google Wallet pass certificate, a transactional
+email channel for lead follow-up, and a background-location entitlement for
+GPS route tracking.
