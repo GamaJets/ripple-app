@@ -46,6 +46,22 @@ cd "$(dirname "$0")/.."
 # point of the paragraph above; it must not be the thing that blocks a publish.
 export REPPLE_REACH_CHANNELS="${CHANNELS[*]}"
 
+# ── the App Store Connect key, if this machine has one ─────────────────────
+#
+# `check:testflight` below reads three environment variables. On a developer's
+# machine they come from their shell profile; a non-interactive runner — CI, or
+# an agent shelling out — sources no profile and would therefore SKIP the one
+# check that answers "can anybody install this", silently and with exit 0.
+# Skipping is the correct behaviour when there is no key and the wrong
+# behaviour when there is one sitting on disk unread.
+#
+# Guarded, so a clone without the file is untouched. The file lives outside the
+# repo and holds a team-wide private key path; nothing here prints it.
+if [ -z "${ASC_ISSUER_ID:-}" ] && [ -f "$HOME/.appstoreconnect/env" ]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.appstoreconnect/env"
+fi
+
 # Where the bundling actually happens. Set below to a detached worktree at HEAD
 # rather than this directory, so an agent writing a file mid-publish cannot
 # reach the thing being bundled at all. The first version of this script only
@@ -143,6 +159,52 @@ echo "── can these channels receive this runtime? ──"
 # — because none has been built since the bump. Ask it that way before
 # believing an Android tester is receiving any of this.
 node scripts/check-runtime-reach.mjs "${CHANNELS[@]}"
+
+# ── and can anybody INSTALL it? ────────────────────────────────────────────
+#
+# The gate above proves a binary exists at this runtime. It then prints the one
+# thing it cannot check and tells the reader to check it by eye: whether that
+# binary is actually assigned to a TestFlight tester group. "Check it by eye"
+# is the instruction that failed sixteen times in a row, because nobody eyeballs
+# a thing they believe is fine.
+#
+# This asks Apple. It needs an App Store Connect API key, and with none
+# configured it says so and exits 0 — so a clone with no key publishes exactly
+# as it did before, and a machine with one gets the answer. See the script's
+# header for the three variables and where they come from.
+#
+# Once per APP, and only for the apps whose channels are in this run. The three
+# variants are three App Store records with three sets of tester groups, and
+# they are not in the same state: the first run of this gate found the client's
+# external group holding 1.3.0 and the COACH's holding 1.0.0 (build 7), so every
+# coach OTA since the version bump has been invisible to every external coach
+# tester. A check that looked only at the client app would have passed.
+#
+# Narrowed with the channels rather than always checking all three, so a
+# deliberate `publish.sh "msg" production` is not blocked by the state of an app
+# it is not publishing to. The mapping is the same 1:1 one the channel list
+# uses, written out because it is two lines and a lookup table nobody can
+# misread beats a clever transformation of a string.
+#
+# Not `&&`-guarded and not backgrounded: a non-zero exit here means what is
+# about to be sent cannot reach the people it is for, and that is a reason to
+# stop rather than a warning to scroll past.
+tf_bundles=()
+for ch in "${CHANNELS[@]}"; do
+  case "$ch" in
+    production|preview)             tf_bundles+=("com.washateria.repple") ;;
+    coach-production|coach-preview) tf_bundles+=("com.washateria.repple.coach") ;;
+    owner-production|owner-preview) tf_bundles+=("com.washateria.repple.studio") ;;
+    # An example-brand or one-off channel names no app this mapping knows. Said
+    # rather than skipped in silence: an unchecked channel is exactly what the
+    # nine days were.
+    *) echo "check:testflight — no bundle id known for channel '$ch'; not checked." ;;
+  esac
+done
+# Deduplicated, because production and preview are the same app.
+while IFS= read -r b; do
+  [ -n "$b" ] && node scripts/check-testflight.mjs "$b"
+done < <(printf '%s\n' "${tf_bundles[@]}" | sort -u)
 
 echo
 echo "── publish ──"
