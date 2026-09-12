@@ -78,6 +78,8 @@ import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
+import { previewLiftingImport, liftingImportNote, type LiftingImportPreview } from '../../src/lib/liftingImport';
+import { pickDocument } from '../../src/ui/nativeModules';
 import { useSettings } from '../../src/ui/settings';
 import { volumeIn, volumeHeadline, est1RMIn, liftLabel, weightDeltaIn, convertedNote, type WeightUnit } from '../../src/lib/units';
 import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
@@ -852,7 +854,111 @@ export default function History() {
          calls, so the button and the gesture do the same thing. */
       onRefresh={() => { void read(); }}
     />
+
+    {/* ── three years somebody already has, in another app ───────────────
+        A lifter with history in Hevy or Strong will not retype it, and Hevy
+        reads Strong's export for exactly that reason. `csvImport.ts` is the
+        gym owner's importer and reads none of this; `watchImport.ts` brings
+        in what a watch recorded, which is a duration and a heart rate with no
+        sets in it.
+
+        Here rather than on Train, because this is the screen about how far
+        back the record goes — which is precisely the thing an import
+        changes, and the reason somebody would want one. */}
+    <ImportFromAnotherApp onImported={() => { void read(); }} />
   </>);
+}
+
+/**
+ * Bring a Strong or Hevy export in.
+ *
+ * Three states and no fourth: nothing picked, a preview to confirm, or a
+ * result. The preview is the point — it says how many sessions and sets were
+ * read AND how many rows will not be, with the reason, before anything is
+ * written. An importer that writes first and reports afterwards is one a member
+ * cannot refuse.
+ */
+function ImportFromAnotherApp({ onImported }: { onImported: () => void }) {
+  const t = useTheme();
+  const { logWorkouts } = useWorkoutLog();
+  const [preview, setPreview] = useState<LiftingImportPreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+
+  const pick = async () => {
+    setDone(null);
+    // Not pinned to text/csv: both apps hand the file over with a different
+    // mime type depending on the OS and the share route it took, and a filter
+    // that rejects the member's own export is worse than one that accepts a
+    // file this reader then refuses by its header.
+    const got = await pickDocument({ type: ['text/csv', 'text/comma-separated-values', 'text/plain', '*/*'] });
+    if (got.outcome === 'unavailable') {
+      setDone('This build cannot open a file picker yet — that needs a new version of the app rather than anything you can change here.');
+      return;
+    }
+    if (got.outcome !== 'picked') return;
+    setBusy(true);
+    try {
+      const res = await fetch(got.file.uri);
+      setPreview(previewLiftingImport(await res.text()));
+    } catch {
+      setDone('That file could not be opened. Export it again from the other app and try once more.');
+    } finally { setBusy(false); }
+  };
+
+  const confirm = async () => {
+    if (!preview || !preview.entries.length) return;
+    setBusy(true);
+    // Through `logWorkouts` like every other write on this screen, so an
+    // import made on a train queues and goes up later rather than failing —
+    // and reports what actually happened instead of what was sent.
+    const outcome = await logWorkouts(preview.entries);
+    setBusy(false);
+    setPreview(null);
+    // The three outcomes are three different facts and get three sentences.
+    // 'unsent' is NOT a failure — the rows are real, they are on this phone and
+    // they go up on the next launch that reaches a server — and telling somebody
+    // to try again would be how they end up importing twice.
+    const n = preview.entries.length;
+    const sessions = `${n} session${n === 1 ? '' : 's'}`;
+    setDone(outcome === 'stored'
+      ? `${sessions} added to your history.`
+      : outcome === 'unsent'
+        ? `${sessions} saved on this phone and waiting for signal — they go up on their own. Do not import the file again.`
+        : 'The server declined that, so nothing was added. Waiting will not change it — check the file came from Strong or Hevy and try once more.');
+    if (outcome === 'stored') onImported();
+  };
+
+  return (
+    <Section>
+      <SectionHead title="Bring In Another App's History" />
+      <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+        Export your log from Strong or Hevy and open it here. Sets come in as sets, one session per day per
+        lift. Anything the file does not say clearly is left out rather than guessed at, and you see the count
+        before anything is saved.
+      </Text>
+
+      {preview ? (
+        <>
+          <Text style={{ ...ty.label, color: t.ink2, marginBottom: sp.sm }}>{liftingImportNote(preview)}</Text>
+          <View style={{ flexDirection: 'row', gap: sp.md, alignItems: 'center' }}>
+            {preview.entries.length ? (
+              <Cta label={busy ? 'Saving…' : 'Add to My History'} onPress={() => { void confirm(); }} />
+            ) : null}
+            <Ghost label="Cancel" onPress={() => setPreview(null)} />
+          </View>
+        </>
+      ) : (
+        <View style={{ alignSelf: 'flex-start' }}>
+          <Ghost label={busy ? 'Reading…' : 'Choose a File'} onPress={() => { void pick(); }} />
+        </View>
+      )}
+
+      {done ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{done}</Text>
+      ) : null}
+    </Section>
+  );
 }
 
 /**
