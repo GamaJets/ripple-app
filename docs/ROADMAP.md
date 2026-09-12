@@ -988,3 +988,73 @@ it. The section was right; the header was stale by six hundred lines.*
   console's door screen — the one screen whose arrivals are `gym_visits` — is
   correctly on a poll rather than a socket. That was decided from part 220's
   header and is now confirmed against the database.
+
+---
+
+## 12 Sep 2026 — discoverability, audited rather than assumed
+
+The brief was the owner's own sentence: *"we have a lot of functions on there
+but the users don't know how to use the app to its highest potential nor do they
+know where to intuitively look for things."* Two audits ran, one per app, against
+four questions with a file-and-line answer required for every claim: can a
+person reach this screen, can they find it by searching, does it offer a next
+step when it is empty, and does it explain a figure it computes.
+
+**The good news first, because it changes what is worth building.** There are no
+orphaned screens in either app. `scripts/check-reachable.mjs` passes, and a
+route-by-route grep confirms it: every `app/(client)` and `app/(trainer)` screen
+is named by a push, a hub row, or the feature catalogue, and every route in
+those lists resolves to a file. The five client screens absent from both
+`HUB_GROUPS` and `CLIENT_FEATURES` are the five tab bar entries, which is
+correct. The coach app has no missing `TRAINER_NAV` entry at all — the routes
+not in it (`chat`, `client`, `exercise`, `class-checkin`, `explore`) each need a
+parameter a bare push cannot supply, verified per file.
+
+So the problem was never navigation. It was what happens after somebody arrives.
+
+### Closed
+
+- **Eleven coach screens that dead-ended on an empty roster.** Each wrote its
+  own "Nobody is on your book yet" and stopped, and all eleven are reachable
+  from `TRAINER_NAV` and Explore before a coach has a single client.
+  `src/ui/EmptyRoster.tsx` is now the one sentence and the one control, landing
+  on `/(trainer)/dashboard?start=invite` — the Clients tab with the invite sheet
+  open, not the tab with the control still to find. `builder` (twice),
+  `log-session` and `leaderboard` got the same destination.
+- **Six screens computing a figure with no help card.** `standards`,
+  `consistency`, `goal`, `coach-money`, `coach-analytics`, `coach-register`.
+  Every line was written from the function rather than from the words on the
+  screen, which caught two errors in the first draft: `currentStreak` counts
+  days and not weeks, and `projectionOf` uses the first and latest readings
+  since the goal was set and not a line through recent ones.
+  `CLIENT_SCREEN_HELP_KEYS` is a third list so `CLIENT_HELP_KEYS` keeps meaning
+  one card per tab.
+- **Five client empty states that named a remedy and offered none.**
+  `records`, `body-trends`, `activity`, `standards`, `trends`. Each control is
+  on the whole-and-empty arm only — `check:whole` caught the first version of
+  the `activity` gate letting `'partial'` through, and was right to.
+- **Three catalogue entries that could not be found by the words people type.**
+  Watch & Devices sold itself as "Apple Watch, WHOOP, Garmin…" on keywords that
+  contained none of those brands; Classes and Book a Session are the two screens
+  a member cancels from and neither carried the word "cancel".
+- **The Your Gym group on Me**, and the eight rows of grey chevrons it shipped
+  with. `HUB_ICON` now falls back to `src/lib/features.ts`, which carries an
+  icon for every route because Explore renders it — so a hub row added without a
+  bespoke icon gets the one Explore shows for the same destination.
+- **Strong and Hevy import, in the empty state as well as the loaded screen.**
+  It sat below the history charts, which a member with nothing logged never
+  reaches — and that empty state is precisely the arrival screen for somebody
+  with three years in another app.
+- **A pause for the dates you are actually away.** `pause_my_session_series`
+  has taken a from/to since part 244 and nothing could reach it; the sheet
+  offered three durations, all starting today. `pauseSeries` comes off the
+  dead-export ratchet.
+
+### Recommended next, and deliberately not started
+
+A global search affordance. Explore is reachable from the Me hub and from the
+Getting Started card, and it is the one screen that answers "where is the thing
+I am looking for" — but a member has to already know it exists. A persistent
+entry point on every tab header is a change to the app's chrome rather than a
+gap in a screen, so it is the owner's call and not a defect to be quietly
+fixed.
