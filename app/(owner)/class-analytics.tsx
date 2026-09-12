@@ -40,6 +40,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Flag, fig } from '../../src/ui/kit';
@@ -807,6 +808,11 @@ export default function OwnerClassAnalytics() {
           <Section>
             {/* Named, not "This Range". The console pays against August; this
                 screen now reads the same August, and says which. */}
+            {/* Fill and Show are over two different denominators and sit side
+                by side. The line that says which is which was a source comment
+                — "Fill is booked/capacity; show is attended/booked" — and a
+                comment is not on screen. */}
+            <ScreenHelp screen="owner-classes" />
             <SectionHead title="This Range" note={periodLabel} />
             <KpiRow items={[
               { label: 'Classes', value: fig(totals.classes) },

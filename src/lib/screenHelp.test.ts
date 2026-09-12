@@ -7,7 +7,7 @@
 // logic ones: a stored list that fails to read as a list, and a key written
 // twice so the round trip through storage compounds. Both are pinned below.
 import {
-  SCREEN_HELP, CLIENT_HELP_KEYS, COACH_HELP_KEYS, CLIENT_SCREEN_HELP_KEYS,
+  SCREEN_HELP, CLIENT_HELP_KEYS, COACH_HELP_KEYS, CLIENT_SCREEN_HELP_KEYS, OWNER_HELP_KEYS,
   dismissedFrom, isDismissed, withDismissed, isHelpKey,
   type ScreenHelpKey,
 } from './screenHelp';
@@ -51,14 +51,21 @@ for (const k of CLIENT_SCREEN_HELP_KEYS) {
   ok(!CLIENT_HELP_KEYS.includes(k), `${k} is not a tab — a tab's card belongs in CLIENT_HELP_KEYS`);
 }
 
-// Every key belongs to exactly one of the three lists, and every entry in the
+// The owner's, which the app had none of at all until an audit found twenty-one
+// screens carrying a gym's money and headcounts with no help card between them.
+eq(OWNER_HELP_KEYS.length, 2, 'two owner screens carry a card');
+for (const k of OWNER_HELP_KEYS) {
+  ok(k.startsWith('owner-'), `${k} is namespaced to the owner — three apps can share a handset`);
+}
+
+// Every key belongs to exactly one of the four lists, and every entry in the
 // record is reachable from one of them. A card in SCREEN_HELP that is in no
 // list is a card no screen can be pointed at and no test can watch.
-eq(ALL.length, CLIENT_HELP_KEYS.length + COACH_HELP_KEYS.length + CLIENT_SCREEN_HELP_KEYS.length,
-  'the record holds the three lists and nothing else');
+eq(ALL.length, CLIENT_HELP_KEYS.length + COACH_HELP_KEYS.length + CLIENT_SCREEN_HELP_KEYS.length + OWNER_HELP_KEYS.length,
+  'the record holds the four lists and nothing else');
 for (const k of ALL) {
-  const inHow = [CLIENT_HELP_KEYS, COACH_HELP_KEYS, CLIENT_SCREEN_HELP_KEYS].filter((l) => l.includes(k)).length;
-  eq(inHow, 1, `${k} is listed in exactly one of the three populations`);
+  const inHow = [CLIENT_HELP_KEYS, COACH_HELP_KEYS, CLIENT_SCREEN_HELP_KEYS, OWNER_HELP_KEYS].filter((l) => l.includes(k)).length;
+  eq(inHow, 1, `${k} is listed in exactly one of the four populations`);
 }
 
 for (const k of ALL) {

@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Pressable, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { Icon, type IconName } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, QuickRow, Spark, Notice, fig } from '../../src/ui/kit';
@@ -475,6 +476,11 @@ export default function OwnerOverview() {
         <Rule />
 
         {/* ── trainer health board ───────────────────────────────────────── */}
+        {/* Before the pills, because a coach at the top of a list called "worst
+            first" is a conversation with a person, and an owner should know
+            what put them there before having it. The owner app carried no help
+            card at all until this one. */}
+        <ScreenHelp screen="owner-trainers" />
         <Section>
           <SectionHead title="Trainer Health" note="Worst first" />
           {loading ? (

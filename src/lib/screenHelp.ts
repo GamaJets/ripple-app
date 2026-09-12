@@ -74,7 +74,8 @@ export type ScreenHelpKey =
   | 'home' | 'train' | 'meals' | 'progress' | 'me'
   | 'coach-clients' | 'coach-quiet' | 'coach-schedule' | 'coach-enquiries' | 'coach-adspend'
   | 'standards' | 'consistency' | 'goal'
-  | 'coach-money' | 'coach-analytics' | 'coach-register';
+  | 'coach-money' | 'coach-analytics' | 'coach-register'
+  | 'owner-trainers' | 'owner-classes';
 
 /** The client's five, in tab order. Exported so the test can assert on the two
  *  populations separately — a coach card must never be countable as a client
@@ -129,6 +130,28 @@ export const COACH_HELP_KEYS: readonly ScreenHelpKey[] =
  */
 export const CLIENT_SCREEN_HELP_KEYS: readonly ScreenHelpKey[] =
   ['standards', 'consistency', 'goal'];
+
+/**
+ * The owner's, and the whole app had none.
+ *
+ * An audit of `app/(owner)/**` found zero `<ScreenHelp>` elements across all
+ * twenty-one screens, on the surface that carries a gym's money and headcounts.
+ * The two here are the ones where a reader cannot recover the meaning from the
+ * screen:
+ *
+ *   owner-trainers  Trainer Health is a 0-100 composite — client load capped
+ *                   at 12 and delivered sessions capped at 20, each worth half
+ *                   — printed as a pill with no scale anywhere. A coach sorted
+ *                   to the top of a list called "worst first" is a conversation
+ *                   with a person, and the owner should know what put them
+ *                   there before having it.
+ *   owner-classes   Fill and Show are two different denominators sitting next
+ *                   to each other. The line saying which is which is a source
+ *                   comment — "Fill is booked/capacity; show is
+ *                   attended/booked" — and a comment is not on screen.
+ */
+export const OWNER_HELP_KEYS: readonly ScreenHelpKey[] =
+  ['owner-trainers', 'owner-classes'];
 
 export interface HelpLine {
   /** The label as it appears on the screen, so the reader can find it. */
@@ -282,6 +305,29 @@ export const SCREEN_HELP: Record<ScreenHelpKey, ScreenHelp> = {
       { term: 'Of Booked, Here', means: 'of the people booked into your classes, the share who turned up — your own register, not the gym\u2019s.' },
       { term: 'Off the Waitlist', means: 'people who got in because somebody cancelled. They count as booked once promoted.' },
       { term: 'Classes', means: 'classes in the period with a register you completed. One you never marked is not in any figure on this screen.' },
+    ],
+  },
+  'owner-trainers': {
+    key: 'owner-trainers',
+    title: 'How Trainer Health Is Worked Out',
+    lines: [
+      // The formula, in the owner's words. src/lib/ownerAnalytics.ts.
+      { term: 'The Score', means: 'half of it is how many clients they carry, counted up to 12; the other half is sessions they delivered, counted up to 20. A full book scores 100 — it is not a mark out of ten for how good they are.' },
+      // The distinction the whole band rests on, and the one that shipped wrong
+      // once: booked is not delivered.
+      { term: 'Delivered', means: 'sessions somebody recorded an outcome for. A session that was booked, has passed, and nobody marked counts for nothing here — which is usually a coach who has not filled their register, not a coach who did not work.' },
+      { term: 'Worst First', means: 'the list is sorted by score, lowest at the top. It is where to look, not a ranking to show anybody.' },
+    ],
+  },
+  'owner-classes': {
+    key: 'owner-classes',
+    title: 'What These Figures Mean',
+    lines: [
+      { term: 'Fill', means: 'people booked in, over the seats you put on sale. It says whether the timetable matches demand.' },
+      // The two denominators, which are the reason this card exists: they sit
+      // side by side and are not over the same thing.
+      { term: 'Show', means: 'people who turned up, over the people who booked — NOT over capacity. A half-empty class everybody attended is 50% fill and 100% show.' },
+      { term: 'A Dash', means: 'no class in the range recorded what it needed. Not zero: a class nobody marked a register for cannot be counted either way.' },
     ],
   },
   standards: {
