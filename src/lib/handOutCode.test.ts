@@ -25,6 +25,7 @@ import {
   UNREAD_NOTE, HOW_THEY_USE_IT, codeToGive, codesToHandOut, copiedNote,
   copyBlockedNote, copyFailedNote, handOut, keptReason, namedCodesLine,
   spokenCode, type CodeRead,
+  codeUptakeLine, uptakeNeedsAnswering,
 } from './handOutCode';
 import { normaliseCode, joinLink, inviteMessage } from './joinCode';
 import type { JoinCodeRow } from './joinCodes';
@@ -208,6 +209,45 @@ ok(/ad’s destination|not your profile/i.test(copied), 'and where a paid ad mus
 ok(/approve/i.test(HOW_THEY_USE_IT), 'the instructions say the coach still has to approve them');
 ok(/find a trainer/i.test(HOW_THEY_USE_IT), 'and name the screen the client actually opens');
 ok(/whatever address/i.test(HOW_THEY_USE_IT), 'and say the code does not care which address they signed up with');
+
+/* ── what the code brought in, and who is waiting ────────────────────────── */
+
+// The failed read must never read as "nobody used it". This is a claim about a
+// coach's own marketing and it may not be made from a dropped request.
+{
+  const line = codeUptakeLine(null);
+  ok(/could not be read/.test(line), 'an unread count says so');
+  ok(!/\b0\b|nobody has joined/i.test(line), 'and never reports nobody having joined');
+  ok(/Nothing is wrong with the code/.test(line), 'and says the code itself is unaffected');
+  ok(!uptakeNeedsAnswering(null), 'an unread count is not a queue to answer');
+}
+
+// Nobody waiting is worth saying out loud — the absence of a queue is the
+// answer to "is anybody waiting on me", and silence is not.
+{
+  const line = codeUptakeLine({ joined: 17, pending: 0 });
+  ok(/17 people have joined/.test(line), 'the joined count is plural above one');
+  ok(/Nobody is waiting on you/.test(line), 'and no queue is stated rather than left out');
+  ok(!uptakeNeedsAnswering({ joined: 17, pending: 0 }), 'and it is not a job');
+}
+
+// The half this was built for: people sitting in a queue a coach cannot see.
+{
+  const line = codeUptakeLine({ joined: 4, pending: 3 });
+  ok(/3 are waiting for you to accept them/.test(line), 'the queue is named as a queue');
+  ok(uptakeNeedsAnswering({ joined: 4, pending: 3 }), 'and reported as something to do');
+}
+
+// One of each, because "1 people have joined" is the sort of thing that ships.
+ok(/^1 person has joined/.test(codeUptakeLine({ joined: 1, pending: 0 })),
+  'one joiner is a person');
+ok(/1 is waiting for you to accept them/.test(codeUptakeLine({ joined: 0, pending: 1 })),
+  'and one waiting is singular too');
+
+// A genuine zero, read whole, is allowed to say so — the refusal above is about
+// an unread count, not about a code nobody has used yet.
+ok(/0 people have joined/.test(codeUptakeLine({ joined: 0, pending: 0 })),
+  'a read zero is stated, because it is true and it is what a new code looks like');
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log(`handOutCode: ok (${hand.length} live named codes offered, ${new Set(lines.values()).size} distinct states)`);

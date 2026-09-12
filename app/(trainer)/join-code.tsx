@@ -45,16 +45,16 @@ import { View, Text, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Cta, Notice, PartialRead } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Cta, Notice, PartialRead, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric, value } from '../../src/theme/scale';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import { fetchMyJoinCode, fetchMyJoinCodes, type JoinCodesRead } from '../../src/ui/joinCode';
+import { fetchMyJoinCode, fetchMyJoinCodes, fetchJoinCodeStats, type JoinCodesRead } from '../../src/ui/joinCode';
 import { shareText } from '../../src/lib/exportShare';
 import { HAS_NATIVE_CLIPBOARD, copyToClipboard } from '../../src/ui/nativeModules';
 import {
   codeToGive, codesToHandOut, namedCodesLine, handOut,
   copyBlockedNote, copiedNote, copyFailedNote,
-  HOW_THEY_USE_IT, type CodeRead,
+  HOW_THEY_USE_IT, codeUptakeLine, uptakeNeedsAnswering, type CodeRead,
 } from '../../src/lib/handOutCode';
 import { codeCountLine } from '../../src/lib/joinCodes';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -70,11 +70,29 @@ export default function CoachJoinCode() {
   // if the two are never collapsed into one status.
   const [read, setRead] = useState<CodeRead>({ status: 'loading' });
   const [codes, setCodes] = useState<JoinCodesRead>({ status: 'loading', rows: [] });
+  /**
+   * What the code has brought in, and who is waiting on this coach.
+   *
+   * A third read, and a third state, for the same reason the two above are
+   * kept apart: `fetchJoinCodeStats` resolves null on a failure, and null here
+   * prints "could not be read" rather than a zero. `undefined` is the state
+   * before it has been asked, which is not the same thing and must not print
+   * the failure sentence on open.
+   *
+   * `my_join_code_stats` has existed since the join-code feature shipped and
+   * nothing called it — the dead-export ratchet carried `fetchJoinCodeStats`
+   * with the note "the coach Join Code screen is where it belongs". The pending
+   * half is the reason it belongs here: a coach reading their code out has no
+   * way of knowing three people are already in a queue, and the only surface
+   * that ever said so is a push notification that fires once, on insert.
+   */
+  const [uptake, setUptake] = useState<{ joined: number; pending: number } | null | undefined>(undefined);
 
   const load = useCallback(async () => {
     const r = await fetchMyJoinCode();
     setRead(r.ok ? { status: 'ready', code: r.code } : { status: 'error', reason: r.reason });
     setCodes(await fetchMyJoinCodes());
+    setUptake(await fetchJoinCodeStats());
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -200,6 +218,17 @@ export default function CoachJoinCode() {
         <Section>
           <SectionHead title="What They Do With It" />
           <Text style={{ ...ty.label, color: t.ink2 }}>{HOW_THEY_USE_IT}</Text>
+          {/* Above the button, because it is the reason to press it. Held back
+              until the read has happened at all: `undefined` is "not asked",
+              and printing the could-not-be-read sentence on open would be the
+              screen describing its own first frame. */}
+          {uptake !== undefined ? (
+            uptakeNeedsAnswering(uptake) ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{codeUptakeLine(uptake)}</Flag>
+            ) : (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{codeUptakeLine(uptake)}</Text>
+            )
+          ) : null}
           <View style={{ marginTop: sp.lg }}>
             <Ghost label="Coaching Requests" onPress={() => router.push('/(trainer)/notifications')} />
           </View>

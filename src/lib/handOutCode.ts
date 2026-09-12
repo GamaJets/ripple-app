@@ -242,6 +242,39 @@ export function namedCodesLine(status: LoadStatus, rows: readonly JoinCodeRow[])
  * Returns the sentence to draw under the buttons, or null when there is nothing
  * a coach needs to be told.
  */
+/**
+ * What this code has actually brought in, and who is waiting on the coach.
+ *
+ * `my_join_code_stats` counts `coach_requests` with `source = 'code'`: accepted
+ * ones are people now on the book, pending ones are people who used the code
+ * and are waiting for the coach to answer. The second half is the one worth
+ * putting on this screen — a coach reading their code out to somebody has no
+ * idea that three other people are already sitting in a queue, and the only
+ * surface that ever said so was a push notification that fires once on insert.
+ *
+ * `null` in, and it says the read failed. A zero for an unread count is the
+ * mistake this file exists to refuse: "nobody has used your code" is a claim
+ * about a coach's own marketing, and an unanswered request is a person left
+ * waiting. Neither may be invented from a dropped request.
+ */
+export function codeUptakeLine(stats: { joined: number; pending: number } | null): string {
+  if (!stats) {
+    return 'How many people have joined on this code could not be read just now. Nothing is wrong with the code itself — pull down to ask again.';
+  }
+  const joined = stats.joined === 1 ? '1 person has joined' : `${stats.joined} people have joined`;
+  if (stats.pending === 0) return `${joined} on this code. Nobody is waiting on you.`;
+  const waiting = stats.pending === 1
+    ? '1 is waiting for you to accept them'
+    : `${stats.pending} are waiting for you to accept them`;
+  return `${joined} on this code, and ${waiting}.`;
+}
+
+/** Whether the uptake line is reporting somebody left waiting — which is the
+ *  one state on this screen that is a job rather than a figure. */
+export function uptakeNeedsAnswering(stats: { joined: number; pending: number } | null): boolean {
+  return !!stats && stats.pending > 0;
+}
+
 export function copyBlockedNote(hasClipboard: boolean): string | null {
   if (hasClipboard) return null;
   return 'This build cannot copy to the clipboard, so the link is written out above — press and hold to select it. Sharing still works.';
