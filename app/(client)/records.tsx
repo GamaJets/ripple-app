@@ -222,6 +222,18 @@ export default function Records() {
       ? 'You have logged more sessions than this screen can read in one go, and there were no sets among the ones it read that could set a record. This is not a statement that you have no records.'
       : 'No records yet — log a strength workout to set your first PR. Pull-ups, dips and press-ups count: tick Bodyweight when you log the set. So do planks and hangs: log them as a hold and your longest one gets a board of its own.'}
     </Text>
+    {/* The sentence above names the one thing that fills this screen and, until
+        now, left the member to find it. The three `Cta`s elsewhere in this file
+        are all "Try Again" for a read that failed — nothing here answered the
+        empty case, which is the case every new member meets first.
+        Not under 'partial': that read found sessions and could not reach the
+        old ones, so sending somebody to log another would be answering the
+        wrong question. */}
+    {logStatus !== 'partial' ? (
+     <View style={{ marginTop: sp.lg }}>
+      <Cta label="Log a Workout" wide onPress={() => router.push('/(client)/workouts')} />
+     </View>
+    ) : null}
    </Section>
   </>) : (<>
    {/* An empty board has three causes and the FULL board has a fourth. Every

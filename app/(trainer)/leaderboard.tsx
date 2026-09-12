@@ -179,9 +179,20 @@ export default function Leaderboard() {
               short. analytics.tsx gates the identical sentence on the identical
               provider with `rosterWhole`; this is that. */}
           {scored.length === 0 && unplaced.length === 0 && isWhole(status) ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              No clients yet — your leaderboard fills in as clients join and log their workouts.
-            </Text>
+            <View>
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                No clients yet — your leaderboard fills in as clients join and log their workouts.
+              </Text>
+              {/* The sentence waits for clients to join and, until now, gave a
+                  coach nothing to do about it. Same destination and same words
+                  as src/ui/EmptyRoster.tsx, which the eleven per-client screens
+                  use — this screen's own sentence is kept because it explains
+                  what fills the board, which "there is no X" does not. */}
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                <Ghost label="Invite a Client" a11yLabel="Invite a client, on the Clients screen"
+                  onPress={() => router.push('/(trainer)/dashboard?start=invite')} />
+              </View>
+            </View>
           ) : null}
 
           {scored.length === 0 && unplaced.length > 0 ? (

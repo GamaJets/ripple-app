@@ -106,6 +106,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 // The month window's instant, recomputed at midnight, on foreground and on
 // focus — never frozen at mount. See src/ui/today.ts.
@@ -495,6 +496,12 @@ export default function CoachMoney() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Money</Text>
           </View>
         </View>
+
+        {/* Above the Notice about the two ledgers, which explains how the
+            screen is SHAPED. This explains what its figures mean — chiefly
+            "Too early to say", which reads as a missing feature and is a
+            statistical refusal. */}
+        <ScreenHelp screen="coach-money" />
 
         <View style={{ marginTop: sp.lg }}>
           <Notice kicker="How to read this" title="Two ledgers, kept apart" note={NO_NET_NOTE} />

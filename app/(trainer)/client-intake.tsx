@@ -32,6 +32,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Ghost, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, hairline, type as ty } from '../../src/theme/scale';
@@ -180,7 +181,7 @@ export default function ClientIntakeScreen() {
               </Pressable>
             ))}
             {!r.roster.length && r.status === 'ready' ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>You have nobody on your book yet.</Text>
+              <EmptyRoster lacks="there is no intake form to look at" />
             ) : null}
           </Section>
         ) : /* Four outcomes a naive screen would render identically, and they mean

@@ -1975,9 +1975,18 @@ export default function Builder() {
           ) : null}
 
           {roster.length === 0 && rosterStatus === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3 }}>
-              No clients yet — add a client from your dashboard and they'll appear here to build for.
-            </Text>
+            <View>
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                No clients yet — add a client from your dashboard and they'll appear here to build for.
+              </Text>
+              {/* "from your dashboard" was the whole instruction and made the
+                  coach change tabs from memory. Same control and destination as
+                  src/ui/EmptyRoster.tsx. */}
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                <Ghost label="Invite a Client" a11yLabel="Invite a client, on the Clients screen"
+                  onPress={() => router.push('/(trainer)/dashboard?start=invite')} />
+              </View>
+            </View>
           ) : roster.length === 0 && rosterStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your roster…</Text>
           ) : roster.length === 0 ? null : (
@@ -3295,9 +3304,15 @@ export default function Builder() {
           ) : null}
 
           {roster.length === 0 && rosterStatus === 'ready' ? (
-            <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>
-              No clients yet — add or invite a client and they will appear here to assign to.
-            </Text>
+            <View style={{ marginBottom: sp.lg }}>
+              <Text style={{ ...ty.label, color: t.ink3 }}>
+                No clients yet — add or invite a client and they will appear here to assign to.
+              </Text>
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+                <Ghost label="Invite a Client" a11yLabel="Invite a client, on the Clients screen"
+                  onPress={() => router.push('/(trainer)/dashboard?start=invite')} />
+              </View>
+            </View>
           ) : roster.length === 0 && rosterStatus === 'loading' ? (
             <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.lg }}>Reading your roster…</Text>
           ) : null}

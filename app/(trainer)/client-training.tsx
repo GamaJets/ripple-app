@@ -55,6 +55,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
@@ -829,9 +830,7 @@ export default function ClientTraining() {
               {r.roster.length === 0 && r.status === 'loading' ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>Reading your roster…</Text>
               ) : r.roster.length === 0 && isWhole(r.status) ? (
-                <Text style={{ ...ty.body, color: t.ink3 }}>
-                  Nobody is on your book yet, so there is no training to look at.
-                </Text>
+                <EmptyRoster lacks="there is no training to look at" />
               ) : r.roster.length === 0 ? null : (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                   {r.roster.map((c) => (

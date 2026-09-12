@@ -259,6 +259,22 @@ export default function Activity() {
                   : feedStatus === 'error' ? 'This is not an empty record — it is one we could not open. Pull down or come back when you have signal.'
                   : 'Log a workout or send a check-in to get started.'}
               </Text>
+              {/* The sentence names two things to do and, until now, offered
+                  neither. Only on the genuinely empty arm: under 'error' this
+                  is a record we could not open, and inviting somebody to add to
+                  it would be answering a question they did not ask; under
+                  'loading' the feed may be about to arrive.
+                  `isWhole`, not "not loading and not error". check:whole caught
+                  the first version of this line, and it was right to: a
+                  'partial' read is a prefix, and offering somebody a first step
+                  over a set we know is incomplete is the same mistake as
+                  calling it empty. */}
+              {isWhole(feedStatus) ? (
+                <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
+                  <Ghost label="Log a Workout" onPress={() => router.push('/(client)/workouts')} />
+                  <Ghost label="Weekly Check-in" onPress={() => router.push('/(client)/checkin')} />
+                </View>
+              ) : null}
             </View>
           ) : feed.map((e, i) => {
             const isOpen = open === i;

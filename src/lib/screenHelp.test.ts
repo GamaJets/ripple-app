@@ -7,7 +7,7 @@
 // logic ones: a stored list that fails to read as a list, and a key written
 // twice so the round trip through storage compounds. Both are pinned below.
 import {
-  SCREEN_HELP, CLIENT_HELP_KEYS, COACH_HELP_KEYS,
+  SCREEN_HELP, CLIENT_HELP_KEYS, COACH_HELP_KEYS, CLIENT_SCREEN_HELP_KEYS,
   dismissedFrom, isDismissed, withDismissed, isHelpKey,
   type ScreenHelpKey,
 } from './screenHelp';
@@ -30,23 +30,35 @@ const ALL = Object.keys(SCREEN_HELP) as ScreenHelpKey[];
 same(CLIENT_HELP_KEYS, ['home', 'train', 'meals', 'progress', 'me'], 'the client five, in tab order');
 eq(CLIENT_HELP_KEYS.length, 5, 'there is one card per client tab');
 
-// The coach's five are not tabs — the coach app has no tab bar — they are the
-// five screens whose numbers are computed rather than typed. Capped at five for
-// the same volume reason: a help row on all fifty-one coach screens is the
-// complaint this feature answers, restated.
-eq(COACH_HELP_KEYS.length, 5, 'and five for the coach');
+// The coach's are not tabs — the coach app has no tab bar — they are the
+// screens whose numbers are computed rather than typed. Held to that bar rather
+// than to a number, for the volume reason the module's header gives: a help row
+// on all fifty-one coach screens is the complaint this feature answers,
+// restated. Eight of fifty-one is not that.
+eq(COACH_HELP_KEYS.length, 8, 'and eight for the coach');
 for (const k of COACH_HELP_KEYS) {
   ok(k.startsWith('coach-'), `${k} is namespaced to the coach — a client and a coach can share a handset, and a collision dismisses the wrong card`);
 }
 
-// Every key belongs to exactly one of the two lists, and every entry in the
-// record is reachable from one of them. A card in SCREEN_HELP that is in
-// neither list is a card no screen can be pointed at and no test can watch.
-eq(ALL.length, CLIENT_HELP_KEYS.length + COACH_HELP_KEYS.length, 'the record holds the two lists and nothing else');
+// The client's screens BELOW a tab. A third population rather than a longer
+// first one, because the first one means "one per tab" and that is the thing
+// the assertion above protects. These are held to the coach's bar instead: a
+// figure that is computed rather than typed, on a screen whose name does not
+// explain it. Capped, for the volume reason the module's header gives.
+eq(CLIENT_SCREEN_HELP_KEYS.length, 3, 'three client screens below a tab carry a card');
+for (const k of CLIENT_SCREEN_HELP_KEYS) {
+  ok(!k.startsWith('coach-'), `${k} is a client screen and must not wear the coach prefix`);
+  ok(!CLIENT_HELP_KEYS.includes(k), `${k} is not a tab — a tab's card belongs in CLIENT_HELP_KEYS`);
+}
+
+// Every key belongs to exactly one of the three lists, and every entry in the
+// record is reachable from one of them. A card in SCREEN_HELP that is in no
+// list is a card no screen can be pointed at and no test can watch.
+eq(ALL.length, CLIENT_HELP_KEYS.length + COACH_HELP_KEYS.length + CLIENT_SCREEN_HELP_KEYS.length,
+  'the record holds the three lists and nothing else');
 for (const k of ALL) {
-  const inClient = CLIENT_HELP_KEYS.includes(k);
-  const inCoach = COACH_HELP_KEYS.includes(k);
-  ok(inClient !== inCoach, `${k} is listed in exactly one of the two populations`);
+  const inHow = [CLIENT_HELP_KEYS, COACH_HELP_KEYS, CLIENT_SCREEN_HELP_KEYS].filter((l) => l.includes(k)).length;
+  eq(inHow, 1, `${k} is listed in exactly one of the three populations`);
 }
 
 for (const k of ALL) {

@@ -24,6 +24,7 @@ import { useState, useCallback } from 'react';
 import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
@@ -344,6 +345,11 @@ export default function Goal() {
           </View>
         </View>
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>What you’re working toward, and how it’s going</Text>
+
+        {/* The projected finish is drawn beside a date the member chose, which
+            is exactly what makes it read as a commitment. Said before either
+            date appears. */}
+        <ScreenHelp screen="goal" />
 
         {g.status === 'error' ? (
           <Section>

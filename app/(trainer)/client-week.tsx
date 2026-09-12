@@ -50,6 +50,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
@@ -295,9 +296,7 @@ export default function ClientWeek() {
                   roster took to arrive. An empty list is a claim, and it may
                   only be made once the read has finished and come back whole. */}
               {r.roster.length === 0 && isWhole(r.status) ? (
-                <Text style={{ ...ty.body, color: t.ink3 }}>
-                  Nobody is on your book yet, so there are no weeks to look at.
-                </Text>
+                <EmptyRoster lacks="there are no weeks to look at" />
               ) : r.roster.length === 0 && r.status === 'loading' ? (
                 <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
               ) : (

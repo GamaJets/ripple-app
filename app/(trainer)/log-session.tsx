@@ -129,6 +129,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, ScrollView, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { liftIn, plain, readLift, type WeightUnit } from '../../src/lib/units';
 import { useSettings } from '../../src/ui/settings';
 import { useTheme } from '../../src/ui/components';
@@ -1345,11 +1346,15 @@ export default function LogSession() {
               * none: it cannot reach an empty list to make this branch true.
               */}
             {r.roster.length === 0 && r.status !== 'error' ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>
-                {r.status === 'loading'
-                  ? 'Reading your clients…'
-                  : 'Nobody is on your book yet. Add or invite a client from the Clients screen and they can be logged against here.'}
-              </Text>
+              r.status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>Reading your clients…</Text>
+              ) : (
+                /* The sentence named the Clients screen and left the coach to
+                   go and find it. Same component as the eleven per-client
+                   screens now use, so the remedy is in one place and one
+                   wording — see src/ui/EmptyRoster.tsx. */
+                <EmptyRoster lacks="there is nobody to log a session against" />
+              )
             ) : (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
                 {shownClients.map((c) => {

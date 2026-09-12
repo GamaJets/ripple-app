@@ -34,6 +34,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
@@ -195,6 +196,10 @@ export default function MyRegister() {
           What the registers you took actually say. These are the same figures your gym reads off
           your check-ins, in front of the person who took them.
         </Text>
+
+        {/* Two bare percentages sit below this, on the screen a coach opens to
+            check they have been paid right. */}
+        <ScreenHelp screen="coach-register" />
 
         <Section>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>

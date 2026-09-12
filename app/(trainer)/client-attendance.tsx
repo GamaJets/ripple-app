@@ -37,6 +37,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { isWhole } from '../../src/ui/loadStatus';
 import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
@@ -263,9 +264,7 @@ export default function ClientAttendanceScreen() {
               coach's own livelihood being made before anything has been read.
               Loading, failed and genuinely empty are three sentences. */}
           {r.roster.length === 0 && isWhole(r.status) ? (
-            <Text style={{ ...ty.body, color: t.ink3 }}>
-              Nobody is on your book yet, so there is no record to open.
-            </Text>
+            <EmptyRoster lacks="there is no record to open" />
           ) : r.roster.length === 0 && r.status === 'loading' ? (
             <Text style={{ ...ty.body, color: t.ink3 }}>Reading your clients…</Text>
           ) : (

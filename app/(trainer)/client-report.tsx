@@ -41,6 +41,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, TextInput, Pressable, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
@@ -481,7 +482,7 @@ export default function ClientReport() {
               </Pressable>
             ))}
             {!r.roster.length && r.status === 'ready' ? (
-              <Text style={{ ...ty.label, color: t.ink3 }}>You have nobody on your book yet.</Text>
+              <EmptyRoster lacks="there is no report to write" />
             ) : null}
           </Section>
         ) : (

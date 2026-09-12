@@ -72,7 +72,9 @@
  *  card by the other person reading theirs. */
 export type ScreenHelpKey =
   | 'home' | 'train' | 'meals' | 'progress' | 'me'
-  | 'coach-clients' | 'coach-quiet' | 'coach-schedule' | 'coach-enquiries' | 'coach-adspend';
+  | 'coach-clients' | 'coach-quiet' | 'coach-schedule' | 'coach-enquiries' | 'coach-adspend'
+  | 'standards' | 'consistency' | 'goal'
+  | 'coach-money' | 'coach-analytics' | 'coach-register';
 
 /** The client's five, in tab order. Exported so the test can assert on the two
  *  populations separately — a coach card must never be countable as a client
@@ -81,7 +83,52 @@ export const CLIENT_HELP_KEYS: readonly ScreenHelpKey[] = ['home', 'train', 'mea
 
 /** The coach's, in the order a coach meets them. */
 export const COACH_HELP_KEYS: readonly ScreenHelpKey[] =
-  ['coach-clients', 'coach-quiet', 'coach-schedule', 'coach-enquiries', 'coach-adspend'];
+  ['coach-clients', 'coach-quiet', 'coach-schedule', 'coach-enquiries', 'coach-adspend',
+   // ── three more, on the same bar the five above are held to ──────────────
+   //
+   //   coach-money     "Which Codes Worked" refuses to rank two channels until
+   //                   the split could be told from a coin toss, and the
+   //                   refusal reads as a missing feature rather than as the
+   //                   statistical answer it is. A coach moves real money on
+   //                   this screen.
+   //   coach-analytics the densest figures screen in either app. Sessions
+   //                   Delivered is counted from marked outcomes and not from
+   //                   the clock, and Value / Client is over a different
+   //                   population than the Clients figure beside it — the file
+   //                   already says both in prose to itself.
+   //   coach-register  two bare percentages beside a count, on the screen a
+   //                   coach opens to check they have been paid right.
+   'coach-money', 'coach-analytics', 'coach-register'];
+
+/**
+ * Client screens BELOW a tab that grade, project or score something.
+ *
+ * A third list rather than four more entries in `CLIENT_HELP_KEYS`, because
+ * that list means one thing — one card per tab — and the test asserts it. These
+ * are not tabs. They are the client-side equivalent of the five coach screens
+ * above: a figure a member has to interpret, on a screen whose own name does
+ * not explain it.
+ *
+ * The header's warning about volume stands, and this list is held to the same
+ * bar it sets for the coach's — each one named, with the reason:
+ *
+ *   standards     the level tiers. A member is told they are "Novice" at
+ *                 squats with nothing on screen saying the grade is their lift
+ *                 divided by their bodyweight against published norms, so it
+ *                 reads as a judgement rather than an arithmetic.
+ *   consistency   the streak and the heatmap. What counts as a training day,
+ *                 and what breaks a streak, decide both figures and neither is
+ *                 stated — and a streak somebody believes they have lost is the
+ *                 single most discouraging thing this app can get wrong.
+ *   goal          the projected finish date. It is a straight line through
+ *                 recent weight readings, and it is drawn beside a target date
+ *                 the member chose, which makes it look like a promise.
+ *
+ * Muscles is deliberately NOT here. It draws a body map and a rest count, and
+ * it already explains both in a line of its own prose beside them.
+ */
+export const CLIENT_SCREEN_HELP_KEYS: readonly ScreenHelpKey[] =
+  ['standards', 'consistency', 'goal'];
 
 export interface HelpLine {
   /** The label as it appears on the screen, so the reader can find it. */
@@ -201,6 +248,86 @@ export const SCREEN_HELP: Record<ScreenHelpKey, ScreenHelp> = {
       { term: 'Matched Spend', means: 'money against an ad whose link carries one of your join codes. Only matched spend can be attributed to anybody.' },
       { term: 'Unmatched', means: 'money the app can see but cannot attribute, because nothing in the ad names a code of yours.' },
       { term: 'Cost Unknown', means: 'a code with joins and no spend behind it. Mark it free and it stops being reported as a gap.' },
+    ],
+  },
+  'coach-money': {
+    key: 'coach-money',
+    title: 'What These Figures Mean',
+    lines: [
+      // The one this card exists for. src/lib/codeReturn.ts runs an exact
+      // binomial test and declines to rank until it passes; on screen that is
+      // a grey box reading "Too early to say".
+      { term: 'Not Enough Yet', means: 'two codes are too close for the difference to be real. Repple would rather say nothing than name a winner off a split that could be a coin toss — keep both running and it will tell you.' },
+      { term: 'Last Touch', means: 'a client is credited to the code they arrived on, and to that one only. Somebody who saw three of your ads counts once.' },
+      { term: 'Cost Unknown', means: 'a code with joins and no spend against it. Mark it free and it stops being counted as a gap.' },
+      { term: 'Named Codes Only', means: 'codes you gave a name to. An unnamed code cannot be told from another unnamed one, so neither is ranked.' },
+    ],
+  },
+  'coach-analytics': {
+    key: 'coach-analytics',
+    title: 'What These Figures Mean',
+    lines: [
+      // DELIVERED_IS_MARKED, in the member's — here, the coach's — words.
+      { term: 'Sessions Delivered', means: 'sessions whose outcome you marked, not bookings whose time has passed. A session nobody marked is not counted.' },
+      // The file's own warning, promoted out of a caption under the row.
+      { term: 'Value / Client', means: 'this month\u2019s revenue over the clients who actually paid — not over the Clients figure beside it, and not the two of them divided into each other.' },
+      { term: 'Avg Adherence', means: 'averaged over clients who have checked in at all. Clients who never have are left out rather than counted as zero.' },
+      { term: 'A Dash', means: 'not read, rather than nothing. Every figure here is withheld instead of guessed when its read came back short.' },
+    ],
+  },
+  'coach-register': {
+    key: 'coach-register',
+    title: 'What These Figures Mean',
+    lines: [
+      { term: 'Of Booked, Here', means: 'of the people booked into your classes, the share who turned up — your own register, not the gym\u2019s.' },
+      { term: 'Off the Waitlist', means: 'people who got in because somebody cancelled. They count as booked once promoted.' },
+      { term: 'Classes', means: 'classes in the period with a register you completed. One you never marked is not in any figure on this screen.' },
+    ],
+  },
+  standards: {
+    key: 'standards',
+    title: 'How These Levels Are Worked Out',
+    lines: [
+      // The whole screen in one sentence, and the one it never said. A tier
+      // name reads as a verdict on the person; it is a ratio.
+      { term: 'Your Level', means: 'your best lift divided by your bodyweight, against published figures for each level. It is arithmetic, not anybody’s opinion of you.' },
+      // The second most confusing thing here: six lifts, six separate answers.
+      { term: 'Per Lift', means: 'each lift is graded on its own. Being Intermediate at deadlift and Novice at overhead press is normal, not a mistake.' },
+      // Two different absences that look identical on the row.
+      { term: 'No Level', means: 'either the lift is not on your log, or we have no bodyweight to divide by. The line under each lift says which.' },
+    ],
+  },
+  consistency: {
+    key: 'consistency',
+    title: 'What This Screen Shows',
+    lines: [
+      // Days, anchored at today OR yesterday — see `currentStreak` in
+      // src/lib/streaks.ts. Written from that function rather than from the
+      // word "streak": a first draft of this card said weeks, and the hero on
+      // the screen says days.
+      { term: 'Current Streak', means: 'days in a row with something logged, counted back from today or yesterday — so resting today does not break it until tomorrow.' },
+      // The one figure on the screen that nothing anywhere explains. "no
+      // freezes yet" is printed under the hero and means nothing on its own.
+      { term: 'Freezes', means: 'you earn one for every 10 training days on your record, up to two. A freeze bridges a single missed day so it does not reset your streak.' },
+      // Exercises, not sessions — `heatmapDayLabel` says so, and the darker
+      // square is what a member reads as "a better day".
+      { term: 'The Squares', means: 'one per day, darker the more exercises you logged that day. Empty means nothing logged.' },
+    ],
+  },
+  goal: {
+    key: 'goal',
+    title: 'What This Screen Shows',
+    lines: [
+      // The reason this card exists. A date beside a target date reads as a
+      // commitment; it is an extrapolation of the last few readings.
+      // Read off `projectionOf` in src/lib/goalTargets.ts rather than off the
+      // words on the screen: the rate is FIRST to LAST reading since the goal
+      // was set, which is why a single bad weigh-in moves the date so much.
+      { term: 'Projected Finish', means: 'your first and latest readings since you set this goal, turned into a weekly rate and carried forward. It is what would happen if nothing changed — not a promise, and it moves every time you weigh in.' },
+      { term: 'Your Target Date', means: 'the date you chose. Nothing computes it and nothing moves it but you.' },
+      // The three refusals the function can return, in the member's words. The
+      // seven-day floor is MIN_TREND_DAYS and is the one worth naming.
+      { term: 'No Finish Date', means: 'your readings are less than a week apart, or flat, or going the other way. A date from any of those would be invented rather than projected.' },
     ],
   },
 };

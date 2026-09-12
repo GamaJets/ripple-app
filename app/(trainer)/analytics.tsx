@@ -28,6 +28,7 @@ import { View, Text, ScrollView, Pressable, ActivityIndicator, Modal, TextInput,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 // The month window's instant, recomputed at midnight, on foreground and on
 // focus — never frozen at mount. See src/ui/today.ts.
@@ -774,6 +775,12 @@ export default function TrainerAnalytics() {
           <Text style={{ ...ty.micro, color: t.ink3 }}>Your coaching business</Text>
           <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Analytics</Text>
         </View>
+
+        {/* The densest figures screen in either app. Two of the things this
+            file already explains to itself in prose — delivered is marked, and
+            Value / Client is over a different population than Clients — are
+            said to the coach here. */}
+        <ScreenHelp screen="coach-analytics" />
 
         {/* Said once, at the top, because it is the reason every figure below
             is a dash. Without it the screen reads as a coaching business with

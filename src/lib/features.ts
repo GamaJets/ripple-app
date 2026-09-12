@@ -92,7 +92,7 @@ export const CLIENT_FEATURES: Feature[] = [
   { key: 'tools', label: 'Lifting Tools', note: '1RM, plate math & macro reference', route: '/(client)/tools', icon: 'settings', area: 'train', keywords: 'calculator 1rm plates macros' },
   { key: 'recovery', label: 'Recovery', note: 'Hydration, sleep & mobility', route: '/(client)/recovery', icon: 'water', area: 'train', keywords: 'sleep hydration mobility rest' },
   { key: 'habits', label: 'Daily Habits', note: 'Habits & water tracker', route: '/(client)/habits', icon: 'check', area: 'train', keywords: 'water streak daily' },
-  { key: 'calendar', label: 'Book a Session', note: 'Month calendar · book your coach', route: '/(client)/calendar', icon: 'calendar', area: 'train', keywords: 'booking session appointment', soloHide: true },
+  { key: 'calendar', label: 'Book a Session', note: 'Month calendar · book your coach', route: '/(client)/calendar', icon: 'calendar', area: 'train', keywords: 'booking session appointment book cancel cancelling cancellation reschedule move change my session rearrange pt personal training slot', soloHide: true },
   // Listed beside Book a Session rather than folded into it, because they are
   // two different situations and a member in the second one has already looked
   // at the first and found nothing. Book a Session shows the hours a coach has
@@ -131,7 +131,7 @@ export const CLIENT_FEATURES: Feature[] = [
   // the phrase a member uses; 'cgm', 'libre' and 'dexcom' are the words the
   // person who actually wears one will type.
   { key: 'glucose', label: 'Blood Sugar', note: 'CGM readings from Health, against your meals', route: '/(client)/glucose', icon: 'water', area: 'meals', keywords: 'blood sugar glucose cgm libre dexcom diabetes diabetic health continuous monitor' },
-  { key: 'classes', label: 'Classes', note: 'Book gym group classes', route: '/(client)/classes', icon: 'calendar', area: 'train', keywords: 'classes group class booking gym schedule hiit spin yoga crossfit waitlist branch' },
+  { key: 'classes', label: 'Classes', note: 'Book gym group classes', route: '/(client)/classes', icon: 'calendar', area: 'train', keywords: 'classes group class booking book cancel cancelling cancellation waitlist gym schedule timetable hiit spin yoga crossfit pilates branch drop out cant make it' },
   { key: 'membership', label: 'Membership', note: 'Card, entry pass & visits', route: '/(client)/membership', icon: 'grid', area: 'me', keywords: 'membership member card gym access barcode entry pass visits plan renew' },
   { key: 'access', label: 'Gym Access', note: 'Entry barcode', route: '/(client)/access', icon: 'grid', area: 'me', keywords: 'access barcode entry scan gym door turnstile membership' },
   // Under Membership, which could READ a plan and offered no action of any
@@ -265,7 +265,7 @@ export const CLIENT_FEATURES: Feature[] = [
   // the app on the day it was up.
   { key: 'notices', label: 'Notices', note: 'Everything your gym has posted, the older ones too', route: '/(client)/notices', icon: 'message', area: 'me', keywords: 'notice notices announcement announcements posted post news bulletin board update updates closed closure opening hours bank holiday what did they say earlier previous older missed it' },
   { key: 'referral', label: 'Invite Friends', note: 'Share the app with a friend', route: '/(client)/referral', icon: 'share', area: 'me', keywords: 'refer referral invite friend share code' },
-  { key: 'devices', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices', icon: 'clock', area: 'me', keywords: 'apple watch wearable heart rate' },
+  { key: 'devices', label: 'Watch & Devices', note: 'Apple Watch, WHOOP, Garmin…', route: '/(client)/devices', icon: 'clock', area: 'me', keywords: 'apple watch wearable heart rate whoop oura ring garmin fitbit strap band google fit health connect healthkit apple health connect my watch sync device' },
   { key: 'music', label: 'Music & Playlists', note: 'AI workout playlists', route: '/(client)/music', icon: 'play', area: 'me', keywords: 'spotify playlist songs' },
   { key: 'appearance', label: 'Appearance', note: 'Theme & accent colour', route: '/(client)/appearance', icon: 'palette', area: 'me', keywords: 'theme dark light colour' },
   { key: 'settings', label: 'Settings', note: 'Account, notifications, units, legal & version', route: '/(client)/settings', icon: 'settings', area: 'me', keywords: 'notifications units legal about sign out signout log out logout account' },

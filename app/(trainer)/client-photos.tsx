@@ -80,6 +80,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable, Image, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
@@ -322,7 +323,7 @@ export default function ClientPhotos() {
         <Section>
           <SectionHead title="Client" />
           {r.roster.length === 0 && isWhole(r.status) ? (
-            <Text style={{ ...ty.body, color: t.ink3 }}>Nobody is on your book yet.</Text>
+            <EmptyRoster lacks="there is nobody to compare photos for" />
           ) : (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
               {r.roster.map((c) => (

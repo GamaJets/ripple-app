@@ -9,6 +9,7 @@ import { useCallback, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Notice, Cta, fig } from '../../src/ui/kit';
@@ -178,6 +179,11 @@ export default function Consistency() {
             <Text style={{ ...ty.title, color: t.ink, marginTop: 3 }}>Consistency</Text>
           </View>
         </View>
+
+        {/* Before the streak figure, which is the number people argue with.
+            What counts as a training day and what breaks a streak decide both
+            the hero and the grid, and neither was stated anywhere on screen. */}
+        <ScreenHelp screen="consistency" />
 
         {/* Said before the hero, because everything below it is a dash until the
             log loads and the reader needs to know why rather than guess. */}

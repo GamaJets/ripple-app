@@ -18,6 +18,7 @@
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { ScreenHelp } from '../../src/ui/ScreenHelp';
 import { useTheme } from '../../src/ui/components';
 import { useClientData } from '../../src/ui/clientData';
 import { useSettings } from '../../src/ui/settings';
@@ -139,10 +140,30 @@ export default function Standards() {
    </View>
   </View>
 
+  {/* Above the grades, not below them. A member reads "Novice" first, and this
+      card is what stops that landing as a verdict on them rather than as the
+      ratio it is — see CLIENT_SCREEN_HELP_KEYS in src/lib/screenHelp.ts. */}
+  <ScreenHelp screen="standards" />
+
   <Rule />
 
   <Section>
    <SectionHead title="The Big Lifts" note={bw != null ? `bodyweight ${weightLabel(bw, wu)}` : bodyWhole ? 'add your weight for ratios' : 'bodyweight not read'} />
+   {/* One button, before the rows, rather than one per lift.
+       Every row on this screen grades a lift against bodyweight, so with no
+       weight on the record all six say the same thing — "add one and this
+       grades itself" — and until now not one of them offered a way to. Six
+       buttons saying the same thing is the other mistake, so the offer is made
+       once, where the SectionHead already says "add your weight for ratios".
+       Only under a whole read: a weight that merely could not be READ is not a
+       weight to add, and asking for it again would be the app blaming the
+       member for its own failed request. */}
+   {bw == null && bodyWhole ? (
+    <View style={{ alignSelf: 'flex-start', marginTop: sp.sm, marginBottom: sp.md }}>
+     <Ghost label="Add Your Weight" a11yLabel="Add your bodyweight, so these lifts can be graded"
+      onPress={() => router.push('/(client)/scans')} />
+    </View>
+   ) : null}
    {/* Said before the rows, because every row below is a grade and this is the
        reason a low one may not be the member's. */}
    {!liftsWhole && logStatus !== 'loading' ? (

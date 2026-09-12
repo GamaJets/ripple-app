@@ -322,6 +322,16 @@ export default function Trends() {
                 : 'We couldn’t read your training log, so there is nothing to chart here yet. Your history is intact.'}
             </Text>
           )}
+          {/* The one Ghost this screen already has points at Targets, which is
+              no use to a member with nothing logged. Only on the `logKnown`
+              arm — the other three are a read in flight, a read that was cut
+              short, and a read that failed, and none of them is answered by
+              logging another set. */}
+          {!anyVolume && logKnown ? (
+            <View style={{ alignSelf: 'flex-start', marginTop: sp.md }}>
+              <Ghost label="Log a Workout" onPress={() => router.push('/(client)/workouts')} />
+            </View>
+          ) : null}
           <View style={{ height: sp.lg }} />
           <KpiRow items={[
             { label: 'This Week', value: logKnown ? fig(volumeIn(thisWeek.vol, wu)?.toLocaleString()) : fig(null), unit: logKnown ? wu : undefined },

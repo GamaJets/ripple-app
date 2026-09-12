@@ -213,6 +213,14 @@ export default function BodyTrends() {
               <SectionHead title="Not Enough Readings Yet" />
               <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Add another scan to see trends</Text>
               <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Once you've logged two or more readings, each metric graphs here so you can watch it move over time.</Text>
+              {/* "Add another scan" was the whole instruction and there was no
+                  way to do it from here — the only other control on this screen
+                  is the Back button. A Ghost rather than a Cta: a member on this
+                  screen came to look at trends, and a full-width primary button
+                  would read as the thing they came for. */}
+              <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>
+                <Ghost label="Add a Scan" a11yLabel="Add a body scan" onPress={() => router.push('/(client)/scans')} />
+              </View>
             </>)}
           </Section>
         ) : (
