@@ -34,6 +34,7 @@
 // because a gym with no door terminal has no evidence either way and a
 // confident-looking verdict there would be a fabrication.
 
+import { sharedCurrency } from './gymRecord';
 import type { Membership, GymPayment, MembershipStatus } from './gymRecord';
 import type { Visit } from './gymVisits';
 import type { PtSession } from './gymSessions';
@@ -369,9 +370,32 @@ export interface MemberDossier {
   status: MembershipStatus | null;
 
   payments: GymPayment[] | null;
-  /** Null when nothing was recorded — a member with no payment rows has not
-   *  necessarily paid nothing, and 0.00 would assert that they have. */
+  /**
+   * What they have paid, or null.
+   *
+   * Three different reasons for null and they are all the same instruction to
+   * the screen — do not print a figure:
+   *
+   *   · the payments could not be read, or came back truncated;
+   *   · there are no payment rows at all, because 0.00 would assert that they
+   *     have paid nothing when nobody has said so;
+   *   · THE ROWS DO NOT AGREE ON A CURRENCY. This one was the defect. A member
+   *     with a £150 and a 150 AED payment — an ordinary thing at a gym that
+   *     changed its base currency, which `gymRecord.ts` records as having
+   *     happened live — summed to 30000 and carried no way to know it. Every
+   *     sibling summariser in this codebase guards this (`takenCurrency`,
+   *     `passRevenueCents`'s `mixedCurrency`, `coachLedger.sumMajor`,
+   *     `sumCurrency.ts`); this one did not, and `studio-web/app/members`
+   *     worked around it at the CALL site rather than here — leaving the
+   *     landmine armed for the next caller.
+   */
   paidCents: number | null;
+  /**
+   * What `paidCents` is denominated in. Null whenever there is no figure, and
+   * ALSO null when the rows disagreed — in which case `paidCents` is null too,
+   * so a caller cannot accidentally render one without the other.
+   */
+  paidCurrency: string | null;
   lastPaidAt: string | null;
 
   visits: Visit[] | null;
@@ -440,6 +464,10 @@ export function buildDossier(
 ): MemberDossier {
   const ms = pick(rowsOf(rec.memberships), (m) => m.memberId === memberId);
   const pays = pick(rowsOf(rec.payments), (p) => p.memberId === memberId);
+  // One currency across every payment row, or null. Null for an empty set and
+  // null for a set that disagrees — see `paidCents` on MemberDossier for why
+  // both of those must withhold the total rather than add it up.
+  const paidCurrency = pays && pays.length ? sharedCurrency(pays) : null;
   const vis = pick(rowsOf(rec.visits), (v) => v.memberId === memberId);
   const bks = pick(rowsOf(rec.bookings), (b) => b.memberId === memberId);
   const sess = pick(rowsOf(rec.sessions), (s) => s.clientId === memberId);
@@ -464,9 +492,14 @@ export function buildDossier(
     status: current?.status ?? null,
 
     payments: pays,
-    paidCents: pays == null || pays.length === 0
+    // `sharedCurrency` answers null both for "no rows" and for "rows that
+    // disagree", and here those collapse to the same answer anyway: no figure.
+    // The currency is computed FIRST so the total cannot be produced without
+    // one, which is the shape that makes the pair impossible to misuse.
+    paidCents: paidCurrency == null || pays == null || pays.length === 0
       ? null
       : pays.reduce((a, p) => a + p.amountCents, 0),
+    paidCurrency,
     lastPaidAt: pays == null || pays.length === 0
       ? null
       : pays.reduce((a, p) => (a > p.takenAt ? a : p.takenAt), pays[0].takenAt),

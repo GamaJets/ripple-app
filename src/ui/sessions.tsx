@@ -1049,8 +1049,17 @@ export async function cancelBookedSession(
     // Server-side lookup on THIS session's trainer, so no other client's
     // identity reaches the caller beyond opaque ids.
     const others = await reofferSlot(session.id);
-    offeredTo = others.length || null;
-    offerPushed = others.length === 0
+    // null is "we could not ask", and it is NOT an empty roster. Both produce
+    // no push — there is nobody to send one to either way — but they are
+    // different facts about what happened, and the caller reports them apart:
+    // `offeredTo` stays null for both, while `offerPushed` false says a push
+    // was owed and did not go. Reported, because a freed slot that reached
+    // nobody is the coach's problem to know about.
+    if (others == null) reportError('sessions.reofferSlot.unread', 'the roster could not be read, so a freed slot was offered to nobody', { session: session.id });
+    offeredTo = others == null ? null : (others.length || null);
+    offerPushed = others == null
+      ? false
+      : others.length === 0
       ? null
       // `dow` as well as `at`. This is the one of the three pushes that goes to
       // the WHOLE roster, and it was the only one that named a time without a
@@ -1060,7 +1069,7 @@ export async function cancelBookedSession(
       // because tonight is impossible for them, and never learns the slot was
       // on a day they were free. The other two pushes in this function already
       // carried the day; this one is the one that most needed it.
-      : (await sendPushChecked(others, 'A PT slot just opened', `${dow} ${at} with your coach just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
+      : (await sendPushChecked(others ?? [], 'A PT slot just opened', `${dow} ${at} with your coach just opened up — first to book it gets it.`, { route: '/(client)/calendar' })).ok;
   }
 
   // `refundSession` answers ok:false both when there is no pack to credit and

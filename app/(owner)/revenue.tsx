@@ -284,6 +284,22 @@ export default function OwnerRevenue() {
   // with twelve clients and a payroll of 728.50 it printed 61 where the figure
   // is 60.71, and `gymMoney` then drew it as "GBP 61.00". The formatter takes
   // the places from the gym's own currency; nothing needs rounding first.
+  /**
+   * Delivered-session value spread over EVERY client on the book.
+   *
+   * Including the ones who did nothing this month, which is the part that has
+   * to be said out loud. app/(trainer)/analytics.tsx computes the coach's
+   * version over `payingClients` — clients who actually had a session that
+   * month — and prints a sentence under the row saying so, because "Value /
+   * Client" next to a "Clients" tile reads as the first divided by the second
+   * and here it genuinely is: the very division that screen refuses.
+   *
+   * The owner screen has no per-client delivery data to narrow the divisor
+   * with — `roll` carries `delivered30` per TRAINER, not per client — so the
+   * figure is not silently recomputed over a population this screen cannot
+   * see. It is labelled for what it is instead, which is the honest half of
+   * the same fix and is why the caption below the row is not optional.
+   */
   const valuePerClient = revenue30 != null && roll.clients > 0 ? revenue30 / roll.clients : null;
   // Said the same way wherever a figure is missing for the same reason, so an
   // owner reading three dashes is told once what they mean.
@@ -379,10 +395,21 @@ export default function OwnerRevenue() {
             },
             { label: 'Session Fee', value: fig(gymMoney(fee, cur)), delta: fee == null ? 'not set' : 'per delivered session' },
             { label: 'Value / Client', value: trainersUnknown ? '—' : fig(gymMoney(valuePerClient, cur)),
-              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : valuePerClient == null ? 'needs a session fee' : 'last 30 days' },
+              delta: loading ? 'not read yet' : trainersUnread ? unreadNote : valuePerClient == null ? 'needs a session fee' : 'over every client on the book' },
             { label: 'Clients', value: trainersUnknown ? '—' : fig(roll.clients),
               delta: loading ? 'not read yet' : trainersUnread ? unreadNote : roll.avgClientsPerTrainer == null ? 'no trainers yet' : `${plainExact(roll.avgClientsPerTrainer)} avg / trainer` },
           ]} />
+          {/* Said under the row, in the same place and for the same reason the
+              coach's own analytics screen says it: three numbers in a line read
+              as though the third were the first two divided into each other,
+              and here that is exactly what it is — over a population that
+              includes everybody who did nothing this month. */}
+          {!trainersUnknown && valuePerClient != null ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              Value per client is delivered-session value spread over every client on the book, including any
+              who did not train in the last 30 days. It is not what an active client is worth to you.
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />

@@ -294,8 +294,25 @@ export function payrollByTrainer(
 }
 
 export interface PayrollTotal {
-  /** Null when nothing payable could be priced. */
+  /**
+   * The sum of the priced lines, or null when nothing payable could be priced.
+   *
+   * A RAW sum, with no opinion about money — the contract
+   * `closePayrollCurrency.test.ts` pins, and it is right: the month close and
+   * the snapshot both need the figure. What was missing is the means to know
+   * whether it may be PRINTED as an amount, which is `currency` and
+   * `mixedCurrency` below. Every `PayrollLine` has carried those two since
+   * part 1010 and this roll-up dropped both, so a gym with one coach paid in
+   * GBP and another in USD handed its caller a number with no way to tell that
+   * it was not an amount of anything.
+   */
   cents: number | null;
+  /** The one currency `cents` may be labelled with, or null when no single
+   *  label is honest. The same contract as `PayrollLine.currency`. */
+  currency: string | null;
+  /** True when the lines spanned more than one money, or any single line did.
+   *  `cents` is null whenever this is true — the two cannot disagree. */
+  mixedCurrency: boolean;
   delivered: number;
   payable: number;
   priced: number;
@@ -304,6 +321,9 @@ export interface PayrollTotal {
    * Whether the figure can be settled. False while sessions are unmarked or
    * payable sessions have no rate — the caller should show the caveat rather
    * than presenting the number as final.
+   *
+   * Also false under a mixed currency: a number that is not an amount of
+   * anything cannot be the basis of a payment run.
    */
   settleable: boolean;
 }
@@ -312,20 +332,60 @@ export interface PayrollTotal {
 export function payrollTotal(lines: PayrollLine[]): PayrollTotal {
   let cents: number | null = null;
   let delivered = 0, payable = 0, priced = 0, unmarked = 0;
+  // Only lines that actually CONTRIBUTE a figure get a say in the currency. A
+  // trainer with nothing payable states no money and must not be able to make
+  // the gym's total unlabelled by being silent.
+  const units = new Set<string>();
+  let anyLineMixed = false;
+  /** A line contributed a figure and stated no currency for it. */
+  let unlabelled = false;
 
   for (const l of lines) {
     delivered += l.delivered;
     payable += l.payable;
     priced += l.priced;
     unmarked += l.unmarked;
-    if (l.cents != null) cents = (cents ?? 0) + l.cents;
+    if (l.cents != null) {
+      cents = (cents ?? 0) + l.cents;
+      if (l.mixedCurrency) anyLineMixed = true;
+      if (l.currency) units.add(l.currency);
+      // A line with a figure and NO currency is the `unrecorded` case from
+      // gymRateCurrency.ts — rates that predate supabase/parts/1010. It is
+      // NOT disagreement: nothing has said it is a different money, only that
+      // nobody wrote down which. Counting it as mixed was the first version of
+      // this fix and it was worse than the bug — every gym whose rates predate
+      // that part would have lost its payroll total and its ability to settle,
+      // which is most of them. It withholds the LABEL instead, below.
+      else unlabelled = true;
+    }
   }
 
+  // Mixed is disagreement, and only disagreement: two stated currencies, or a
+  // line that is itself a sum across two.
+  const mixedCurrency = anyLineMixed || units.size > 1;
+  // A label is offered only when every contributing line stated the same one.
+  // One unlabelled figure in the set is enough to withhold it — the total may
+  // still be a real amount, but nothing here can say of what, and stamping the
+  // gym's own code over it is the exact defect `PayrollLine.currency` exists to
+  // make impossible.
+  const currency = mixedCurrency || unlabelled ? null : ([...units][0] ?? null);
+
   return {
+    // The raw sum, unchanged. `closePayrollCurrency.test.ts` pins this contract
+    // deliberately — "payrollTotal adds lines and has no opinion about money.
+    // It is the LABEL that refuses" — and a first version of this fix broke it
+    // by nulling the figure here. That was the wrong end: the snapshot and the
+    // month close both want the sum, and what must never happen is a screen
+    // PRINTING it as an amount. `mixedCurrency` and `settlementBlocker` below
+    // are what stop that, and the console's payroll header already gates its
+    // figure on the blocker.
     cents,
+    currency,
+    mixedCurrency,
     delivered, payable, priced, unmarked,
-    // Everything payable must be priced, and nothing may still be unmarked.
-    settleable: unmarked === 0 && payable > 0 && priced === payable,
+    // Everything payable must be priced, nothing may still be unmarked, and the
+    // figure must be an amount of one thing.
+    settleable: !mixedCurrency && unmarked === 0 && payable > 0 && priced === payable,
   };
 }
 
@@ -334,6 +394,12 @@ export function payrollTotal(lines: PayrollLine[]): PayrollTotal {
  * on. Null when it can.
  */
 export function settlementBlocker(t: PayrollTotal): string | null {
+  // First, because it is the one an owner cannot fix by marking a session: two
+  // coaches paid in two moneys have no single total, and no amount of tidying
+  // the register produces one. Named as the specific thing it is.
+  if (t.mixedCurrency) {
+    return 'Your coaches are not all priced in one currency this period, so there is no single total to settle. Settle them one at a time.';
+  }
   if (t.unmarked > 0) {
     return `${t.unmarked} session${t.unmarked === 1 ? '' : 's'} still need an outcome recorded.`;
   }

@@ -297,7 +297,23 @@ export interface PassSummary {
   expired: number;
   usedUp: number;
   visitsRemaining: number;
+  /**
+   * What the priced passes came to, or null when no single amount exists.
+   *
+   * `passRevenueCents` beside this already computes `currency`, `currencies`
+   * and `mixedCurrency` precisely so a caller can tell a cross-currency sum
+   * apart from a real total — and this function destructured `{ cents, priced }`
+   * and dropped every one of the safety fields, leaving `PassSummary` with a
+   * figure and no way to know whether it meant anything. Latent rather than
+   * live, because nothing renders it as money today; carried now so the next
+   * screen that does cannot inherit the bug.
+   */
   revenueCents: number | null;
+  /** The one currency `revenueCents` may be labelled with, or null. */
+  currency: string | null;
+  /** True when the priced passes span more than one money, in which case
+   *  `revenueCents` is null and there is nothing to print. */
+  mixedCurrency: boolean;
   /** How many of the issued passes carried a recorded price. */
   priced: number;
 }
@@ -319,8 +335,14 @@ export function summarisePasses(passes: GymPass[], today: string): PassSummary {
     else live += 1;
   }
 
-  const { cents, priced } = passRevenueCents(passes);
-  return { issued: passes.length, live, expired, usedUp, visitsRemaining, revenueCents: cents, priced };
+  const { cents, priced, currency, mixedCurrency } = passRevenueCents(passes);
+  return {
+    issued: passes.length, live, expired, usedUp, visitsRemaining,
+    // Withheld under a mix, for the same reason the payroll total is: a sum
+    // across two moneys is not an amount of anything.
+    revenueCents: mixedCurrency ? null : cents,
+    currency, mixedCurrency, priced,
+  };
 }
 
 /**

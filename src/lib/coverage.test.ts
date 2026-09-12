@@ -577,6 +577,64 @@ ok((settlementBlocker(unpricedTotal) ?? '').includes('rate'), 'blocker names the
 ok(payrollTotal([]).settleable === false, 'an empty period is not settleable');
 ok(payrollTotal([]).cents === null, 'an empty period has null pay, not 0');
 
+/* ── two coaches, two currencies ──────────────────────────────────────────
+   Every PayrollLine carries `currency` and `mixedCurrency` so a cross-currency
+   figure cannot be printed, and the gym-wide roll-up dropped both — producing a
+   single number the console's payroll header labelled with the gym's own three
+   letters. Its own comment calls that header "the single most important
+   decision on this screen". The per-trainer settle action was separately
+   guarded, so the money never moved wrongly; the number an owner reads before
+   deciding was wrong. Each fixture below is a fully marked, fully priced line,
+   so nothing but the currency is in question. */
+{
+  const line = (trainerId: string, cents: number, currency: string | null, mixed = false) => ({
+    trainerId, trainerName: trainerId, delivered: 1, noShows: 0, cancelled: 0, unmarked: 0,
+    cents, currency, mixedCurrency: mixed, priced: 1, payable: 1,
+  });
+  const same = payrollTotal([line('a', 5000, 'GBP'), line('b', 7000, 'GBP')]);
+  ok(same.cents === 12000, 'one currency across both coaches still totals');
+  ok(same.currency === 'GBP' && same.mixedCurrency === false, 'and is labelled with it');
+  ok(same.settleable === true, 'and can be settled');
+
+  const split = payrollTotal([line('a', 5000, 'GBP'), line('b', 7000, 'USD')]);
+  /* The SUM survives, and that is deliberate — closePayrollCurrency.test.ts
+     pins the contract that this function "adds lines and has no opinion about
+     money", because the month close and the snapshot both need the figure. What
+     was missing was any means for a caller to know it must not be PRINTED as an
+     amount. A first version of this fix nulled `cents` here and broke two
+     existing tests, which were right and it was wrong. */
+  ok(split.cents === 12000, 'the raw sum is still computed');
+  ok(split.currency === null && split.mixedCurrency === true, 'but there is no unit to print it in, and it says so');
+  ok(split.settleable === false, 'and a number that is not an amount cannot be settled');
+  ok((settlementBlocker(split) ?? '').toLowerCase().includes('currency'),
+    `the blocker names the currency, not a tidying job (got ${settlementBlocker(split)})`);
+
+  // A line that is itself mixed makes the total unlabellable in the same way.
+  const oneMixed = payrollTotal([line('a', 5000, null, true)]);
+  ok(oneMixed.mixedCurrency === true && oneMixed.settleable === false,
+    'a single trainer priced in two moneys has no settleable total either');
+  ok(settlementBlocker(oneMixed) !== null, 'and the blocker says so before anybody pays on it');
+
+  /* A figure with no currency at all — rates predating supabase/parts/1010 —
+     is NOT disagreement. Nothing has said it is a different money, only that
+     nobody wrote down which. Treating it as mixed was the first version of this
+     fix and it was worse than the bug it repaired: every gym whose rates
+     predate that part would have lost both its payroll total and its ability to
+     settle. So the figure survives and the LABEL is withheld, which is the one
+     thing that cannot be honestly supplied. */
+  const unlabelledTotal = payrollTotal([line('a', 5000, null)]);
+  ok(unlabelledTotal.cents === 5000, 'a priced line with no recorded currency still totals');
+  ok(unlabelledTotal.currency === null, 'but offers no label for it');
+  ok(unlabelledTotal.mixedCurrency === false, 'and is not reported as a mix, because nothing disagreed');
+  ok(unlabelledTotal.settleable === true, 'a legacy gym can still settle its payroll');
+
+  // One unlabelled line beside a labelled one withholds the label for both,
+  // because the sum is no longer known to be all of one money.
+  const partly = payrollTotal([line('a', 5000, 'GBP'), line('b', 2000, null)]);
+  ok(partly.cents === 7000, 'the figure is still the sum');
+  ok(partly.currency === null, 'and carries no unit, because one of its halves named none');
+}
+
 // ── gym payroll must not price unconfirmed work ──
 // Regression guard: payroll used to be sessions30 * fee, where sessions30 was
 // "booked and the clock has passed" — so it paid for no-shows and slots nobody
@@ -2166,8 +2224,11 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   const mem = (memberId: string, memberName: string | null, status: Membership['status'], startedOn: string): Membership =>
     ({ id: 'ms-' + memberId + '-' + startedOn, memberId, memberName, planId: 'p1', planName: 'Full', startedOn, endsOn: null, status });
-  const pay = (id: string, memberId: string, amountCents: number, takenAt: string): GymPayment =>
-    ({ id, memberId, memberName: null, amountCents, currency: 'AED', method: 'card', takenAt, note: null,
+  // `currency` is a parameter and not a constant, because it being a constant is
+  // exactly why the cross-currency bug below survived: every fixture here was
+  // AED, so the path where two payments disagree had never run.
+  const pay = (id: string, memberId: string, amountCents: number, takenAt: string, currency = 'AED'): GymPayment =>
+    ({ id, memberId, memberName: null, amountCents, currency, method: 'card', takenAt, note: null,
        kind: 'payment', reversesPaymentId: null, invoiceId: null, membershipId: null });
   const visit = (id: string, memberId: string, enteredAt: string, classId: string | null = null): Visit =>
     ({ id, memberId, memberName: null, passId: null, classId, enteredAt, exitedAt: null, source: 'door', note: null });
@@ -2254,6 +2315,24 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   ok(gone.paidCents === null, 'a member with no payment rows has paid an unknown amount, not 0');
   ok(floor.paidCents === 30000, 'and a member with two has the sum of them');
+  ok(floor.paidCurrency === 'AED', 'with the currency those two rows agree on');
+  /* ── two payments, two currencies ──────────────────────────────────────
+     A gym that changed its base currency, which gymRecord.ts records as having
+     happened live. The sum was 30000 with nothing to mark it, and the console
+     printed it with the gym's CURRENT three letters in front — which is a
+     bigger number wearing a unit that never applied to half of it. Every
+     sibling summariser in this codebase guards this; this one did not, and the
+     guard was at the call site instead, one caller deep. */
+  {
+    const mixedRec = { ...rec, payments: sliceReady([
+      pay('pay1', 'floor', 15000, ago(20), 'GBP'),
+      pay('pay2', 'floor', 15000, ago(50), 'AED'),
+    ]) };
+    const d = buildDossier('floor', mixedRec, NOW);
+    ok(d.paidCents === null, 'two currencies do not add up to a total');
+    ok(d.paidCurrency === null, 'and there is no unit to print one in');
+    ok(d.payments != null && d.payments.length === 2, 'the rows themselves are still all there to be listed');
+  }
   ok(buildDossier('floor', { ...rec, payments: sliceFailed('nope') }, NOW).paidCents === null, 'an unread payments table is not 0.00 either');
   const noClasses = buildDossier('floor', { ...rec, bookings: sliceReady([]) }, NOW);
   ok(noClasses.booked === 0 && noClasses.showRate === null, 'nobody who booked nothing has a 0% attendance rate');

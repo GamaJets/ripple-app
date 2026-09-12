@@ -47,7 +47,7 @@ const closeOf = (o: Partial<MonthClose> = {}): MonthClose => ({
   check: null,
   payroll: {
     lines: [],
-    total: { cents: 180000, delivered: 40, payable: 40, priced: 40, unmarked: 0, settleable: true },
+    total: { currency: 'GBP', mixedCurrency: false, cents: 180000, delivered: 40, payable: 40, priced: 40, unmarked: 0, settleable: true },
     blocker: null,
     // What `payrollOf` derived from the sessions the total is a sum of. GBP
     // here and AED in `currency` below would be the whole point of the split.
@@ -129,7 +129,7 @@ const GBP = { taken: 'GBP', invoiced: 'GBP', outstanding: 'GBP' };
   const mixedPay = closeOf({
     payroll: {
       lines: [],
-      total: { cents: 180000, delivered: 40, payable: 40, priced: 40, unmarked: 0, settleable: true },
+      total: { currency: 'GBP', mixedCurrency: false, cents: 180000, delivered: 40, payable: 40, priced: 40, unmarked: 0, settleable: true },
       blocker: null,
       currency: null, mixedCurrency: true,
       currencyNote: 'This period covers more than one currency — 20 sessions in AED, 20 sessions in GBP — so there is no single total.',
@@ -148,7 +148,7 @@ const GBP = { taken: 'GBP', invoiced: 'GBP', outstanding: 'GBP' };
   const unrecorded = closeOf({
     payroll: {
       lines: [],
-      total: { cents: 180000, delivered: 40, payable: 40, priced: 40, unmarked: 0, settleable: true },
+      total: { currency: 'GBP', mixedCurrency: false, cents: 180000, delivered: 40, payable: 40, priced: 40, unmarked: 0, settleable: true },
       blocker: null,
       currency: null, mixedCurrency: false,
       currencyNote: 'These 40 sessions were filed before Repple recorded what money a session rate is in.',
@@ -194,7 +194,7 @@ const GBP = { taken: 'GBP', invoiced: 'GBP', outstanding: 'GBP' };
       { kind: 'money_gap', text: 'Two invoices marked paid have no payment behind them.' },
     ],
     payroll: {
-      lines: [], total: { cents: 180000, delivered: 40, payable: 52, priced: 40, unmarked: 12, settleable: false },
+      lines: [], total: { currency: 'GBP', mixedCurrency: false, cents: 180000, delivered: 40, payable: 52, priced: 40, unmarked: 12, settleable: false },
       blocker: 'unmarked', currency: 'GBP', mixedCurrency: false, currencyNote: null,
     },
   });

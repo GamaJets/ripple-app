@@ -970,14 +970,35 @@ export async function redeemSession(trainerId: string): Promise<{ ok: boolean; r
   }
 }
 
-/** The trainer OTHER clients, to push a freed slot to. Server-side lookup so no
- *  other-client identity leaks to the caller beyond opaque ids. */
-export async function reofferSlot(sessionId: string): Promise<string[]> {
+/**
+ * The trainer's OTHER clients, to push a freed slot to.
+ *
+ * Server-side lookup so no other-client identity leaks to the caller beyond
+ * opaque ids.
+ *
+ * ── null is not an empty roster ────────────────────────────────────────────
+ *
+ * This returned `[]` for three different things: a coach with nobody else on
+ * their book, a refused read, and a request nobody answered. The only caller
+ * does `offeredTo = others.length || null` and, on zero, sends no push and
+ * reports nothing — so a freed slot went un-offered to a full roster, silently,
+ * whenever the network hiccuped. Nobody was told: not the member who cancelled,
+ * not the coach, not the other clients who would have taken it.
+ *
+ * `null` now means "we could not ask", which is the distinction `redeemSession`
+ * directly above already draws for the same reason — its own comment ends "this
+ * is not the same as having none left". An empty array still means the coach
+ * genuinely has nobody else.
+ */
+export async function reofferSlot(sessionId: string): Promise<string[] | null> {
   try {
     const { data, error } = await supabase.rpc('reoffer_client_ids', { p_session: sessionId });
-    if (error) { reportError('connect.reofferSlot', error); return []; }
+    if (error) { reportError('connect.reofferSlot', error); return null; }
     return Array.isArray(data) ? data.map((r: any) => r.client_id).filter(Boolean) : [];
-  } catch { return []; }
+  } catch (e) {
+    reportError('connect.reofferSlot', e);
+    return null;
+  }
 }
 
 /**
