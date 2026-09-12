@@ -67,10 +67,13 @@ import {
 import {
   useSessions, cancelBookedSession, ptCancelLines, useCancellationPolicy, cancelWarningFor,
 } from '../../src/ui/sessions';
-import { useSeriesPauses, pauseSeriesForDays, resumeSeries } from '../../src/ui/seriesPause';
+import { useSeriesPauses, pauseSeries, pauseSeriesForDays, resumeSeries } from '../../src/ui/seriesPause';
 import {
   pausePreviewLine, pauseOutcomeLines, pausedRangeLine, resumeConfirm, resumedLine,
+  pauseRangeRefusal, pauseRangeConfirm,
 } from '../../src/lib/reschedule';
+import { DateSheet } from '../../src/ui/DateSheet';
+import { todayParts, isoFromParts } from '../../src/lib/monthGrid';
 import { insideNoticeWindow, noticeHoursOf } from '../../src/lib/booking';
 import { useClientData } from '../../src/ui/clientData';
 import { peerHeading } from '../../src/lib/threadPeer';
@@ -121,6 +124,20 @@ export default function StandingAppointments() {
   // materialiser respects, so the sessions do not quietly re-book themselves.
   const { pauses, status: pauseStatus, reload: reloadPauses } = useSeriesPauses();
   const [pauseFor, setPauseFor] = useState<RecurringSeries | null>(null);
+  // ── "I am away from the 12th to the 26th" ────────────────────────────────
+  //
+  // The three fixed durations start from today, which covers a member who is
+  // going away now and nobody who books a holiday in advance — and a holiday
+  // booked in advance is the case pausing exists for. `pauseSeries` has taken a
+  // from/to since supabase/parts/244 and nothing in the app could reach it.
+  //
+  // Two dates rather than a range control: `DateSheet` is the one date picker
+  // in this app and it picks one day, so this picks twice. Both stay in local
+  // `YYYY-MM-DD` and are never turned into a Date on the way — see
+  // `pauseRangeRefusal`.
+  const [fromOn, setFromOn] = useState('');
+  const [toOn, setToOn] = useState('');
+  const [picking, setPicking] = useState<'from' | 'to' | null>(null);
   // The fourth read on this screen. Every cancellation offered here is priced
   // against this policy and every sentence about a fee comes out of it, and it
   // was outside the gesture — so a gym that changed its notice period was still
@@ -327,6 +344,62 @@ export default function StandingAppointments() {
         } },
       ],
     );
+  };
+
+  /**
+   * Pause the dates the member named.
+   *
+   * The same three things as `doPause` above, in the same order and out of the
+   * same modules: refuse what cannot work, preview what this device can see,
+   * then let the server be the authority on what it cost. What differs is only
+   * where the dates come from — and that is why the bounds below are computed
+   * from the strings rather than from a duration: `seriesOccurrencesIn` takes
+   * instants, and the range the member chose is a pair of LOCAL days, so the
+   * window opens at the start of the first and closes at the end of the last.
+   *
+   * That arithmetic is this device's calendar and the preview says so. The
+   * server re-reads the range in the ARRANGEMENT's zone, which is the only
+   * place that can be right, and `pauseOutcomeLines` reports what it found.
+   */
+  const doPauseRange = (s: RecurringSeries) => {
+    const [ty_, tm, td] = todayParts();
+    const refusal = pauseRangeRefusal(fromOn, toOn, isoFromParts(ty_, tm, td));
+    if (refusal) { Alert.alert('Those dates will not work', refusal); return; }
+    // Local midnight to local end-of-day, built by the same `Date` the rest of
+    // this screen's previews use. utc-day-ok: both bounds are constructed from
+    // local parts and never sliced out of an ISO string, which is the failure
+    // this gate is about.
+    const [fy, fm, fd] = fromOn.split('-').map(Number);
+    const [uy, um, ud] = toOn.split('-').map(Number);
+    const startMs = new Date(fy, fm - 1, fd, 0, 0, 0, 0).getTime();
+    const endMs = new Date(uy, um - 1, ud, 23, 59, 59, 999).getTime();
+    const inRange = seriesOccurrencesIn(sessions, s, startMs, endMs);
+    const notice = noticeHoursOf(readPolicy);
+    const late = inRange.filter((x) => insideNoticeWindow(x.startsAt, notice)).length;
+    const preview = pausePreviewLine(inRange.length, late, readPolicy, isWhole(sessionsStatus));
+    const cf = pauseRangeConfirm(seriesLabel(s), fromOn, toOn);
+    Alert.alert(cf.title, `${cf.body}\n\n${preview}`, [
+      { text: 'Not Now', style: 'cancel' },
+      { text: 'Pause It', style: 'destructive', onPress: async () => {
+        if (busy) return;
+        setBusy(true);
+        const res = await pauseSeries(s.id, fromOn, toOn, null);
+        setBusy(false);
+        setPauseFor(null);
+        if (!res.report) {
+          Alert.alert('Not paused', res.error ?? 'That did not save, so your sessions are still booked.');
+          return;
+        }
+        // Cleared only on a pause that landed. A member whose write failed gets
+        // their dates back, because retyping two dates to retry something that
+        // was not their fault is the kind of small insult this codebase avoids.
+        setFromOn(''); setToOn('');
+        await refreshSessions();
+        void reloadSeries();
+        void reloadPauses();
+        Alert.alert('Paused', pauseOutcomeLines(res.report).join('\n\n'));
+      } },
+    ]);
   };
 
   /** Lift one. Says what does not come back, because it is the thing people
@@ -705,6 +778,44 @@ export default function StandingAppointments() {
                 </View>
               ))}
               <Rule />
+              {/* ── or the dates you are actually away ──────────────────────
+                  Under the three durations rather than above them: a member
+                  going away now taps a duration and is done, and this is the
+                  longer path for the one who knows the dates. Both fields are
+                  buttons over `DateSheet`, which is the only date control in
+                  this app — see its header for why it is not a native picker
+                  and why typing lives inside it. */}
+              <View style={{ paddingTop: sp.md }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Pause Particular Dates</Text>
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
+                  For a holiday you already know the dates of. Your usual time starts again by itself the day after the last one.
+                </Text>
+                <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.md }}>
+                  {([['from', 'First day away', fromOn], ['to', 'Last day away', toOn]] as const).map(([which, label, val]) => (
+                    <Pressable key={which} onPress={() => setPicking(which)} disabled={busy}
+                      accessibilityRole="button" accessibilityLabel={`${label}${val ? `, ${val}` : ', not chosen yet'}`}
+                      style={{
+                        flex: 1, paddingVertical: sp.md, paddingHorizontal: sp.md,
+                        borderRadius: radius.sm, backgroundColor: t.surface2, opacity: busy ? 0.5 : 1,
+                      }}>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>{label.toUpperCase()}</Text>
+                      <Text style={{ ...ty.body, color: val ? t.ink : t.ink3, marginTop: 2, ...(val ? numeric : null) }}>
+                        {val || 'Choose'}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={{ marginTop: sp.md, alignSelf: 'flex-start' }}>
+                  {/* Live whether or not both dates are in. The refusal names
+                      which of the two mistakes was made, and a button that
+                      greys out says only that something is wrong somewhere —
+                      which is the thing the coach in DateSheet's own header was
+                      defeated by. */}
+                  <Ghost label="Pause These Dates" a11yLabel={`Pause ${seriesLabel(pauseFor)} for the dates chosen`}
+                    onPress={() => doPauseRange(pauseFor)} />
+                </View>
+              </View>
+              <Rule />
               {/* Said here as well as in the confirm, because this is the sheet
                   somebody opens when they are worried about what a fortnight
                   away is going to cost them. */}
@@ -717,6 +828,38 @@ export default function StandingAppointments() {
           </>) : null}
         </View>
       </Modal>
+
+      {/* Outside the pause Modal on purpose. A Modal inside a Modal is the one
+          arrangement iOS will not reliably present — the second arrives behind
+          the first, or not at all — so the sheet is a sibling and `picking`
+          is what decides which field it is filling. `min` is today at both
+          ends: a pause over dates that have gone cannot remove anything, which
+          `pauseRangeRefusal` also refuses, and drawing those days as
+          untappable is the honest version of the same rule. */}
+      <DateSheet
+        visible={picking != null}
+        value={picking === 'to' ? toOn : fromOn}
+        fallback={picking === 'to' ? (fromOn || null) : null}
+        range={{ min: isoFromParts(...todayParts()) }}
+        heading={picking === 'to' ? 'Last day away' : 'First day away'}
+        note={picking === 'to'
+          ? 'The last date your usual time should not run. It starts again the day after.'
+          : 'The first date your usual time should not run.'}
+        onCancel={() => setPicking(null)}
+        onPick={(iso) => {
+          if (picking === 'to') setToOn(iso);
+          else {
+            setFromOn(iso);
+            // A first day chosen after the last one leaves a backwards range
+            // sitting in two fields that both look filled in, and the member
+            // would meet a refusal about a mistake the app watched them make.
+            // The later end is dropped instead, so the next tap is the one that
+            // fixes it.
+            if (toOn && toOn < iso) setToOn('');
+          }
+          setPicking(null);
+        }}
+      />
     </SafeAreaView>
   );
 }

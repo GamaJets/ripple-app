@@ -8,6 +8,7 @@
 import {
   canOfferMove, rescheduleRefusalLine, rescheduleLines, moveConfirm, noSlotsLine,
   pausePreviewLine, pauseOutcomeLines, pausedRangeLine, resumeConfirm, resumedLine,
+  pauseRangeRefusal, pauseRangeConfirm,
   NOT_MOVED, COACH_NOT_MOVED, coachMoveRefusalLine, coachMovedLine,
   type RescheduleReport, type RescheduleRefusal, type PauseReport, type CoachMoveReport,
 } from './reschedule';
@@ -289,6 +290,39 @@ ok(/authority/.test(notWhole), 'and it still says whose calendar decides');
 // switched into the cautious sentence.
 eq(pausePreviewLine(4, 2, charges), pausePreviewLine(4, 2, charges, true),
   'omitting the flag is the same as saying the read was whole');
+
+// ── a pause over dates the member chose ────────────────────────────────────
+//
+// The three fixed durations let the server pick the dates. A named range is the
+// other half, and the only two mistakes a member can make with two taps are
+// naming them backwards and naming a week that has gone.
+eq(pauseRangeRefusal('2026-06-12', '2026-06-26', '2026-06-01'), null,
+  'a fortnight in the future is fine');
+eq(pauseRangeRefusal('2026-06-12', '2026-06-12', '2026-06-12'), null,
+  'a single day, today, is still to come — it has not happened yet');
+ok(/other order/.test(pauseRangeRefusal('2026-06-26', '2026-06-12', '2026-06-01') ?? ''),
+  'a backwards range says so, and says what to do');
+ok(/already passed/.test(pauseRangeRefusal('2026-05-01', '2026-05-08', '2026-06-01') ?? ''),
+  'a range that has gone is refused rather than written to do nothing');
+ok(/Pick both dates/.test(pauseRangeRefusal('', '2026-06-26', '2026-06-01') ?? ''),
+  'a missing date is named as missing, not as backwards');
+ok(/Pick both dates/.test(pauseRangeRefusal('12/06/2026', '2026-06-26', '2026-06-01') ?? ''),
+  'and a date in another format is not read as though it parsed');
+// The refusal never runs the range through a Date: 2026-03-29 is the day the
+// clocks go forward in London, and a range that starts on it must be treated
+// as the string it is.
+eq(pauseRangeRefusal('2026-03-29', '2026-03-29', '2026-03-29'), null,
+  'a clock-change day is a date like any other here');
+{
+  const c = pauseRangeConfirm('Tuesdays at 6pm', 'Fri 12 Jun', 'Fri 26 Jun');
+  ok(/12 Jun/.test(c.title) && /26 Jun/.test(c.title), 'the confirm names both ends');
+  ok(/NOT ended/.test(c.body), 'and promises the arrangement survives, which is the fear');
+}
+{
+  const one = pauseRangeConfirm('Tuesdays at 6pm', 'Fri 12 Jun', 'Fri 12 Jun');
+  ok(!/between/.test(one.body), 'a single day is not described as a range');
+  ok(/on Fri 12 Jun/.test(one.body), 'it is described as that day');
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('reschedule.test.ts — ok');

@@ -180,7 +180,6 @@ const KNOWN = new Map([
   ['src/ui/charts.tsx', { count: 2, fix: 'Sparkline and DeltaBadge. HrZoneChart and src/lib/chartAxis.ts are what the screens actually draw with.' }],
   ['src/ui/fetched.tsx', { count: 1, fix: 'useFetchedAt — the "last updated" timestamp hook. Screens print freshness through src/lib/freshness.ts instead.' }],
   ['src/ui/joinCode.ts', { count: 1, fix: 'fetchJoinCodeStats — how many times a join code has been used. The coach Join Code screen is where it belongs; that file is another lane\'s today.' }],
-  ['src/ui/seriesPause.ts', { count: 1, fix: 'pauseSeries — the pause-a-DATE-RANGE call (pause_my_session_series, from/to). Pausing itself is wired: app/(client)/standing.tsx:279 pauses through pauseSeriesForDays. Nothing offers the member a range, so the from/to entry point is unreachable. Give the sheet a range or delete this one.' }],
   ['src/ui/useMrrHistory.ts', { count: 1, fix: 'useMrrHistory. The three screens in that module\'s import list take useMonthlyHistory and useSessionsHistory from it; the MRR hook itself is drawn by nothing.' }],
 ]);
 

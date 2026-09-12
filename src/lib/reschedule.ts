@@ -300,6 +300,44 @@ export function pauseOutcomeLines(r: PauseReport): string[] {
   return lines;
 }
 
+/**
+ * Why a chosen pause range will not do, or null when it will.
+ *
+ * The three fixed durations — a week, a fortnight, four weeks — let the SERVER
+ * decide which dates those are, because "today" for a standing appointment is
+ * today in the arrangement's own zone (see `pauseSeriesForDays`). A member
+ * naming dates is the other case entirely: "I am away from the 12th to the
+ * 26th" IS a pair of calendar dates, and the only checks that belong on the
+ * device are the two a member can get wrong by tapping.
+ *
+ * Dates are `YYYY-MM-DD` and are compared as strings, which is correct for this
+ * format and is the whole reason it is the one stored: no Date is constructed,
+ * so nothing here can move a day by a timezone. `today` is the member's own
+ * local day, and a range ENDING today is allowed — the sessions still to come
+ * on it have not happened yet.
+ */
+export function pauseRangeRefusal(from: string, to: string, today: string): string | null {
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (!iso.test(from) || !iso.test(to)) return 'Pick both dates — the first day you are away and the last.';
+  if (to < from) return 'The last day is before the first. Tap the dates again in the other order.';
+  // A pause over dates that have already gone cannot remove anything: the
+  // occurrences are in the past, and the materialiser does not revisit them. It
+  // would be written to the database and do nothing, which is worse than a
+  // refusal because the list would then show a pause that changed nothing.
+  if (to < today) return 'Those dates have already passed, so pausing them would not change anything.';
+  return null;
+}
+
+/** The confirm for a pause over dates the member chose. `from` and `to` are
+ *  already formatted for reading; the preview line is the caller's. */
+export function pauseRangeConfirm(label: string, from: string, to: string): { title: string; body: string } {
+  return {
+    title: from === to ? `Pause ${from}?` : `Pause ${from} to ${to}?`,
+    body: `${label} will not run ${from === to ? `on ${from}` : `between ${from} and ${to}`}. `
+      + 'Your standing appointment is NOT ended: it starts again by itself afterwards.',
+  };
+}
+
 /** How a pause reads back on the list. `from` and `to` are already formatted. */
 export function pausedRangeLine(from: string, to: string, reason: string | null): string {
   const head = from === to ? `Paused on ${from}` : `Paused from ${from} to ${to}`;
