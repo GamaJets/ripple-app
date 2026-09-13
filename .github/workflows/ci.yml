@@ -58,10 +58,38 @@ jobs:
           # version that decides, because it is the one nobody can skip.
           node-version: '26'
           cache: npm
+          # BOTH lockfiles, because this job installs both. A cache keyed on the
+          # root lockfile alone goes stale the moment studio-web's changes, and
+          # a stale hit here is a job that reinstalls the console on every run.
+          cache-dependency-path: |
+            package-lock.json
+            studio-web/package-lock.json
 
       # ci, not install: it installs exactly the lockfile and fails if
       # package.json and package-lock.json have drifted apart.
       - name: Install
+        run: npm ci
+
+      # ── the console's dependencies, in the job that checks the console ─────
+      #
+      # `check:all` contains `check:studio`, which points a compiler at
+      # studio-web — and that gate is written to FAIL rather than skip when the
+      # console's TypeScript is absent, because "a gate that passes when its
+      # tool is missing reports a clean console on any machine that has not
+      # installed one".
+      #
+      # This job installed the root only, so every push since check:studio
+      # joined the list failed on it, every time, with a red X that was about
+      # this workflow rather than about the commit. The build job below
+      # installs the console too, which is why THAT one has been green
+      # throughout and why the failure looked like a mystery: one job proved
+      # the console builds while the other could not find a compiler for it.
+      #
+      # Installed here rather than removed from `check:all`: the gate is right,
+      # and the roll-call above this step says plainly that adding or removing
+      # gates in this file is the drift the single list exists to end.
+      - name: Install the console's dependencies
+        working-directory: studio-web
         run: npm ci
 
       - name: Typecheck
