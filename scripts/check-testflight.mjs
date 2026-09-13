@@ -322,8 +322,12 @@ if (staleExternal.length) {
   }
   say('  Everybody outside your own team who tests this app is on that build, and an');
   say(`  update published to runtime ${rt.version} will not be offered to any of them.`);
-  say('  App Store Connect → TestFlight → that group → add the build. It needs no new');
-  say('  review if the build is already approved.');
+  say('  Fix it with:  npm run testflight:distribute');
+  say('  which adds the newest finished build at this runtime to every external group');
+  say('  and reads each one back to prove it landed. It needs an App Manager or Admin');
+  say('  key — a Developer-role one answers every write with "does not allow this');
+  say('  request". By hand it is App Store Connect → TestFlight → that group → add the');
+  say('  build, which needs no new review if the build is already approved.');
   if (!allowed) {
     console.error('  Set REPPLE_TESTFLIGHT_STALE_EXTERNAL_OK=1 to publish anyway, knowingly.');
     process.exit(1);
