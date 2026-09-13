@@ -24,7 +24,7 @@ import { GuardedImage } from '../../src/ui/GuardedImage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hrFreshness, staleHrNote } from '../../src/lib/hrFreshness';
-import { watchReach, zonesNote, type WatchReach } from '../../src/lib/watchReach';
+import { watchReach, zonesNote, liveHrNote, type WatchReach } from '../../src/lib/watchReach';
 import { parseLiveSession, mayRestore, type LiveSession } from '../../src/lib/liveSession';
 import { startLiveActivity, endLiveActivity } from '../../modules/workout-activity';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -3780,9 +3780,7 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
         </View>
         {liveHr == null ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
-            {reach === 'connected-silent'
-              ? 'Your watch is connected and has not sent a reading yet — an Apple Watch only streams heart rate while a workout is running on the watch.'
-              : `Wear your Apple Watch for live heart rate${recovery ? '' : ' & calories'}`}
+            {liveHrNote(reach ?? 'none', !recovery)}
           </Text>
         ) : liveSample == null ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
@@ -5097,7 +5095,11 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
 
         <MetricCols t={t} items={liveCols} />
         {liveHr == null ? (
-          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>Wear your Apple Watch for live heart rate &amp; calories</Text>
+          /* Was the literal "Wear your Apple Watch for live heart rate &
+             calories", with no branch on `reach` at all — so a member whose
+             watch WAS connected was told to wear the watch they had on, and
+             never told the one thing that starts the stream. See liveHrNote. */
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{liveHrNote(reach ?? 'none', true)}</Text>
         ) : liveSample == null ? (
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             That bpm is today&apos;s average from your connected device, not a live reading — it can&apos;t be used for zones.

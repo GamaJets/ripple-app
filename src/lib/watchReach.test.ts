@@ -3,7 +3,7 @@
 // That is the whole of section 2, and it is the defect this module exists for:
 // two screens held one fact and gave two answers, and the one the member was
 // reading told them to do something they had already done.
-import { watchReach, zonesNote } from './watchReach';
+import { watchReach, zonesNote, liveHrNote } from './watchReach';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -61,6 +61,37 @@ for (const r of ['connected-silent', 'none'] as const) {
   const note = zonesNote(r)!;
   ok(!/fail|error|broken|wrong|denied|refus/i.test(note), `${r}: nothing here calls anything broken`);
 }
+
+
+/* ── the sentence beside the bpm names the thing that actually works ─────── */
+
+// THE regression this guards. The strength runner said "Wear your Apple Watch
+// for live heart rate & calories" — which is what the member was already doing,
+// and is not what makes a watch stream. Across every user on this platform
+// exactly one workout has ever carried zones, and it is a CYCLING session,
+// logged through the one runner whose sentence was right.
+for (const reach of ['connected-silent', 'none'] as const) {
+  const note = liveHrNote(reach, true)!;
+  ok(!!note, `${reach} gets a sentence`);
+  ok(/workout on the watch|running on the watch/.test(note),
+    `${reach} names the watch-workout requirement, which is the only thing that starts the stream`);
+  ok(!/^Wear your Apple Watch/.test(note),
+    `${reach} does not tell somebody to do the thing they are already doing`);
+}
+
+// A recovery session credits no calories, so it must not promise any.
+ok(/and calories/.test(liveHrNote('none', true)!), 'calories are offered where the runner shows them');
+ok(!/calories/.test(liveHrNote('none', false)!), 'and never where it does not');
+
+// A connected watch is never told to connect a watch — the whole point of
+// `reach` existing, and the bug it was written for.
+ok(!/^Connect an Apple Watch/.test(liveHrNote('connected-silent', true)!),
+  'a connected watch is not told to connect one');
+ok(/^Connect an Apple Watch/.test(liveHrNote('none', true)!), 'and nothing connected is');
+
+// Silence where another sentence already covers it.
+eq(liveHrNote('live', true), null, 'a live reading needs no sentence');
+eq(liveHrNote('stale', true), null, 'and a stale one is staleHrNote’s to explain, not this');
 
 if (errors.length) {
   console.error('watchReach.test.ts FAILED');

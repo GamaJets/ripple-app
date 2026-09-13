@@ -92,3 +92,53 @@ export function zonesNote(reach: WatchReach): string | null {
       return 'Connect a watch under Train → Watch & Devices and your zones appear here live while you train.';
   }
 }
+
+/**
+ * What to say BESIDE THE BPM when there is no live heart rate.
+ *
+ * ── Why this is a function and not two string literals ────────────────────
+ *
+ * It was two string literals, and they had drifted. The cardio runner branched
+ * on `reach` and told a member with a connected watch the one thing that
+ * actually works — start a workout ON THE WATCH. The strength runner, which is
+ * the path most sessions take, said "Wear your Apple Watch for live heart rate
+ * & calories" unconditionally.
+ *
+ * That sentence is not merely vague, it is wrong, and wrong in the way that
+ * costs the reading: wearing the watch is exactly what the member was already
+ * doing. An Apple Watch writes a heart-rate sample to HealthKit every several
+ * MINUTES at rest and every few SECONDS only while a workout runs on the watch
+ * — src/lib/hrFreshness.ts has the whole argument — and `freshSample` in the
+ * runner is null unless the reading is moving. No fresh sample, no zone timer,
+ * no `zones` on the row.
+ *
+ * The evidence is in the data. Across every user this platform has, exactly
+ * one workout has ever carried zones, and it is a CYCLING session — logged
+ * through the cardio runner, the one with the correct sentence. Not one
+ * strength session has ever recorded a zone.
+ *
+ * So both callers now ask this, and a test holds the sentence to naming the
+ * watch-workout requirement. Two screens that answer one question must not be
+ * able to answer it differently again.
+ *
+ * Null for 'live' (nothing to explain) and for 'stale' — `staleHrNote` already
+ * says that one in full right beside this, and two sentences about one silence
+ * is how a member reads neither.
+ *
+ * @param calories whether this runner also credits calories to the watch.
+ *   Recovery sessions do not, and promising calories there would be a claim
+ *   about a figure that screen never shows.
+ */
+export function liveHrNote(reach: WatchReach, calories: boolean): string | null {
+  switch (reach) {
+    case 'live':
+    case 'stale':
+      return null;
+    case 'connected-silent':
+      return 'Your watch is connected and has not sent a reading yet — an Apple Watch only '
+        + 'streams heart rate while a workout is running on the watch. Start one there.';
+    case 'none':
+      return `Connect an Apple Watch under Watch & Devices, then start a workout on the watch — `
+        + `that is what streams live heart rate${calories ? ' and calories' : ''}.`;
+  }
+}
