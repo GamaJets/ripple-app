@@ -61,6 +61,22 @@ import { useNow } from '../../src/ui/today';
 // taken on Thursday for Tuesday's class is written exactly like one taken at
 // the door. The coach was simply never handed the tap. See src/lib/registerGaps.ts.
 import { missingRegisters, peopleWaiting, gapsHeading, gapsNote, gapLine } from '../../src/lib/registerGaps';
+// ── The month somebody is trying to close, and the coach's share of it ────
+//
+// `closeBlockers` (src/lib/monthEnd.ts) is the owner console's refusal, and one
+// of its eight kinds is `unmarked_sessions` — a sentence naming work only a
+// coach can do, printed on a screen only the owner can open. Nothing anywhere
+// told the coach that a named month is being held up and that their sessions
+// are what is holding it.
+//
+// The section is deliberately NOT a second copy of the rolling list further
+// down this screen. It is scoped to one month — the last that ENDED at the gym,
+// which is the one being closed — and it splits the two piles by whether they
+// actually block: a one-to-one with no outcome does, a class register does not,
+// and src/lib/coachClose.ts refuses to let the second borrow the first's
+// urgency.
+import { useMyCloseQueue } from '../../src/ui/coachClose';
+import { CoachCloseQueue } from '../../src/ui/CoachCloseQueue';
 import { BACK_ICON } from '../../src/ui/direction';
 
 /** The three windows, in days. Rolling, and the labels come from the module so
@@ -144,7 +160,13 @@ export default function MyRegister() {
     return () => { cancelled = true; };
   }, [window]);
 
-  const reload = useCallback(() => setTick((n) => n + 1), []);
+  // Its own reads and its own month, kept out of the window above: this screen's
+  // chips are a rolling 7, 30 or 90 days and a month close is a date. Folding
+  // the two would mean either the chips silently changed what "outstanding for
+  // August" meant, or the deadline moved when a coach tapped a chip.
+  const closeQueue = useMyCloseQueue();
+
+  const reload = useCallback(() => { setTick((n) => n + 1); closeQueue.refresh(); }, [closeQueue.refresh]); // eslint-disable-line react-hooks/exhaustive-deps -- `closeQueue.refresh` is the stable identity from the hook, not the object
   // The one read on this screen, through the nonce the effect already
   // watches. A register is written at the door by whoever taught the class,
   // often on another handset, so this is a coach asking whether their own
@@ -200,6 +222,13 @@ export default function MyRegister() {
         {/* Two bare percentages sit below this, on the screen a coach opens to
             check they have been paid right. */}
         <ScreenHelp screen="coach-register" />
+
+        {/* First, because it is the only thing on this screen with a deadline
+            on it. Everything below is a coach checking their own term; this is
+            somebody else waiting on them. */}
+        <CoachCloseQueue queue={closeQueue} />
+
+        <Rule />
 
         <Section>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm }}>
@@ -304,6 +333,16 @@ export default function MyRegister() {
             <Section>
               <SectionHead title={heading} note={waiting != null ? `${num(waiting)} booked` : undefined} />
               <Text style={{ ...ty.label, color: t.ink3 }}>{gapsNote(gaps)}</Text>
+              {/* Said out loud because a class can honestly appear twice on this
+                  screen. This list is the window the chips above choose; the
+                  month section at the top is the same kind of gap narrowed to
+                  the month the gym is closing. Two lists that overlap and never
+                  explain why read as a bug, and a coach who has taken one
+                  register and still sees it listed stops trusting the list. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                This is the window you have chosen above. Any of these that fall in the month at the
+                top of the screen are listed there too.
+              </Text>
               {gaps.map((g, i) => (
                 <Pressable key={g.classId}
                   onPress={() => router.push({

@@ -33,6 +33,20 @@ import { sp, layout, radius, hairline, type as ty, value } from '../../src/theme
 import { useClasses } from '../../src/ui/classes';
 import { useMyGymKit } from '../../src/ui/coachKit';
 import { GymKitRegister } from '../../src/ui/GymKitRegister';
+// ── The other half of a coach's week at the gym ───────────────────────────
+//
+// `gym_shifts` (supabase/parts/43) has admitted this gym's trainers since it
+// was written, under a policy whose own comment says "a rota nobody rostered on
+// it can see is a rota that gets re-typed into WhatsApp". Both readers built on
+// it are the owner's — app/(owner)/rota.tsx and studio-web/app/staff — so the
+// coach on the Saturday had no way to see it.
+//
+// It sits on this screen because this screen is already the coach's week at the
+// gym: the classes they teach are here, and the hours the gym has them on the
+// floor are the rest of the same week. Read-only, because `gym_shifts_owner` is
+// the only policy granting anything but SELECT.
+import { useMyRota } from '../../src/ui/coachRota';
+import { MyShifts } from '../../src/ui/MyShifts';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { CLASS_KINDS, branchesFrom, type GymClass } from '../../src/lib/classesMock';
 import {
@@ -132,11 +146,15 @@ export default function TrainerClasses() {
   // Its own hook, its own status: a refused equipment read must not take down
   // the timetable, which is the bigger answer on this screen.
   const kit = useMyGymKit();
+  // Its own hook and its own status, for the same reason: a refused rota read
+  // must not take the timetable down, and a refused timetable must not be
+  // allowed to draw an empty fortnight of shifts.
+  const rota = useMyRota();
   // One source, and the booking counts on these rows move without this coach
   // doing anything — a member books or drops a class from their own phone.
   // The register comes down with it: a rower taken out of action by whoever
   // was standing next to it is exactly the kind of change a coach pulls for.
-  const pull = usePullToRefresh(useCallback(() => { refresh(); kit.refresh(); }, [refresh, kit.refresh])); // eslint-disable-line react-hooks/exhaustive-deps -- `kit.refresh` is the stable identity from useMyGymKit, not the object
+  const pull = usePullToRefresh(useCallback(() => { refresh(); kit.refresh(); rota.refresh(); }, [refresh, kit.refresh, rota.refresh])); // eslint-disable-line react-hooks/exhaustive-deps -- both refreshes are the stable identities from their hooks, not the objects
 
   const [title, setTitle] = useState('');
   const [kind, setKind] = useState<string>(CLASS_KINDS[0]);
@@ -905,6 +923,13 @@ export default function TrainerClasses() {
             <Text style={{ ...ty.label, color: t.ink3 }}>Reading your timetable…</Text>
           ) : null}
         </Section>
+
+        <Rule />
+
+        {/* The hours the gym has this coach on, under the classes they teach:
+            both are the same fortnight and a coach reading one wants the other.
+            Read-only — the rota is the gym's to write. */}
+        <MyShifts rota={rota} />
 
         <Rule />
 

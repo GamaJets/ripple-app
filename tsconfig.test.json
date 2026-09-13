@@ -674,6 +674,8 @@
     "src/lib/coachKit.ts",
     "src/lib/coachKit.test.ts",
     "src/lib/coachClose.ts",
-    "src/lib/coachClose.test.ts"
+    "src/lib/coachClose.test.ts",
+    "src/lib/coachRota.ts",
+    "src/lib/coachRota.test.ts"
   ]
 }
