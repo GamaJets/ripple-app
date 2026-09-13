@@ -1995,10 +1995,14 @@ ok(tipsFor('client')[0].id !== tipsFor('owner')[0].id, 'the apps do not share a 
 
   // What a coach programmes vs what anybody has filmed.
   {
+    // The 'db' prefix is load-bearing and not decoration. coverageFor reads it
+    // through clipOwner, because an entry saved on the handset after a refused
+    // insert also carries `trainerId: null` and is NOT the Academy's — see the
+    // phone-only block in videoCoverage.test.ts.
     const vids = [
-      { exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'me' },
-      { exerciseId: 'bench-press', name: 'Bench Press', trainerId: null },
-      { exerciseId: 'deadlift', name: 'Deadlift', trainerId: 'other-coach' },
+      { id: 'db1', exerciseId: 'back-squat', name: 'Back Squat', trainerId: 'me' },
+      { id: 'db2', exerciseId: 'bench-press', name: 'Bench Press', trainerId: null },
+      { id: 'db3', exerciseId: 'deadlift', name: 'Deadlift', trainerId: 'other-coach' },
     ];
     const programmed = ['Back Squat', 'Bench Press', 'Deadlift', 'Hip Thrust', 'back squat'];
     // An EMPTY set, not the default. coverageFor's fourth argument is the

@@ -13,10 +13,16 @@
 //   3. A single total                      — summed across AED and GBP rows,
 //      producing a number in no currency that exists.
 import {
-  EXPIRING_SOON_DAYS, amount, daysBetween, isCurrent, methodLabel, planStateOf,
+  EXPIRING_SOON_DAYS, amount, daysBetween, fetchMyMemberships, isCurrent, methodLabel, planStateOf,
   primaryMembership, renewalNote, standingLabel, standingOf, todayIso, totalsByCurrency,
   type MemberMembership, type MemberPlan,
 } from './memberRecord';
+// The freeze rules are NOT reimplemented here and are not re-asserted here —
+// src/lib/membershipFreeze.test.ts owns them. What this file pins is that the
+// member's own read HANDS THEM THE DATES those rules need, which is the whole
+// of what was missing: the rules existed, the owner console used them, and the
+// member's row came back without the two columns they read.
+import { freezeState, freezeLine, frozenDays } from './membershipFreeze';
 
 const errors: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
@@ -29,7 +35,7 @@ const plan = (over: Partial<MemberPlan> = {}): MemberPlan => ({
 });
 const mem = (over: Partial<MemberMembership> = {}): MemberMembership => ({
   id: 'm1', tenantId: 't1', startedOn: '2026-01-05', endsOn: null, status: 'active',
-  planId: 'p1', plan: plan(), ...over,
+  planId: 'p1', plan: plan(), frozenFrom: null, frozenTo: null, ...over,
 });
 
 /* ── the plan that could not be read is not "no plan" ─────────────────────── */
@@ -198,5 +204,196 @@ eq(todayIso(new Date(2026, 7, 31, 23, 30)), '2026-08-31',
   'late on the 31st is still the 31st in the reader’s own life, whatever UTC thinks');
 eq(todayIso(new Date(2026, 0, 5, 0, 15)), '2026-01-05', 'and just after midnight is the new day');
 
-if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
-console.log(`memberRecord: ok (plan-unreadable ≠ no-plan, dates beat the status column, ${EXPIRING_SOON_DAYS}-day window, no cross-currency totals)`);
+/* ═══════════════════════════════════════════════════════════════════════════
+   Claim 4. A member could not see their own freeze.
+
+   `memberships.frozen_from` / `frozen_to` have existed since
+   supabase/parts/2616 and `memberships_own_r` is `member_id = auth.uid()` with
+   not one column grant on the table, so the member was ALREADY permitted to
+   read them. The read simply never asked for them, so the only thing the app
+   could say to somebody whose gym had paused them was the bare word "Frozen" —
+   no first day, no last day, and no statement that it lifts by itself.
+
+   What is pinned below is the READ: the two columns are requested, and they
+   arrive on the row as the bare dates `membershipFreeze` compares as strings.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/** A Queryable that records the column list each select asked for. */
+function reader(opts: {
+  memberships?: Record<string, unknown>[];
+  membershipsError?: { message: string } | null;
+  plans?: Record<string, unknown>[];
+}) {
+  const asked: Record<string, string> = {};
+  const sb = {
+    from: (table: string) => ({
+      select: (cols: string) => {
+        asked[table] = cols;
+        if (table === 'memberships') {
+          const res = Promise.resolve({
+            data: opts.membershipsError ? null : (opts.memberships ?? []),
+            error: opts.membershipsError ?? null,
+          });
+          return { eq: () => ({ order: () => ({ limit: () => res }) }) };
+        }
+        return { in: () => Promise.resolve({ data: opts.plans ?? [], error: null }) };
+      },
+    }),
+  };
+  return { asked, sb };
+}
+
+async function reads(): Promise<void> {
+  /* ── the two columns are asked for at all ───────────────────────────────── */
+  {
+    const { asked, sb } = reader({
+      memberships: [{
+        id: 'm1', tenant_id: 't1', plan_id: 'p1', started_on: '2026-01-05',
+        ends_on: '2026-07-15', status: 'active',
+        frozen_from: '2026-06-12', frozen_to: '2026-06-26',
+      }],
+      plans: [{ id: 'p1', name: 'Gold', price_cents: 20000, currency: 'AED', interval: 'month', active: true }],
+    });
+    const r = await fetchMyMemberships(sb, 'u1');
+    ok(/\bfrozen_from\b/.test(asked.memberships || ''),
+      'the member’s own membership read asks for frozen_from — RLS admitted them all along, the SELECT did not');
+    ok(/\bfrozen_to\b/.test(asked.memberships || ''), 'and for frozen_to');
+    ok(r.ok, 'and the read lands');
+    const row = r.ok ? r.value[0] : null;
+    eq(row?.frozenFrom, '2026-06-12', 'the first day arrives as the bare date it is in the column');
+    eq(row?.frozenTo, '2026-06-26', 'and so does the last');
+
+    /* The point of carrying them: `freezeState` and `freezeLine` — the SAME two
+       functions app/(owner)/members.tsx calls, not a second implementation — can
+       now be run over a member-side row and produce a sentence with a date in it. */
+    const f = { from: row?.frozenFrom, to: row?.frozenTo };
+    eq(freezeState(f, '2026-06-26'), 'frozen', 'the last day of a pause is still inside it');
+    eq(freezeState(f, '2026-06-27'), 'thawed', 'and the day after, it is over');
+    eq(frozenDays(f), 15, 'fifteen days, both ends counted');
+    const line = freezeLine(freezeState(f, '2026-06-20'), {
+      from: row?.frozenFrom ?? null, to: row?.frozenTo ?? null,
+      days: frozenDays(f), newEndsOn: null,
+    });
+    ok(!!line && line.includes('2026-06-26'),
+      'and the sentence the member now reads NAMES the day it lifts — which "Frozen" on its own never did');
+  }
+
+  /* ── a bare date is a string, and the zone may not move it ──────────────── */
+  //
+  // The one rule this lane could have broken silently. `npm run test:zones`
+  // runs this file in Los Angeles, Auckland and Dubai, and a `new Date(iso)`
+  // anywhere on the path from the column to the sentence moves a freeze that
+  // starts on the 1st to the 31st for everybody west of Greenwich.
+  {
+    const { sb } = reader({
+      memberships: [{
+        id: 'm1', tenant_id: 't1', plan_id: null, started_on: '2026-01-05',
+        ends_on: null, status: 'frozen',
+        frozen_from: '2026-03-01', frozen_to: '2026-03-01',
+      }],
+    });
+    const r = await fetchMyMemberships(sb, 'u1');
+    const row = r.ok ? r.value[0] : null;
+    eq(row?.frozenFrom, '2026-03-01', 'a bare YYYY-MM-DD comes through byte-identical in every zone');
+    eq(frozenDays({ from: row?.frozenFrom, to: row?.frozenTo }), 1,
+      'and a pause from the 1st to the 1st is ONE day — a day the member could not train, not zero');
+  }
+
+  /* ── no pause, and half a pause, are different silences ─────────────────── */
+  {
+    const { sb } = reader({
+      memberships: [
+        { id: 'none', tenant_id: 't1', plan_id: null, started_on: '2026-01-05', ends_on: null, status: 'active', frozen_from: null, frozen_to: null },
+        // The check constraint memberships_freeze_range_check refuses this at
+        // the write. If one ever arrives it is a row that came back wrong, and
+        // 'unreadable' is the only honest answer: a membership whose pause
+        // could not be read is NOT one that was never paused.
+        { id: 'half', tenant_id: 't1', plan_id: null, started_on: '2026-01-05', ends_on: null, status: 'active', frozen_from: '2026-06-12', frozen_to: null },
+      ],
+    });
+    const r = await fetchMyMemberships(sb, 'u1');
+    const rows = r.ok ? r.value : [];
+    eq(rows[0]?.frozenFrom, null, 'a column with nothing in it is null on the row, not undefined');
+    eq(freezeState({ from: rows[0]?.frozenFrom, to: rows[0]?.frozenTo }, TODAY), 'none',
+      'and no pause recorded is "none"');
+    eq(freezeState({ from: rows[1]?.frozenFrom, to: rows[1]?.frozenTo }, TODAY), 'unreadable',
+      'while half a range is "unreadable" — never quietly folded into "none"');
+  }
+
+  /* ── Claim 5. Number(null) is 0, and 0 is a price ───────────────────────── */
+  //
+  // `membership_plans.price_cents` is `integer not null` today, so this is a
+  // defence and not a live bug — the same standing as the identical shape Lane 7
+  // fixed in membershipOrder.ts. What it defends against is one `drop not null`
+  // away: `Number(null)` is 0, and "AED 0.00" is a price this gym never set,
+  // printed on the one screen whose job is to be the record of what they pay.
+  {
+    const { sb } = reader({
+      memberships: [{ id: 'm1', tenant_id: 't1', plan_id: 'p1', started_on: '2026-01-05', ends_on: null, status: 'active', frozen_from: null, frozen_to: null }],
+      plans: [{ id: 'p1', name: 'Gold', price_cents: null, currency: 'AED', interval: 'month', active: true }],
+    });
+    const r = await fetchMyMemberships(sb, 'u1');
+    const p = r.ok ? r.value[0].plan : null;
+    eq(p?.priceCents, null, 'a price the gym has not recorded is NULL, never 0');
+    eq(amount(p?.priceCents, p?.currency), '—', 'and it prints as nothing said, never as "AED 0.00"');
+    eq(planStateOf(r.ok ? r.value[0] : { planId: 'p1', plan: null }).kind, 'plan',
+      'the plan itself is still readable — a missing price does not demote it to "we could not read it"');
+  }
+  {
+    // The other half of `minorOrNull`, and the reason it is not just `?? null`:
+    // PostgREST hands a bigint over as a string, and a real price must survive.
+    const { sb } = reader({
+      memberships: [{ id: 'm1', tenant_id: 't1', plan_id: 'p1', started_on: '2026-01-05', ends_on: null, status: 'active', frozen_from: null, frozen_to: null }],
+      plans: [{ id: 'p1', name: 'Gold', price_cents: ' 20000 ', currency: 'AED', interval: 'month', active: true }],
+    });
+    const r = await fetchMyMemberships(sb, 'u1');
+    eq(r.ok ? r.value[0].plan?.priceCents : null, 20000,
+      'a bigint that arrived as a string is still the price it is');
+  }
+  {
+    const { sb } = reader({
+      memberships: [{ id: 'm1', tenant_id: 't1', plan_id: 'p1', started_on: '2026-01-05', ends_on: null, status: 'active', frozen_from: null, frozen_to: null }],
+      plans: [{ id: 'p1', name: 'Gold', price_cents: 'two hundred', currency: 'AED', interval: 'month', active: true }],
+    });
+    const r = await fetchMyMemberships(sb, 'u1');
+    eq(r.ok ? r.value[0].plan?.priceCents : 0, null,
+      'and a price that cannot be read is null rather than NaN or nought');
+  }
+
+  /* ── `interval`: the fallback to 'month' is CORRECT, and here is why ─────── */
+  //
+  // `membership_plans.interval` is `text not null default 'month'` with
+  // `check (interval in ('month','year','once'))`, so the only values that
+  // reach this reader are the three it names. The fallback is unreachable
+  // rather than wrong, and it must stay: a value outside the check would be a
+  // row nothing in this codebase wrote, and 'month' is the column's own
+  // default rather than a guess this file invented.
+  {
+    const { sb } = reader({
+      memberships: [{ id: 'm1', tenant_id: 't1', plan_id: 'p1', started_on: '2026-01-05', ends_on: null, status: 'active', frozen_from: null, frozen_to: null }],
+      plans: [{ id: 'p1', name: 'Gold', price_cents: 20000, currency: 'AED', interval: 'year', active: true }],
+    });
+    const r = await fetchMyMemberships(sb, 'u1');
+    eq(r.ok ? r.value[0].plan?.interval : null, 'year',
+      'a yearly plan is not flattened to monthly by a fallback that only exists for values the CHECK forbids');
+  }
+
+  /* ── and a failed read is still not an empty list ───────────────────────── */
+  {
+    const { sb } = reader({ membershipsError: { message: 'permission denied' } });
+    const r = await fetchMyMemberships(sb, 'u1');
+    eq(r.ok, false, 'a refused membership read is { ok: false } — never [], which reads as "you have no membership"');
+  }
+}
+
+function finish(): void {
+  if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
+  console.log(`memberRecord: ok (plan-unreadable ≠ no-plan, dates beat the status column, ${EXPIRING_SOON_DAYS}-day window, no cross-currency totals, the member can see their own pause, and a null price is not nought)`);
+}
+
+reads().then(finish, (e: unknown) => {
+  // A throw out of the reads is a failure, not a pass. `finish` is still called
+  // so the assertions that already ran are reported with it.
+  errors.push(`the reads threw: ${(e as Error)?.message ?? String(e)}`);
+  finish();
+});

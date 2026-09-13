@@ -183,6 +183,58 @@ export default function GettingStarted() {
 
         <Rule />
 
+        {/* ── the three the DESK cares about ──────────────────────────────
+         *
+         * The checklist above is about learning the app. This is about being
+         * let in, and none of it was anywhere on a new member's path.
+         *
+         * `src/lib/features.ts` and the Me hub are the only routes to all three
+         * — Explore, and a list eleven rows down under Me — so a member who has
+         * just joined is never once shown the gym's waiver, the intake their
+         * coach needs before a first session, or the entry barcode. The first
+         * two are what a desk turns somebody away for; the third has to be
+         * handed to reception BEFORE it opens anything, which makes it a day
+         * one task and not a later one. Mindbody, PureGym and Planet Fitness
+         * all put exactly these in front of a joining member; this app had them
+         * and hid them.
+         *
+         * Deliberately without ticks. The rows above earn theirs from reads
+         * this screen already has; these three would each need a read of their
+         * own, and a tick drawn off a read that has not happened is the one
+         * thing the whole top of this file is about. They say what they are and
+         * where they stand is on the other side of the tap.
+         */}
+        <Section>
+          <SectionHead title="Before Your First Visit" />
+          <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.sm }}>
+            These are the ones the front desk cares about. Open each one to see where you stand.
+          </Text>
+          {[
+            { icon: 'check' as const, title: "Your Gym's Paperwork", note: 'waivers and consents your gym asks you to sign — some gyms cannot train you until they have them', route: '/(client)/agreements' },
+            { icon: 'pencil' as const, title: 'Your Intake', note: 'what your coach needs before your first session — you can save it half-finished', route: '/(client)/intake' },
+            { icon: 'lock' as const, title: 'Your Entry Barcode', note: 'give it to reception once and the entrance scanner will read it after that', route: '/(client)/access' },
+          ].map((r) => (
+            <Pressable
+              key={r.route}
+              onPress={() => router.push(r.route as any)}
+              accessibilityRole="button"
+              accessibilityLabel={`${r.title}. ${r.note}`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
+            >
+              <View style={{ width: 24, height: 24, alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={r.icon} size={15} color={t.ink3} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.title}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{r.note}</Text>
+              </View>
+              <Icon name={FORWARD_ICON} size={15} color={t.ink3} />
+            </Pressable>
+          ))}
+        </Section>
+
+        <Rule />
+
         <Section>
           <SectionHead title="If Something Does Not Make Sense" />
           <Text style={{ ...ty.body, color: t.ink2, marginBottom: sp.lg }}>

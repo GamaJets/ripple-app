@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.test.json",
+  "files": [
+    "src/lib/habitStreaks.ts",
+    "src/lib/habitStreaks.test.ts"
+  ]
+}

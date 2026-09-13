@@ -106,7 +106,7 @@ import { guardRecipients, bulkReport, bulkThreadNote, type WriteOutcome } from '
 import { listNames } from '../../src/lib/groupProgram';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import type { StatusLevel } from '../../src/lib/status';
 import { rankClients, readClientActivity, type DriftInput } from '../../src/lib/clientDrift';
 import { packLeft } from '../../src/lib/coachMoney';
@@ -372,11 +372,22 @@ export default function Broadcast() {
    * A source that has not been asked for yet is 'loading' rather than 'ready'.
    * A segment nobody has computed has no members, and "0 recipients" is not the
    * answer to a question that has not been put. */
+  /** What an unasked source is worth saying.
+   *
+   *  'loading' while the roster is whole, because the effect above starts the
+   *  read the moment a segment on it is selected and one really is in flight.
+   *  But that effect REFUSES to start over a roster that is not whole — rightly
+   *  — so under a truncated book nothing is loading and nothing ever will be,
+   *  and reporting 'loading' put "this takes a moment" under a send that was
+   *  waiting on something else entirely. Deferring to the roster's own status
+   *  (which `guardRecipients` takes the worst of anyway) leaves the sentence
+   *  describing the read that is actually the problem. */
+  const unasked: LoadStatus = rosterStatus === 'ready' ? 'loading' : rosterStatus;
   const sourceStatus: LoadStatus = !def
     ? (sel.kind === 'tag' ? tagStatus : 'ready')
     : def.source === 'roster' ? 'ready'
-    : def.source === 'drift' ? (drift?.status ?? 'loading')
-    : (packs?.status ?? 'loading');
+    : def.source === 'drift' ? (drift?.status ?? unasked)
+    : (packs?.status ?? unasked);
   const claim = guardRecipients(rosterStatus, sourceStatus, segmentLabel);
   // The count the coach reads on the button. It is only a count when the read
   // behind it was whole — under any other status the button is withheld anyway,
@@ -434,8 +445,18 @@ export default function Broadcast() {
       // the first, in the threads of the people who got both.
       if (!report.retry.length) setBody('');
       Alert.alert(report.title, report.body);
-    } catch {
-      Alert.alert('Not Sent', 'The message could not be written to your clients’ threads. Nothing was sent. Check your connection and try again.');
+    } catch (e) {
+      reportError('broadcast.send', e);
+      // The panel above this is headed "Your last send", and the last send is
+      // THIS one. Left standing, an earlier "Written to every thread" would sit
+      // on screen describing a send that has just failed — the one shape this
+      // screen exists to refuse. Cleared rather than replaced with
+      // `sendOutcome(ids.length, 0)`: every per-client insert in
+      // `sendCoachMessages` is caught and reported individually, so anything
+      // reaching here threw AFTER them, and "nothing was written" is a figure
+      // we would be inventing.
+      setOutcome(null);
+      Alert.alert('Not Sent', 'Something went wrong on the way to your clients’ threads, and this screen cannot say how far it got. Open a thread to check before sending it again — a second send would put the same words there twice.');
     } finally { setBusy(false); }
   };
   const send = () => deliver(recipients.map((c) => c.id));
@@ -520,9 +541,17 @@ export default function Broadcast() {
 
           {/* The people the segment's source could not answer for. Said out
               loud because otherwise the count is quietly smaller than the
-              coach's book with nothing anywhere explaining the gap. */}
-          {def && unassessedNote(def, notAssessed) ? (
-            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{unassessedNote(def, notAssessed)}</Text>
+              coach's book with nothing anywhere explaining the gap.
+
+              And only once the source read has LANDED. `unassessed` counts
+              clients whose drift is null, and null is unknown — so while the
+              read is in flight, and for ever after it fails, every client on
+              the book counts, and this sentence told a coach that all forty of
+              their clients had been added by hand and had no account. The
+              guard's own sentence covers that moment instead, and says the
+              truthful thing about it. */}
+          {def && unassessedNote(def, notAssessed, isWhole(sourceStatus)) ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{unassessedNote(def, notAssessed, isWhole(sourceStatus))}</Text>
           ) : null}
           {/* Every name, not the first two. This list is the last thing between
               the coach and N irreversible writes, and the `numberOfLines={2}`

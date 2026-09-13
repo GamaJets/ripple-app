@@ -81,7 +81,7 @@ import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { num } from '../../src/lib/format';
-import { isAcademyClip, videoForExercise } from '../../src/lib/exerciseId';
+import { videoForExercise } from '../../src/lib/exerciseId';
 // ── two rows, one movement, and only one of them ever plays ────────────────
 //
 // This list is the clip library, one row per clip, and nothing on it said when
@@ -741,7 +741,7 @@ export default function TrainerVideos() {
             The library answers "what have I recorded". This answers the more
             useful question: what am I asking people to do that they have never
             seen done. Scoped to the movements in this coach's own templates,
-            not the whole 56-row catalogue — a list of everything is a chore
+            not the whole catalogue — a list of everything is a chore
             nobody starts. */}
         {coverage && coverageLine(coverage) ? (
           <>
@@ -784,6 +784,30 @@ export default function TrainerVideos() {
                       <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
                       <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
                       <Text style={{ ...ty.caption, color: t.ink3 }}>Academy</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              {/* The movements the coach DID film and their clients still have
+                  nothing for. These also appear in the "nothing to show" list
+                  above, which without this section reads as the app having
+                  forgotten work the coach remembers doing: a clip whose insert
+                  was refused is kept on this phone under its own `vx` id, is
+                  listed in the library below marked "this phone only", and
+                  reaches nobody. Named separately because the action is
+                  different — add it again, not film it again. */}
+              {coverage.localOnly.length ? (
+                <View style={{ marginTop: sp.lg }}>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
+                    Filmed, but saved on this phone only — the clip never reached the server, so no client can watch it. Add it again from the library below.
+                  </Text>
+                  {coverage.localOnly.slice(0, 6).map((nm, i) => (
+                    <View key={nm} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm,
+                      paddingVertical: sp.sm, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.warn }} />
+                      <Text style={{ ...ty.body, color: t.ink, flex: 1 }}>{nm}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>this phone only</Text>
                     </View>
                   ))}
                 </View>

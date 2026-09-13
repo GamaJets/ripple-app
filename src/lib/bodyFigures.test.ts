@@ -226,6 +226,82 @@ eq(readingsLabel([{ at: '2026-08-20', value: 82.1, source: 'weigh-in' }]), '1 we
   ok(!manualBeatsScan('2026-08-30T09:00:00.000Z', 'not-a-date'), 'and an unreadable scan date does the same');
 }
 
+/* ── the index a reading is classified on ──────────────────────────────── */
+
+// `bodyReadings` classifies by POSITION: the first `scanCount` points of the
+// series clientData built are scans and anything past them is the one appended
+// weigh-in. That is a statement about positions in `series`, so the index has
+// to be taken before any point is dropped — a filter renumbers them, and every
+// point after a dropped one then answers to the position of its predecessor.
+//
+// Four points, three of them scans, and the MIDDLE SCAN is unusable. If the
+// index is taken after the drop, the weigh-in lands at index 2, is inside
+// `scanCount`, and is labelled an InBody scan.
+{
+  const gappy: SeriesPoint[] = [
+    { t: '2026-06-01', v: 86.2 },
+    { t: '2026-07-01', v: NaN },
+    { t: '2026-08-01', v: 83.9 },
+    { t: '2026-08-20T07:12:00.000Z', v: 82.1 },
+  ];
+  const r = bodyReadings(gappy, 3);
+  eq(r.length, 3, 'the unusable scan point is dropped and the other three survive');
+  eq(r.filter((x) => x.source === 'scan').length, 2,
+    'a dropped scan does not promote the weigh-in into being a scan');
+  eq(r[r.length - 1].source, 'weigh-in',
+    'the appended weigh-in is still a weigh-in when an earlier scan point fell out');
+  eq(latestBodyReading(gappy, 3)?.source, 'weigh-in',
+    'and the current figure is not claimed to have come off a machine');
+  eq(readingsLabel(r), '2 scans · 1 weigh-in',
+    'the heading counts what is actually there, not what the positions would say after a filter');
+  eq(measuredNote(latestBodyReading(gappy, 3), '2026-08-21').startsWith('weigh-in you logged'), true,
+    'and the note under it names the instrument that was actually used');
+}
+
+// A point with no date, in the same position, does the same thing.
+{
+  const gappy: SeriesPoint[] = [
+    { t: '2026-06-01', v: 86.2 },
+    { t: '', v: 84.7 },
+    { t: '2026-08-01', v: 83.9 },
+    { t: '2026-08-20T07:12:00.000Z', v: 82.1 },
+  ];
+  eq(latestBodyReading(gappy, 3)?.source, 'weigh-in',
+    'a scan point with no date does not renumber the weigh-in either');
+}
+
+// Two scans dropped, so the weigh-in would land at index 1 — well inside
+// scanCount — under the old ordering.
+{
+  const gappy: SeriesPoint[] = [
+    { t: '2026-06-01', v: NaN },
+    { t: '2026-07-01', v: NaN },
+    { t: '2026-08-01', v: 83.9 },
+    { t: '2026-08-20T07:12:00.000Z', v: 82.1 },
+  ];
+  const r = bodyReadings(gappy, 3);
+  eq(readingsLabel(r), '1 scan · 1 weigh-in', 'two dropped scans still leave exactly one weigh-in');
+}
+
+// And the cases that work today must answer exactly as they did. Every point
+// usable is every series in production, and the ordering change must be
+// invisible to them.
+{
+  eq(readingsLabel(bodyReadings(SCANS_ONLY, 3)), '3 scans', 'an all-scan series is unchanged');
+  eq(readingsLabel(bodyReadings(WITH_WEIGH_IN, 3)), '3 scans · 1 weigh-in',
+    'and a scan series with the weigh-in appended is unchanged');
+  const r = bodyReadings(WITH_WEIGH_IN, 3);
+  eq(r.map((x) => x.source).join(','), 'scan,scan,scan,weigh-in',
+    'point for point, in order');
+  eq(r.map((x) => `${x.at}=${x.value}`).join('|'),
+    '2026-06-01=86.2|2026-07-01=84.7|2026-08-01=83.9|2026-08-20T07:12:00.000Z=82.1',
+    'and every value and date is carried through untouched');
+  // scanCount 0 — a client with no scans at all and a weigh-in typed on the
+  // profile screen. Nothing is a scan.
+  eq(bodyReadings([{ t: '2026-08-20T07:12:00.000Z', v: 82.1 }], 0)[0].source, 'weigh-in',
+    'with no scans, the only reading is the weigh-in');
+}
+
 if (errors.length) {
   console.error(`bodyFigures.test: ${errors.length} failure(s)`);
   for (const e of errors) console.error('  ✗ ' + e);

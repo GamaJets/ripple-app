@@ -169,14 +169,36 @@ export default function ClientGymAgreementsScreen() {
               await load();
             } catch (e: any) {
               reportError('gymAgreements.sign', e, { id: a.id });
+              // ── one of these two refusals is not a failure ──────────────
+              //
+              // `gym_agreement_signatures_uq` is unique on (agreement, member),
+              // so a second insert against a version this person has already
+              // signed comes back 23505. That happens on a perfectly ordinary
+              // path: they signed on another handset, or this screen's own
+              // re-read failed and the list in front of them is out of date.
+              //
+              // The single sentence below used to be printed for every error
+              // it could catch, and on THAT error both halves of it were
+              // wrong. It showed a member a Postgres string about a unique
+              // constraint, and then told them "as far as your gym can see you
+              // have not signed it" — about a document their gym is holding
+              // their signature for. On a screen whose subject is what a gym
+              // can produce in a dispute, that is the one sentence it must
+              // never say untruthfully.
+              //
+              // Everything else keeps it, and keeps it for the reason it was
+              // written: the version refusal from supabase/parts/520 means the
+              // gym replaced this wording while it was on screen, nothing was
+              // recorded, and agreeing to what is no longer being asked would
+              // be worth nothing to either party.
+              const already = e?.code === '23505' || /duplicate key|already exists/i.test(String(e?.message ?? ''));
               Alert.alert(
-                'Not signed',
-                // The version refusal from supabase/parts/520 is the one worth
-                // saying in full: it means the gym replaced this wording while
-                // it was on screen, and agreeing to what is no longer being
-                // asked would be worth nothing to either party.
-                `${e?.message ?? 'That could not be saved.'} Nothing has been recorded, so as far as your gym can see you have not signed it.`,
+                already ? 'Already signed' : 'Not signed',
+                already
+                  ? 'Your gym already holds your signature for this version, so it has not been asked for again. Nothing is outstanding on it.'
+                  : `${e?.message ?? 'That could not be saved.'} Nothing has been recorded, so as far as your gym can see you have not signed it.`,
               );
+              // Either way the list on screen has been shown to be out of date.
               await load();
             } finally { setBusyId(null); }
           },

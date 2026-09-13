@@ -36,6 +36,7 @@
 // that a partial read is never counted. So under a partial or failed read this
 // says what is on screen, which it knows, and refuses to enumerate the rest.
 import { exerciseSlug } from './exerciseId';
+import { clipOwner } from './clipOwner';
 import { num } from './format';
 
 /** The minimum a clip has to carry to be attributed. Named as VideoItem names
@@ -70,6 +71,18 @@ export interface ClipSources {
    *  gym shares them; never played on this coach's preview while their own id
    *  is known, which is precisely why they have to be named. */
   others: number;
+  /**
+   * Clips that exist on this phone and nowhere else.
+   *
+   * A separate figure from `mine` and emphatically not part of `academy`. The
+   * coach did film it, so calling it "not filmed" would be wrong; there is no
+   * row, so nobody else can see it, and every sentence on the preview screen is
+   * about what the CLIENT sees. Counting these as the Academy's — which is what
+   * `trainerId == null` does on its own — told a coach their client was
+   * watching a platform demonstration of a movement nobody outside their
+   * handset has a demonstration of.
+   */
+  local: number;
   /** The bought animation for the movement. */
   animation: boolean;
   /** The catalogue's reference stills. Not a clip and never described as one. */
@@ -107,28 +120,46 @@ export function clipSources(
   let mine = 0;
   let academy = 0;
   let others = 0;
+  let local = 0;
   for (const v of hits) {
-    if (v.trainerId == null) academy += 1;
-    else if (coachId && v.trainerId === coachId) mine += 1;
-    else others += 1;
+    // Through `clipOwner` rather than a `trainerId == null` test written here.
+    // That test cannot tell a platform clip from a clip the coach saved while
+    // the insert was refused — both carry a null trainer — and the id prefix
+    // can. One classifier, so the library row, the coverage report and this
+    // preview cannot come to three different answers about the same clip.
+    switch (clipOwner({ id: v.id, trainerId: v.trainerId ?? null }, coachId)) {
+      case 'mine': mine += 1; break;
+      case 'platform': academy += 1; break;
+      case 'other': others += 1; break;
+      case 'local': local += 1; break;
+    }
   }
 
+  // Still videoForExercise's order, and `local` is placed where that function
+  // actually puts it rather than where it ought to go: it takes the first hit
+  // with a null trainer, and `videos` is `[...remote, ...added]`, so a real
+  // Academy clip is found before any offline save and an offline save is found
+  // before the catalogue's own artwork is ever reached. A preview that
+  // disagrees with the player about which clip wins is worse than no preview,
+  // so the ordering is copied and the WORDING carries the correction.
   const shown: ShownSource = mine > 0 ? 'mine'
     : academy > 0 ? 'academy'
-      // Only reachable with no signed-in id. With one, videoForExercise
-      // refuses to fall back to a stranger's clip and so does this.
-      : (!coachId && others > 0) ? 'other'
-        : media.animation ? 'animation'
-          : media.frames ? 'frames'
-            : 'none';
+      : local > 0 ? 'local'
+        // Only reachable with no signed-in id. With one, videoForExercise
+        // refuses to fall back to a stranger's clip and so does this.
+        : (!coachId && others > 0) ? 'other'
+          : media.animation ? 'animation'
+            : media.frames ? 'frames'
+              : 'none';
 
   return {
     mine,
     academy,
     others,
+    local,
     animation: media.animation,
     frames: media.frames,
-    total: mine + academy + others + (media.animation ? 1 : 0) + (media.frames ? 1 : 0),
+    total: mine + academy + others + local + (media.animation ? 1 : 0) + (media.frames ? 1 : 0),
     shown,
     ownershipKnown: coachId != null,
   };
@@ -199,6 +230,11 @@ function shownLine(s: ClipSources): string | null {
     case 'mine': return 'Your client sees your own clip.';
     case 'academy': return 'Your client sees the Academy clip, not one of yours.';
     case 'other': return 'Your client sees a clip belonging to another coach.';
+    // The one line here that is about what the client does NOT see. The clip
+    // above is real and it is the coach's own, and it never reached the server
+    // — so it plays on this handset and on no other, and the client falls
+    // through to whatever the catalogue holds, or to nothing.
+    case 'local': return 'This clip is saved on this phone only and never reached the server, so your client cannot see it — add it again from your clip library when you have a connection.';
     case 'animation': return 'Your client sees the catalogue animation, not a filmed clip.';
     case 'frames': return 'Your client sees the catalogue reference stills, not a filmed clip.';
     // Nothing is on screen. The screen's own "No Demonstration Yet" notice is
@@ -223,6 +259,15 @@ function alsoHeld(s: ClipSources): string[] {
     // Whose, deliberately not said. This coach may not be entitled to the
     // other's name, and the useful fact is that the movement is covered.
     parts.push(others === 1 ? 'a clip filmed by another coach' : `${num(others)} clips filmed by other coaches`);
+  }
+  const local = s.shown === 'local' ? s.local - 1 : s.local;
+  if (local > 0) {
+    // Named with the reason they do not count, because a coach reading "two
+    // clips held" and "your client sees the animation" in the same sentence
+    // needs the half that reconciles them.
+    parts.push(local === 1
+      ? 'a clip saved on this phone only, which never reached the server'
+      : `${num(local)} clips saved on this phone only, which never reached the server`);
   }
   if (s.animation && s.shown !== 'animation') parts.push('the catalogue animation');
   if (s.frames && s.shown !== 'frames') parts.push('the catalogue reference stills');
@@ -276,6 +321,13 @@ export function clipSourceLine(s: ClipSources, whole: boolean): string | null {
 
   // One demonstration, it is the one playing, the library was read in full and
   // we know whose it is. Nothing worth a line.
-  if (parts.length === 1 && whole && s.total <= 1) return null;
+  //
+  // `shown === 'local'` is exempt and has to be. It is a single demonstration
+  // that IS the one playing on this handset, so it satisfies every clause of
+  // the test above — and it is the one case on this screen where the coach is
+  // looking at a clip their client has no way to see. Suppressing it as the
+  // ordinary case is how the defect this state was added for would come back
+  // silently.
+  if (parts.length === 1 && whole && s.total <= 1 && s.shown !== 'local') return null;
   return parts.join(' ');
 }

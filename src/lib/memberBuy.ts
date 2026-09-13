@@ -367,10 +367,17 @@ export function offerFor(
  * the neutral word. Calling a cheaper plan an upgrade is a small lie that reads
  * as a sales line; calling a dearer one a switch costs nothing.
  */
-export function switchLabel(held: GymPlan | { priceCents: number; currency: string | null } | null, next: GymPlan): string {
+export function switchLabel(held: GymPlan | { priceCents: number | null; currency: string | null } | null, next: GymPlan): string {
   const a = (held?.currency || '').trim().toUpperCase();
   const b = (next.currency || '').trim().toUpperCase();
-  if (held && a && b && a === b && next.priceCents > held.priceCents) return 'Upgrade to This Plan';
+  // `held.priceCents != null` is not defensive noise. `MemberPlan.priceCents`
+  // is nullable — a plan whose price the gym has not recorded — and
+  // `next.priceCents > null` coerces to `next.priceCents > 0`, so EVERY plan
+  // with a price on it would have read "Upgrade to This Plan" to a member whose
+  // own plan has no price. A word that claims a comparison nobody could make.
+  if (held && a && b && a === b && next.priceCents > held.priceCents) {
+    return 'Upgrade to This Plan';
+  }
   return 'Switch to This Plan';
 }
 

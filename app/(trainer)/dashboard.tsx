@@ -1388,6 +1388,10 @@ export default function TrainerClients() {
    *  captioned a fragment as the whole book. The segment still SELECTS in both
    *  cases — filtering what did load is honest — it just cannot say how many.  */
   const segN = (n: number): number | null => (isWhole(rosterStatus) ? n : null);
+  /** Nobody has written this client a programme — as opposed to "this phone has
+   *  not been told what they are on", which is what a null means under any
+   *  status but 'ready'. Only ever asked behind `isWhole(programStatus)`. */
+  const noProgramme = (c: RosterClient): boolean => getProgram(c.id) == null;
   const AUTO_SEGS = [
     { key: 'all', label: 'All', n: segN(roster.length) },
     // The drift segments replace the old At-risk chip rather than sitting
@@ -1423,6 +1427,33 @@ export default function TrainerClients() {
     // One segment per delivery, built from the vocabulary rather than listed by
     // hand — a book with no hybrid clients simply shows a zero, the same as the
     // other two, instead of quietly filing them under Online.
+    /* ── who this coach is not actually programming for ──────────────────
+     *
+     * The chip a coach opens a roster to find and the one this screen did not
+     * have. TrueCoach, Trainerize and PT Distinction all surface "no active
+     * programme" on the roster, because it is the difference between somebody
+     * who is coached and somebody who is merely listed — and it is invisible
+     * from every other signal here: a client with no programme at all can be
+     * training four times a week off their own bat, so they are `on_track` in
+     * drift, unflagged on adherence, and nothing on this screen ever mentions
+     * that the coach has written them nothing.
+     *
+     * No new read. `useAssignedPrograms` is already mounted for the bulk-assign
+     * panel and the client sheet, and `getProgram` is what both of those ask.
+     *
+     * ONLY OFFERED OFF A WHOLE READ, and that is not fussiness. The header of
+     * src/ui/assignedPrograms.tsx is explicit that `getProgram` serves this
+     * DEVICE's cache when no read has landed — deliberately — and that serving
+     * the cache does not make anything 'ready'. So under 'loading' and under
+     * 'error' a null programme means "this phone has not been told", and a chip
+     * built on it would list every client the cache happens not to hold under a
+     * heading asserting the coach has programmed none of them. The drift chips
+     * two entries above appear on exactly the same condition and for exactly
+     * the same reason; this one is absent rather than wrong.
+     */
+    ...(isWhole(programStatus)
+      ? [{ key: 'noprogramme', label: 'No Programme', n: segN(roster.filter(noProgramme).length) }]
+      : []),
     ...COACHED_MODES.map((m) => ({ key: m, label: COACHED_MODE_SHORT[m], n: segN(roster.filter((c) => c.mode === m).length) })),
   ];
   const matchSeg = (c: RosterClient) =>
@@ -1430,6 +1461,10 @@ export default function TrainerClients() {
     : seg === 'drifting' ? driftFor(c)?.status === 'at_risk'
     : seg === 'nodata' ? driftFor(c)?.status === 'idle'
     : seg === 'below' ? lowAdherence(c)
+    // Only reachable while the chip is on screen, which is only while the
+    // programme read was whole — see AUTO_SEGS. `segLive` drops the selection
+    // back to the whole book if that stops being true underneath the coach.
+    : seg === 'noprogramme' ? noProgramme(c)
     // A row whose unread count could not be read is NOT in this list. The
     // segment is a queue a coach works through, and a client who may or may not
     // have written is not something to answer — the chip's own dash says the
@@ -1440,7 +1475,14 @@ export default function TrainerClients() {
     : tagsFor(c.id).includes(seg);
   // A drift segment cannot be honoured once the read is gone; fall back to the
   // whole book rather than showing an empty list that reads as "none of these".
-  const segLive = !(!bands && (seg === 'drifting' || seg === 'nodata'));
+  //
+  // The same for 'noprogramme': a programme read that stops being whole — a
+  // refresh that fails, a sign-out and back — leaves `getProgram` serving a
+  // cache, and a segment computed off that would quietly become a list of the
+  // clients this handset has forgotten rather than the ones nobody has written
+  // to. It falls back to the whole book, which is visibly not a filtered list.
+  const segLive = !((!bands && (seg === 'drifting' || seg === 'nodata'))
+    || (seg === 'noprogramme' && !isWhole(programStatus)));
   const segRoster = segLive ? roster.filter(matchSeg) : roster;
   // What is on screen, and therefore what every control under the list acts on.
   //
@@ -1615,6 +1657,13 @@ export default function TrainerClients() {
   const segStatus: LoadStatus =
     seg === 'drifting' || seg === 'nodata'
       ? (driftErr ? 'error' : drift ? 'ready' : 'loading')
+      : seg === 'noprogramme'
+        // Bulk message and bulk assign both act on "everybody in this segment",
+        // and this segment IS the programme read. `guardRecipients` refuses the
+        // pair outright on anything but 'ready' — which matters most here,
+        // because the obvious next gesture after filtering to No Programme is
+        // to assign one to all of them.
+        ? programStatus
       : seg === 'all' || seg === 'below' || (COACHED_MODES as readonly string[]).includes(seg)
         ? 'ready'
         : tagStatus;

@@ -150,7 +150,7 @@ eq(addDays(null, 1), null, 'no date in, no date out');
 
 const held = (over: Partial<MemberMembership> = {}): MemberMembership => ({
   id: 'm1', tenantId: 't1', startedOn: '2026-09-01', endsOn: '2026-09-30',
-  status: 'active', planId: 'p1', plan: null, ...over,
+  status: 'active', planId: 'p1', plan: null, frozenFrom: null, frozenTo: null, ...over,
 });
 
 eq(renewStart(held(), '2026-09-20'), '2026-10-01', 'a renewal begins the day after the current term ends');
@@ -274,6 +274,15 @@ eq(switchLabel({ priceCents: 30000, currency: 'AED' }, plan({ id: 'p2', priceCen
 eq(switchLabel({ priceCents: 20000, currency: 'GBP' }, plan({ id: 'p2', priceCents: 30000 })), 'Switch to This Plan', 'and two currencies cannot be compared at all');
 eq(switchLabel({ priceCents: 20000, currency: null }, plan({ id: 'p2', priceCents: 30000 })), 'Switch to This Plan', 'nor can one with no currency recorded');
 eq(switchLabel(null, plan()), 'Switch to This Plan', 'and a plan we could not read is not evidence of anything');
+// A price NOBODY RECORDED is not a price of zero, and it is not evidence
+// either. `MemberPlan.priceCents` is nullable as of this pass, and without the
+// null guard `next.priceCents > null` coerces to `next.priceCents > 0` — so
+// every plan with any price on it would be called an Upgrade to a member whose
+// own plan has none. A word claiming a comparison nobody could make.
+eq(switchLabel({ priceCents: null, currency: 'AED' }, plan({ id: 'p2', priceCents: 30000 })), 'Switch to This Plan',
+  'a held plan with no price recorded cannot be compared, so nothing is called an upgrade');
+eq(switchLabel({ priceCents: null, currency: 'AED' }, plan({ id: 'p2', priceCents: 0 })), 'Switch to This Plan',
+  'and a free plan beside an unknown one is still not a comparison');
 
 /* ═══════════════════════════════════════════════════════════════════════════
    6. Passes, orders and money

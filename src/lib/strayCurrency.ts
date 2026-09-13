@@ -61,7 +61,21 @@
 // a screen. `strayLines` is here because the wording is the part that must not
 // be re-invented per screen, and it is the only thing in this file that knows
 // there is a reader.
-import { normaliseCurrency } from './gymRecord';
+// `currencyText` and NOT `normaliseCurrency`, and this module is the only place
+// in the tree where that is the right import.
+//
+// `normaliseCurrency` now REFUSES a non-code: it answers null for 'pounds' the
+// same as for '', because everything else in this product compares or prints
+// its result and a non-code must not survive contact with either. This module
+// is the exception — it does not compare or print money, it REPORTS the column,
+// and it cannot tell an owner that a row says `Pounds` if the value has already
+// been turned into null on the way in. Importing the strict one collapsed
+// 'unstated' and 'not_a_code' into one fault and quoted `stated: null` for a
+// column that plainly states something, which is the opposite of this file's
+// job. `currencyText` is the spelling half that `normaliseCurrency` is built
+// on: trimmed and upper-cased, shape unchecked. `isCode` below is what asks the
+// shape question here, and it is the same `/^[A-Z]{3}$/`.
+import { currencyText } from './gymRecord';
 
 /** Why one code on the rows is being named. See the header — three faults with
  *  three different fixes, never collapsed into "bad currency". */
@@ -131,7 +145,7 @@ export function strayCurrencies(
 ): StrayReport {
   const known = new Set<string>();
   for (const b of book ?? []) {
-    const c = normaliseCurrency(b);
+    const c = currencyText(b);
     // A gym whose own setting is not a code does not get to legitimise rows
     // holding the same non-code. It is reported against them instead, which is
     // the honest reading: something is wrong, and it is not the payments.
@@ -150,7 +164,7 @@ export function strayCurrencies(
   // not a row to skip.
   const found = new Map<string, Stray>();
   for (const r of rows) {
-    const c = normaliseCurrency(r.currency);
+    const c = currencyText(r.currency);
     const kind: StrayKind = c == null ? 'unstated' : !isCode(c) ? 'not_a_code' : 'unseen';
     // A well-formed code the gym uses is the ordinary case and the only one
     // with nothing to say. The `checked` guard is what stops an unread price

@@ -118,10 +118,21 @@ export default function Nudges() {
    *  "Nobody is suggested twice" true in the window where the server has not
    *  been told anything yet. */
   const [queuedFor, setQueuedFor] = useState<string[]>([]);
-  // The watch digest opens itself when it is due for the week and is otherwise
-  // a section the coach may open. Its own flag: sharing one with `showMuted`
-  // would make closing one close the other.
-  const [showWatch, setShowWatch] = useState(false);
+  /**
+   * Whether the watch digest is open, or null for "whatever the week says".
+   *
+   * A tri-state and not a boolean, because the section has a default that is
+   * not always closed: it opens itself when the week's digest is still owed.
+   * As a boolean this was `n.watchDigestDue || showWatch`, so while the digest
+   * was due the rows were open no matter what the flag said — the heading
+   * offered "hide", a coach tapped it, and the section did not move. A control
+   * that reads as broken on the one screen whose whole argument is that a coach
+   * should keep reading it.
+   *
+   * Null means nobody has touched it this sitting, so the week decides. Once
+   * they have, their choice decides, in both directions.
+   */
+  const [showWatch, setShowWatch] = useState<boolean | null>(null);
 
   const board = n.board;
 
@@ -358,13 +369,18 @@ export default function Nudges() {
               <>
                 <Rule />
                 <Section>
+                  {/* One expression, used by the heading and by the rows, so
+                      the word on the control and what the control does cannot
+                      come apart. `?? !!n.watchDigestDue` is the default until
+                      the coach touches it; `watchDigestDue` is null while the
+                      stored week is still being read, and null is not "due". */}
                   <SectionHead
                     title="Slipping"
-                    note={showWatch || n.watchDigestDue ? (showWatch ? 'hide' : `${board.watching.length}`) : `${board.watching.length}`}
-                    onPress={() => setShowWatch((v) => !v)}
+                    note={(showWatch ?? !!n.watchDigestDue) ? 'hide' : `${board.watching.length}`}
+                    onPress={() => setShowWatch((v) => !(v ?? !!n.watchDigestDue))}
                   />
                   <Text style={{ ...ty.body, color: t.ink2 }}>{watchDigestNote(board.watching)}</Text>
-                  {n.watchDigestDue || showWatch ? (
+                  {(showWatch ?? !!n.watchDigestDue) ? (
                     <View style={{ marginTop: sp.md }}>
                       {board.watching.map((w, i) => (
                         <View key={w.clientId}

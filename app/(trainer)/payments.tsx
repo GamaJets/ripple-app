@@ -238,6 +238,16 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag, PartialRead, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty, value, numeric } from '../../src/theme/scale';
 import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
+// Which clients the figure at the top of this screen is made of. A BREAKDOWN
+// of a total already here, and deliberately not a lifetime value — that figure
+// is `clientValue` in src/lib/clientValue.ts, it adds the cash a coach records
+// themselves, and app/(trainer)/money.tsx renders it. See the header of
+// src/lib/payerBook.ts for why this may never be labelled as the other one.
+import {
+  payerBook, payerPayments, payerGaveBack,
+  PAYER_NAMELESS, PAYER_IS_CARD_ONLY, PAYER_IS_GROSS, PAYER_WHOLE_FIGURE_IS_ELSEWHERE,
+  type PayerCharge,
+} from '../../src/lib/payerBook';
 import { reportError } from '../../src/lib/reportError';
 import { isoDate } from '../../src/lib/format';
 import { payoutStage, canOnboard } from '../../src/lib/payoutAccount';
@@ -1460,6 +1470,43 @@ export default function TrainerPayments() {
   // back are real sales. Nothing is counted off them — see the heading note.
   const memberships = buys.filter((b) => b.status === 'paid' && b.sessions_total == null);
 
+  // ── which clients the figure at the top is made of ────────────────────────
+  //
+  // "Taken Through Stripe" says AED 18,400 and says nothing about whose. Both
+  // halves of it are already in memory here and both carry `client_name`, so
+  // the breakdown is a grouping rather than a read — there is no new query on
+  // this screen for it, which is also why it can never be the WHOLE figure:
+  // `coach_receipts` is not read here.
+  //
+  // `earnedStatus`, the same gate the takings figure uses, and for the same
+  // reason doubled: this spans the two tables, so it is only as complete as the
+  // worse of them, and a per-client breakdown over a truncated read is the one
+  // shape of this that looks entirely correct while being wrong about a person
+  // by name. `payerBook` returns null under everything but 'ready' and the
+  // section below draws the same three arms every section beside it draws.
+  //
+  // GROSS and NOT NETTED, following the doctrine two sections up: a refund has
+  // no date on it, so it is printed beside the client's figure and taken off
+  // nothing. That is the opposite of what `clientValue` does on the Money
+  // screen, deliberately — that figure is all-time by construction and this one
+  // sits under a heading that also prints a month — and
+  // `PAYER_IS_GROSS` says which is which on the screen.
+  const payers = payerBook(
+    [
+      ...paid.map((b): PayerCharge => ({
+        client_id: b.client_id, client_name: b.client_name,
+        amount_cents: b.amount_cents, currency: b.currency,
+        refunded_cents: b.refunded_cents, kind: 'one-off',
+      })),
+      ...pays.map((p): PayerCharge => ({
+        client_id: p.client_id, client_name: p.client_name ?? null,
+        amount_cents: p.amount_cents, currency: p.currency,
+        refunded_cents: p.refunded_cents, kind: 'renewal',
+      })),
+    ],
+    earnedStatus,
+  );
+
   /** A row of money pots, one per currency. Never one figure: AED 600 and
    *  GBP 90 do not add to 690 of anything, and a white-label product sees both
    *  on the same coach's book the first time a visitor buys a session. */
@@ -1955,6 +2002,174 @@ export default function TrainerPayments() {
               {disputesStatus !== 'error' && disputes.length ? (<>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{DISPUTE_MONEY_IS_ALREADY_GONE}</Text>
                 <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{EVIDENCE_GOES_TO_STRIPE}</Text>
+              </>) : null}
+            </Section>
+
+            <Rule />
+
+            {/* ── which clients that money came from ──────────────────────
+                The figure at the top of this screen is a month and an all-time
+                total, and a coach reading it has one obvious next question that
+                nothing here could answer: WHOSE. Three lists existed below —
+                packs, memberships, renewals — and a coach wanting to know what
+                one client had put through their card had to find that person in
+                all three and add it up in their head, per currency.
+
+                A BREAKDOWN, NOT A LIFETIME VALUE, and the distinction is the
+                whole of why this section is allowed to exist. `clientValue` in
+                src/lib/clientValue.ts is this app's answer to "what has this
+                person paid me": it adds `coach_receipts` — the cash and the
+                bank transfers, which for most self-employed coaches are the
+                LARGER half — and it takes refunds off. app/(trainer)/money.tsx
+                renders it under "What Each Client Has Paid" and
+                app/(trainer)/client.tsx renders it per person. Nothing here
+                computes a second one. This is the same total already at the top
+                of this screen, split by who paid it, card only and gross,
+                and all three of those words are on the screen underneath it.
+
+                Never ranked across currencies. `orderedBy` names the one
+                currency the order is by, and a coach paid in two is told the
+                other exists rather than shown a league table built out of an
+                exchange rate nobody supplied. */}
+            <Section>
+              {/* Counted only under 'ready'. `payerBook` returns nothing at all
+                  under the other three, so there is no list here to count over
+                  when the count would be over a prefix. */}
+              <SectionHead title="Who Paid You" note={payers && payers.payers.length ? String(payers.payers.length) : undefined} />
+              {earnedStatus === 'error' ? (
+                // Never an empty list under 'error'. A coach shown no clients
+                // under a heading about who has paid them reads it as nobody.
+                <Flag tone={t.crit}>
+                  {buysStatus === 'error' && paysStatus === 'error'
+                    ? 'Your sales and your renewals could not be read, so there is nothing here about who has paid you. Nobody has stopped paying you because a read failed.'
+                    : buysStatus === 'error'
+                      ? 'Your one-off sales could not be read, so this cannot be split by client. Half of what each person has paid you is missing and it will not be shown as the whole.'
+                      : 'Your subscription renewals could not be read, so this cannot be split by client. Half of what each person has paid you is missing and it will not be shown as the whole.'}
+                </Flag>
+              ) : earnedStatus === 'partial' ? (
+                // The rows that came back are real; the SET is a prefix. Every
+                // name would be right and a client who has been paying for a
+                // year would show three payments, which is the one version of
+                // this figure a coach has no way to doubt.
+                <PartialRead what="payments" shown={buys.length + pays.length} onPress={load} />
+              ) : payers && payers.payers.length === 0 ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Nobody has paid you through Stripe yet. Anything paid in cash or by bank transfer
+                  is under Receipts and is not counted here.
+                </Text>
+              ) : payers ? (<>
+                {payers.payers.map((r, i) => (
+                  <View key={r.clientId} style={{
+                    paddingVertical: sp.md,
+                    borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: sp.md }}>
+                      {/* A name that could not be read gets a sentence, not a
+                          dash and not the word "Unknown": the payment is real,
+                          the person is real, and the failure is ours to state.
+                          Same wording as the Memberships Sold list below. */}
+                      <Text
+                        style={{ ...ty.body, fontWeight: '500', color: r.name ? t.ink : t.ink3, flex: 1 }}
+                        numberOfLines={1}
+                      >
+                        {r.name || PAYER_NAMELESS}
+                      </Text>
+                      {/* One figure per currency, stacked. AED 600 and GBP 90
+                          are two amounts of money and there is no third. */}
+                      <View style={{ alignItems: 'flex-end' }}>
+                        {r.taken.pots.map((p) => (
+                          <Text key={p.currency} style={{ ...ty.body, ...numeric, color: t.ink }}>
+                            {fig(minorMoney(p.minorUnits, p.currency))}
+                          </Text>
+                        ))}
+                      </View>
+                    </View>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                      {payerPayments(r) === 1 ? '1 payment' : payerPayments(r) + ' payments'}
+                      {r.renewals ? (r.renewals === 1 ? ' · 1 of them a renewal' : ' · ' + r.renewals + ' of them renewals') : ''}
+                    </Text>
+                    {/* What has gone back, stated beside the figure and taken
+                        off nothing — `refunded_cents` carries no date, so a
+                        netted number here would belong to no period and would
+                        disagree with the gross figure at the top of the screen.
+                        One line per currency, for the same reason the totals
+                        are potted. Null for nearly everybody. */}
+                    {payerGaveBack(r) ? (
+                      <View style={{ marginTop: 2 }}>
+                        {r.givenBack.pots.map((p) => (
+                          <Text key={p.currency} style={{ ...ty.caption, color: t.ink3 }}>
+                            {'Refunded, and not taken off the figure above: '}
+                            <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>{fig(minorMoney(p.minorUnits, p.currency))}</Text>
+                          </Text>
+                        ))}
+                        {r.givenBack.unlabelled ? (
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>
+                            {r.givenBack.unlabelled === 1
+                              ? 'One refund to them has no currency recorded, so it has no figure here.'
+                              : r.givenBack.unlabelled + ' refunds to them have no currency recorded, so they have no figure here.'}
+                          </Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    {/* A hole in this person's figure, sized. Counted by
+                        `sumTaken` and never summed into a unit nobody stated. */}
+                    {r.taken.unlabelled || r.taken.unpriced ? (
+                      <Flag tone={t.warn} style={{ marginTop: sp.sm }}>
+                        {r.taken.unlabelled
+                          ? (r.taken.unlabelled === 1
+                            ? 'One of their payments has no currency recorded and is in no figure above. '
+                            : r.taken.unlabelled + ' of their payments have no currency recorded and are in no figure above. ')
+                          : ''}
+                        {r.taken.unpriced
+                          ? (r.taken.unpriced === 1
+                            ? 'One has no amount recorded at all.'
+                            : r.taken.unpriced + ' have no amount recorded at all.')
+                          : ''}
+                      </Flag>
+                    ) : null}
+                  </View>
+                ))}
+
+                {/* Two currencies is two books. Said once, under the list,
+                    because the order above is a fact about one of them. */}
+                {payers.currencies.length > 1 && payers.orderedBy ? (
+                  <Flag tone={t.ink3} style={{ marginTop: sp.md }}>
+                    {'You have been paid in ' + payers.currencies.join(' and ')
+                      + '. Those are separate amounts of money, they are never added together, and the order above is by '
+                      + payers.orderedBy + ' alone.'}
+                  </Flag>
+                ) : null}
+
+                {/* Money on this screen's own totals that belongs to nobody in
+                    the list. Counted and reported rather than dropped: a
+                    breakdown of a figure that silently omits part of it is the
+                    defect this section exists to close, one level down. */}
+                {payers.unattached.pots.length > 0 || payers.unattached.unpriced > 0 || payers.unattached.unlabelled > 0 ? (
+                  <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+                    {'Some payments in the totals above carry no client and are in nobody’s figure here: '}
+                    {payers.unattached.pots.map((p) => minorMoney(p.minorUnits, p.currency)).filter(Boolean).join(' · ')}
+                    {payers.unattached.pots.length ? '. ' : ''}
+                    {payers.unattached.unlabelled || payers.unattached.unpriced
+                      ? 'Some of them have no amount or no currency recorded either.'
+                      : ''}
+                  </Flag>
+                ) : null}
+
+                {/* How many people in the list above are a sentence rather than
+                    a name, said once instead of being left to be counted. */}
+                {payers.nameless ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {payers.nameless === 1
+                      ? 'One name above could not be read. The payment is real and so is the person; only the name is missing.'
+                      : payers.nameless + ' names above could not be read. Those payments are real and so are the people; only the names are missing.'}
+                  </Text>
+                ) : null}
+
+                {/* The three sentences this figure cannot be read without. Card
+                    only, gross, and where the whole of it lives. */}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg }}>{PAYER_IS_CARD_ONLY}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAYER_IS_GROSS}</Text>
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{PAYER_WHOLE_FIGURE_IS_ELSEWHERE}</Text>
               </>) : null}
             </Section>
 

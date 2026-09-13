@@ -6,8 +6,15 @@
 // forty clips has no idea which of them matter. Both want the same list.
 //
 // Deliberately scoped to what the coach ACTUALLY PROGRAMMES, not the whole
-// 56-row catalogue. A list of everything is a chore nobody starts; a list of
-// the nine movements in the programmes you have already written is a job.
+// catalogue. A list of everything is a chore nobody starts; a list of the nine
+// movements in the programmes you have already written is a job.
+//
+// This comment used to call that "the whole 56-row catalogue". 56 is the number
+// of distinct EQUIPMENT values, not the number of exercises — counted against
+// the live table on 13 Sep 2026 the catalogue is 615 rows, so the sentence was
+// out by a factor of eleven in the direction that makes "list everything" sound
+// reasonable. The figure is dated here and is deliberately not load-bearing:
+// nothing reads it and every count this file produces is counted at the time.
 //
 // An Academy clip counts as covered — a client will see the platform
 // demonstration — but it is reported separately, because "somebody has filmed
@@ -18,10 +25,11 @@
 //
 // This file used to know about two kinds of cover, clips and Academy clips,
 // and everything else was "no clip at all". That was true when it was written
-// and stopped being true the day a bought pack of 483 animations and 601
-// stills landed on the catalogue: a coach was being told that 25 of the 25
-// movements they programme have nothing, while their clients were watching a
-// proper animation of every one.
+// and stopped being true the day a bought pack of animations and stills landed
+// on the catalogue: a coach was being told that 25 of the 25 movements they
+// programme have nothing, while their clients were watching a proper animation
+// of every one. Counted against the live table on 13 Sep 2026: of 615 rows, 496
+// carry an animation, 608 carry stills and 7 carry neither.
 //
 // So there are four states, and the question the screen answers is what the
 // CLIENT WILL SEE — because that is the decision a coach is making when they
@@ -32,8 +40,21 @@
 // requires reading the catalogue, and a read that failed must not be reported
 // as "nothing is illustrated" — see the null case in coverageFor.
 import { exerciseSlug } from './exerciseId';
+import { clipOwner } from './clipOwner';
 
-export interface CoverageVideo { exerciseId: string | null; name: string; trainerId?: string | null }
+/**
+ * One clip, with enough on it to say whose it is.
+ *
+ * `id` is required for the reason spelled out on `SourcedClip` in
+ * src/lib/clipSources.ts: `useExerciseVideos` returns `[...remote, ...added]`
+ * and an `added` row — a clip saved on this phone because the insert was
+ * refused — carries `trainerId: null`, which is indistinguishable from a
+ * platform clip by that field alone. This report is entirely about what a
+ * CLIENT will see, and a clip with no row is seen by nobody, so filing one
+ * under the Academy told a coach their client was watching a demonstration
+ * that exists on one handset.
+ */
+export interface CoverageVideo { id: string; exerciseId: string | null; name: string; trainerId?: string | null }
 
 export interface Covered {
   /** The exercise as the coach wrote it in the programme. */
@@ -42,6 +63,11 @@ export interface Covered {
   mine: boolean;
   /** Covered by a platform Academy clip, which they may replace with their own. */
   academy: boolean;
+  /** A clip for this movement is sitting on this phone and nowhere else, so it
+   *  covers nothing. Kept beside `mine` rather than folded into it because the
+   *  coach HAS filmed it and the client still cannot watch it, and those are
+   *  two different sentences with two different actions under them. */
+  localOnly: boolean;
   /** The catalogue has an illustration of the movement. Not somebody's clip —
    *  a client still sees the lift performed correctly, which is the difference
    *  between "worth filming eventually" and "nobody has ever seen this done".
@@ -70,6 +96,16 @@ export interface CoverageReport {
   academyOnly: string[];
   /** Filmed by this coach. */
   mine: string[];
+  /**
+   * Movements whose only clip never reached the server.
+   *
+   * These also appear in `missing` or `illustratedOnly`, and deliberately so:
+   * this list is not a fourth kind of cover, it is the reason a coach who
+   * believes they filmed something is being shown it in a list of things to
+   * film. Naming them is what turns "why is this still here" into "add it
+   * again from your clip library".
+   */
+  localOnly: string[];
 }
 
 /**
@@ -92,11 +128,23 @@ export function coverageFor(
 ): CoverageReport {
   const mineSlugs = new Set<string>();
   const academySlugs = new Set<string>();
+  const localSlugs = new Set<string>();
   for (const v of videos) {
     const slug = v.exerciseId || exerciseSlug(v.name);
     if (!slug) continue;
-    if (coachId && v.trainerId === coachId) mineSlugs.add(slug);
-    else if (v.trainerId == null) academySlugs.add(slug);
+    switch (clipOwner({ id: v.id, trainerId: v.trainerId ?? null }, coachId)) {
+      case 'mine': mineSlugs.add(slug); break;
+      case 'platform': academySlugs.add(slug); break;
+      // A clip on this phone and nowhere else. It is NOT cover — the client
+      // sees whatever the catalogue holds, or nothing — and it is not the
+      // Academy's either. It is reported on its own so the coach is told the
+      // one thing that changes what they do: the clip they think they added is
+      // not with their clients.
+      case 'local': localSlugs.add(slug); break;
+      // Another coach's clip. Never served to this coach's client by
+      // videoForExercise, so it covers nothing here.
+      case 'other': break;
+    }
   }
 
   // One entry per movement, keeping the first spelling the coach used — it is
@@ -113,6 +161,7 @@ export function coverageFor(
       name,
       mine: mineSlugs.has(slug),
       academy: academySlugs.has(slug),
+      localOnly: localSlugs.has(slug) && !mineSlugs.has(slug) && !academySlugs.has(slug),
       illustrated: illustratedSlugs ? illustratedSlugs.has(slug) : null,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -127,6 +176,7 @@ export function coverageFor(
     unknownCover: illustratedSlugs == null,
     academyOnly: all.filter((c) => !c.mine && c.academy).map((c) => c.name),
     mine: all.filter((c) => c.mine).map((c) => c.name),
+    localOnly: all.filter((c) => c.localOnly).map((c) => c.name),
   };
 }
 
@@ -165,6 +215,15 @@ export function coverageLine(r: CoverageReport): string | null {
   }
   if (a > 0) {
     parts.push(`${a} ${a === 1 ? 'uses' : 'use'} the Academy clip, which you can replace with your own`);
+  }
+  // Said whatever else is on the line, because it is the only clause here that
+  // contradicts something the coach believes: they filmed it, the clip is in
+  // their library list, and the insert never landed. Without this they read
+  // "nothing to show" against a movement they remember filming and conclude the
+  // count is wrong.
+  const l = r.localOnly.length;
+  if (l > 0) {
+    parts.push(`${l} ${l === 1 ? 'has a clip' : 'have clips'} saved on this phone only, which never reached your clients`);
   }
   if (r.unknownCover) {
     // Never let an unreadable catalogue read as "these have nothing". The

@@ -946,8 +946,29 @@ export function sharedCurrency(rows: Array<{ currency?: string | null }>): strin
 }
 
 /**
+ * What a currency column SPELLS, with case and spacing settled — or null when
+ * it holds nothing at all. The shape is not checked here.
+ *
+ * This is the smaller half of `normaliseCurrency`, split out of it and exported
+ * for exactly one caller: `strayCurrencies` in src/lib/strayCurrency.ts, whose
+ * whole job is to tell an owner that a row holds `Pounds` and to QUOTE it back
+ * to them. That module needs to see the non-code in order to report it, and it
+ * is the only thing in this tree that does — everything else compares, folds or
+ * prints, and for all of those a non-code must not survive contact with a
+ * currency at all.
+ *
+ * So: this function answers "what does the column say", and
+ * `normaliseCurrency` below answers "what money is this". Two different
+ * questions that were one function, which is how `'pounds'` came to be a
+ * currency everywhere downstream.
+ */
+export function currencyText(currency: string | null | undefined): string | null {
+  return (currency ?? '').trim().toUpperCase() || null;
+}
+
+/**
  * One currency code, as this product stores and compares them, or null for
- * "nobody has said".
+ * "this is not a currency this app can name".
  *
  * Empty string is normalised to null for the same reason `money()` refuses it:
  * "" and null are the same fact, and letting "" through as a stated value hands
@@ -956,12 +977,49 @@ export function sharedCurrency(rows: Array<{ currency?: string | null }>): strin
  * are one currency, and a comparison that says otherwise withholds a total the
  * gym is entitled to.
  *
+ * ── THE SHAPE IS CHECKED, AND THAT IS NEW ─────────────────────────────────
+ *
+ * This used to be `trim().toUpperCase() || null` and nothing else, so it
+ * answered `'POUNDS'` for `'pounds'` — a truthy, stable, comparable value that
+ * is not a currency. Five money columns in this schema carry no format check of
+ * any kind (`gym_passes`, `gym_pass_types`, `membership_plans`, `gym_invoices`,
+ * `gym_orders`; `gym_payments` is a sixth), so `'pounds'`, `'GB'` and `'£'` all
+ * satisfy `not null` and reach this function from a real row.
+ *
+ * What that cost, twice, in one night:
+ *
+ *   · Two rows both holding `'pounds'` normalised to the same string, COMPARED
+ *     EQUAL, were subtracted from one another and placed a member on the list
+ *     price — the exact fold src/lib/priceBook.ts exists to refuse, arrived at
+ *     through the currency rather than through the amount.
+ *   · `sharedCurrency` above answered `'POUNDS'` for a whole register of them,
+ *     and every figure built on that answer was labelled with it.
+ *
+ * `/^[A-Z]{3}$/` is not a sixth spelling of this rule. It is the one
+ * `priceBook.ts` uses, and `coachCosts.ts`, `coachInvoice.ts`, `costBudgets.ts`,
+ * `coachReceipts.ts`, `csvImport.ts`, `coachCurrency.ts`, `monthlyHistory.ts`
+ * and `publicProfile.ts` already apply, and it is the constraint
+ * `tenants_currency_is_iso` holds in the database.
+ *
+ * ── NULL IS NOT ZERO AND IT IS NOT AN OMISSION ────────────────────────────
+ *
+ * A null out of here means "this money cannot be spelled", which is a fact
+ * about the NAMING and never about the amount. Every caller must go on counting
+ * the row: `unstatedTakings` in ./gymBanked.ts counts it, `incomeOf` in
+ * ./monthEnd.ts makes null a member of its currency set so the month's total is
+ * WITHHELD rather than invented, `passRevenueCents` in ./gymPasses.ts does the
+ * same, and `denominate` in ./siteRollUp.ts adds null to `codes` so an
+ * unlabelled site cannot be absorbed into a labelled neighbour's currency. None
+ * of them may turn this null into a default, into `tenants.currency`, or into
+ * a row missing from a count.
+ *
  * Exported because `sharedCurrency` is not the only place this question is
  * asked — `incomeOf` in src/lib/monthEnd.ts groups by it — and a rule about
  * money that exists twice will eventually be two rules.
  */
 export function normaliseCurrency(currency: string | null | undefined): string | null {
-  return (currency ?? '').trim().toUpperCase() || null;
+  const spelled = currencyText(currency);
+  return spelled != null && /^[A-Z]{3}$/.test(spelled) ? spelled : null;
 }
 
 export function summarise(

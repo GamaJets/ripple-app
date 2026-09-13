@@ -110,6 +110,10 @@ import {
 // hook that replaced them.
 import { planEditsNote } from '../../src/lib/planEdits';
 import { usePlanEdits } from '../../src/ui/planEdits';
+// Starting today from a session already in the log. The conversion is the whole
+// of it and none of it is here — src/lib/repeatSession.ts carries the reasoning
+// about what a logged set can and cannot be turned into.
+import { pastSessions, repeatSession, sessionSummary, type PastSession } from '../../src/lib/repeatSession';
 import { Confetti } from '../../src/ui/Confetti';
 import { useWorkoutLog } from '../../src/ui/workoutLog';
 import { useToast } from '../../src/ui/toast';
@@ -144,7 +148,7 @@ import { RepdbInlineCredit } from '../../src/ui/Attribution';
 // takes today's bundle and has no ExpoImage in it. A bare import would take
 // this whole screen down while it loaded. React Native's own <Image> is the
 // fallback and is in every binary ever built.
-import { videoForExercise } from '../../src/lib/exerciseId';
+import { videoForExercise, exerciseSlug, type ExerciseRef } from '../../src/lib/exerciseId';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { DidYouKnow } from '../../src/ui/DidYouKnow';
@@ -741,6 +745,50 @@ export default function Train() {
   // recovery even if the chips underneath are touched behind it.
   const [timed, setTimed] = useState<{ kind: SessionKind; activity: string } | null>(null);
 
+  /* ── repeating a session already in the log ───────────────────────────────
+   *
+   * Two pieces of state and deliberately no third. `repeatPick` is the picker
+   * being open; `repeatRun` is the session being repeated, which the runner is
+   * handed INSTEAD of today's plan for exactly as long as it is on screen.
+   *
+   * ── What this does NOT write, and why that is the whole decision ─────────
+   *
+   * Nothing. Not a swap, not an exercise edit, not a removal, and above all not
+   * `customEx`. Every one of those goes through `usePlanEdits`, and a plan edit
+   * in this app means one specific thing: THE MEMBER HAS CHANGED THEIR
+   * PROGRAMME. It is written to the phone, upserted to `client_plan_edits`, and
+   * drawn on the coach's console as the member rewriting what they were given.
+   *
+   * Repeating last Thursday is not that. It is one session's choice, today, and
+   * recording it as a programme change would tell a coach something untrue —
+   * permanently, because nothing in this app ever expires a plan edit.
+   *
+   * `customEx` in particular would be worse than untrue. It is NOT day-scoped:
+   * `planRows` and `runnableEx` append it to every day, so a repeat written
+   * there would put last Thursday's six movements onto Monday, Tuesday, the
+   * rest day and week six as well, for ever, with a Remove per row as the only
+   * way back out.
+   *
+   * ── And when the coach has edited the day since ──────────────────────────
+   *
+   * Then the coach's day stands, untouched and unlogged. The repeat runs beside
+   * it rather than over it: today's plan is still on the sheet, its ring still
+   * reads 0 of 5, and the sets the member logs from the repeat land in the log
+   * under the movements they actually did. A correction is a second recorded
+   * fact and never an erasure, and there is no reading of "I want to do
+   * Thursday again" that means "delete what my coach wrote".
+   *
+   * The confirm on the picker says so in as many words, because the one thing
+   * that must not happen is a member repeating a session in the belief they
+   * have done today's programme. Whether repeating should also be able to
+   * DISCHARGE today's plan — mark it done, or swap it out for the week — is a
+   * product decision and not a default anyone should pick in a lane: it changes
+   * what adherence means, and adherence is what the coach is paid on. This
+   * implements the half that cannot be wrong.
+   */
+  const [repeatPick, setRepeatPick] = useState(false);
+  const [repeatRun, setRepeatRun] = useState<{ from: string; exercises: ProgramExercise[] } | null>(null);
+
   /* ── the workout that was still running when the app went away ────────────
    *
    * "If you close the tab or if you lock the phone, that workout that's being
@@ -1148,6 +1196,70 @@ export default function Train() {
   // and every programme this app generates itself.
   const programDays = Array.isArray(blk.days) ? blk.days : [];
   const workout = programDays[dayIdx % (programDays.length || 1)] || programDays[0] || { day: '', focus: 'Rest Day', exercises: [] };
+
+  /* ── the sessions there are to repeat ─────────────────────────────────────
+   *
+   * `workoutLog` is EMPTY under a failed read — the same trap `logKnown` above
+   * already exists for — so the count of sessions here is a count of what was
+   * READ and not of what there is. The control below is drawn off it and says
+   * which it is looking at; nothing on this screen says "you have no past
+   * sessions" without `workoutLogStatus` agreeing. */
+  const repeatable = useMemo(() => pastSessions(workoutLog), [workoutLog]);
+  /* The movements this screen can still put a name to.
+   *
+   * NOT the 615-row `exercises` catalogue. `useExerciseCatalogue` is a third of
+   * a megabyte and this screen is used in basements; reading it here to fill in
+   * a muscle group would be six hundred rows over a gym's signal for one word
+   * under a movement name. What it is instead is the member's own programme —
+   * every movement on every day of the week they are on, plus anything they
+   * have added themselves — which is the list that actually answers the
+   * question the picker asks: is this still something you train?
+   *
+   * A real list either way, never null, so `repeatSession` reports honestly
+   * that it was given something to check against. */
+  const knownMovements: ExerciseRef[] = (() => {
+    const by = new Map<string, ExerciseRef>();
+    const add = (name: string, group: string) => {
+      const id = exerciseSlug(name);
+      if (!id || by.has(id)) return;
+      by.set(id, { id, name, group });
+    };
+    for (const d of programDays) for (const e of (d.exercises || [])) add(e.name, e.group);
+    for (const e of customEx) add(e.name, e.group);
+    return [...by.values()];
+  })();
+  /**
+   * Open the runner on a session already in the log.
+   *
+   * No `rememberSession` and no Live Activity, and that is a limitation rather
+   * than a preference. The live record in src/lib/liveSession.ts can say that a
+   * GUIDED session was running and cannot say which past session it was
+   * repeating, so a restore after the app is killed would re-open the runner on
+   * TODAY'S PLAN — a different list of movements than the one somebody was
+   * three sets into. The typed sets are on disk under the guided draft either
+   * way and are left there rather than deleted, because the draft's own
+   * day-and-plan check sees a list it does not recognise (`staleDraft`).
+   *
+   * A repeat therefore does not survive the app being killed, and nothing
+   * claims it does. Restoring one needs a field on the live record, which is a
+   * change to a module ten screens read.
+   */
+  const startRepeat = (s: PastSession) => {
+    const c = repeatSession(s.entries, knownMovements);
+    if (c.exercises.length === 0) {
+      // Never an empty runner. `startGate` in src/lib/startGate.ts is the whole
+      // story of what mounting one costs, and the reason is always in `skipped`
+      // — this is the one path that can produce nothing, and it says which.
+      Alert.alert('Nothing to repeat in that one',
+        c.skipped.length ? c.skipped[0].reason : 'No sets were recorded in that session.');
+      return;
+    }
+    setRepeatPick(false);
+    setRepeatRun({ from: s.t, exercises: c.exercises });
+    setResumeAt(null);
+    setSession(true);
+    tapLight();
+  };
   const exercises = Array.isArray(workout && workout.exercises) ? workout.exercises : [];
   const estMin = Math.max(20, exercises.length * 9);
   /**
@@ -2589,6 +2701,33 @@ export default function Train() {
                 </View>
               ) : null}
 
+              {/* ── start from a session you have already done ──────────────
+                  Offered on any day, rest days included: a member who wants
+                  Thursday again on a Sunday is not asking the programme for
+                  permission. It does not replace the day and does not touch the
+                  plan — see `repeatRun` at the top of this screen for the whole
+                  of that decision.
+
+                  Withheld only when there is genuinely nothing to offer, and
+                  the two reasons for that are not the same thing. An empty
+                  `repeatable` under a whole read is a member who has not logged
+                  a lifting session yet, and there is nothing to say to them
+                  here. An empty one under a read that failed or came back
+                  short is us, and saying so is the difference between "you have
+                  never trained" and "we could not see it". */}
+              {repeatable.length > 0 ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Ghost label="Repeat a Past Session" icon="clock" a11yLabel="Start a session from one you have already done"
+                    onPress={() => { setRepeatPick(true); tapLight(); }} />
+                </View>
+              ) : !isWhole(workoutLogStatus) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {workoutLogStatus === 'loading'
+                    ? 'Still reading your history — past sessions you can repeat will appear here.'
+                    : 'We could not read your history in full, so there are no past sessions to offer you yet. That is our end, not yours.'}
+                </Text>
+              ) : null}
+
               {Object.keys(logged).some((k) => k.indexOf(dayIdx + ':') === 0 && (logged[k] || []).length > 0) ? (
                 <View style={{ marginTop: sp.md }}>
                   <Cta label="Save Workout to Log" wide onPress={saveManual} />
@@ -3269,7 +3408,61 @@ export default function Train() {
         {showCal ? overlays : null}
       </Modal>
 
-      <Modal visible={session} animationType="slide" onRequestClose={() => { rememberSession(null); void endLiveActivity(); setSession(false); }}>
+      {/* ── which session to repeat ────────────────────────────────────────
+          A list and nothing else. Every row says the day it was done, how much
+          was in it, and which movements — enough to recognise the session
+          without opening it, which is the whole of what a picker owes somebody
+          standing in a gym.
+
+          The sentence under the heading is the one that has to be right: a
+          member tapping here must not come away believing they have done
+          today's programme. It says what happens to the plan, because what
+          happens to the plan is nothing. */}
+      <Modal visible={repeatPick} transparent animationType="slide" onRequestClose={() => setRepeatPick(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRepeatPick(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: Math.max(insets.bottom, layout.gutter), maxHeight: '76%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Repeat a session</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+            The movements and sets you recorded, ready to run again. Today&rsquo;s plan is left exactly as it is — this runs instead of it for one session, and does not mark it done.
+          </Text>
+          {/* The dot is the mark and the words are the meaning — a status
+              colour is tuned for a 3:1 mark and not for the 4.5:1 that text
+              needs, which is what scripts/check-contrast.mjs holds. Same shape
+              the runner's own injury caveat uses a few hundred lines down. */}
+          {!isWhole(workoutLogStatus) ? (
+            <View style={{ flexDirection: 'row', gap: 7, marginBottom: sp.md }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: workoutLogStatus === 'loading' ? t.ink3 : t.warn, marginTop: 5 }} />
+              <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>
+                {workoutLogStatus === 'loading'
+                  ? 'Still reading — there may be more sessions than these.'
+                  : 'Your history could not be read in full, so this is what we could see and not everything you have done.'}
+              </Text>
+            </View>
+          ) : null}
+          <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: sp.md }}>
+            {repeatable.slice(0, 20).map((s) => {
+              // Translated for READING only. The names that identify the
+              // movements are the logged ones and never leave `s.entries`.
+              const names = s.entries.filter((e) => Array.isArray(e.sets) && e.sets.length > 0).map((e) => movement(e.exercise));
+              const when = s.day ? prettyDay(s.day) : 'A session';
+              const line = `${sessionSummary(s)} · ${names.join(', ')}`;
+              return (
+                <Pressable key={s.t} accessibilityRole="button" accessibilityLabel={`Repeat ${when}. ${line}`}
+                  hitSlop={hitSlopFor(MIN_TARGET)}
+                  onPress={() => startRepeat(s)}
+                  style={{ minHeight: MIN_TARGET, justifyContent: 'center', backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: sp.md, marginBottom: sp.sm }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{when}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={2}>{line}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Ghost label="Close" onPress={() => setRepeatPick(false)} />
+        </View>
+      </Modal>
+
+      <Modal visible={session} animationType="slide" onRequestClose={() => { rememberSession(null); void endLiveActivity(); setRepeatRun(null); setSession(false); }}>
         {/* `clientId` is null rather than 'unknown': that placeholder is what
             this screen carries before the profile has resolved, and a
             notification routed to `?clientId=unknown` opens a coach's screen at
@@ -3277,7 +3470,27 @@ export default function Train() {
             a shared handset can belong to whoever used it last, and a coach
             congratulating the wrong person by name is worse than one told "a
             client". */}
-        <SessionRunner t={t} unit={wu} distanceUnit={unit} exercises={runnableEx} focus={workout.focus} nameOf={nameOf} onSwap={(e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} resumeAt={resumeAt} onClose={() => { rememberSession(null); void endLiveActivity(); setResumeAt(null); setSession(false); }} />
+        {/* ── the plan, or the session being repeated ────────────────────
+            Three props move together and must not be split up.
+
+            `exercises` is the repeated list when there is one. `nameOf` becomes
+            the identity function with it, because the plan's `nameOf` resolves
+            a swap by `dayIdx:key` and a repeated movement has neither — it is
+            already the name it was logged under, which is the name it will be
+            logged under again. And `onSwap` is dropped entirely: it writes a
+            swap into `usePlanEdits` keyed on a plan row, and a repeated
+            movement is not one. The runner reads `!!onSwap` for `canSwap`, so
+            the Swap control is simply not offered — correct in its own right,
+            since a repeated movement carries no alternatives to swap to.
+
+            The injury caution the runner draws under each movement is NOT
+            affected: it is computed inside the runner from the name and the
+            group, so a repeated movement is flagged exactly as a planned one
+            is. What it does not get is the plan screen's severe-injury HIDING,
+            which is the same treatment `customEx` already gets one line above
+            in `runnableEx` — a movement somebody chose for themselves is shown
+            to them with the caution on it rather than taken away. */}
+        <SessionRunner t={t} unit={wu} distanceUnit={unit} exercises={repeatRun ? repeatRun.exercises : runnableEx} focus={repeatRun ? 'Repeat' : workout.focus} nameOf={repeatRun ? (e: ProgramExercise) => e.name : nameOf} onSwap={repeatRun ? undefined : (e, alt) => { setSwaps({ ...swaps, [uid(e)]: alt }); tapLight(); }} age={ageFromDob(cd.dob)} restingKcalPerMin={restingKcalPerMin} log={workoutLog} logStatus={workoutLogStatus} weightHistory={cd.weightSeries} injuries={cd.injuries} injuryStatus={cd.profileStatus} videos={exVideos} videoStatus={exVideoStatus} preferTrainerId={coachId} clientId={cd.id && cd.id !== 'unknown' ? cd.id : null} clientName={cd.profileStatus === 'ready' ? cd.name : null} onComplete={logWorkouts} onRetry={flushWorkouts} resumeAt={resumeAt} onClose={() => { rememberSession(null); void endLiveActivity(); setResumeAt(null); setRepeatRun(null); setSession(false); }} />
       </Modal>
 
       {/* Mounted only while a session is running, so its clock starts at zero

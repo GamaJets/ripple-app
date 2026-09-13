@@ -72,7 +72,7 @@ import {
 } from '@lib/gymSchedule';
 import {
   fetchPtSlots, fetchTrainerOptions, createPtSlot, removePtSlot, updatePtSlot,
-  mergeTimetable, summariseBoard, clashes, floorByHour, floorAt,
+  mergeTimetable, summariseBoard, clashes, floorAt,
   slotBlocker,
   type PtSlot, type TimetableEntry, type FloorSlice,
 } from '@lib/gymPtSchedule';
@@ -85,7 +85,7 @@ import { WEEK_DAYS } from '@lib/weekStart';
 // which is what this board already did — and the difference is that the
 // fallback is now the exception rather than the rule. See `range` below.
 import { weekStartOf, weekDays, shiftWeek, weekWindow } from '@lib/gymRota';
-import { rotaInstant, rotaToday } from '@lib/rotaClock';
+import { rotaInstant, rotaToday, rotaCell } from '@lib/rotaClock';
 import { Banner, type BannerTone } from '@/components/Banner';
 // The three answers `promote_session_waitlist` can give, read once for the
 // whole product. `src/ui/sessions.tsx` reads the same RPC through the same
@@ -94,7 +94,6 @@ import { Banner, type BannerTone } from '@/components/Banner';
 // failed.
 import { readPromotion, mayReoffer, promotionText } from '@lib/waitlistPromotion';
 
-const DAY = 86400000;
 const DAY_NAMES = WEEK_DAYS;
 const FIRST_HOUR = 6;
 const LAST_HOUR = 22;
@@ -1137,18 +1136,53 @@ function FloorCover({ board, days, zone }: {
   // is the day the gym is having. An owner in Los Angeles at 17:00 on a
   // Saturday is looking at a London gym where it is already Sunday, and opening
   // them on Saturday is opening them on a day that is over.
+  /**
+   * The day and the hour the panel opens on: where the gym actually is.
+   *
+   * `rotaCell` gives the gym's calendar date and its hour from ONE reading, so
+   * the two can never disagree about which day it is at the gym — the failure
+   * that two separate `Intl` calls either side of midnight produce.
+   *
+   * ── The hour this used to open on ───────────────────────────────────────
+   *
+   * 18. Always 18, whatever the time. The panel is named "Is the floor covered
+   * at six?" and it answered that question and only that one: a desk opening
+   * the board at nine in the morning to see who is on now was shown the evening,
+   * and had to count nine buttons along to reach its own hour. Every front-desk
+   * console this is measured against — Mindbody, Glofox, PushPress, Wodify,
+   * Zen Planner — opens on now, because "who is on the floor" is overwhelmingly
+   * a question about the next few minutes.
+   *
+   * It opens on 18 only when the shown day is NOT the day the gym is having:
+   * paging to next Tuesday has no "now" in it, and the evening is the hour an
+   * owner planning cover is looking for.
+   */
+  const gymNow = useMemo(() => rotaCell(Date.now(), zone), [zone]);
   const todayIdx = useMemo(() => {
     // Matched as a calendar DATE rather than counted as a span of days: both
     // sides are `YYYY-MM-DD` on the same calendar, so this is a string compare
     // and no clocks-change day of 23 or 25 hours can move it.
-    const today = rotaToday(zone);
+    const today = gymNow?.date ?? rotaToday(zone);
     if (!today) return 0;
     const i = days.indexOf(today);
     return i >= 0 ? i : 0;
-  }, [days, zone]);
+  }, [days, zone, gymNow]);
+  /** The gym's current hour, clamped into the strip the panel draws. Null when
+   *  the shown week does not contain the gym's today, or when the clock could
+   *  not be read at all — and 18:00 is what the panel falls back to, which is
+   *  what it has always opened on. */
+  const nowHour = useMemo(() => {
+    if (!gymNow || days[todayIdx] !== gymNow.date) return null;
+    return Math.min(LAST_HOUR, Math.max(FIRST_HOUR, gymNow.hour));
+  }, [gymNow, days, todayIdx]);
   const [dayIdx, setDayIdx] = useState(todayIdx);
-  const [hour, setHour] = useState(18);
+  const [hour, setHour] = useState(nowHour ?? 18);
   useEffect(() => { setDayIdx(todayIdx); }, [todayIdx]);
+  // Follows the clock only while the panel is showing the gym's today. Moving
+  // to another day leaves the chosen hour where the reader put it: a desk that
+  // clicked 07:00 to check tomorrow's cover has not asked to be sent back to
+  // now.
+  useEffect(() => { if (nowHour != null) setHour(nowHour); }, [nowHour]);
 
   /** The gym's calendar date this strip is drawn for. */
   const dayIso = days[dayIdx] ?? days[0] ?? null;
@@ -1190,8 +1224,16 @@ function FloorCover({ board, days, zone }: {
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--ring)', display: 'flex', gap: 12, alignItems: 'baseline', justifyContent: 'space-between', flexWrap: 'wrap' }}>
         <div>
           <h2>Who is on the floor</h2>
-          <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5 }}>
-            Classes and one-to-ones counted together. A quiet hour is shown as a quiet hour, not left out.
+          <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12.5, maxWidth: '80ch' }}>
+            Classes and one-to-ones counted together. A quiet hour is shown as a quiet hour, not left out.{' '}
+            {/* Whose hours these are, said in both states and for the reason the
+                door's own histogram says it: a strip drawn on the wrong clock
+                renders exactly as neatly as one drawn on the right clock, and
+                the only reader who ever finds out is the coach rostered against
+                it. */}
+            {zone
+              ? <>Hours are <span className="mono">{zone}</span>, this gym&rsquo;s own clock.</>
+              : <>Hours are <strong style={{ color: 'var(--ink2)' }}>your own device&rsquo;s</strong> — {NO_ZONE_NOTE}.</>}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>

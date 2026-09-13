@@ -27,6 +27,12 @@
 // exists to put in front of an owner.
 import type { GymOrder, OrderStatus } from './memberBuy';
 import { readAll } from './rowCap';
+// The one rule about what a money column names, imported rather than restated.
+// `paidPots` used to key its pots on `(o.currency ?? '').trim()` — no
+// upper-casing and no shape check — so a gym holding one row written 'gbp'
+// beside a hundred written 'GBP' got TWO tiles for one money, and a row holding
+// 'pounds' got a third with POUNDS in the label.
+import { normaliseCurrency, currencyText } from './gymRecord';
 
 type Queryable = { from: (table: string) => any };
 
@@ -133,10 +139,12 @@ export function paidPots(rows: readonly GymOrderRow[]): OrderPot[] {
   const by = new Map<string, OrderPot>();
   for (const o of rows) {
     if (o.status !== 'paid') continue;
-    const cur = (o.currency ?? '').trim();
-    // A row with no currency is not money that can be added to money. It is
-    // excluded from every pot and stays visible as a row in the list, which is
-    // where somebody can see what is wrong with it.
+    const cur = normaliseCurrency(o.currency);
+    // A row whose currency is not a currency is not money that can be added to
+    // money. It is excluded from every pot and stays visible as a row in the
+    // list, which is where somebody can see what is wrong with it —
+    // `unspellablePaid` below is the COUNT of exactly these, so the exclusion
+    // is a stated one rather than a silent shortfall.
     if (!cur) continue;
     if (!Number.isFinite(o.amountCents)) continue;
     const pot = by.get(cur) ?? { currency: cur, cents: 0, count: 0 };
@@ -145,6 +153,61 @@ export function paidPots(rows: readonly GymOrderRow[]): OrderPot[] {
     by.set(cur, pot);
   }
   return [...by.values()].sort((a, b) => (b.cents - a.cents) || a.currency.localeCompare(b.currency));
+}
+
+/**
+ * How many paid orders `paidPots` could not put in any pot, and why.
+ *
+ * The pots are the money this gym can WRITE DOWN. These are the paid orders
+ * that reached none of them, and they are real money that moved: somebody was
+ * charged, Stripe took it, and the only thing wrong with the row is that
+ * nothing on it spells what money it was in.
+ *
+ * It exists because the exclusion inside `paidPots` was invisible at three of
+ * the four sites that read it. Both order screens narrate it only in the branch
+ * where there are NO pots at all ("…and not one states both an amount and the
+ * currency it was taken in"); a gym with one good pot and four unspellable rows
+ * saw one tile and no mention of the four. That is a withheld total presented
+ * as a complete one, which is the same defect the empty-pots branch was written
+ * against, one case further along.
+ *
+ * Split by fault, because they have different fixes: `unstated` is a column
+ * holding nothing, `notACode` is a column holding `'pounds'` or `'GB'`, and
+ * `notAnAmount` is a non-finite `amount_cents`. `src/lib/strayCurrency.ts`
+ * keeps the first two apart for the same reason over the payments register.
+ *
+ * NOT summed. A total across rows that may each be in a different unspellable
+ * money is not an amount either — the count is the honest figure, exactly as
+ * `unstatedTakings` in src/lib/gymBanked.ts reports a count and withholds the
+ * amount.
+ */
+export interface UnspellablePaid {
+  /** Every paid order that reached no pot. The sum of the three below. */
+  orders: number;
+  /** The currency column holds nothing. */
+  unstated: number;
+  /** It holds something that is not an ISO 4217 code — `pounds`, `GB`, `£`. */
+  notACode: number;
+  /** `amount_cents` is not a finite number, whatever the currency says. */
+  notAnAmount: number;
+}
+
+export function unspellablePaid(rows: readonly GymOrderRow[]): UnspellablePaid {
+  let unstated = 0;
+  let notACode = 0;
+  let notAnAmount = 0;
+  for (const o of rows) {
+    if (o.status !== 'paid') continue;
+    // Asked in the order `paidPots` excludes on, so the two can never disagree
+    // about which rows are in the pots: currency first, amount second.
+    if (!normaliseCurrency(o.currency)) {
+      if (currencyText(o.currency) == null) unstated += 1;
+      else notACode += 1;
+      continue;
+    }
+    if (!Number.isFinite(o.amountCents)) notAnAmount += 1;
+  }
+  return { orders: unstated + notACode + notAnAmount, unstated, notACode, notAnAmount };
 }
 
 /** Every status and how many are in it, so a status this code has never heard

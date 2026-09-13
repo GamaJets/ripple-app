@@ -13,7 +13,15 @@ const ok = (cond: boolean, msg: string) => { if (!cond) errors.push(msg); };
 const eq = (a: unknown, b: unknown, msg: string) => ok(Object.is(a, b), `${msg} — got ${JSON.stringify(a)}, wanted ${JSON.stringify(b)}`);
 
 const COACH = 'coach-1';
-const clip = (name: string, trainerId: string | null): CoverageVideo => ({ exerciseId: null, name, trainerId });
+// `id` carries the half of the answer `trainerId` cannot. A 'db…' id is a row
+// on the server; anything else is a clip saved on this phone, which also has a
+// null trainer and is emphatically not the Academy's.
+let SEQ = 0;
+const clip = (name: string, trainerId: string | null): CoverageVideo =>
+  ({ id: 'db' + (SEQ += 1), exerciseId: null, name, trainerId });
+/** A clip whose insert was refused: kept on this handset, seen by nobody. */
+const phoneOnly = (name: string): CoverageVideo =>
+  ({ id: 'vx' + (SEQ += 1), exerciseId: null, name, trainerId: null });
 const programmed = ['Back Squat', 'Bench Press', 'Deadlift'];
 const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCase().replace(/[^a-z0-9]+/g, '-')));
 
@@ -121,6 +129,52 @@ const illustrated = (...names: string[]) => new Set(names.map((n) => n.toLowerCa
   ok(coverageLine(coverageFor(two, [], COACH, illustrated(...two)))!.includes('2 show the catalogue'), 'plural illustrated');
   ok(coverageLine(coverageFor(two, two.map((n) => clip(n, null)), COACH, illustrated()))!.includes('2 use the Academy'), 'plural academy');
   ok(coverageLine(coverageFor(two, [], COACH, null))!.includes('2 have no clip of yours'), 'plural unknown');
+}
+
+/* ── a clip that never reached the server is not the Academy's ────────── */
+//
+// `useExerciseVideos` returns `[...remote, ...added]` and mints an `added` row
+// with `trainerId: null` — the same field a platform clip carries. Classified
+// on that alone, every clip a coach saved while the insert was refused was
+// reported as an Academy clip, so this screen told them their client was
+// watching a platform demonstration of a movement whose only demonstration was
+// on their own handset.
+{
+  const r = coverageFor(programmed, [phoneOnly('Back Squat')], COACH, illustrated());
+  eq(r.academyOnly.length, 0, 'a clip with no row is not the Academy\u2019s');
+  eq(r.mine.length, 0, 'and it is not cover of the coach\u2019s either, because no client can reach it');
+  eq(r.localOnly.length, 1, 'it is its own answer');
+  eq(r.localOnly[0], 'Back Squat', 'named as the coach wrote it');
+  ok(r.missing.includes('Back Squat'), 'the movement is still something the client has nothing for');
+
+  const line = coverageLine(r)!;
+  ok(!line.includes('Academy'), 'and the sentence never calls it the Academy clip');
+  ok(line.includes('saved on this phone only'), `it says where the clip actually is: ${line}`);
+  ok(line.includes('3 of the 3'), 'while still counting all three as having nothing to show');
+}
+
+// The same row, once it reaches the server. Nothing about the shape of the
+// clip changed except the id, and that is the whole of the difference.
+{
+  const r = coverageFor(programmed, [clip('Back Squat', null)], COACH, illustrated());
+  eq(r.academyOnly.length, 1, 'a platform row IS the Academy\u2019s');
+  eq(r.localOnly.length, 0, 'and is not on this phone only');
+}
+
+// A coach who filmed it properly AND has a stale phone copy is not nagged
+// about the phone copy: their clients can watch it.
+{
+  const r = coverageFor(['Back Squat'], [clip('Back Squat', COACH), phoneOnly('Back Squat')], COACH, illustrated());
+  eq(r.mine.length, 1, 'the server row is what counts');
+  eq(r.localOnly.length, 0, 'and the handset copy is not reported as a gap');
+  ok(coverageLine(r)!.includes('Every movement you programme has your own clip'), 'so the screen reads as done');
+}
+
+// Singular and plural of the new clause, like every other count here.
+{
+  const two = coverageLine(coverageFor(['Back Squat', 'Deadlift'],
+    [phoneOnly('Back Squat'), phoneOnly('Deadlift')], COACH, illustrated()))!;
+  ok(two.includes('2 have clips saved on this phone only'), `plural phone-only: ${two}`);
 }
 
 /* ── the matching rule ─────────────────────────────────────────────────── */

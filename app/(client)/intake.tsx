@@ -368,17 +368,24 @@ export default function IntakeScreen() {
               note="Your saved intake also has answers in it, and these were not typed on top of it. Nothing has been changed. Choose which one you want to carry on from.">
               <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.lg }}>
                 <View style={{ flex: 1 }}>
+                  {/* `setSeeded`, not `setSource`. The ref is what
+                      `intakeSeedAction` is asked about on every subsequent read,
+                      and setting only the state left the two disagreeing about
+                      which document is on screen — harmless today because both
+                      answers happen to land on 'hold', and exactly the kind of
+                      divergence that stops being harmless the moment a fourth
+                      source is added. One setter, both facts. */}
                   <Ghost label="Keep Saved" onPress={() => {
                     setDraft(m.intake ?? emptyIntake(new Date().toISOString()));
                     m.discardDraft();
-                    setSource('server');
+                    setSeeded('server');
                     setChoose(false);
                   }} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Cta label="Use This Phone" wide onPress={() => {
                     setDraft(m.draft!.intake);
-                    setSource('restored');
+                    setSeeded('restored');
                     setChoose(false);
                   }} />
                 </View>

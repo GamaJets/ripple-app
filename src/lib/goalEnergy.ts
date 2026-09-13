@@ -247,7 +247,14 @@ export function energyPlanFor(input: EnergyPlanInput): EnergyPlan {
   // was working before the date arrived, and dividing a 6 kg gap by four days
   // produces a rate that exists only as a number. Both fall back to the
   // enum's steady deficit, which is the truthful answer in each case.
-  if (days < 0) return fall('date-passed');
+  //
+  // `<= 0` and not `< 0`. `targetDateMs` for a bare date is the first instant
+  // AFTER the target day, so `days === 0` is the instant the day ended, and a
+  // day that has ended has gone by. `goalTargets.isOverdue` flips on exactly
+  // that side of exactly that instant (`nowMs >= dayIsOver`); with `< 0` the
+  // two contradicted each other for the millisecond the boundary is wide,
+  // which is the one thing the note above promises cannot happen again.
+  if (days <= 0) return fall('date-passed');
   if (!(days >= MIN_TREND_DAYS)) return fall('date-too-soon');
 
   const requiredRateKg = prog.remaining / (days / 7);

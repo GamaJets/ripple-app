@@ -175,8 +175,30 @@ export default function Payroll() {
    */
   const tick = useMonthTick();
   const periods = useMemo(() => periodsBack(PERIODS, monthTickStart(tick).getTime()), [tick]);
-  const [periodKey, setPeriodKey] = useState(periods[0].key);
-  const period = periods.find((p) => p.key === periodKey) ?? periods[0];
+  /**
+   * WHICH month, held as "nobody has chosen" rather than as a month.
+   *
+   * This was `useState(periods[0].key)` — the seed read once, at mount, off a
+   * list built from the instant the tab was opened. The memo above was fixed to
+   * rebuild that list when the calendar month turns over, and this defeated it:
+   * the list moved to September and the picker went on holding the August key,
+   * so a console tab left open across midnight on the 1st — which is what this
+   * console's tabs do, it has no router and they live for days — kept offering
+   * the previous month as the default on the screen people are paid from. The
+   * only way to reach the month that had just ended was to notice and pick it.
+   *
+   * Null means the owner has not chosen, so the default FOLLOWS `periods[0]`
+   * instead of being frozen beside it, and `periods.find` below already had the
+   * fallback this needs. Once they do choose it stays chosen — the find only
+   * misses when the key has left the list entirely. Same shape /close and
+   * /costs hold their month pickers in, for the same reason.
+   */
+  const [picked, setPicked] = useState<string | null>(null);
+  const period = periods.find((p) => p.key === picked) ?? periods[0];
+  // Derived, not held. Everything downstream — the `<select>` value, the effect
+  // that disarms a confirmation — keys off the month actually in force, so the
+  // rollover reaches them too rather than only reaching `period`.
+  const periodKey = period.key;
 
   /**
    * The gym's stored pay policy, READ rather than held.
@@ -954,6 +976,69 @@ export default function Payroll() {
   })();
 
   /**
+   * What pressing Settle on every ready row would hand over.
+   *
+   * ── The figure this screen did not have ─────────────────────────────────
+   *
+   * "Payable, August" above is the PERIOD's wage bill: `payrollByTrainer` walks
+   * every session in the month, settled or not, and totals what the month's
+   * work is worth. It is the right figure for "what did August cost" and it is
+   * not the figure an owner needs before paying anybody, which is "how much
+   * money is about to leave this account today". The two differ by everything
+   * already settled, by every class taught, and by every adjustment — and this
+   * screen offered only the first, with a column of per-coach amounts beside it
+   * and no total anywhere.
+   *
+   * So an owner settling twelve coaches pressed twelve buttons against twelve
+   * separate figures and never saw the sum until it had left. That is the one
+   * number a payroll screen exists to show, and Gusto shows it before the run
+   * rather than after.
+   *
+   * ── Why the blocked rows are counted separately and not silently ────────
+   *
+   * A blocked row is money this gym owes that this figure does NOT include. A
+   * total presented without saying so is exactly the "looks final, is smaller
+   * than the truth" shape the rest of this screen refuses, so the count travels
+   * with the figure and the note says it out loud.
+   *
+   * ── And two currencies are not a total ──────────────────────────────────
+   *
+   * `runCurrencyBlocker` over every currency on every ready row. A run holding
+   * one coach paid in EUR and another in GBP has two amounts and no sum, and
+   * this product is white-label: that is not a hypothetical.
+   */
+  const runNow = (() => {
+    if (rows === null) return null;
+    const ready = rows.filter((r) => r.blocker === null);
+    // A row held up that still has work on it. Not the roster rows that simply
+    // have nothing outstanding — those are not money anybody is waiting for.
+    const held = rows.filter((r) =>
+      r.blocker !== null && (r.outstanding.length + r.classes.length + r.adjustments.length) > 0);
+
+    const currencies = [
+      ccy,
+      ...ready.flatMap((r) => [
+        ...r.classes.map((c) => c.currency),
+        ...r.adjustments.map((a) => a.currency),
+        ...r.outstanding.map((x) => x.rateCurrency ?? null),
+      ]),
+    ];
+    const mixed = runCurrencyBlocker(currencies);
+
+    // `rowOwed` per row and summed — the SAME function the button hands to
+    // `recordSettlement`, so the figure previewed and the money moved are
+    // produced by one piece of arithmetic. A row whose own amount cannot be
+    // stated makes the sum unstateable rather than smaller.
+    let cents: number | null = 0;
+    for (const r of ready) {
+      const owed = rowOwed(r);
+      if (owed == null) { cents = null; break; }
+      cents += owed;
+    }
+    return { ready: ready.length, held: held.length, cents, mixed };
+  })();
+
+  /**
    * Whose clock this screen is drawn on, and what that costs.
    *
    * Two separate sentences and only the first is cosmetic.
@@ -1101,6 +1186,34 @@ export default function Payroll() {
           label="Already settled"
           text={alreadySettled == null ? null : String(alreadySettled)}
           note={alreadySettled == null ? undefined : 'sessions in this period already paid for'}
+        />
+        <Kpi
+          label="This run hands over"
+          // A figure or a dash, never a partial sum. See `runNow`: a mixed-
+          // currency run has no total, and a row whose own amount cannot be
+          // stated takes the sum with it rather than quietly shrinking it.
+          text={
+            runNow === null || runNow.mixed !== null || runNow.cents === null
+              ? null
+              : amount(runNow.cents, ccy)
+          }
+          note={
+            runNow === null
+              ? undefined
+              : runNow.mixed
+                ? runNow.mixed
+                : runNow.cents === null
+                  ? 'part of this run cannot be priced, so it has no total'
+                  : runNow.ready === 0
+                    ? (runNow.held > 0
+                        ? `no coach is ready to settle — ${runNow.held} ${runNow.held === 1 ? 'is' : 'are'} held up below`
+                        : 'nothing is outstanding on this run')
+                    : `across ${runNow.ready} coach${runNow.ready === 1 ? '' : 'es'} ready to settle${
+                        runNow.held > 0
+                          ? `, and NOT the ${runNow.held} held up below — ${runNow.held === 1 ? 'that one is' : 'those are'} owed money this figure leaves out`
+                          : ''}`
+          }
+          tone={runNow && runNow.held > 0 ? 'warn' : undefined}
         />
       </div>
 

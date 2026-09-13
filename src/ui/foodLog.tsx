@@ -51,7 +51,17 @@ import type { FoodFigures } from '../lib/entryEdit';
 import { isWhole, worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
 import { isPending, localId, mergeLog } from '../lib/wellnessSync';
-import { classifyWrite, forDay, registerFlush, serverRows, staleForDay, todayKey, type WriteOutcome } from '../lib/offlineQueue';
+import { classifyWrite, dayOf, forDay, registerFlush, serverRows, staleForDay, todayKey, type WriteOutcome } from '../lib/offlineQueue';
+// The day a meal goes to, and which meal it was. src/lib/foodLogging.ts holds
+// both, and its header holds the decision this provider turns on: a back-dated
+// row NEVER LAPSES. src/lib/outbox.ts drops a day plan whose date has passed
+// and tells the member, because a plan for a day nobody can live any more has
+// stopped meaning anything. A food row is the opposite kind of thing — a record
+// of something that happened, as true a fortnight later as it was that evening,
+// carrying its own `logged_at` so a late send still lands in the right day. It
+// is queued until the server takes it or refuses it, and nothing here ever
+// drops one for age.
+import { isLogVia, readMealSlot, type MealSlot } from '../lib/foodLogging';
 import { useAuthRevision } from './authRevision';
 import { useRecoverRead } from './readRefresh';
 
@@ -59,8 +69,30 @@ export type LogVia = 'search' | 'barcode' | 'photo' | 'manual';
 /** `at` is when it was eaten, and it is on the entry rather than implied by the
  *  read because a queued meal has to be sent under its own time. Without it a
  *  Tuesday dinner that waited for signal arrives on the server stamped
- *  Wednesday and lands in the wrong day's macros. */
-export interface FoodEntry { id: string; at: string; name: string; kcal: number; protein: number; carbs: number; fat: number; via: LogVia }
+ *  Wednesday and lands in the wrong day's macros. It is also what a back-dated
+ *  row is: a meal the member says they ate on a day that is not today. */
+export interface FoodEntry {
+  id: string; at: string; name: string; kcal: number; protein: number; carbs: number; fat: number; via: LogVia;
+  /**
+   * Which meal it was, or null for "nobody told us".
+   *
+   * ── NOT READ FROM THE SERVER YET, AND NOT WRITTEN TO IT ──────────────────
+   *
+   * The `meal` column is specified in a part file that is deliberately NOT
+   * applied. Naming a column that does not exist in a PostgREST select is a
+   * 42703, which `serverRows` correctly reads as a failed read — so adding
+   * `meal` to the two `.select()` lists below would put the entire food log
+   * into 'error' for every member until the part was applied, and adding it to
+   * the two inserts would have `classifyWrite` report every meal as refused.
+   * Either one trades the whole feature for a heading.
+   *
+   * So the column is absent from every query here and this field is always
+   * null in practice. `rowToEntry` already reads it through `readMealSlot`, so
+   * the day the part is applied the change is `, meal` in the two select lists
+   * and `meal: e.meal ?? null` in the two inserts, and nothing else.
+   */
+  meal?: MealSlot | null;
+}
 
 interface FoodLogValue {
   entries: FoodEntry[];
@@ -103,8 +135,27 @@ interface FoodLogValue {
    * 'refused' the server read it and declined. It is NOT kept — offering the
    *           same row to the same constraint again gets the same answer — so
    *           the caller has to say the meal was not logged.
+   *
+   * ── `loggedAt`: the meal you forgot to log ───────────────────────────────
+   *
+   * Omitted is unchanged: the row is stamped now and joins today's list, and
+   * the ordinary case behaves exactly as it always has.
+   *
+   * Given an instant on ANOTHER day, the row goes to that day and NOT into
+   * `entries`. That is not a detail — `entries` is what `consumed` is summed
+   * from and what "calories remaining" is computed against, and a meal the
+   * member ate on Tuesday counted into Wednesday's remaining calories is the
+   * single worst thing this file could do. A back-dated row is held in exactly
+   * the queue this provider already keeps for yesterday's unsent dinner, is
+   * counted in `unsent` while it waits, and NEVER LAPSES however long that is
+   * — see the import note at the top of this file and the header of
+   * src/lib/foodLogging.ts for why that is the opposite of the rule
+   * src/lib/outbox.ts applies to a day plan.
+   *
+   * Pass an instant, not a day: src/lib/foodLogging.ts · `readLogDay` turns the
+   * day a member picked into one, at local noon, and refuses the future.
    */
-  logFood: (f: Omit<FoodEntry, 'id' | 'at'>) => Promise<WriteOutcome>;
+  logFood: (f: Omit<FoodEntry, 'id' | 'at'>, loggedAt?: string) => Promise<WriteOutcome>;
   /** Resolves true only when the row was actually deleted. A refused delete
    *  brings the food back — and its calories with it — after a relaunch. */
   removeFood: (id: string) => Promise<boolean>;
@@ -126,6 +177,29 @@ interface FoodLogValue {
    *  over from an earlier day. Derived, never counted alongside the list,
    *  because a count in its own state is a second answer that drifts. */
   unsent: number;
+  /**
+   * The unsent entries belonging to days that are NOT today.
+   *
+   * Yesterday's dinner logged in a basement, and now also anything the member
+   * back-dated while offline. Deliberately not in `entries` — they are not part
+   * of today's macros and must never be added into them — but they are the
+   * member's meals and the server has never heard of them, so a reader of a
+   * PAST day has to be able to see them or it under-reports that day by exactly
+   * the rows this device is holding. `useFoodHistory` merges them in.
+   */
+  owed: FoodEntry[];
+  /**
+   * Bumped whenever a row is written to a day other than today.
+   *
+   * A back-dated row must not silently change a figure the member has already
+   * been shown as settled. The only reader of a past day inside this file is
+   * `useFoodHistory`, whose effect is keyed on this, so an accepted back-date
+   * re-reads the fortnight rather than leaving Tuesday's total on screen
+   * without the meal that has just been added to it.
+   *
+   * A counter rather than a flag: two back-dates are two re-reads.
+   */
+  pastRevision: number;
 }
 
 /** Per-account, so signing out and back in as somebody else on a shared gym
@@ -138,7 +212,14 @@ const rowToEntry = (r: any): FoodEntry => ({
   id: String(r.id), at: String(r.at ?? r.logged_at ?? new Date().toISOString()),
   name: r.name, kcal: Math.round(r.kcal ?? 0),
   protein: Math.round(r.protein ?? 0), carbs: Math.round(r.carbs ?? 0), fat: Math.round(r.fat ?? 0),
-  via: (['search', 'barcode', 'photo', 'manual'].includes(r.via) ? r.via : 'manual'),
+  // `isLogVia`, not a literal array written out a fourth time. The four values
+  // live in src/lib/foodLogging.ts beside the guard, because this column's
+  // CHECK constraint has been violated twice by a caller who had no guard to
+  // hand and reached for `as any` instead.
+  via: (isLogVia(r.via) ? r.via : 'manual'),
+  // Absent today: no query below selects it. See `FoodEntry.meal`. Null is the
+  // true answer either way — nobody told us which meal it was.
+  meal: readMealSlot(r.meal),
 });
 
 /** Oldest first, which is the order a day of meals is eaten in and the order
@@ -176,10 +257,20 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
   // are not part of today's macros; not thrown away, because they are the
   // client's work and the server has never heard of them.
   const owedRef = useRef<FoodEntry[]>([]);
-  // The same number, in state, because `unsent` is rendered and a ref changing
-  // does not re-render anything. Written only beside `owedRef`, never on its
-  // own — one fact, two places, and the moment they are set apart they drift.
-  const [owedCount, setOwedCount] = useState(0);
+  // The same list, in state, because a ref changing re-renders nothing and both
+  // the count and — since back-dating — the rows themselves are read by
+  // screens. It holds the LIST rather than a count of it: this used to be
+  // `owedCount`, a number kept beside the array it was the length of, which is
+  // one fact in two places and the shape this file's own comments warn about.
+  // `unsent` is derived from it below, so the two cannot drift.
+  const [owed, setOwed] = useState<FoodEntry[]>([]);
+  // Bumped when a row lands on a day that is not today, so `useFoodHistory`
+  // re-reads rather than leaving a settled past total on screen without the
+  // meal just added to it.
+  const [pastRevision, setPastRevision] = useState(0);
+  // Written only here, so every path that changes the owed queue updates the
+  // one place it is read from.
+  const publishOwed = () => setOwed([...owedRef.current]);
   const uidRef = useRef<string | null>(null);
   // False once a read has come back truncated. Writing a short day over the
   // good cached one would turn a temporary gap into this device's idea of what
@@ -226,9 +317,30 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
     } catch { return 'unsent'; }
   };
 
-  /** Push one owed entry from an earlier day. It never appears in `entries`, so
-   *  it is dropped from `owedRef` on any outcome that is not "still waiting". */
-  const sendOwed = async (owner: string, e: FoodEntry): Promise<void> => {
+  /**
+   * Push one entry belonging to a day that is not today.
+   *
+   * Yesterday's dinner logged in a basement, and — since back-dating — a meal
+   * the member deliberately filed under an earlier day. Both are the same row
+   * to the server and the same row to this queue.
+   *
+   * It never appears in `entries`, so it is dropped from `owedRef` on any
+   * outcome that is not "still waiting":
+   *
+   *   'stored'  the server has it; the local copy would be a duplicate.
+   *   'refused' the same row offered again gets the same answer, so retrying it
+   *             forever is the "1 waiting to send" that outlives the install.
+   *   'unsent'  KEPT, for as long as it takes. Nothing here expires a row for
+   *             age — see the note at the top of this file. A meal is a record
+   *             of something that happened and carries the day it happened on;
+   *             it cannot go stale the way a plan for a day nobody can live any
+   *             more goes stale.
+   *
+   * Returns the outcome so a caller that back-dated on purpose can tell the
+   * member which of the three happened, and so the past-day re-read is bumped
+   * once per flush rather than once per row.
+   */
+  const sendOwed = async (owner: string, e: FoodEntry): Promise<WriteOutcome> => {
     let out: WriteOutcome = 'unsent';
     try {
       const { data, error } = await supabase.from('food_logs')
@@ -237,10 +349,11 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
       out = classifyWrite(error as any, data ? data.length : 0);
       if (out === 'refused') reportError('foodLog.owed', error);
     } catch { out = 'unsent'; }
-    if (out === 'unsent') return;
+    if (out === 'unsent') return out;
     owedRef.current = owedRef.current.filter((x) => x.id !== e.id);
-    setOwedCount(owedRef.current.length);
+    publishOwed();
     writeCache(owner);
+    return out;
   };
 
   useEffect(() => {
@@ -283,7 +396,7 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
       // deliberately NOT kept: the server has it, and this cache is not a
       // history — it is what today needs plus what the server has not heard.
       owedRef.current = staleForDay(cached, day, isPending);
-      setOwedCount(owedRef.current.length);
+      publishOwed();
       if (localToday.length) setEntries(chron(mergeLog<FoodEntry>(null, localToday).entries), null);
 
       try {
@@ -321,7 +434,12 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
         // fatal nor silent: the entry keeps its local id, stays in the list,
         // stays counted in `unsent`, and is tried again on the next launch.
         for (const e of m.pending) { if (cancelled) return; await send(id, e); }
-        for (const e of [...owedRef.current]) { if (cancelled) return; await sendOwed(id, e); }
+        // Once for the whole flush, not once per row: each bump is a re-read of
+        // the fortnight, and a phone coming back from a week offline would
+        // otherwise ask for it eight times in a row.
+        let landed = false;
+        for (const e of [...owedRef.current]) { if (cancelled) return; if ((await sendOwed(id, e)) === 'stored') landed = true; }
+        if (landed) setPastRevision((n) => n + 1);
       } catch { if (!cancelled) setStatus('error'); /* offline: the cached day stands, and now says so */ }
     })();
     return () => { cancelled = true; };
@@ -349,15 +467,54 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
       // back is how half a day's log fails to land.
       if ((await send(owner, e)) === 'unsent') return;
     }
-    for (const e of [...owedRef.current]) await sendOwed(owner, e);
+    let landed = false;
+    for (const e of [...owedRef.current]) if ((await sendOwed(owner, e)) === 'stored') landed = true;
+    // One re-read of the past fortnight for the whole flush, so a day whose
+    // total was already on screen picks up the meals that have just reached it.
+    if (landed) setPastRevision((n) => n + 1);
   };
 
   // Registered once: the closure reads refs, so it stays correct across
   // re-renders and across a change of account.
   useEffect(() => registerFlush('foodLog', flushQueue), []);
 
-  const logFood: FoodLogValue['logFood'] = async (f) => {
-    const entry: FoodEntry = { ...f, id: localId(), at: new Date().toISOString() };
+  const logFood: FoodLogValue['logFood'] = async (f, loggedAt) => {
+    const entry: FoodEntry = { ...f, id: localId(), at: loggedAt ?? new Date().toISOString() };
+
+    // ── the meal that belongs to another day ────────────────────────────────
+    //
+    // Judged from the entry's own instant against the day RIGHT NOW, not
+    // against anything computed when this provider mounted. A provider is
+    // mounted for as long as the app is; a member who opened the app yesterday
+    // evening and logs breakfast this morning must not have it filed under
+    // yesterday because a constant said so (src/ui/today.ts, and
+    // scripts/check-frozen-day.mjs, on why this keeps happening).
+    //
+    // It does NOT go into `entries`. That list is what `consumed` sums and what
+    // "calories remaining" is computed from, so a meal eaten on Tuesday counted
+    // there would be eaten a second time on Wednesday — the one figure on this
+    // screen that gets acted on. It goes into the owed queue instead, which is
+    // cached, counted in `unsent`, retried on every launch and reconnect, and
+    // never expired for age.
+    if (dayOf(entry.at) !== todayKey()) {
+      owedRef.current = [entry, ...owedRef.current];
+      publishOwed();
+      // Cached before the network is touched, exactly as today's path is: a
+      // back-dated meal typed on a train has to survive the app being killed.
+      writeCache(uidRef.current);
+      // Signed out, or a build with no backend. It is on the phone and it is
+      // counted as unsent, which is the honest answer — 'stored' would not be.
+      if (!USE_SUPABASE || !uidRef.current) return 'unsent';
+      const back = await sendOwed(uidRef.current, entry);
+      // A past day that was already on screen has just changed. Re-read it
+      // rather than leaving a settled total standing without the meal that has
+      // been added to it.
+      if (back === 'stored') setPastRevision((n) => n + 1);
+      // 'refused' has already taken it back out of the queue inside `sendOwed`;
+      // the caller says the meal was not logged.
+      return back;
+    }
+
     // Optimistic, and cached immediately — a meal logged in a gym cafe has to
     // survive the app being killed before the network ever comes back.
     setEntries(chron(mergeLog<FoodEntry>(null, [entry, ...listRef.current]).entries), uidRef.current);
@@ -378,7 +535,7 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
     // which would otherwise send a meal the client has just deleted.
     if (isPending(id)) {
       owedRef.current = owedRef.current.filter((x) => x.id !== id);
-      setOwedCount(owedRef.current.length);
+      publishOwed();
       setEntries(listRef.current.filter((x) => x.id !== id), uidRef.current);
       return true;
     }
@@ -404,6 +561,12 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
     // signal returns, because the queue holds the entry rather than the write.
     if (isPending(id)) {
       owedRef.current = owedRef.current.map((x) => (x.id === id ? { ...x, ...next } : x));
+      // Published, which it was not before. The owed rows used to be reduced to
+      // a count, and a correction to one of them changes no count — so a
+      // back-dated meal corrected before it had sent kept its old figures on
+      // any screen reading the queue, while the row that eventually went up
+      // carried the new ones.
+      publishOwed();
       setEntries(listRef.current.map((x) => (x.id === id ? { ...x, ...next } : x)), uidRef.current);
       return true;
     }
@@ -434,8 +597,8 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
   // meals, the server has never seen them, and a count that hid them would be
   // the same silence this file was rewritten to remove.
   const unsent = useMemo(
-    () => entries.filter((e) => isPending(e.id)).length + owedCount,
-    [entries, owedCount],
+    () => entries.filter((e) => isPending(e.id)).length + owed.length,
+    [entries, owed],
   );
 
   // Re-run this read when the signal comes back, without the member having
@@ -463,7 +626,7 @@ export function FoodLogProvider({ children }: { children: ReactNode }) {
   const logFoodStable = useCallback((...a: Parameters<typeof logFood>) => impl.current.logFood(...a), []);
   const removeFoodStable = useCallback((...a: Parameters<typeof removeFood>) => impl.current.removeFood(...a), []);
   const updateFoodStable = useCallback((...a: Parameters<typeof updateFood>) => impl.current.updateFood(...a), []);
-  const value = useMemo<FoodLogValue>(() => ({ entries, consumed, status, addFood: addFoodStable, logFood: logFoodStable, removeFood: removeFoodStable, updateFood: updateFoodStable, unsent, reload }), [entries, consumed, status, addFoodStable, logFoodStable, removeFoodStable, updateFoodStable, unsent, reload]);
+  const value = useMemo<FoodLogValue>(() => ({ entries, consumed, status, addFood: addFoodStable, logFood: logFoodStable, removeFood: removeFoodStable, updateFood: updateFoodStable, unsent, owed, pastRevision, reload }), [entries, consumed, status, addFoodStable, logFoodStable, removeFoodStable, updateFoodStable, unsent, owed, pastRevision, reload]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
@@ -572,7 +735,15 @@ export function useFoodHistory(days: number = 14): FoodHistory {
       } catch { if (!cancelled) setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, [authRev, days, tick]);
+    // `today.pastRevision` is in here because a back-dated meal changes a day
+    // this hook has ALREADY put a total on screen for. Without it, a member who
+    // adds Tuesday's forgotten dinner goes on reading Tuesday's old total, and
+    // the fortnight's average is taken over a set that is missing the row they
+    // have just been told was saved. That is the "settled figure quietly moving
+    // underneath somebody" failure, arriving through the one reader that shows
+    // a past day. The effect re-runs, the query runs again, and `status` goes
+    // back through 'loading' to whatever the server says this time.
+  }, [authRev, days, tick, today.pastRevision]);
 
   const todayKeyNow = todayKey();
   const value = useMemo<FoodHistory>(() => {
@@ -580,7 +751,21 @@ export function useFoodHistory(days: number = 14): FoodHistory {
     // query's own today rows rather than merging them: the provider's list
     // already holds them plus anything unsent, and a merge on id would leave a
     // meal logged offline showing twice the moment it was accepted.
-    const all = [...today.entries, ...rows.filter((r) => dayKeyOf(r.at) !== todayKeyNow)];
+    //
+    // `today.owed` is the third source and it is not optional. Those are meals
+    // belonging to earlier days that this phone is holding and the server has
+    // never seen — yesterday's dinner logged in a basement, and anything the
+    // member back-dated while offline. Leaving them out would show a day total
+    // short by exactly the rows this device knows about, on the screen the
+    // member opened to check that the meal they just added had landed. They are
+    // filtered to days other than today for the same reason the query's rows
+    // are: `today.entries` is the authority on today, and the owed queue never
+    // holds a row for today anyway.
+    const all = [
+      ...today.entries,
+      ...today.owed.filter((r) => dayKeyOf(r.at) !== todayKeyNow),
+      ...rows.filter((r) => dayKeyOf(r.at) !== todayKeyNow),
+    ];
     const byDay = new Map<string, FoodEntry[]>();
     for (const e of all) {
       const k = dayKeyOf(e.at);
@@ -615,7 +800,7 @@ export function useFoodHistory(days: number = 14): FoodHistory {
       }
       : null;
     return { days: out, status: combined, average, reload: () => setTick((n) => n + 1) };
-  }, [rows, today.entries, today.status, status, todayKeyNow]);
+  }, [rows, today.entries, today.owed, today.status, status, todayKeyNow]);
 
   return value;
 }

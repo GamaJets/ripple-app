@@ -17,8 +17,15 @@ const eq = (a: unknown, b: unknown, msg: string) => {
 
 const COACH = 'coach-1';
 const OTHER = 'coach-2';
+// A 'db…' id is a row on the server. Anything else is a clip this phone kept
+// because the insert was refused — which also carries a null trainer, and is
+// not the Academy's.
+let SEQ = 0;
 const clip = (name: string, trainerId: string | null, exerciseId: string | null = null): SourcedClip =>
-  ({ exerciseId, name, trainerId });
+  ({ id: 'db' + (SEQ += 1), exerciseId, name, trainerId });
+/** A clip saved on this handset and nowhere else. */
+const phoneOnly = (name: string, exerciseId: string | null = null): SourcedClip =>
+  ({ id: 'vx' + (SEQ += 1), exerciseId, name, trainerId: null });
 
 const bare = { animation: false, frames: false };
 
@@ -133,6 +140,61 @@ const bare = { animation: false, frames: false };
   const out = clipSourceLine(clipSources('Back Squat', [clip('Back Squat', OTHER)], null, bare), true);
   ok(out != null && out.includes('Nobody is signed in'),
     'a clip nobody can be matched to is not evidence the coach has not filmed this');
+}
+
+// ── the clip that is on this phone and nowhere else ───────────────────────
+//
+// `useExerciseVideos` returns `[...remote, ...added]`, and an `added` row is
+// minted with `trainerId: null` — character for character the shape of a
+// platform clip. Read on that field alone, every offline save was counted as
+// the Academy's, and this screen — whose header is "What your client sees" —
+// told a coach their client was watching a platform demonstration of a
+// movement nobody outside their handset had a demonstration of.
+{
+  const s = clipSources('Back Squat', [phoneOnly('Back Squat')], COACH, bare);
+  eq(s.academy, 0, 'a clip with no row is not the Academy\u2019s');
+  eq(s.mine, 0, "and it is not counted among the clips a client can watch");
+  eq(s.local, 1, 'it is its own figure');
+  eq(s.total, 1, 'and it is still something held for the movement');
+  eq(s.shown, 'local', 'the player really does put it on screen, so the preview says so');
+
+  // Read through a default rather than `!`: a regression here returns null,
+  // and a test that throws on it reports a stack trace where it should be
+  // reporting which claim stopped being true.
+  const line = clipSourceLine(s, true) ?? '';
+  ok(line !== '', 'and this is the one single-clip case that is never silent');
+  ok(!line.includes('Academy'), 'the sentence never calls it the Academy clip');
+  ok(line.includes('saved on this phone only'), `it says where the clip is: ${line}`);
+  ok(line.includes('cannot see it'), 'and what that means for the client');
+}
+
+// The player's order is copied, not improved on: `videos` is [...remote,
+// ...added], so a real Academy row is found before an offline save.
+{
+  const s = clipSources('Back Squat', [clip('Back Squat', null), phoneOnly('Back Squat')], COACH, bare);
+  eq(s.shown, 'academy', 'the server row is the one videoForExercise returns');
+  eq([s.academy, s.local], [1, 1], 'and both are counted, apart');
+  const line = clipSourceLine(s, true) ?? '';
+  ok(line.includes('saved on this phone only'), `the handset copy is named as also held: ${line}`);
+}
+
+// A coach's own server clip outranks everything, and the phone copy is still
+// named — it is the reason their library shows two rows for one movement.
+{
+  const s = clipSources('Back Squat', [clip('Back Squat', COACH), phoneOnly('Back Squat')], COACH, bare);
+  eq(s.shown, 'mine', 'their own uploaded clip wins');
+  eq(s.local, 1, 'the phone copy is counted');
+  ok((clipSourceLine(s, true) ?? '').includes('never reached the server'), 'and explained rather than left as a mystery row');
+}
+
+// With the catalogue holding artwork, the phone copy still wins on THIS
+// handset — which is exactly why the line has to say the client sees neither.
+{
+  const s = clipSources('Back Squat', [phoneOnly('Back Squat')], COACH, { animation: true, frames: false });
+  eq(s.shown, 'local', 'videoForExercise returns the clip before any catalogue fallback');
+  const line = clipSourceLine(s, true) ?? '';
+  ok(line.includes('cannot see it'), 'so the coach is told their client is not seeing this');
+  ok(line.includes('the catalogue animation'), 'and what the client gets instead is named');
 }
 
 // ── two rows of the clip library, one movement ────────────────────────────

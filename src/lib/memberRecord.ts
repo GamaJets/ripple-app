@@ -67,7 +67,20 @@ export type PaymentMethod = 'card' | 'cash' | 'transfer' | 'direct_debit' | 'oth
 export interface MemberPlan {
   id: string;
   name: string;
-  priceCents: number;
+  /**
+   * Minor units, or NULL when the gym recorded no price.
+   *
+   * Null and not 0. `membership_plans.price_cents` is `integer not null` today,
+   * so this is a defence rather than a live bug — the same position
+   * src/lib/membershipOrder.ts takes about `gym_orders.amount_cents`. What it
+   * defends against is one `drop not null` away: the reader was
+   * `Number(p.price_cents)`, `Number(null)` is 0, and 0 is a price. A member on
+   * a plan whose price column had gone null would have read "AED 0.00" — a
+   * figure this gym never set, on the screen whose whole job is to be the
+   * record of what they are charged. `amount()` already prints '—' for null,
+   * so the honest silence was one coercion away the whole time.
+   */
+  priceCents: number | null;
   /** ISO 4217 as the gym recorded it. Never defaulted — see rule 3. */
   currency: string | null;
   interval: PlanInterval;
@@ -87,6 +100,17 @@ export interface MemberMembership {
   planId: string | null;
   /** Null WITH a planId set means the plan row did not come back. Rule 1. */
   plan: MemberPlan | null;
+  /**
+   * First day of a pause, inclusive, as a bare 'YYYY-MM-DD'. Null means no
+   * pause is recorded — which is NOT the same as one this build could not read.
+   * src/lib/membershipFreeze.ts keeps those two apart and this screen says so.
+   */
+  frozenFrom: string | null;
+  /** Last day of a pause, inclusive. Both dates or neither: the check
+   *  constraint `memberships_freeze_range_check` (supabase/parts/2616) refuses
+   *  half a range at the write, so a single date here is a row that came back
+   *  wrong, and `freezeState` reports it 'unreadable' rather than 'none'. */
+  frozenTo: string | null;
 }
 
 export interface MemberPayment {
@@ -355,7 +379,12 @@ export function renewalNote(s: Standing, plan: PlanState): string {
 
 /* ── the reads ────────────────────────────────────────────────────────────── */
 
-const MEMBERSHIP_COLUMNS = 'id, tenant_id, plan_id, started_on, ends_on, status';
+// `frozen_from, frozen_to` are here as of supabase/parts/2616 and they are the
+// member's business before they are anybody else's. `memberships_own_r` is
+// `member_id = auth.uid()` and there is not one column grant on this table, so
+// the member was ALREADY permitted to read them — they were simply never asked
+// for, and the screen showed the bare word "Frozen" with no date it lifts.
+const MEMBERSHIP_COLUMNS = 'id, tenant_id, plan_id, started_on, ends_on, status, frozen_from, frozen_to';
 const PAYMENT_COLUMNS = 'id, amount_cents, currency, method, taken_at, membership_id';
 
 // `note` is in neither list, and that is deliberate. Both tables carry a
@@ -386,6 +415,23 @@ const PAYMENT_COLUMNS = 'id, amount_cents, currency, method, taken_at, membershi
 // type something private into a field its own console calls the purpose of the
 // bill. `drop_reason` (part 2642) is NOT selected — that one is the gym's own
 // record of why it stopped chasing money, addressed to itself.
+
+/**
+ * Minor units, or null for anything that is not a number.
+ *
+ * A `bigint` arrives from PostgREST as a string often enough that every money
+ * reader in this codebase coerces one; what none of them may do is coerce an
+ * ABSENCE, because `Number(null)` is 0 and 0 is a price somebody could have
+ * paid. Same five lines and same reasoning as `minorOrNull` in
+ * src/lib/membershipOrder.ts — that one is a module-private const and this file
+ * may not reach into it, so the duplication is stated here rather than left to
+ * look like an oversight.
+ */
+const minorOrNull = (v: unknown): number | null => {
+  if (v == null) return null;
+  const n = typeof v === 'string' ? Number(v.trim()) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) ? n : null;
+};
 
 const asStatus = (v: unknown): MembershipStatus =>
   (v === 'frozen' || v === 'cancelled' || v === 'expired') ? v : 'active';
@@ -444,7 +490,7 @@ export async function fetchMyMemberships(sb: Queryable, uid: string): Promise<Re
           plans.set(p.id, {
             id: p.id,
             name: typeof p.name === 'string' ? p.name : '',
-            priceCents: Number(p.price_cents),
+            priceCents: minorOrNull(p.price_cents),
             currency: typeof p.currency === 'string' && p.currency.trim() ? p.currency : null,
             interval: asInterval(p.interval),
             active: p.active !== false,
@@ -461,6 +507,12 @@ export async function fetchMyMemberships(sb: Queryable, uid: string): Promise<Re
       status: asStatus(r.status),
       planId: r.plan_id ?? null,
       plan: r.plan_id ? (plans.get(r.plan_id) ?? null) : null,
+      // Passed through as the bare dates they are. Nothing here parses them
+      // into a Date: `freezeState` compares 'YYYY-MM-DD' as a string precisely
+      // so that a member in Auckland and a front desk in Dubai cannot disagree
+      // about which day a pause started.
+      frozenFrom: r.frozen_from ?? null,
+      frozenTo: r.frozen_to ?? null,
     })) };
   } catch (e) {
     return { ok: false, reason: (e as Error).message || 'The read failed.' };

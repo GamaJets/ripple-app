@@ -85,6 +85,29 @@ import {
   closeBlocker, reopenBlocker, driftSince,
   type MonthCloseRow,
 } from '@lib/gymClose';
+/*
+ * The FIFTH figure's drift line, which this screen could not draw.
+ *
+ * `snapshotOf` above already carries the pass figures — `CloseSnapshot` extends
+ * `PassSnapshot` and spreads `passSnapshotOf(c)` in — and `closeMonth` has been
+ * writing `pass_cents`, `pass_currency`, `passes_sold` and `passes_priced` since
+ * supabase/parts/2970. `fetchCloses` reads them back. So this console has been
+ * FILING what the desk sold over the counter and then saying nothing whatever
+ * about it having moved since, because `driftSince` deliberately does not check
+ * the passes: it has no way to tell a close written before part 2970 (which
+ * stored nothing and whose row carries no pass KEYS at all) from a close that
+ * stored a null on purpose, and it words a null as "not known" where a
+ * mixed-currency month needs "not a single amount".
+ *
+ * `passDriftSince` holds both of those rules, and it is the only function that
+ * compares the passes — checking them here AND in `driftSince` would report
+ * every movement in them twice. Its lines are APPENDED to the money ones rather
+ * than drawn in a section of their own, exactly as `filingOf` appends them on
+ * the owner's phone, because the question the heading above the list asks is
+ * "what has moved since this was filed" and pass sales are one of the figures
+ * that can move.
+ */
+import { passDriftSince } from '@lib/ownerClose';
 // The same history `fetchCloses` already returns, read a year at a time instead
 // of one month at a time. Nothing on this console could say which months of a
 // year were never closed, or which were reopened and why, and both facts are
@@ -1382,8 +1405,29 @@ function Signoff({ c, currency, invoicedCcy, arrearsCcy, monthKey, zone, tenantI
    * figure: the stored side's own column, and the live side's from the snapshot
    * just built above.
    */
+  /*
+   * The pass lines come from `passDriftSince` and go on the END of the same
+   * list. Two functions, one list, and never both over the same figure — see
+   * the import above and the note `driftSince` leaves where the pass check
+   * would otherwise be.
+   *
+   * `snap` is handed in as the live side rather than `passSnapshotOf(c)` being
+   * called a second time: `snapshotOf` already spread it in, and it is the
+   * SAME object the Close button files. A second derivation here could drift
+   * from the one that gets stored, and then the screen would report movement
+   * against a figure the button never wrote.
+   *
+   * A month filed before supabase/parts/2970 produces no pass lines at all:
+   * `fetchCloses` omits the four keys on a row whose columns are all null, and
+   * `passDriftSince` answers nothing to a row that was never asked the
+   * question. That silence is the point — reporting it as movement would put
+   * "pass sales were not a single amount at the close" on every month this
+   * product has ever closed.
+   */
+  const driftFmt = (cents: number | null, ccy: string | null) =>
+    money(cents, ccy) ?? 'an unstateable amount';
   const drift = live
-    ? driftSince(live, snap, (cents, ccy) => money(cents, ccy) ?? 'an unstateable amount')
+    ? [...driftSince(live, snap, driftFmt), ...passDriftSince(live, snap, driftFmt)]
     : [];
 
   const doClose = async () => {
@@ -1719,8 +1763,17 @@ function Handoff({ c, rec, currency, invoicedCcy, arrearsCcy, gymName, monthKey,
       // NOT re-derive which figures moved: a second copy of that comparison is
       // a second rule, and the day the two disagree the screen and the file it
       // produced would be saying different things about one filed month.
+      // …and the pass lines are appended here for exactly the reason the
+      // sentence above gives. The screen now draws `driftSince` plus
+      // `passDriftSince`; a file that drew only the first would be the second
+      // rule that comment refuses — an accountant's copy that says August has
+      // not moved about a month whose pass sales have. Same two functions, same
+      // order, same `today` snapshot the Close button files.
       drift: live
-        ? driftSince(live, today, (cents, ccy) => money(cents, ccy) ?? 'an unstateable amount')
+        ? [
+            ...driftSince(live, today, (cents, ccy) => money(cents, ccy) ?? 'an unstateable amount'),
+            ...passDriftSince(live, today, (cents, ccy) => money(cents, ccy) ?? 'an unstateable amount'),
+          ]
         : [],
       // Per CURRENCY, not per method. `byMethod` is already one line per method
       // per currency (`Line.key` joins the two), so folding it by code is a

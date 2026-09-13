@@ -80,7 +80,9 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Flag, Ghost } from '../../src/ui/kit';
 import { useKeyboardLift } from '../../src/ui/keyboardLift';
-import { HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE } from '../../src/ui/nativeModules';
+import {
+  HAS_NATIVE_VIDEO, UPDATE_REQUIRED_NOTE, HAS_NATIVE_CLIPBOARD, copyToClipboard,
+} from '../../src/ui/nativeModules';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { peerHeading } from '../../src/lib/threadPeer';
 import { peerMonogram } from '../../src/lib/peerAvatar';
@@ -207,11 +209,25 @@ export default function Messages() {
   // on screen to say so. `reload` re-reads the newest page and is the member's
   // only way out of that; `loadOlder` above walks backwards, and the two are
   // different asks. Nothing queued on this device is dropped by either.
-  const pull = usePullToRefresh(useCallback(() => { reload(); }, [reload]));
   // The block and the report. Its state is deliberately allowed to be stale or
   // unread: the database refuses a blocked write regardless, so being wrong
   // here costs a sentence rather than the protection. See src/lib/threadSafety.
   const safety = useThreadSafety(null, 'client');
+  // ── the pull brings the block back too ────────────────────────────────
+  //
+  // It re-read the thread and nothing else. `blockStateOf` answers 'unknown'
+  // for a read that failed, and 'unknown' draws NO composer note and leaves
+  // the composer live — which is the right pessimism and is also silent. So a
+  // member who blocked their coach last night, opened this screen on a dropped
+  // connection and watched the block read fail had no sentence saying so and
+  // no way to ask again: the hook re-runs on the thread key and the sign-in
+  // revision, neither of which a gesture moves. `reload` is the hook's own and
+  // has been exposed since it was written; this is the gesture that reaches it.
+  //
+  // Deliberately NOT `safety.status === 'error'`-gated. A block lifted on
+  // another handset is just as invisible, and re-reading two rows costs
+  // nothing next to the thread page beside it.
+  const pull = usePullToRefresh(useCallback(() => { reload(); safety.reload(); }, [reload, safety.reload]));
   const [text, setText] = useState('');
   const [pending, setPending] = useState<PendingAttachment | null>(null);
   const [busy, setBusy] = useState(false);
@@ -219,7 +235,12 @@ export default function Messages() {
   // `open` is separate from the id because reporting the conversation is a
   // legitimate report with no message on it — the abuse was the sum of it, or
   // the message has already been deleted by the person who sent it.
-  const [reportFor, setReportFor] = useState<{ open: true; messageId: string | null } | null>(null);
+  //
+  // `body` travels with it so the sheet can offer to COPY the message as well
+  // as report it. Empty for the conversation-level open, and empty for a bubble
+  // that is only a photograph — the Copy row is drawn on the words, never on an
+  // attachment it could not put on a clipboard.
+  const [reportFor, setReportFor] = useState<{ open: true; messageId: string | null; body: string } | null>(null);
   const [reportNote, setReportNote] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
   const scRef = useRef<ScrollView>(null);
@@ -317,6 +338,46 @@ export default function Messages() {
     const c = blocked ? unblockConfirm(OTHER) : blockConfirm(OTHER);
     Alert.alert(c.title, c.body, [
       { text: 'Not Now', style: 'cancel' },
+      // ── the half of this control that was promised and not built ────────
+      //
+      // The header of this file says there are "two ways in, because they are
+      // two different moments. The header control is for 'I want this to
+      // stop'; a long press on a bubble is for 'look at THIS'." The control's
+      // own accessibilityHint says it the same way — "Block this conversation,
+      // or report a message in it". Neither was true: this alert offered Not
+      // Now and Block, and the ONLY route to the report sheet in the whole
+      // screen was a long press on a bubble that is not the member's own.
+      //
+      // Two things followed, and the second is the worse one:
+      //
+      //   · a member who wanted to report the conversation rather than one
+      //     message — because the abuse was the sum of it, or because the
+      //     person who sent it has since deleted it, which `msg_coach` lets
+      //     them do — had no way to. `safety.report` has taken a null message
+      //     id since it was written, and the sheet below already titles itself
+      //     "Report this conversation" for exactly that case: a branch that
+      //     rendered for nobody.
+      //   · a member who cannot long-press had the ONE moderation path in this
+      //     product behind a gesture. The accessibilityActions on each bubble
+      //     were added to fix that for a message; nothing fixed it for the
+      //     conversation, and a hint on a header button promised it was there.
+      //
+      // Between Not Now and Block deliberately: reporting is the middle answer,
+      // and it is the one somebody reaches for when they want it looked at
+      // rather than silenced. It does NOT block — REPORT_EXPLAINER in the sheet
+      // is explicit about that, and it is the sentence that stops somebody
+      // thinking a report has protected them.
+      {
+        // Just 'Report'. This alert is the BLOCK confirm on an open thread and
+        // the UNBLOCK confirm on one this member has already blocked, and a
+        // label that reads as an alternative to the destructive button ("Report
+        // Instead") reads as nonsense over "Unblock your coach?". Reporting is
+        // available in both, which is what `blockConfirm` already promises when
+        // it says everything here is kept "so you can still read it and still
+        // report it" — a sentence that had no control behind it.
+        text: 'Report',
+        onPress: () => { setReportNote(''); setReportFor({ open: true, messageId: null, body: '' }); },
+      },
       {
         text: blocked ? 'Unblock' : 'Block',
         style: blocked ? 'default' : 'destructive',
@@ -332,6 +393,48 @@ export default function Messages() {
         },
       },
     ]);
+  };
+
+  /**
+   * Put the words of one message on the clipboard.
+   *
+   * ── why this is here and not on the bubble ────────────────────────────
+   *
+   * Nothing in this thread could be copied, selected or got out of the app in
+   * any way. A coach writes an address, a supplement, a time, a gym's door
+   * code; the member re-types it from a screenshot or does not. Every messenger
+   * this product is measured against — and every coaching app with a thread in
+   * it — lets the person being coached copy what their coach wrote.
+   *
+   * The obvious fix is `selectable` on the bubble's <Text>, and it is the wrong
+   * one HERE: an incoming bubble is a Pressable whose only gesture is
+   * `onLongPress`, and that gesture is the one route this product has to
+   * reporting abuse. `selectable` installs a long-press recogniser of its own
+   * on the text, so making the coach's words copyable by that route is trading
+   * the report gesture for it — on the surface where the report matters most.
+   *
+   * So it goes where a long press already lands, in the sheet that already
+   * knows which message it is about and already opens from an accessibility
+   * action as well as from the gesture. Nothing is traded and nothing new is
+   * behind a gesture.
+   *
+   * Reported rather than assumed, for the reason `copyToClipboard` gives:
+   * "Copied" is a sentence somebody ACTS on, and claiming it against a binary
+   * with no clipboard costs them the paste.
+   */
+  const copyMessage = async (body: string) => {
+    if (!body) return;
+    if (!(await copyToClipboard(body))) {
+      Alert.alert(
+        'Not copied',
+        HAS_NATIVE_CLIPBOARD
+          ? 'That could not be put on your clipboard just now. Try again in a moment.'
+          : 'This version of the app cannot use the clipboard. Updating to the latest build adds it.',
+      );
+      return;
+    }
+    setReportFor(null);
+    Alert.alert('Copied', 'The message is on your clipboard.');
   };
 
   /** File the report the sheet has collected. `id` coming back is the row
@@ -494,7 +597,7 @@ export default function Messages() {
               // double-tap sends and 'longpress' is what the rotor's long-press
               // action sends; both land here, and both do what the hint says.
               <Pressable key={m.id} disabled={mine}
-                onLongPress={() => { setReportNote(''); setReportFor({ open: true, messageId: m.id.startsWith('local-') ? null : m.id }); }}
+                onLongPress={() => { setReportNote(''); setReportFor({ open: true, messageId: isLocalId(m.id) ? null : m.id, body: m.body }); }}
                 // ── the label is the MESSAGE ────────────────────────────
                 //
                 // It was 'Report this message'. `Pressable` is accessible by
@@ -526,7 +629,7 @@ export default function Messages() {
                 onAccessibilityAction={mine ? undefined : (e) => {
                   if (e.nativeEvent.actionName !== 'activate' && e.nativeEvent.actionName !== 'longpress') return;
                   setReportNote('');
-                  setReportFor({ open: true, messageId: m.id.startsWith('local-') ? null : m.id });
+                  setReportFor({ open: true, messageId: isLocalId(m.id) ? null : m.id, body: m.body });
                 }}
                 style={{ alignSelf: mine ? 'flex-end' : 'flex-start', maxWidth: '82%', marginBottom: sp.md }}>
                 {hasMedia ? (
@@ -650,6 +753,29 @@ export default function Messages() {
             <Text style={{ ...ty.title, color: t.ink }}>
               {reportFor?.messageId ? 'Report this message' : 'Report this conversation'}
             </Text>
+
+            {/* ── the way out of the app for a message's words ──────────────
+                Above the report, because it is by far the likelier reason
+                somebody held their thumb on a message their coach wrote, and
+                because burying it under four categories of abuse would read as
+                this app thinking they are the same kind of thing. Drawn only
+                on a bubble that HAS words: a photograph has nothing to put on a
+                clipboard, and a row offering to copy one would do nothing. */}
+            {reportFor?.body ? (
+              <View style={{ marginTop: sp.md }}>
+                <Pressable onPress={() => { void copyMessage(reportFor.body); }}
+                  accessibilityRole="button" accessibilityLabel="Copy this message"
+                  accessibilityHint="Puts the words of this message on your clipboard"
+                  style={{ paddingVertical: sp.md }}>
+                  <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Copy this message</Text>
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
+                    Puts the words on your clipboard. Nothing is reported and nobody is told.
+                  </Text>
+                </Pressable>
+                <Rule />
+              </View>
+            ) : null}
+
             {/* What a report does and does not do — including the sentence that
                 matters most, which is that a report is not a block. */}
             <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>{REPORT_EXPLAINER}</Text>

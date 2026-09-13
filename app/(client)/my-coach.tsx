@@ -102,6 +102,10 @@ import {
   type MyCoachReview,
 } from '../../src/lib/myReviews';
 import { CoachAdvice } from '../../src/ui/CoachAdvice';
+// The provider `CoachAdvice` reads. Mounted app-wide, so this is the same
+// instance and the same rows — nothing is read twice by asking for it here.
+// It is imported for its `reload` alone: see the pull handler below.
+import { useCoachFeedback } from '../../src/ui/feedback';
 import { useToday } from '../../src/ui/today';
 import {
   credentialBadge, credentialLine, expiryLine, sortCredentials, insuranceClaim, insuranceLine,
@@ -316,12 +320,25 @@ export default function MyCoach() {
     [written, coachId],
   );
 
-  // The four reads behind this screen: the coach's profile, their branding,
-  // their credentials, and this member's own review and whether they may leave
-  // one. `tick` runs the last three; `load` is the first.
+  // The reads behind this screen: the coach's profile, their branding, their
+  // credentials, this member's own review and whether they may leave one, the
+  // plan changes their coach can see, and every review they have written.
+  // `tick` runs all but the first; `load` is the first.
+  //
+  // ── and the one the pull did not reach ────────────────────────────────
+  //
+  // What the coach has WRITTEN to this member is the largest block on the
+  // screen and it comes out of `CoachFeedbackProvider`, which is mounted at
+  // the root and keyed on nothing this screen owns — so `tick` could not move
+  // it. A member pulling this screen down after their coach said they had left
+  // a note got every other read refreshed and that one left exactly as it was,
+  // with no way short of killing the app to bring it in. `reload` is the
+  // provider's own, so this asks the same instance `CoachAdvice` is drawing
+  // from rather than opening a second reader with a second opinion.
+  const { reload: reloadAdvice } = useCoachFeedback();
   const pull = usePullToRefresh(useCallback(() => {
-    void load(); setTick((n) => n + 1);
-  }, [load]));
+    void load(); setTick((n) => n + 1); reloadAdvice();
+  }, [load, reloadAdvice]));
 
   const openForm = () => {
     setRating(mine && !mine.withdrawnAt ? mine.rating : null);
@@ -812,6 +829,26 @@ export default function MyCoach() {
                   messaging surface. */}
               <ListRow icon="message" title="Message Coach" note="Your thread with them" onPress={() => go('/(client)/messages')} />
               <ListRow icon="calendar" title="Book a Session" note="Their open times" onPress={() => go('/(client)/calendar')} />
+              {/* ── and the hour they have NOT opened ──────────────────────
+                  The row above books from what the coach has published, and
+                  the product owner's own report is about the half that leaves
+                  out: "i can't see my coach Dayne's availability and am not
+                  able to book a session or send a request for a booking."
+                  app/(client)/request-session.tsx is the answer to it and has
+                  been reachable from the calendar, the PT sessions screen and
+                  the standing-appointment screen — every screen about a DIARY,
+                  and not the one screen about the PERSON. So a member who
+                  opened "Your Coach" in order to ask their coach for Tuesday at
+                  seven found Message, Book, Packs, Standing and Documents, and
+                  the one control that does what they came to do was on none of
+                  them.
+
+                  Directly under Book a Session because the two are one
+                  decision: a member looks for an open time first and asks for
+                  one only when there is none. The note is what keeps them
+                  apart — asking is not booking, which is the rule that whole
+                  screen exists to hold. */}
+              <ListRow icon="clock" title="Ask for a Time" note="A time they haven’t opened — it asks, it doesn’t book" onPress={() => go('/(client)/request-session')} />
               <ListRow icon="trophy" title="Packs & Memberships" note="What you have bought from them" onPress={() => go('/(client)/packages')} />
               {/* A standing appointment is an agreement between these two
                   people, which is what makes this the screen it belongs on —

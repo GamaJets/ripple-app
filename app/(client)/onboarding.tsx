@@ -72,6 +72,7 @@ import {
   SETUP_QUESTIONS, EMPTY_DRAFT, questionsToAsk, readDraft, resumeAt, type SetupStep,
 } from '../../src/lib/firstRun';
 import { isWhole } from '../../src/ui/loadStatus';
+import { useKeyboardLift } from '../../src/ui/keyboardLift';
 
 export const ONBOARD_KEY = 'repple.onboarded';
 /** Where setup got to, on this device. See the header. */
@@ -132,6 +133,9 @@ export default function Onboarding() {
   // it, the label changes to Start Training on the last, and both wrap at large
   // text sizes. A number here would be right on one card at one text size.
   const [footerH, setFooterH] = useState(0);
+  // And how far it has to move when a keyboard arrives under it. See the note
+  // beside the container this is applied to.
+  const { ref: footerRef, lift } = useKeyboardLift();
   const [cmode, setCmode] = useState<CoachingMode>(c.coachingMode);
   const [goal, setGoal] = useState<Goal>(c.goal);
   // Pre-filled from a MEASUREMENT, and blank otherwise.
@@ -213,21 +217,46 @@ export default function Onboarding() {
   const minHeight = lu === 'in' ? Math.round(cmToIn(MIN_CM)) : MIN_CM;
   const maxHeight = lu === 'in' ? Math.round(cmToIn(MAX_CM)) : MAX_CM;
 
-  /**
-   * Switch the unit the weight box is being typed in, and carry what is already
-   * in it across.
+  /* ── carrying a figure across a change of unit ──────────────────────────
    *
-   * The carrying is the whole point. A member who typed 180 with "lb" lit and
-   * then taps "kg" means the same body — leaving the digits where they are and
-   * relabelling them is precisely the stored-record corruption this screen's
-   * header is about, except done by the app rather than by the missing
-   * preference. The value goes out to kilograms and back through the same
-   * functions the record uses, and units.test.ts sweeps that trip for
-   * losslessness at these grains, so nothing is shaved off by switching twice.
+   * The carry itself is the whole point: a member who typed 180 with "lb" lit
+   * and then taps "kg" means the same body, and leaving the digits where they
+   * are and relabelling them is precisely the stored-record corruption this
+   * screen's header is about, except done by the app rather than by the missing
+   * preference.
+   *
+   * What was wrong was the claim underneath it. The comment here read "the
+   * value goes out to kilograms and back through the same functions the record
+   * uses, and units.test.ts sweeps that trip for losslessness at these grains,
+   * so nothing is shaved off by switching twice." units.test.ts sweeps a
+   * DIFFERENT trip — type in a unit, store, read back in the SAME unit — which
+   * is lossless by construction because the storage grain is finer than the
+   * display grain. The cross-unit trip is not, and cannot be: `weightIn`
+   * returns WHOLE pounds and whole inches on purpose, so a kilogram figure that
+   * leaves through pounds comes back rounded to the nearest half-kilo or so.
+   * Swept over 40–140 kg in tenths, 781 of 1001 values come back different —
+   * 70 kg goes out as 154 lb and returns as 69.9 — and it compounds: each tap
+   * re-derives from the digits the last tap left behind.
+   *
+   * So the digits in the box are not the source any more. The METRIC value the
+   * member last actually typed is, held here, and every switch is derived from
+   * that. Tapping lb, kg, lb, kg from a typed 70 now shows 70 every time it
+   * comes back rather than walking down the scale. Typing clears it, because at
+   * that moment the digits ARE the source again.
+   *
+   * A ref rather than state: nothing renders from it, and a re-render between
+   * the keystroke and the tap would be the one thing that could lose it.
    */
+  const typedKg = useRef<number | null>(null);
+  const typedCm = useRef<number | null>(null);
+  const typeWeight = (v: string) => { typedKg.current = null; setWeight(v); };
+  const typeHeight = (v: string) => { typedCm.current = null; setHeight(v); };
+  const typeHeightIn = (v: string) => { typedCm.current = null; setHeightInVal(v); };
+
   const changeWeightUnit = (u: WeightUnit) => {
     if (u === wu) return;
-    const kg = weightToKg(weight, wu);
+    const kg = typedKg.current ?? weightToKg(weight, wu);
+    typedKg.current = kg;
     const carried = kg == null ? null : weightIn(kg, u);
     setWeight(carried == null ? '' : String(carried));
     st.set({ weightUnit: u });
@@ -237,7 +266,8 @@ export default function Onboarding() {
    *  the carry has to go through centimetres, not through the digits. */
   const changeLengthUnit = (u: LengthUnit) => {
     if (u === lu) return;
-    const cm = heightToCm(height, lu, heightInVal);
+    const cm = typedCm.current ?? heightToCm(height, lu, heightInVal);
+    typedCm.current = cm;
     if (cm == null) { setHeight(''); setHeightInVal(''); }
     else if (u === 'in') {
       const parts = heightParts(cm);
@@ -251,12 +281,54 @@ export default function Onboarding() {
     st.set({ lengthUnit: u });
   };
 
+  /* ── whether what is in each box will actually be recorded ──────────────
+   *
+   * These three tests lived inside `commit` and nowhere else, which meant a
+   * figure outside the plausible range was dropped in SILENCE. The screen's own
+   * caption says "Used to set your calorie and macro targets", the sentence at
+   * the foot of the card says skipping this leaves "no calorie or macro targets
+   * anywhere", and a member who typed 1750 — a pound figure with kg lit, a
+   * stone-and-pounds habit, a slipped finger — was shown neither. They tapped
+   * Continue, the app wrote nothing, and the next thing they saw was a dashboard
+   * asking them to add the weight they had just given it.
+   *
+   * The same test, named once, used by `commit` AND drawn under the box it is
+   * about. `null` is an empty box: the caption invites blanks — "leave anything
+   * you don't know blank" — so an empty field is a real answer and has nothing
+   * to say for itself.
+   *
+   * The bounds are the ones already in the member's own unit (`minWeight` and
+   * friends above), so the sentence shown quotes figures of the same shape as
+   * the one in the box. Telling somebody typing pounds that the limit is 400 is
+   * how the original defect got written in the first place.
+   */
+  const weightTyped = weight.trim();
+  const weightOk: boolean | null = weightTyped === ''
+    ? null
+    : (() => {
+      const w = parseFloat(weightTyped);
+      return Number.isFinite(w) && w > minWeight && w < maxWeight && weightToKg(weightTyped, wu) != null;
+    })();
+  // Feet and inches are only a plausible height taken together, so the magnitude
+  // judged is the one recovered from the centimetres rather than either box.
+  const heightCm = heightToCm(height, lu, heightInVal);
+  const heightShown = heightIn(heightCm, lu);
+  const heightOk: boolean | null = height.trim() === '' && heightInVal.trim() === ''
+    ? null
+    : heightCm != null && heightShown != null && heightShown > minHeight && heightShown < maxHeight;
+  const bfOk: boolean | null = bf.trim() === ''
+    ? null
+    : (() => { const b = parseFloat(bf); return Number.isFinite(b) && b > 3 && b < 70; })();
+
   /**
    * Write down the step being left.
    *
    * Committed as each step is left rather than all at the end, so a setup
    * abandoned halfway keeps what it was told. Every one of these is idempotent:
    * going Back and forward again re-writes the same value.
+   *
+   * See `weightOk` / `heightOk` / `bfOk` above for the figures it will and will
+   * not take, and for why those are named rather than inlined here.
    */
   const commit = (id: SetupStep) => {
     if (id === 'coaching') c.setCoachingMode(cmode);
@@ -266,17 +338,18 @@ export default function Onboarding() {
       // scale, then store the metric it converts to. Both steps matter: the
       // check has to see pounds as pounds, and the record has to receive
       // kilograms.
-      const w = parseFloat(weight);
-      if (w > minWeight && w < maxWeight) { const kg = weightToKg(weight, wu); if (kg != null) c.setWeightKg(kg); }
+      //
+      // The three tests are `weightOk` / `heightOk` / `bfOk`, computed above and
+      // DRAWN, because they used to live only here and a figure outside the
+      // range was therefore dropped in silence.
+      if (weightOk) { const kg = weightToKg(weight, wu); if (kg != null) c.setWeightKg(kg); }
       // Height comes from one box in metric and two in imperial, so the typed
       // magnitude is recovered from the centimetres rather than re-parsed: feet
       // and inches are only a plausible height taken together.
-      const cm = heightToCm(height, lu, heightInVal);
-      const h = heightIn(cm, lu);
-      if (cm != null && h != null && h > minHeight && h < maxHeight) c.setHeightCm(cm);
+      if (heightOk && heightCm != null) c.setHeightCm(heightCm);
       // Body fat is a percentage and is stored exactly as typed. There is no
       // such thing as an imperial percentage.
-      const b = parseFloat(bf); if (b > 3 && b < 70) c.setBodyFat(b);
+      if (bfOk) { const b = parseFloat(bf); if (Number.isFinite(b)) c.setBodyFat(b); }
     }
     if (id === 'injuries') {
       // Only areas that are not already recorded as active. This screen can be
@@ -406,26 +479,48 @@ export default function Onboarding() {
             in the wrong unit it is out by more than double.
           </Text>
         ) : null}
-        <Field label="Weight" hint={wu} style={{ marginBottom: sp.lg }} a11y={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'}>
-          <TextInput value={weight} onChangeText={setWeight} keyboardType="decimal-pad" style={inp} />
+        <Field label="Weight" hint={wu} style={{ marginBottom: weightOk === false ? sp.sm : sp.lg }} a11y={wu === 'kg' ? 'Weight in kilograms' : 'Weight in pounds'}>
+          <TextInput value={weight} onChangeText={typeWeight} keyboardType="decimal-pad" style={inp} />
         </Field>
+        {/* Said while it is still fixable, on the card, rather than discovered
+            two screens later as a dashboard with no targets on it. The warn ink
+            lives in the words and not in the colour — `t.warn` as caption ink
+            is under AA on the light palettes, which is what check:contrast is
+            for. */}
+        {weightOk === false ? (
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.lg }}>
+            That is not a weight this will record — it takes {minWeight} to {maxWeight} {wu}. Check the number, or the unit above it.
+          </Text>
+        ) : null}
         {/* Two boxes in imperial, one in metric, as in the profile sheet. A
             single box asking for a height "in inches" is a box nobody who
             thinks in feet knows how to fill in — they would type 5.10 and mean
             five foot ten. */}
-        <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.lg, alignItems: 'flex-end' }}>
+        <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: heightOk === false ? sp.sm : sp.lg, alignItems: 'flex-end' }}>
           <Field label="Height" hint={lu === 'cm' ? 'cm' : 'ft'} a11y={lu === 'cm' ? 'Height in centimetres' : 'Height, feet'}>
-            <TextInput value={height} onChangeText={setHeight} keyboardType="number-pad" style={inp} />
+            <TextInput value={height} onChangeText={typeHeight} keyboardType="number-pad" style={inp} />
           </Field>
           {lu === 'in' ? (
             <Field label="Inches" a11y="Height, inches">
-              <TextInput value={heightInVal} onChangeText={setHeightInVal} keyboardType="number-pad" style={inp} />
+              <TextInput value={heightInVal} onChangeText={typeHeightIn} keyboardType="number-pad" style={inp} />
             </Field>
           ) : null}
         </View>
+        {heightOk === false ? (
+          <Text style={{ ...ty.caption, color: t.ink2, marginBottom: sp.lg }}>
+            {lu === 'cm'
+              ? `That is not a height this will record — it takes ${minHeight} to ${maxHeight} cm.`
+              : 'That is not a height this will record. Feet go in the first box and inches in the second — five foot ten is 5 and 10, not 5.10.'}
+          </Text>
+        ) : null}
         <Field label="Body fat" hint="% · optional" a11y="Body fat percentage">
           <TextInput value={bf} onChangeText={setBf} keyboardType="decimal-pad" style={inp} />
         </Field>
+        {bfOk === false ? (
+          <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>
+            That is not a body fat percentage this will record — it takes 3 to 70%. Leave it blank if you do not know it.
+          </Text>
+        ) : null}
       </View>
     ),
     injuries: (
@@ -458,6 +553,22 @@ export default function Onboarding() {
   const q = SETUP_QUESTIONS.find((x) => x.id === id);
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
+      {/* ── the footer, and the keyboard that used to sit on top of it ─────
+          The Back / Continue row is OUTSIDE the ScrollView, so
+          `automaticallyAdjustKeyboardInsets` — which brings the focused field
+          clear and is what check:keyboard asks for — does nothing whatever for
+          it. On the Your Stats card that is the whole of the step: three
+          decimal-pad and number-pad keyboards, none of which HAS a return key
+          to dismiss itself with, sitting over the only button that goes
+          forward. The way out was to guess that a tap on empty space would
+          dismiss it.
+
+          Measured rather than guessed at, by the hook the compose bars already
+          use — see src/ui/keyboardLift.ts for why RN's own
+          KeyboardAvoidingView under-lifts by exactly the header height. The
+          padding goes on a container that holds both the scroller and the
+          footer, so the footer travels up and the scroller shortens to match. */}
+      <View style={{ flex: 1, paddingBottom: lift }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingTop: sp.md }}>
         <View style={{ flexDirection: 'row', gap: 5, flex: 1 }}>
           {steps.map((_, i) => <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i <= step ? t.brand : t.surface3 }} />)}
@@ -475,12 +586,13 @@ export default function Onboarding() {
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xl }}>Skip this and {q.breaks}.</Text>
         ) : null}
       </ScrollView>
-      <View onLayout={(e) => setFooterH(e.nativeEvent.layout.height)}
+      <View ref={footerRef} onLayout={(e) => setFooterH(e.nativeEvent.layout.height)}
         style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingBottom: sp.lg }}>
         {step > 0 ? <Ghost label="Back" onPress={() => { commit(id); setStep(step - 1); }} /> : null}
         <View style={{ flex: 1 }}>
           <Cta label={last ? 'Start Training' : 'Continue'} onPress={() => { if (last) { void finish(); } else { commit(id); setStep(step + 1); } }} wide />
         </View>
+      </View>
       </View>
     </SafeAreaView>
   );

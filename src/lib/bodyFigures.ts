@@ -98,6 +98,27 @@ export const STALE_AFTER_DAYS = 28;
  *
  * `scanCount` is `cd.scans.length`, from the same provider and the same
  * render, so the two cannot drift apart between them.
+ *
+ * ── why the index is taken BEFORE the unusable points are dropped ─────────
+ *
+ * It used to `.filter(...).map((p, i) => ...)`, which classified on the index
+ * within the SURVIVING points rather than within the series clientData built.
+ * The whole rule above — "the first `scanCount` points are scans" — is a
+ * statement about positions in `series`, and a filter renumbers them. Drop one
+ * scan point and every later point shifts down one, so the appended weigh-in
+ * lands at index `scanCount - 1` and is labelled an InBody scan; `readingsLabel`
+ * then counts it as one, and `measuredNote` tells the client a figure they
+ * typed was measured by a machine.
+ *
+ * Latent rather than live today, and only just: a scan point is dropped only
+ * when `weight_kg` or `body_fat_pct` is null or unparseable, both of which are
+ * NOT NULL in the schema, and `muscleSeries` never appends a weigh-in at all.
+ * One nullable column, or one series that starts appending, and it is live. The
+ * ordering below costs nothing and removes the dependence entirely.
+ *
+ * So: map first, carrying the ORIGINAL index, and drop the unusable points
+ * afterwards. For a series in which every point is usable — which is every
+ * series in production today — the output is identical, point for point.
  */
 export function bodyReadings(
   series: SeriesPoint[] | null | undefined,
@@ -105,8 +126,9 @@ export function bodyReadings(
 ): BodyReading[] {
   if (!series?.length) return [];
   return series
-    .filter((p) => p && typeof p.v === 'number' && Number.isFinite(p.v) && !!p.t)
-    .map((p, i) => ({ value: p.v, at: p.t, source: i < scanCount ? 'scan' : 'weigh-in' } as BodyReading));
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => p && typeof p.v === 'number' && Number.isFinite(p.v) && !!p.t)
+    .map(({ p, i }) => ({ value: p.v, at: p.t, source: i < scanCount ? 'scan' : 'weigh-in' } as BodyReading));
 }
 
 /**

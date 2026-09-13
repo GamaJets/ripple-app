@@ -63,6 +63,11 @@ import {
 import {
   fetchShifts, fetchDemand, addShift, updateShift, setShiftStatus, deleteShift,
   shiftFromHours, shiftBlocker, shiftRate, rotaCost, summariseRota, shiftHours, isLive,
+  // What the rota is FOR, and the half of it this console never drew. See the
+  // note on `cover` below: `coverage` is written, tested and already wired into
+  // the phone owner app — the web console showed shifts, hours and cost and
+  // never once compared them against what the gym had booked.
+  coverage, hourLabel, type RotaGap, type CoverageReport,
   weekStartOf, weekWindow, weekDays, shiftWeek,
   type DemandBlock, type Shift, type ShiftRole,
 } from '@lib/gymRota';
@@ -1420,6 +1425,18 @@ function Rota({ tenantId, trainers, ccy, zone, zoneRead }: {
   // already Sunday, and the two would otherwise open different weeks.
   const [week, setWeek] = useState(() => weekStartOf());
   const [shifts, setShifts] = useState<Shift[] | null>(null);
+  /**
+   * What the gym has BOOKED this week — classes and one-to-ones.
+   *
+   * Null is a read that did not land, never []. An empty demand list makes
+   * `coverage` report every rostered hour as idle and nothing as uncovered,
+   * which is a gym with a quiet week; a refused read looks identical and is a
+   * gym whose timetable nobody could see. The second must never be drawn as the
+   * first, because the reading it invites — "nothing needs cover" — is the one
+   * that leaves a class with no staff in the building.
+   */
+  const [demand, setDemand] = useState<DemandBlock[] | null>(null);
+  const [demandErr, setDemandErr] = useState<string | null>(null);
   const [readErr, setReadErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<Said>(null);
   const [editing, setEditing] = useState<Shift | null>(null);
@@ -1436,19 +1453,28 @@ function Rota({ tenantId, trainers, ccy, zone, zoneRead }: {
   const load = useCallback(async () => {
     // Not before the gym's clock is known — see `zoneRead`. This leaves the
     // section on 'Loading…', which is the honest state: nothing has been read.
-    if (!zoneRead) { setShifts(null); setReadErr(null); return; }
+    if (!zoneRead) { setShifts(null); setDemand(null); setReadErr(null); setDemandErr(null); return; }
     const w = weekWindow(week, zone);
-    if (!w) { setShifts(null); setReadErr('That week could not be read as a date range.'); return; }
-    try {
-      setShifts(await fetchShifts(supabase, tenantId, w.fromISO, w.toISO));
-      setReadErr(null);
-    } catch (e: any) {
-      // Null, never []: an empty rota under a failed read tells an owner that
-      // nobody is on the floor this week, which is the one sentence that gets
-      // somebody called in on their day off.
-      setShifts(null);
-      setReadErr(e?.message ?? 'The rota could not be read.');
+    if (!w) {
+      setShifts(null); setDemand(null); setDemandErr(null);
+      setReadErr('That week could not be read as a date range.');
+      return;
     }
+    // allSettled, not all. A refused timetable read must not empty the rota —
+    // the rota is still worth drawing without it, and it is the demand side
+    // alone that goes unanswered. Under Promise.all the two failed together and
+    // the more useful half was lost to the less useful one.
+    const [sRes, dRes] = await Promise.allSettled([
+      fetchShifts(supabase, tenantId, w.fromISO, w.toISO),
+      fetchDemand(supabase, tenantId, w.fromISO, w.toISO),
+    ]);
+    // Null, never []: an empty rota under a failed read tells an owner that
+    // nobody is on the floor this week, which is the one sentence that gets
+    // somebody called in on their day off.
+    setShifts(sRes.status === 'fulfilled' ? sRes.value : null);
+    setReadErr(sRes.status === 'fulfilled' ? null : (sRes.reason?.message ?? 'The rota could not be read.'));
+    setDemand(dRes.status === 'fulfilled' ? dRes.value : null);
+    setDemandErr(dRes.status === 'fulfilled' ? null : (dRes.reason?.message ?? "This week's timetable could not be read."));
   }, [tenantId, week, zone, zoneRead]);
 
   useEffect(() => { load(); }, [load]);
@@ -1466,6 +1492,31 @@ function Rota({ tenantId, trainers, ccy, zone, zoneRead }: {
   const days = weekDays(week);
   const cost = shifts ? rotaCost(shifts) : null;
   const summary = shifts ? summariseRota(shifts) : null;
+
+  /**
+   * The rota against the timetable — the question this screen exists to answer
+   * and did not.
+   *
+   * A rota is not a list of shifts. It is a claim that every hour the gym has
+   * sold somebody has somebody in the building for it, and until now this
+   * console showed the shifts, the hours and the cost and never once compared
+   * them with what was booked. `coverage` in src/lib/gymRota.ts already does
+   * the comparison, has its own tests, and is what the phone owner app draws;
+   * the web console imported `fetchDemand` for a different purpose on the same
+   * page and never asked it this question.
+   *
+   * Null while EITHER side is unread, and that asymmetry is the point. With the
+   * shifts missing there is no rota to check. With the demand missing there is
+   * nothing to check it against — and `coverage` over an empty demand list
+   * reports zero uncovered hours, which is byte-for-byte what a fully covered
+   * week looks like. An all-clear made out of a query that did not run is the
+   * single worst thing this section could print, because the hole it hides is a
+   * class with nobody in the building.
+   *
+   * `zone` is threaded through because the buckets are HOURS OF A DAY, and
+   * whose day that is decides which cell a 23:30 class lands in.
+   */
+  const cover = shifts && demand ? coverage(days, shifts, demand, zone) : null;
 
   // The gym's currency, because a shift rate has none of its own until it is
   // typed. There is no default currency in this product — part 150 — so with
@@ -1631,6 +1682,24 @@ function Rota({ tenantId, trainers, ccy, zone, zoneRead }: {
              note={summary?.hours == null ? 'nothing rostered this week' : undefined} />
         <Kpi label="People on" text={summary ? String(summary.trainers) : null} />
         <Kpi
+          label="Booked hours covered"
+          // A percentage or nothing. Every silence below gets its own sentence,
+          // because the one thing this tile may never do is read as "covered"
+          // when the question was not answerable — see `cover`.
+          text={cover?.coverRate == null ? null : `${Math.round(cover.coverRate * 100)}%`}
+          note={
+            demand === null
+              ? (demandErr ? 'the timetable could not be read' : 'reading the timetable')
+              : shifts === null ? undefined
+              : cover?.blocker ? cover.blocker
+              : cover?.coverRate == null ? 'nothing is booked this week, so there is no cover rate'
+              : cover.uncovered && cover.uncovered.length > 0
+                ? `${cover.uncovered.length} booked hour${cover.uncovered.length === 1 ? '' : 's'} with nobody rostered`
+                : `all ${cover.demandHours} booked hour${cover.demandHours === 1 ? '' : 's'} have somebody on`
+          }
+          tone={cover?.uncovered && cover.uncovered.length > 0 ? 'crit' : undefined}
+        />
+        <Kpi
           label="Costs"
           // Three different silences, and each gets its own words. A total that
           // hid any of them would read as a cheap week.
@@ -1730,6 +1799,19 @@ function Rota({ tenantId, trainers, ccy, zone, zoneRead }: {
         )}
       </p>
 
+      {/* ── the holes ────────────────────────────────────────────────────
+          Above the shift list, because a hole is what an owner opens this
+          section to find and a list of shifts does not contain one: the whole
+          point of an uncovered hour is that nothing is on the rota for it, so
+          it cannot appear as a row in a table of rota rows. */}
+      <Uncovered
+        cover={cover}
+        shiftsUnread={shifts === null}
+        demandUnread={demand === null}
+        demandWhy={demandErr}
+        zone={zone}
+      />
+
       {shifts === null ? (
         // Announced: the text that replaces "Loading…" here carries the
         // database's own refusal, and it is the only place this section says it.
@@ -1772,6 +1854,111 @@ function Rota({ tenantId, trainers, ccy, zone, zoneRead }: {
  * exact inverses across the days the clocks move. With no zone this falls back
  * to the browser's — the old behaviour, unchanged — and says so on the form.
  */
+/**
+ * Hours this gym has sold and nobody is rostered for.
+ *
+ * ── Why this is a table and not a number ──────────────────────────────────
+ *
+ * "3 hours uncovered" is not actionable. WHICH three is: a Tuesday 18:00 with
+ * two classes and a pulled shift is one errand, and a Saturday 07:00 with one
+ * one-to-one assigned to a coach who is not on the rota is a different one.
+ * `coverage` already writes that sentence per hour (`note`), naming the pulled
+ * shift and the assigned-but-not-rostered case separately, and this draws it.
+ *
+ * ── The three silences, kept apart ────────────────────────────────────────
+ *
+ * Nothing here may say "covered" unless the comparison was actually made.
+ *
+ *   · the shifts are unread — there is no rota to check;
+ *   · the timetable is unread — there is nothing to check it against, and this
+ *     is the dangerous one: `coverage` over an empty demand list reports no
+ *     uncovered hours at all, which draws identically to a perfect week;
+ *   · the rota is EMPTY — `coverage` returns `uncovered: null` with its own
+ *     blocker for exactly this, on the grounds that an empty rota means nobody
+ *     filled it in rather than that the gym is unstaffed. Every hour of the
+ *     week would otherwise be reported as a failure.
+ *
+ * Idle hours are deliberately not listed beside these. `coverage` judges idle
+ * gym-wide and conservatively, and an owner acting on an uncovered hour and an
+ * owner trimming an idle one are doing different jobs on different days; mixing
+ * them into one table is how the urgent list stops being read.
+ */
+function Uncovered({ cover, shiftsUnread, demandUnread, demandWhy, zone }: {
+  cover: CoverageReport | null;
+  shiftsUnread: boolean;
+  demandUnread: boolean;
+  demandWhy: string | null;
+  /** The gym's own zone, or null. The hour labels are wall-clock hours on
+   *  whichever calendar `coverage` bucketed by, and the note below says which
+   *  one that was rather than leaving the reader to assume. */
+  zone: string | null;
+}) {
+  if (shiftsUnread || demandUnread) {
+    return (
+      <div style={{
+        padding: '12px 14px', borderTop: '1px solid var(--ring)',
+        fontSize: 12.5, color: 'var(--ink2)', maxWidth: '76ch',
+      }}>
+        {shiftsUnread && demandUnread
+          ? 'Neither the rota nor the timetable came back, so nothing here can say whether this week is covered.'
+          : shiftsUnread
+            ? 'The rota did not come back, so there is nothing to check the timetable against.'
+            : <>
+                <strong style={{ color: 'var(--ink)' }}>This week&rsquo;s timetable could not be
+                read</strong>, so cover cannot be checked
+                {demandWhy ? <>: {demandWhy}</> : '.'} That is not the same as a week with nothing
+                booked &mdash; with no timetable to compare against, an hour with a class and
+                nobody on it looks exactly like an hour with neither.
+              </>}
+      </div>
+    );
+  }
+  if (cover === null) return null;
+
+  if (cover.blocker) {
+    return (
+      <div style={{
+        padding: '12px 14px', borderTop: '1px solid var(--ring)',
+        fontSize: 12.5, color: 'var(--ink2)', maxWidth: '76ch',
+      }}>
+        {cover.blocker}{' '}
+        {cover.demandHours > 0
+          ? `${cover.demandHours} hour${cover.demandHours === 1 ? '' : 's'} this week ${cover.demandHours === 1 ? 'has' : 'have'} something booked in ${cover.demandHours === 1 ? 'it' : 'them'}.`
+          : 'Nothing is booked this week either.'}
+      </div>
+    );
+  }
+
+  const gaps = cover.uncovered ?? [];
+  const cols: Column<RotaGap>[] = [
+    { key: 'when', header: 'When', value: (g) => `${g.date}T${String(g.hour).padStart(2, '0')}`,
+      // A bare calendar date drawn as a calendar date — `calendarDateText`
+      // formats the string rather than parsing it into an instant, which is
+      // what stops a Monday reading as the Sunday before it.
+      render: (g) => `${calendarDateText(g.date, { weekday: 'short', day: 'numeric', month: 'short' }) ?? g.date} ${hourLabel(g.hour)}` },
+    { key: 'what', header: 'Booked', value: (g) => g.classes + g.ptSessions, numeric: true,
+      render: (g) => `${g.classes ? `${g.classes} class${g.classes === 1 ? '' : 'es'}` : ''}${g.classes && g.ptSessions ? ', ' : ''}${g.ptSessions ? `${g.ptSessions} one-to-one${g.ptSessions === 1 ? '' : 's'}` : ''}` },
+    { key: 'why', header: 'Why it is a hole', value: (g) => g.note },
+  ];
+
+  return (
+    <div style={{ borderTop: '1px solid var(--ring)' }}>
+      <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '76ch' }}>
+        Hours with a class or a one-to-one booked and nobody on the rota for them. An hour with a
+        colleague on the floor counts as covered even if somebody else is teaching &mdash; being on
+        the floor while a colleague teaches is the job.{' '}
+        {zone
+          ? 'Hours are the gym’s own.'
+          : 'This gym has set no timezone, so the hours are cut on this device’s clock — set one on Gym and they become the gym’s.'}
+      </p>
+      <DataTable noun="uncovered hours"
+        rows={gaps} columns={cols} rowKey={(g) => `${g.date}T${g.hour}`}
+        empty="Every booked hour this week has somebody rostered for it."
+      />
+    </div>
+  );
+}
+
 function EditShift({ shift, ccy, zone, onClose }: {
   shift: Shift; ccy: TenantCurrency; zone: string | null; onClose: (changed: boolean) => void;
 }) {

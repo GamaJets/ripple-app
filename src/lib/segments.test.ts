@@ -59,11 +59,26 @@ eq(unassessed(def('drifting'), [handAdded, genuinelyIdle]).join(','), 'hand',
 eq(unassessed(def('pack-run-out'), [handAdded]).length, 0, 'a purchase read answers for everybody');
 eq(unassessed(def('never-checked-in'), [handAdded]).length, 0, 'and so does the roster');
 
-const note = unassessedNote(def('no-record'), 3);
+const note = unassessedNote(def('no-record'), 3, true);
 ok(note !== null && /3/.test(note), 'the note counts them');
 ok(note !== null && /no account/.test(note), 'and says why they could not be reached');
 ok(note !== null && /never asked/.test(note), 'and that they were never asked about, rather than found to be outside');
-eq(unassessedNote(def('no-record'), 0), null, 'and says nothing when there is nobody to say it about');
+eq(unassessedNote(def('no-record'), 0, true), null, 'and says nothing when there is nobody to say it about');
+
+// ── and nothing at all until the source read has landed ──────────────────
+//
+// `unassessed` counts clients whose drift is null, and null is UNKNOWN. While
+// the activity read is in flight — and for ever after it fails — every client
+// on the book has a null drift, so this count is the size of the whole book.
+// Printed anyway, the sentence told a coach that all forty of their clients
+// "were added by you by hand and have no account", which is a claim about real
+// people assembled out of a read's own status.
+eq(unassessedNote(def('no-record'), 40, false), null,
+  'an unfinished source read says nothing about who could not be assessed');
+eq(unassessedNote(def('drifting'), 1, false), null,
+  'the same for every drift segment, whatever the count');
+ok(unassessedNote(def('drifting'), 1, true) !== null,
+  'and the sentence comes back the moment the read is whole');
 
 /* ── the drift bands ───────────────────────────────────────────────────── */
 

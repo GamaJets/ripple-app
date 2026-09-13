@@ -76,6 +76,10 @@ import { Banner } from '@/components/Banner';
 import { num } from '@/lib/num';
 import {
   buildPassConversion, suppressionSentence,
+  // The credits a member has paid for and is about to lose — the one pass
+  // report a desk acts on the same day, and the one this console had no
+  // version of at all. Pure, and asserted under plain node.
+  expiringPasses, expiringExclusions, EXPIRY_HORIZON_DAYS, type ExpiringPass,
   CAUSAL_CAVEAT, MONEY_NOTE, CONVERSION_LABEL, CONVERSION_COST,
   type PassConversionRecord, type PassConversion, type PassHolder,
   type HostGuests, type HolderOutcome, type ConversionPart,
@@ -792,6 +796,153 @@ function Holders({ c, rec, ccy, contacts }: {
           rows={c.holders} columns={cols} rowKey={(h) => h.holderId}
           empty="No pass has been issued to somebody with an account. Passes sold to walk-ins are listed nowhere here, because there is no person for them to be a row about."
         />
+      ) : null}
+    </Section>
+  );
+}
+
+/* ── credits a member is about to lose ─────────────────────────────────────── */
+
+/**
+ * Live passes with credits on them whose last day is close.
+ *
+ * ── The gap this closes ───────────────────────────────────────────────────
+ *
+ * Every leading gym console leads with this list and this one had no version of
+ * it at all. /door answers about one pass in front of one person, /money draws
+ * the price book, and this page measured what pass-giving CONVERTED to after
+ * the fact. Nothing anywhere said which members have paid for credits they are
+ * about to lose — which is the one pass report a desk acts on the same day,
+ * because the member is still a member and the credits are still spendable.
+ *
+ * No new read and no new column: `fetchPasses` already brings back every
+ * `gym_passes` row for the report above, each one carrying `expires_on`,
+ * `uses_total` and `uses_spent`, and the contact read two sections down is
+ * already in hand.
+ *
+ * `rowsOf` and not `rowsToShow`: a truncated pass read is a PREFIX, and "six
+ * members are about to lose credits" computed over the first thousand rows is a
+ * subtotal with a call list's authority. The section states the truncation and
+ * withholds, exactly as `Sold` below does.
+ */
+function RunningOut({ rec, today, contacts, contactsErr }: {
+  rec: PassConversionRecord; today: string;
+  contacts: Map<string, GymMemberRecord> | null; contactsErr: string | null;
+}) {
+  const passes = rowsOf(rec.passes);
+  const x = useMemo(
+    () => (passes ? expiringPasses(passes, today) : null),
+    [passes, today],
+  );
+
+  const cols: Column<ExpiringPass>[] = [
+    {
+      key: 'who', header: 'Who', value: (p) => p.name ?? '￿',
+      render: (p) => (
+        <a href={`/members?member=${encodeURIComponent(p.holderId)}`} style={{ color: 'var(--brand)' }}>
+          {p.name ?? 'unnamed account'}
+        </a>
+      ),
+    },
+    {
+      key: 'contact', header: 'Reach them on',
+      value: (p) => contactLine(contacts?.get(p.holderId) ?? null),
+      render: (p) => {
+        // The same three answers as every other contact column on this page:
+        // the gym has a number, the gym has none, or nobody could read the
+        // records. Only the middle one is a fact about this person.
+        if (contacts === null) return <span className="dash">not read</span>;
+        const line = contactLine(contacts.get(p.holderId) ?? null);
+        if (!line) {
+          return (
+            <a href={`/members?member=${encodeURIComponent(p.holderId)}`} style={{ color: 'var(--ink3)' }}>
+              add a number
+            </a>
+          );
+        }
+        const rc = contacts.get(p.holderId);
+        return rc?.phone
+          ? <a href={`tel:${rc.phone.replace(/\s+/g, '')}`} style={{ color: 'var(--brand)' }}>{line}</a>
+          : <span>{line}</span>;
+      },
+    },
+    {
+      key: 'pass', header: 'Pass', value: (p) => p.passTypeName ?? '￿',
+      render: (p) => (
+        <>
+          {p.passTypeName ?? <span className="dash">the pass type could not be read</span>}
+          <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 2 }}>
+            {/* What the credits actually buy, on the row. A door credit and a
+                PT hour are different goods and this table never adds them. */}
+            {p.covers === 'pt' ? 'personal training'
+              : p.covers === 'visit' ? 'door and classes'
+              : 'what it covers could not be read'}
+          </div>
+        </>
+      ),
+    },
+    {
+      key: 'left', header: 'Credits left', value: (p) => p.creditsLeft, numeric: true,
+      render: (p) => `${num(p.creditsLeft)} of ${num(p.usesTotal)}`,
+    },
+    // A bare YYYY-MM-DD off a `date` column. Printed as the string it is —
+    // `gymDateText` would move it onto a zone a calendar day does not have.
+    { key: 'last', header: 'Last day', value: (p) => p.expiresOn },
+    {
+      key: 'days', header: 'Days left', value: (p) => p.daysLeft, numeric: true,
+      render: (p) => (
+        <span style={{ color: p.daysLeft <= 7 ? 'var(--warn)' : 'var(--ink2)' }}>
+          {p.daysLeft === 0 ? 'today' : p.daysLeft === 1 ? 'tomorrow' : `${num(p.daysLeft)}d`}
+        </span>
+      ),
+    },
+  ];
+
+  const exclusions = x ? expiringExclusions(x) : null;
+
+  return (
+    <Section
+      title="Credits about to be lost"
+      sub={`Live passes with credits still on them whose last day falls inside ${EXPIRY_HORIZON_DAYS} days, at this gym's own calendar day. The member has paid for these and is about to stop being able to spend them.`}
+    >
+      {rec.passes.state === 'loading' ? <Loading /> : null}
+      {rec.passes.state === 'failed' ? <Failed reason={reasonOf(rec.passes)} part="passes" /> : null}
+      <Truncated s={rec.passes} part="passes" />
+
+      {x ? (
+        <>
+          {x.soon.length ? (
+            <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--ink2)' }}>
+              {/* People, not passes, because the job is phone calls and one
+                  member holding three expiring packs is one call. Both figures
+                  are given rather than one standing for the other. */}
+              <strong style={{ color: 'var(--ink)' }}>{num(x.people)}</strong>{' '}
+              {x.people === 1 ? 'member is' : 'members are'} about to lose credits, across{' '}
+              {num(x.soon.length)} {x.soon.length === 1 ? 'pass' : 'passes'}. Nothing here expires
+              anything or reminds anybody — this product sends no mail and the console cannot push.
+            </p>
+          ) : null}
+
+          {contactsErr ? (
+            <p style={{ margin: 0, padding: '12px 14px 0', fontSize: 12.5, color: 'var(--warn)' }}>
+              Contact details could not be read: {contactsErr}. The column below says &ldquo;not
+              read&rdquo; rather than &ldquo;nothing recorded&rdquo; — this is not a list of people the
+              gym has no number for.
+            </p>
+          ) : null}
+
+          <DataTable
+            noun="passes about to run out"
+            rows={x.soon} columns={cols} rowKey={(p) => p.passId}
+            empty={`Nobody with an account is inside ${EXPIRY_HORIZON_DAYS} days of losing credits. That is a reading of the pass book, not a gap in it — the line below says what is counted out of this list.`}
+          />
+
+          {exclusions ? (
+            <p style={{ margin: 0, padding: '12px 14px 14px', fontSize: 12, color: 'var(--ink3)', maxWidth: 820 }}>
+              {exclusions}
+            </p>
+          ) : null}
+        </>
       ) : null}
     </Section>
   );

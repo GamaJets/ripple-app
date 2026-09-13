@@ -62,6 +62,12 @@ import {
   amount, fetchMyMemberships, isCurrent, planStateOf, primaryMembership, renewalNote,
   standingLabel, standingOf, type MemberMembership,
 } from '../../src/lib/memberRecord';
+// The pause, in words. Reused rather than reimplemented: app/(owner)/members.tsx
+// has printed these exact sentences off these exact two columns since
+// supabase/parts/2616, and the member — the person whose access to a building
+// it is — was reading the bare word "Frozen" with no date it lifts. Two
+// renderings of one rule is how the desk and the phone come to disagree.
+import { freezeState, frozenDays, freezeLine } from '../../src/lib/membershipFreeze';
 // The purchase behind the membership above. `gym_orders_own_r` has admitted the
 // member to their own orders since supabase/parts/281 and part 800's header
 // says the table "is read by the member's own purchase history" — which did not
@@ -294,6 +300,52 @@ export default function Membership() {
   const standing = primary ? standingOf(primary, today) : null;
   const planState = primary ? planStateOf(primary) : null;
 
+  /* ── the pause, and the two places it can disagree with the status ───────
+     `freezeState` wants the GYM's day (src/lib/gymZone.ts), and `today` here is
+     the member's own device day — this screen holds no tenant clock and
+     `tenants_client_r` would refuse most gym members the row it lives on, so
+     fetching one would mean printing a failed-read note to almost everybody.
+     What that costs is bounded and worth writing down: on the first or last day
+     of a pause a member whose device is a calendar day ahead of or behind the
+     gym can read 'scheduled' where the desk reads 'frozen', or 'thawed' where
+     the desk reads 'frozen'. Every one of those sentences NAMES BOTH DATES, so
+     the member still reads the day it lifts — which is the thing they came here
+     for and the thing they previously could not see at all.
+
+     `newEndsOn` is null for the same reason app/(owner)/members.tsx passes null
+     on the register row: `savePause` writes the moved end date into `ends_on`
+     in the SAME update as the dates (see `setMembershipFreeze`), so the "Runs
+     to" line above ALREADY has the paused days inside it. Promising the move a
+     second time would read as days being given back twice. */
+  const freeze = useMemo(() => {
+    if (!primary) return null;
+    const f = { from: primary.frozenFrom, to: primary.frozenTo };
+    const state = freezeState(f, today);
+    if (state === 'none') return null;
+    const line = freezeLine(state, {
+      from: primary.frozenFrom ? day(primary.frozenFrom) : null,
+      to: primary.frozenTo ? day(primary.frozenTo) : null,
+      days: frozenDays(f),
+      newEndsOn: null,
+    });
+    if (!line) return null;
+    /* supabase/parts/2616 is deliberate that nothing flips `status` at
+       midnight, and its header says the app shows both and says when they
+       disagree. The owner console does. Both directions matter to the member
+       and they are different facts:
+         · dates paused, status not — the door may still open, and a member who
+           thinks they are paused may not bother ringing ahead.
+         · status Frozen, dates say otherwise — the badge above says Frozen and
+           nothing is going to lift it on its own, which is exactly the "nobody
+           remembers to unfreeze it" failure part 2616 opens with. */
+    const clash = state === 'frozen' && primary.status !== 'frozen'
+      ? ' Your gym has not marked the membership itself paused, so the door may still let you in. Check at reception before you rely on either.'
+      : state !== 'frozen' && primary.status === 'frozen'
+        ? ' Your gym still has this marked Frozen, which does not lift by itself. Ask reception to take it off.'
+        : '';
+    return { state, line, clash };
+  }, [primary, today]);
+
   // The order that produced the membership on screen, matched on
   // `membership_id` alone — see `orderForMembership`, which refuses the
   // "…or the newest one" fallback and says why. Only over a read that landed:
@@ -420,9 +472,15 @@ export default function Membership() {
               {planState.kind === 'plan' ? (
                 <>
                   <Line t={t} first label="Plan" value={fig(planState.plan.name)} />
+                  {/* A null price is not a free plan and it is not AED 0.00.
+                      The interval is dropped with it: "— a month" is a billing
+                      frequency attached to no amount, and the honest line says
+                      the one thing we know. */}
                   <Line t={t} label="Price"
-                    value={`${amount(planState.plan.priceCents, planState.plan.currency)}${
-                      planState.plan.interval === 'once' ? '' : planState.plan.interval === 'year' ? ' a year' : ' a month'}`} />
+                    value={planState.plan.priceCents == null
+                      ? 'Not recorded by your gym'
+                      : `${amount(planState.plan.priceCents, planState.plan.currency)}${
+                        planState.plan.interval === 'once' ? '' : planState.plan.interval === 'year' ? ' a year' : ' a month'}`} />
                 </>
               ) : planState.kind === 'none' ? (
                 <Line t={t} first label="Plan" value="None recorded by your gym" />
@@ -442,9 +500,25 @@ export default function Membership() {
                       used to do here. */}
                   {standing.kind === 'current' || standing.kind === 'expiring'
                     ? `${standingLabel(standing)} · runs to ${day(standing.endsOn)}`
-                    : renewalNote(standing, planState)}
+                    /* With dates on the pause there IS an answer, so the line
+                       that used to send a paused member to reception to ask
+                       when it restarts says when it restarts instead. Without
+                       them `renewalNote` is still right: a status of Frozen and
+                       no dates is a pause only a person can explain. */
+                    : standing.kind === 'frozen' && freeze
+                      ? `${freeze.line}${freeze.clash}`
+                      : renewalNote(standing, planState)}
                 </Text>
               </View>
+
+              {/* The pause the status column has not caught up with — or has
+                  got ahead of. Drawn only where the line above is not already
+                  carrying it, so the member reads it once. */}
+              {freeze && standing.kind !== 'frozen' ? (
+                <Flag tone={freeze.state === 'unreadable' ? t.warn : t.ink3} style={{ marginTop: sp.md }}>
+                  {`${freeze.line}${freeze.clash}`}
+                </Flag>
+              ) : null}
 
               {planState.kind === 'unreadable' ? (
                 <Flag tone={t.warn} style={{ marginTop: sp.md }}>

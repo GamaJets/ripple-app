@@ -338,7 +338,8 @@ export default function TrainerExercise() {
         ) : null}
 
         {/* ── Tips, which this screen was rendering nowhere ──────────────────
-            The catalogue carries them — 597 of 604 rows have at least one —
+            The catalogue carries them — counted against the live table on 13 Sep
+            2026, 604 of 615 rows have at least one —
             and the client's own exercise screen has shown them all along. A
             coach opening the same movement got the description and the steps
             and then nothing, so the cues they might pass on in a session were

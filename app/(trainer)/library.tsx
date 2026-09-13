@@ -21,7 +21,7 @@
 // filters are muscle groups, because that is the axis a coach builds a split
 // on — push day, pull day, legs.
 //
-// ── Why the clip column is three-valued and sometimes silent ───────────────
+// ── Why the clip column is four-valued and sometimes silent ────────────────
 //
 // "You have not filmed this" is a claim, and it is only true if we managed to
 // read the clip library. `useExerciseVideos` reports 'error' when it could not
@@ -32,6 +32,15 @@
 // So a POSITIVE match is safe under any status — we found the clip, it exists.
 // A negative is only stated under 'ready'. Otherwise the column says nothing
 // at all and a notice above the list explains why it is blank.
+//
+// The fourth value is 'local', and it was missing rather than deliberate.
+// `useExerciseVideos` returns `[...remote, ...added]`; an `added` row is a clip
+// the coach saved when the insert was refused, minted with `trainerId: null` —
+// the same shape a platform clip has. Classifying on that field alone therefore
+// reported every offline save as an Academy clip, so a movement whose only
+// demonstration is on the coach's own handset was drawn as one their client is
+// already watching, and counted into the Academy figure. `clipOwner` reads the
+// id prefix, which is the only thing that tells the two apart.
 //
 // ── Why matching is exact ──────────────────────────────────────────────────
 //
@@ -60,6 +69,7 @@ import { ExerciseThumb } from '../../src/ui/ExerciseDemo';
 import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { useAuth } from '../../src/ui/auth';
 import { exerciseSlug } from '../../src/lib/exerciseId';
+import { clipOwner } from '../../src/lib/clipOwner';
 import { catalogueValue as cap, num } from '../../src/lib/format';
 // ── the question that gets BETTER as a coach gets busier ───────────────────
 //
@@ -157,8 +167,17 @@ function Chips({ options, value, onChange, a11y }: {
 }
 
 /** What a client would actually be shown for this movement. `null` is the
- *  fourth case and the important one: we do not know, and must not guess. */
-type Clip = 'mine' | 'academy' | 'none' | null;
+ *  case that matters most: we do not know, and must not guess.
+ *
+ *  'local' is the one that was missing. `useExerciseVideos` hands back
+ *  `[...remote, ...added]`, and an `added` row is a clip the coach saved when
+ *  the insert was refused — minted with `trainerId: null`, which is character
+ *  for character the shape of a platform clip. So every offline save was
+ *  reported here as "Academy clip": a movement whose only demonstration sits on
+ *  the coach's own handset was drawn as one their client is already watching,
+ *  and counted into the Academy figure above. The id prefix is what tells them
+ *  apart, and src/lib/clipOwner.ts is where that is written down. */
+type Clip = 'mine' | 'academy' | 'local' | 'none' | null;
 
 const PAGE = 50;
 
@@ -271,17 +290,29 @@ export default function TrainerLibrary() {
   // client is actually served cannot disagree. `exerciseId` when the clip
   // reached the server, the slugged name as the bridge for rows written before
   // there was an exercise_id to write.
-  const { mine, academy } = useMemo(() => {
+  const { mine, academy, local } = useMemo(() => {
     const m = new Set<string>();
     const a = new Set<string>();
+    const l = new Set<string>();
     for (const v of videos) {
       const slug = v.exerciseId || exerciseSlug(v.name);
       if (!slug) continue;
-      if (coachId && v.trainerId === coachId) m.add(slug);
-      // Belongs to no coach: the platform clip every client falls back to.
-      else if (v.trainerId == null) a.add(slug);
+      // `clipOwner` and not a `trainerId == null` test written here. That test
+      // reads a clip saved on this phone — no row, so `trainerId: null` — as a
+      // platform clip, and the two have opposite meanings for a client: one is
+      // a demonstration everybody gets, the other is a demonstration nobody
+      // outside this handset can reach.
+      switch (clipOwner(v, coachId)) {
+        case 'mine': m.add(slug); break;
+        // Belongs to no coach: the platform clip every client falls back to.
+        case 'platform': a.add(slug); break;
+        case 'local': l.add(slug); break;
+        // Another coach's, visible because their gym shares it. Not served to
+        // THIS coach's clients, so it is not cover on this screen.
+        case 'other': break;
+      }
     }
-    return { mine: m, academy: a };
+    return { mine: m, academy: a, local: l };
   }, [videos, coachId]);
 
   // Signed in one request rather than one per row — see useCatalogueThumbs.
@@ -323,32 +354,46 @@ export default function TrainerLibrary() {
     if (!slug) return null;
     if (mine.has(slug)) return 'mine';
     if (academy.has(slug)) return 'academy';
+    // Last of the three positives, because a clip that reached the server wins
+    // over one that did not: a coach with both has clients who can watch it,
+    // and the phone copy is not the fact worth putting on the row.
+    if (local.has(slug)) return 'local';
     return clipsKnown ? 'none' : null;
   };
 
   // Signed out, every clip belongs to somebody else as far as this screen can
-  // tell, and "you have not filmed this" would be true of all 604 movements
+  // tell, and "you have not filmed this" would be true of every movement in
+  // the catalogue
   // for the wrong reason.
   const ownershipKnown = coachId != null;
 
   // "No clip" was reported from the screenshot as reading like a contradiction,
   // and it was one. Every row already draws a picture — the catalogue's own
-  // demonstration still, which 601 of the 604 movements have — so a badge
-  // saying "No clip" sits directly beside visible proof that there is
+  // demonstration still, which nearly every movement has (counted against the
+  // live table on 13 Sep 2026: 608 of 615 rows carry stills, and 7 carry
+  // neither stills nor an animation) — so a badge saying "No clip" sits
+  // directly beside visible proof that there is
   // something to show. The badge was never about that picture: it is about
   // whether a COACH has filmed this movement, which is what the section above
   // it is titled. So it now says that, and stops denying the thumbnail.
   const clipNote = (c: Clip) =>
     c === 'mine' ? 'Your clip'
       : c === 'academy' ? 'Academy clip'
-        : c === 'none' ? 'Not filmed'
-          : null;
+        // Not "Your clip". The coach filmed it and their client cannot watch
+        // it, and a row that says only "Your clip" is the screen agreeing with
+        // the belief that put it there.
+        : c === 'local' ? 'On this phone only'
+          : c === 'none' ? 'Not filmed'
+            : null;
 
   // Every figure here is a count over the rows we hold. Under 'partial' those
   // rows are a prefix of the catalogue, so a count would be a subtotal printed
   // as a total. A dash is the honest answer and PartialRead says why.
   const countable = status === 'ready';
   const filmed = rows.filter((r) => mine.has(exerciseSlug(r.name))).length;
+  // What a CLIENT would be served — which is what "Not Filmed" is the
+  // complement of. A clip saved on this phone is deliberately not in here: it
+  // is not cover, because nobody outside this handset can reach it.
   const covered = rows.filter((r) => {
     const slug = exerciseSlug(r.name);
     return mine.has(slug) || academy.has(slug);
@@ -357,6 +402,14 @@ export default function TrainerLibrary() {
   // both an Academy clip and one of yours, and the subtraction would drop
   // every one of those from the Academy figure.
   const academyFilmed = rows.filter((r) => academy.has(exerciseSlug(r.name))).length;
+  // Movements whose ONLY clip never reached the server. Counted apart from all
+  // three figures above and said in its own sentence, because it is the one
+  // number here that contradicts something the coach believes: they filmed it,
+  // it is in their clip library list, and no client has it.
+  const strandedOnPhone = rows.filter((r) => {
+    const slug = exerciseSlug(r.name);
+    return local.has(slug) && !mine.has(slug) && !academy.has(slug);
+  }).length;
   // Both clip figures need BOTH reads whole: a catalogue prefix undercounts
   // the movements, and a clip-library prefix undercounts the matches.
   const clipCountable = countable && clipsKnown && ownershipKnown;
@@ -404,7 +457,7 @@ export default function TrainerLibrary() {
         <Section>
           <SectionHead title="What You Have Filmed" />
           {/* "Nothing to Show" was wrong, not just blunt. It counted movements
-              with no coach clip — and 601 of the 604 carry a demonstration
+              with no coach clip — and nearly every one of them carries a demonstration
               animation the client can already watch, so there is something to
               show for nearly all of them. Renamed to what it actually counts. */}
           <KpiRow items={[
@@ -414,9 +467,22 @@ export default function TrainerLibrary() {
           ]} />
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
             {clipCountable
-              ? 'These count coaching clips, not whether a movement can be demonstrated — every exercise here already shows your client how it is done. Not Filmed means neither you nor the Academy has recorded one; record yours on the Videos screen and yours is what they see.'
+              ? 'These count movements a coaching clip reaches, not whether a movement can be demonstrated — nearly every exercise here already shows your client how it is done. Not Filmed means nothing your clients can watch has been recorded for it; record yours on the Videos screen and yours is what they see.'
               : 'These stay blank until both the catalogue and your clip library have been read in full, rather than reporting a figure computed from part of them.'}
           </Text>
+          {/* The correction to the line above, and only when there is something
+              to correct. A clip that never reached the server counts in none of
+              the three figures — it is not yours as far as a client is
+              concerned, it is certainly not the Academy's, and calling the
+              movement Not Filmed is the screen agreeing with a coach who
+              believes they have already done it. */}
+          {clipCountable && strandedOnPhone > 0 ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+              {strandedOnPhone === 1
+                ? '1 of those counted as Not Filmed does have a clip of yours — saved on this phone only, because it never reached the server, so no client can watch it. Add it again from Videos.'
+                : `${num(strandedOnPhone)} of those counted as Not Filmed do have clips of yours — saved on this phone only, because they never reached the server, so no client can watch them. Add them again from Videos.`}
+            </Text>
+          ) : null}
         </Section>
 
         <Rule />
@@ -577,6 +643,9 @@ export default function TrainerLibrary() {
                               <View style={{
                                 width: 6, height: 6, borderRadius: 3,
                                 backgroundColor: c === 'mine' ? t.brand : c === 'academy' ? t.ink3 : t.warn,
+                                // 'local' and 'none' both land on t.warn, and
+                                // both are work outstanding — one of them is
+                                // work the coach has already done once.
                               }} />
                               <Text style={{ ...ty.caption, color: t.ink2 }}>{note}</Text>
                             </View>

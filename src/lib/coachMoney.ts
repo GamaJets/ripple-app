@@ -102,17 +102,46 @@ export function currencyDecimals(currency: string | null | undefined): number | 
  * white-labelled, so there is no fallback that is not simply wrong for half the
  * gyms running it, and an amount with the wrong code on it is worse than an
  * amount with no code, because it reads as a considered figure.
+ *
+ * ── AND NULL WHEN THE CURRENCY IS NOT A CURRENCY ──────────────────────────
+ *
+ * The paragraph above was the whole rule and it only caught the EMPTY string.
+ * Anything else non-empty was upper-cased and printed as though it were a code,
+ * so `moneyIn(6000, 'pounds', true)` rendered **POUNDS 60.00** — a figure with
+ * a made-up unit in front of it, on a coach's own takings screen, reading
+ * exactly as considered as `GBP 60.00` does.
+ *
+ * It is reachable from a real row. Five money columns in this schema carry no
+ * format check at all (`gym_passes`, `gym_pass_types`, `membership_plans`,
+ * `gym_invoices`, `gym_orders`, and `gym_payments` beside them), so `'pounds'`,
+ * `'GB'` and `'£'` all satisfy `not null` and arrive here intact. `money()` in
+ * src/lib/gymRecord.ts delegates straight to this function, so every gym screen
+ * in the product inherited it.
+ *
+ * `/^[A-Z]{3}$/` — the same test `normaliseCurrency` in ./gymRecord.ts now
+ * applies, and the one `priceBook.ts`, `coachCosts.ts`, `coachInvoice.ts`,
+ * `costBudgets.ts`, `coachReceipts.ts` and `csvImport.ts` already applied. A
+ * non-code is not a currency, so there is no amount to print and the answer is
+ * the same dash a missing currency gets. The AMOUNT is not lost by that: it is
+ * the caller's row, the caller still holds it, and every caller in this tree
+ * renders the dash beside a count rather than dropping the row — which is the
+ * rule, because an amount nobody can spell is still an amount somebody paid.
+ *
+ * Note the check happens BEFORE `currencyDecimals`, whose `?? 2` fallback is
+ * now unreachable from here: a code that gets past the regex is three letters,
+ * and `currencyDecimals` answers null only for an empty one.
  */
 export function moneyIn(amount: number | null | undefined, currency: string | null | undefined, minor: boolean): string | null {
   if (amount == null || !Number.isFinite(amount)) return null;
-  const cur = (currency || '').trim().toLowerCase();
-  if (!cur) return null;
+  const code = (currency || '').trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) return null;
+  const cur = code.toLowerCase();
   // How many decimal places this money has — asked, never assumed. Two is the
   // answer for most of the world and it is the answer for none of Japan, Korea,
   // Vietnam or Kuwait.
   const dp = currencyDecimals(cur) ?? 2;
   const whole = minor ? amount / Math.pow(10, dp) : amount;
-  return `${cur.toUpperCase()} ${whole.toLocaleString(appLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
+  return `${code} ${whole.toLocaleString(appLocale(), { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
 }
 
 /** A Stripe amount, in minor units. */
