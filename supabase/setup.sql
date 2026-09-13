@@ -66375,6 +66375,17 @@ create trigger guard_gym_cost_template_t
 -- (part 141).
 revoke execute on function public.guard_gym_cost_template() from public, anon, authenticated;
 
+-- ── the covering index the advisors ask for ───────────────────────────────
+--
+-- `created_by` is `on delete set null`, so deleting a profile obliges Postgres
+-- to find this table's children first — by sequential scan without an index,
+-- inside the transaction of somebody exercising a data right through
+-- `action_account_deletion()`. Nothing filters on the column and nothing should;
+-- this is purely so a delete does not have to read the table. Partial, because
+-- a NULL cannot be the child of a delete.
+create index if not exists idx_gym_cost_templates_created_by
+  on public.gym_cost_templates (created_by) where created_by is not null;
+
 -- ── Deliberately NOT written here ────────────────────────────────────────
 --
 -- NO new `gym_events` kind, and no trigger writing one.
@@ -66638,6 +66649,12 @@ create trigger guard_gym_cost_budget_t
 -- EXECUTE to anon separately from PUBLIC and revoking PUBLIC does not touch it
 -- (part 141).
 revoke execute on function public.guard_gym_cost_budget() from public, anon, authenticated;
+
+-- The covering index for `created_by`, for the reason part 2730 gives at the
+-- same line: an `on delete set null` foreign key with no index makes account
+-- deletion scan this table.
+create index if not exists idx_gym_cost_budgets_created_by
+  on public.gym_cost_budgets (created_by) where created_by is not null;
 
 -- ── Deliberately NOT written here ────────────────────────────────────────
 --

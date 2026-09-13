@@ -242,6 +242,12 @@ create trigger guard_gym_cost_budget_t
 -- (part 141).
 revoke execute on function public.guard_gym_cost_budget() from public, anon, authenticated;
 
+-- The covering index for `created_by`, for the reason part 2730 gives at the
+-- same line: an `on delete set null` foreign key with no index makes account
+-- deletion scan this table.
+create index if not exists idx_gym_cost_budgets_created_by
+  on public.gym_cost_budgets (created_by) where created_by is not null;
+
 -- ── Deliberately NOT written here ────────────────────────────────────────
 --
 -- No `gym_events` kind, and the reason is part 2730's: a budget is not money,
