@@ -167,16 +167,17 @@ const CONSUMER_ROOTS = ['app', 'src', 'scripts', 'studio-web', 'supabase/functio
  * CORRECT as it stands and will stay.
  */
 const KNOWN = new Map([
-  // The phone app's own unwired features are all wired now: spotifyDevices and
-  // spotifyTransfer came off when app/(client)/music.tsx grew the device
-  // picker, and spotifyPlaylistTracks came off when the same screen learned to
-  // open a playlist and show what is in it.
-
-  // ── the console and the shared UI kit ───────────────────────────────────
-  ['src/ui/ExerciseVideo.tsx', { count: 1, fix: 'ExerciseVideoBlock. The screens render ExerciseVideo directly; this is the block wrapper nobody adopted. Adopt it or delete it.' }],
-  ['src/ui/ZoneBoard.tsx', { count: 1, fix: 'ZoneStrip — the compact HR-zone strip beside ZoneBoard, which IS rendered. Nothing renders the strip.' }],
-  ['src/ui/charts.tsx', { count: 2, fix: 'Sparkline and DeltaBadge. HrZoneChart and src/lib/chartAxis.ts are what the screens actually draw with.' }],
-  ['src/ui/fetched.tsx', { count: 1, fix: 'useFetchedAt — the "last updated" timestamp hook. Screens print freshness through src/lib/freshness.ts instead.' }],
+  // Empty, and that is the point of a ratchet: it can shrink and can never
+  // grow. The last entries went when the two half-built features behind them
+  // were finished (spotifyPlaylistTracks opens a playlist on the Music screen;
+  // useMrrHistory draws the owner's recurring-revenue trend; ZoneStrip draws
+  // time in zone on a past session) and the four genuine duplicates were
+  // deleted — Sparkline, DeltaBadge, useFetchedAt and ExerciseVideoBlock, each
+  // with a shipped alternative already doing the job.
+  //
+  // A new entry here is not a place to park work. Adding one means the build is
+  // already red and somebody chose to write down an offence rather than fix it,
+  // which is worth doing exactly once and arguing for in the commit.
 ]);
 
 /** A test file. Its imports never count as a use — that is the entire point:

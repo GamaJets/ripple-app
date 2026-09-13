@@ -33,6 +33,9 @@ import { liftIn, weightLabel } from '../../src/lib/units';
 import { setChipLabel } from '../../src/lib/timedSets';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { SessionHrSheet } from '../../src/ui/SessionHrSheet';
+import { ZoneStrip } from '../../src/ui/ZoneBoard';
+import { sessionZones, sessionZonesLine } from '../../src/lib/sessionZones';
+import type { ZoneSeconds } from '../../src/lib/hr';
 import { ageFromDob } from '../../src/lib/hr';
 import { isWhole, worstStatus } from '../../src/ui/loadStatus';
 import { BACK_ICON, FORWARD_ICON, turn } from '../../src/ui/direction';
@@ -45,7 +48,12 @@ import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
 // matched every other client's filter — so two people would see each other's
 // bookings, and the trainer side (which stores real user ids) never matched at all.
 
-interface Event { at: string; icon: string; title: string; sub: string; route?: string; hr?: { title: string; startISO: string; durationMin: number } }
+interface Event { at: string; icon: string; title: string; sub: string; route?: string;
+  hr?: { title: string; startISO: string; durationMin: number };
+  /** A whole session's time in heart-rate zones, drawn as a strip when the row
+   *  is opened. One per SESSION — see src/lib/sessionZones.ts for why this
+   *  cannot be hung off the workout rows themselves. */
+  zones?: ZoneSeconds }
 
 function timeAgo(iso: string) {
   const ms = Date.now() - Date.parse(iso);
@@ -181,6 +189,31 @@ export default function Activity() {
       events.push({ at: e.t, icon: 'heart', title: `Logged ${movement(e.exercise)}`, sub: [`${e.cardio.mins} min`, e.cardio.dist > 0 ? `${e.cardio.dist} ${e.cardio.unit}` : null, e.cardio.watts && e.cardio.watts > 0 ? `${e.cardio.watts} W` : null, e.cardio.hrAvg ? `♥ ${e.cardio.hrAvg} avg / ${e.cardio.hrHigh ?? e.cardio.hrAvg} hi` : null].filter(Boolean).join(' · '), route: '/(client)/trends', hr: e.cardio.mins > 0 ? { title: movement(e.exercise), startISO: e.t, durationMin: e.cardio.mins } : undefined });
     }
   }
+
+  // ── Time in zone, once per session ──────────────────────────────────────
+  //
+  // The app has recorded `zones` on every workout it watches a heart rate
+  // through, and then only ever shown them WHILE the member was still
+  // training: <ZoneBoard> renders in the live runner and on the finish screen
+  // and nowhere else. Close the app and the reading was written down and never
+  // read back.
+  //
+  // Its own event rather than something hung off the workout rows, because a
+  // guided session writes the same zone seconds onto EVERY exercise it
+  // produces. A strip per row would show one forty-minute session five times
+  // over, once under each lift, as if the member had spent forty minutes in
+  // zone 4 on the bench and another forty on the squat. `sessionZones` groups
+  // by the session's timestamp and takes one reading per session; its test
+  // puts that duplication back and watches it collapse.
+  for (const sz of sessionZones(log)) {
+    events.push({
+      at: sz.at,
+      icon: 'heart',
+      title: 'Time in Zone',
+      sub: sessionZonesLine(sz),
+      zones: sz.seconds,
+    });
+  }
   // Streak milestone (as of now), off the ONE streak figure — see
   // `shownStreak` in src/lib/streaks.ts. The raw chain here meant a member
   // could pass a milestone on Home and not have it appear in their own feed.
@@ -292,6 +325,10 @@ export default function Activity() {
                     <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }} numberOfLines={isOpen ? undefined : 2}>{e.sub}</Text>
                     {isOpen ? (
                       <View style={{ marginTop: sp.md }}>
+                        {/* The strip carries its own spoken sentence — "zone 3
+                            Cardio, 12 minutes 30 seconds" — so it is not
+                            re-labelled here. */}
+                        {e.zones ? <View style={{ marginBottom: sp.md }}><ZoneStrip seconds={e.zones} /></View> : null}
                         <Text style={{ ...ty.caption, ...numeric, color: t.ink3 }}>{timeLabel(e.at)}</Text>
                         <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
                           {e.route ? (

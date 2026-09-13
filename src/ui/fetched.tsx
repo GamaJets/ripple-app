@@ -99,38 +99,3 @@ export function Fetched({
     </View>
   );
 }
-
-/**
- * The state a screen keeps beside its data: when it last read, and whether a
- * refresh is in flight.
- *
- * `mark()` is called by the screen when a read SUCCEEDS. Deliberately not
- * called for it — a hook that stamped on every settle would stamp on failures
- * too, and a failed refresh must leave the stamp on the read the figures
- * actually came from.
- */
-export function useFetchedAt(): {
-  at: number | null;
-  busy: boolean;
-  mark: () => void;
-  run: (job: () => Promise<unknown>) => Promise<void>;
-} {
-  const [at, setAt] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
-  const mark = () => setAt(Date.now());
-  const run = async (job: () => Promise<unknown>) => {
-    setBusy(true);
-    try {
-      await job();
-      setAt(Date.now());
-    } catch {
-      // Swallowed on purpose. The screen's own loader already reports its
-      // failure in its own words; this hook's only job is not to move the
-      // stamp, and an unhandled rejection out of a refresh button would take
-      // the screen down for a read that merely did not come back.
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { at, busy, mark, run };
-}

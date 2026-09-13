@@ -901,7 +901,15 @@ not ready to be worked.
   Still open and worth pulling forward: `markMyOutcome` (a coach recording
   their own session outcome), `setAttendance`, `fetchEndRecord`, `pauseSeries`
   (pause a DATE RANGE — only pause-for-days is reachable), `packageCurrencies`,
-  `fetchJoinCodeStats`, `useMrrHistory`, `ZoneStrip`, `Sparkline`, `DeltaBadge`.
+  `fetchJoinCodeStats`.
+  Closed since: `useMrrHistory` now draws the owner's recurring-revenue trend on
+  Financials, and `ZoneStrip` now draws time in zone per past session in the
+  Activity feed. `Sparkline` and `DeltaBadge` were deleted as duplicates of
+  `Spark` and of `deltaLabel`/`deltaSign`, along with `ExerciseVideoBlock` (it
+  could only ask whether a coach had uploaded a clip, and `exercise_videos` has
+  never held a row) and `useFetchedAt` (the `Fetched` component and
+  `src/lib/freshness.ts` are what the screens use). The dead-export ratchet is
+  empty.
 - **Localisation is further along than "R085 · Arabic — deferred" implies.**
   `check:translations` passes over 1,166 catalogue rows (583 de, 583 es) from
   `supabase/parts/791` and `792`, with `src/lib/catalogueLocale.ts` refusing to

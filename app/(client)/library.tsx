@@ -379,7 +379,7 @@ export default function Library() {
   return () => { cancelled = true; };
  }, [visibleKey]);
 
- // Whose clip it is, in the same words <ExerciseVideoBlock> uses on the workout
+ // Whose clip it is, in the same words <ExerciseVideo> uses on the workout
  // screen: one clip described two ways on two screens reads as two facts. A null
  // trainerId is a platform clip belonging to no gym; anything else is here
  // because a coach chose to share it with this client.

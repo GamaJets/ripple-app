@@ -3822,7 +3822,8 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
  *
  * ── What this screen was actually showing ─────────────────────────────────
  *
- * The runner rendered <ExerciseVideoBlock> and nothing else, which asks one
+ * The runner rendered <ExerciseVideoBlock> (since deleted) and nothing else,
+ * which asks one
  * question: has anybody uploaded a CLIP of this. `exercise_videos` has never
  * held a single row on this platform — not one, for any gym — so the answer
  * mid-set was always "No demonstration for this exercise yet", under a toggle
