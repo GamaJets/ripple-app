@@ -65241,3 +65241,528 @@ create trigger guard_workout_attribution_t
 -- EXECUTE to anon separately from PUBLIC and revoking PUBLIC does not touch it
 -- (part 141).
 revoke execute on function public.guard_workout_attribution() from public, anon, authenticated;
+
+-- ▶ the-one-sleep-source-with-no-switch-in-front-of-it.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- The gate part 109 asked for, built — not the blanket read it refused.
+--
+-- ── What was refused, and by whom ─────────────────────────────────────────
+--
+-- Backlog item "Coach #33" asked to show a coach their client's own water and
+-- sleep logs. The first attempt was to add a coach-read policy to `sleep_logs`
+-- and `hydration_logs`. That was refused, in the words part 109 had already
+-- written on the policy it declined to add:
+--
+--     Granting a coach a blanket read of hand-typed nights here would route
+--     around that switch by the back door, and it would do it for the one
+--     sleep source a client with no wearable has. If a coach is ever to see
+--     these, it goes through the same gate the device nights go through, in
+--     the change that builds the screen — not as a policy added speculatively
+--     ahead of any reader.
+--
+-- The refusal was reviewed and upheld: "Deny as written — build the gate
+-- instead. The need is real; the route is wrong. It'd be the only sleep source
+-- skipping the member-controlled sharing switch, for exactly the clients with
+-- no wearable."
+--
+-- This is the gate. It is not a widening of 109; it is 109's own condition
+-- being met, and it arrives WITH its reader (app/(trainer)/client-body.tsx) so
+-- that nothing here is a policy nobody has exercised.
+--
+--
+-- ── One correction to the record, because it changes what "the same gate"
+--    can mean ───────────────────────────────────────────────────────────────
+--
+-- Part 109 cites `src/lib/wearables/sleepAccess.ts` as the per-client sharing
+-- switch that device sleep already passes through. It is not one. That file
+-- decides whether to raise the iOS HealthKit permission sheet once per device;
+-- it is about what the PHONE may read out of Health, and has nothing to say
+-- about what a coach may read out of Postgres. The whole ledger was searched
+-- for the switch it describes, and the result is worth stating plainly rather
+-- than leaving for the next reader to rediscover:
+--
+--   · `clients.glucose_shared` (part 102) is the ONLY member-controlled
+--     coach-visibility switch in this schema.
+--   · `device_sleep_nights` (part 154) carries exactly one policy,
+--     `device_sleep_nights_own`, and no coach may read it by any route. Its own
+--     table comment says "a coach reads device sleep through the sharing
+--     switch, never here; see 153" — but part 153 is about coach branding, the
+--     number is a stale reference to an earlier draft of 154 itself, and no
+--     such switch was ever built.
+--
+-- So there is no device-sleep gate for hand-typed sleep to join. There is a
+-- SHAPE — part 102's, which is also the shape parts 96, 1000 and 1140 use for
+-- injuries, injury-document OCR and body-scan sheets — and this follows it
+-- exactly rather than inventing a second vocabulary for the same consent.
+--
+--
+-- ── Why one column for sleep AND water, and why it is named for neither ────
+--
+-- `wellness_shared`, not `sleep_shared` plus `water_shared`. Two switches over
+-- two tables written by one screen is how a member ends up believing they have
+-- stopped sharing because they turned off the one they remembered. The member
+-- is answering a single question — may my coach see what I log about myself —
+-- and there is one control for it.
+--
+-- The name is deliberately about the MEMBER'S OWN LOGS rather than about
+-- sleep, because that is the set it governs and the set it will still govern
+-- when device nights get a coach-side reader. When that change is written, it
+-- hangs on THIS column: a member who has turned this on has answered the
+-- question for their sleep, and asking them a second time with different words
+-- would be the parallel switch this file exists to avoid.
+--
+-- No policy is added to `device_sleep_nights` here, and that is the same
+-- restraint part 109 showed. There is no coach-side reader of device nights in
+-- this change, and 109's own sentence — "a policy written ahead of its reader
+-- is a policy nobody tests" — applies to this file as much as it applied to
+-- the one it refused.
+--
+--
+-- ── What the member gets, and what "off" has to mean ───────────────────────
+--
+-- Off by default, on the same reasoning part 102 gives: a member who types
+-- four hours and a quality of one is recording the worst week of their year,
+-- and a coach learning about it should be that member's decision made on
+-- purpose, not a consequence of having a coach.
+--
+-- Turning it off hides the history as well as the next night. A share that
+-- cannot be taken back is not a share — so the policies below test the flag on
+-- every row, every read, rather than stamping rows as shared when they are
+-- written.
+--
+-- `c.trainer_id = auth.uid()` is the second half of it and carries no extra
+-- bookkeeping: `end_coaching()` (part 68) clears `trainer_id`, so a coach who
+-- is no longer theirs stops reading these the moment the relationship ends,
+-- with the member's own switch left exactly as they set it.
+--
+-- The member's control lives in app/(client)/devices.tsx, beside the sleep
+-- sources — reachable whether or not they own a wearable, which is the point.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ── The switch ─────────────────────────────────────────────────────────────
+--
+-- On `clients` rather than `profiles`, exactly as `glucose_shared` is: sharing
+-- only means anything when there is somebody to share with, and `trainer_id`
+-- — the other half of every policy below — lives here too.
+alter table public.clients
+  add column if not exists wellness_shared boolean not null default false;
+
+comment on column public.clients.wellness_shared is
+  'Member-controlled. False by default. True lets the member''s CURRENT coach read the sleep and water the member typed themselves (sleep_logs, hydration_logs). Only the member may change it; see clients_wellness_consent_is_the_clients. Device-measured nights are not governed by it yet because nothing reads them coach-side — when something does, it hangs here rather than on a second switch.';
+
+
+-- ── Only the member may move it ────────────────────────────────────────────
+--
+-- The same mechanism as part 96 (`clients.injuries`), part 102
+-- (`clients.glucose_shared`) and part 127 (`clients.intake`), for the same
+-- reason: row-level security cannot restrict WHICH COLUMNS an update touches,
+-- and `clients_trainer_update` lets a coach write their own client's row. A
+-- consent column a coach can set is not a consent column — it is a coach
+-- granting themselves the access it exists to withhold, silently, with the
+-- member's app still showing the switch turned off.
+--
+-- auth.uid() IS NULL is the service role and migrations, which are server-side
+-- and trusted; every request through PostgREST carries a uid, so a coach is
+-- always caught.
+create or replace function public.clients_wellness_consent_is_the_clients()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $fn$
+begin
+  if new.wellness_shared is distinct from old.wellness_shared
+     and auth.uid() is not null
+     and auth.uid() <> old.id then
+    raise exception 'Only the member may choose to share their sleep and water logs'
+      using errcode = '42501';
+  end if;
+  return new;
+end $fn$;
+
+-- A trigger fires on the table's own authority and EXECUTE is never consulted
+-- when it does, so nothing here needs to be callable by a request. Postgres
+-- grants EXECUTE on a new function to PUBLIC, and in a Supabase project the
+-- ALTER DEFAULT PRIVILEGES on schema `public` grant it to `anon` and to
+-- `authenticated` SEPARATELY as well — so revoking PUBLIC alone leaves it
+-- answering at /rest/v1/rpc/. All three are named. See part 141 §2, and
+-- scripts/check-grants.mjs for the nine trigger functions this was measured on.
+revoke execute on function public.clients_wellness_consent_is_the_clients() from public;
+revoke execute on function public.clients_wellness_consent_is_the_clients() from anon;
+revoke execute on function public.clients_wellness_consent_is_the_clients() from authenticated;
+
+drop trigger if exists clients_wellness_consent_guard on public.clients;
+create trigger clients_wellness_consent_guard
+  before update on public.clients
+  for each row execute function public.clients_wellness_consent_is_the_clients();
+
+
+-- ── The nights the member typed ────────────────────────────────────────────
+--
+-- SELECT only. `sleep_logs_own` keeps every other verb with the member, and a
+-- coach who could delete a night could remove the one their client would
+-- rather not have been asked about — which is the reasoning 109 applied to
+-- announcements and 96 applied to injuries.
+--
+-- Additive: `sleep_logs_own` is untouched and still grants the member
+-- everything. Two permissive policies on one table are OR'd, so the member
+-- keeps full access to their own rows whatever this one says.
+--
+-- The subquery reads `clients` as the CALLER, under RLS, which is what makes
+-- it safe to spell inline rather than behind a definer helper: a coach may
+-- already read their own clients' rows (`clients_trainer_read`) and nobody
+-- else's, so this can only ever answer about a relationship the caller is
+-- entitled to see. This is `glucose_trainer_read` with one column changed.
+drop policy if exists sleep_logs_coach_read on public.sleep_logs;
+create policy sleep_logs_coach_read on public.sleep_logs
+  for select using (
+    exists (
+      select 1 from public.clients c
+       where c.id = sleep_logs.user_id
+         and c.trainer_id = (select auth.uid())
+         and c.wellness_shared
+    )
+  );
+
+comment on table public.sleep_logs is
+  'Hand-typed sleep entries. The member''s own, always. A coach reads them only while that member has turned wellness_shared on for them and is still their client — see sleep_logs_coach_read and part 2670.';
+
+
+-- ── And the water ──────────────────────────────────────────────────────────
+--
+-- The same switch, for the reason given in the header: one question, one
+-- answer. A coach can already see whether the water HABIT was ticked on a day
+-- (`habit_logs_coach_read`, which is the adherence question); this is the
+-- running count, which is finer and is the member's to offer.
+drop policy if exists hydration_logs_coach_read on public.hydration_logs;
+create policy hydration_logs_coach_read on public.hydration_logs
+  for select using (
+    exists (
+      select 1 from public.clients c
+       where c.id = hydration_logs.user_id
+         and c.trainer_id = (select auth.uid())
+         and c.wellness_shared
+    )
+  );
+
+comment on table public.hydration_logs is
+  'Glasses of water per person per local day. The water HABIT tick stays in habit_logs; see 109 for why the count is not a column there. A coach reads these only through wellness_shared — see hydration_logs_coach_read and part 2670.';
+
+
+-- ── Grants ─────────────────────────────────────────────────────────────────
+--
+-- RLS narrows a grant; it does not confer one. Part 109 already granted the
+-- four verbs on both tables to `authenticated` and revoked `anon`, and a
+-- coach is `authenticated` — so the policies above are live without anything
+-- further. These statements are restated rather than assumed, because 109's
+-- own note records what was measured: this project's default privileges in
+-- `public` hand `anon` the full set on every new table, and the two tables
+-- below hold a member's sleep and a member's water. Re-revoking is free; being
+-- wrong about it is not.
+grant select on public.sleep_logs to authenticated;
+revoke all on public.sleep_logs from public;
+revoke all on public.sleep_logs from anon;
+
+grant select on public.hydration_logs to authenticated;
+revoke all on public.hydration_logs from public;
+revoke all on public.hydration_logs from anon;
+
+-- ▶ whether-they-signed-is-not-what-they-signed.sql
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Whether they signed is not what they signed.
+--
+-- A deliberate, reviewed narrowing of the boundary part 84 drew. Read the whole
+-- of this header before you touch any of it: a future reader has to be able to
+-- tell that this was decided, by a named person, against a refusal that was
+-- correct — and not that somebody widened a legal record because a screen
+-- looked empty.
+--
+-- ── What part 84 said ─────────────────────────────────────────────────────
+--
+-- `liability_waivers` has exactly one read policy, `liability_waivers_own_r`,
+-- and part 84 gives the reason in its own words:
+--
+--     "Read your own. A coach or owner has no business reading it through the
+--      app; it is a legal record, not roster data."
+--
+-- Two other places in this repository were built ON that sentence and cite it:
+--
+--   · supabase/parts/159 §6 made the "a liability release was signed"
+--     notification deliberately ROUTELESS — it opens no screen — because
+--     "there is nowhere to send them", quoting part 84 verbatim;
+--   · app/(trainer)/documents.tsx:9 tells the coach the platform release is
+--     "deliberately unreadable to the coach — correctly, because it is the
+--     client's legal record and not roster data".
+--
+-- A lane asked to build backlog item Coach #34 ("show whether a client has
+-- signed the release, and which version") REFUSED it on exactly that ground,
+-- and the refusal was right on the argument it made. Part 84 is about the
+-- DOCUMENT. A document somebody signs about their own body, their own health
+-- and their own risk is theirs; a coach reading it through the app is reading
+-- a legal instrument they are not a party to, at their leisure, over the
+-- roster. Nothing below disturbs that.
+--
+-- ── What was wrong with it anyway ─────────────────────────────────────────
+--
+-- "Has this person signed" is a different question from "what does their
+-- signed document say", and part 84's argument is only about the second one. A
+-- coach who takes somebody through a first session without knowing whether a
+-- release exists is carrying a liability they cannot see, and cannot act on:
+-- the one thing they would do about it — ask the person to sign before they
+-- start — is precisely the thing the closed door prevents. The routeless
+-- notification in part 159 is the same defect in its most visible form: the
+-- app tells the coach a release was signed and then refuses to let them
+-- confirm it.
+--
+-- ── Who decided, and exactly what they approved ───────────────────────────
+--
+-- The owner of this product reviewed that refusal on 13 September 2026 and
+-- reversed it, narrowly. His ruling, in full:
+--
+--     "Approve, but narrowly — status only: signed yes/no and which version,
+--      never the body, the signature or the date of birth. Written as an
+--      explicit column-limited policy rather than a SECURITY DEFINER function,
+--      so it can be audited later."
+--
+-- So the widening is two facts and no more: a row exists for this person, and
+-- the version string it names. That is the whole of it.
+--
+-- ── What remains refused, stated so nobody has to infer it ────────────────
+--
+--   · THE DOCUMENT BODY REMAINS UNREADABLE TO EVERY COACH AND EVERY OWNER.
+--     The wording somebody agreed to lives in src/lib/waiver.ts behind
+--     `WAIVER_VERSION`, and the record of their agreement to it lives in
+--     `liability_waivers`. No coach may read that table. This part adds no
+--     policy to it, drops none, and changes none of its grants.
+--   · `accepted_at` — WHEN they signed — is refused. It is a status column by
+--     any reasonable reading and it is still refused, because the ruling said
+--     "signed yes/no and which version" and a date nobody asked for is the
+--     first step of a log of somebody's movements through the app. A coach who
+--     genuinely needs the date has a person standing in front of them to ask.
+--   · `released_liability` and `physician_ack` are refused, and would carry
+--     nothing anyway: part 84's `liability_waivers_both_given` check makes
+--     both of them true on every row that exists.
+--   · A GYM OWNER is not widened. The ruling is about a coach training a named
+--     person; an owner is not that, and `is_owner_of()` appears nowhere below.
+--   · A coach who is NO LONGER this person's coach sees nothing, because the
+--     policy resolves through `is_my_client()` — `clients.trainer_id` as it is
+--     right now — exactly like every other coach-side read in this schema.
+--
+-- The body, the signature and the date of birth the ruling names are worth one
+-- more sentence, because `liability_waivers` holds none of them: it is
+-- (user_id, version, released_liability, physician_ack, accepted_at) and
+-- nothing else. Free-text, signatures and dates of birth live on the GYM's
+-- paperwork — `gym_agreement_signatures` (parts 185 and 520) — and on a coach's
+-- own documents (part 135). This part touches neither of those and widens
+-- nothing about either.
+--
+-- ── Why a table with a policy, and not a view ─────────────────────────────
+--
+-- The ruling asked for a column-limited policy rather than a SECURITY DEFINER
+-- function, and said why: a definer function is the same widening through a
+-- side door, and it is harder to audit later. Agreed, and there is no definer
+-- function in the read path below. Getting there took ruling out both of the
+-- other shapes, and the reasoning is recorded because the next person will
+-- reach for them in the same order:
+--
+--   · A SECOND POLICY ON `liability_waivers` CANNOT BE COLUMN-LIMITED. RLS
+--     restricts ROWS; column privileges restrict COLUMNS, and they are granted
+--     per ROLE, not per policy. The coach and the client are the same role —
+--     `authenticated` — which already holds a table-wide SELECT (part 84). So
+--     a coach policy on that table would hand the coach `accepted_at` along
+--     with everything else, directly over PostgREST, whatever any view above
+--     it selected. There is no arrangement of grants that gives the subject
+--     all five columns and their coach two.
+--
+--   · A VIEW CANNOT CARRY RLS. PostgreSQL has no `create policy` on a view;
+--     a view is as wide as whatever runs it. `security_invoker = true` makes
+--     it as wide as the reader, which lands it back on the table's own RLS and
+--     on the paragraph above. Turning it off would make it a definer view —
+--     the thing the ruling refused, in another costume — and this repository
+--     forbids that outright: `npm run check:views` fails any view in
+--     supabase/parts that does not restate `security_invoker = true`, after
+--     part 2370 dropped the flag off `pending_deletions` by accident and made
+--     every gym's deletion queue readable by anon.
+--
+-- What is left is a table whose COLUMNS ARE THE LIMIT. `liability_waiver_status`
+-- holds the two facts the ruling approved and physically cannot hold a third;
+-- its policy is an ordinary `create policy` that reads like every other
+-- coach-side policy in this schema and is found by every tool that finds those.
+-- A reviewer auditing this in 2029 reads one policy and one two-column table,
+-- and the question "could a coach have got at the document" is answered by the
+-- shape of the table before they read a line of SQL.
+--
+-- ── The one SECURITY DEFINER here is the WRITE, and that is not the widening
+--
+-- The mirror is maintained by an AFTER INSERT trigger on `liability_waivers`,
+-- and its function is SECURITY DEFINER with a pinned `search_path`, like every
+-- other trigger in this schema — the client's own session inserts the waiver
+-- and has no write of any kind on the status table. That is a definer function
+-- in the write path, where it copies two columns it is handed; it is not a
+-- definer function in the read path, which is what the ruling was about and
+-- what an auditor is looking for.
+--
+-- ── Why a mirror cannot drift, which is the honest objection to one ────────
+--
+-- A derived copy that stops matching its source is a coach reading a stale
+-- answer about a legal record, so the reasons this one cannot are load-bearing:
+--
+--   · INSERT is the only write part 84 permits. It has no UPDATE policy and no
+--     DELETE policy — "a release that can be withdrawn is not a release" — so
+--     a version can never be edited out from under the mirror and a row can
+--     never disappear from beneath it.
+--   · TRUNCATE is revoked from every role by part 119.
+--   · The trigger fires for every inserting role, service_role included.
+--   · Both tables cascade from the same `auth.users` row, so an erasure takes
+--     the pair together.
+--
+-- The backfill below is idempotent and claims nothing the source does not
+-- already say.
+--
+-- ── For the record, this does not become an export gap ────────────────────
+--
+-- `src/lib/gdpr.ts` exports `liability_waivers` itself (part 84 ·
+-- liability_waivers_own_r), so every fact in the mirror is already in the
+-- subject's own bundle, under the table that is the actual record. The subject
+-- can read their own mirror row too — see the second policy — because a record
+-- kept about somebody that they cannot see is what part 2660 is about.
+--
+-- Additive and idempotent.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- ── 1. the two facts, and no room for a third ──────────────────────────────
+
+create table if not exists public.liability_waiver_status (
+  -- `auth.users`, not `profiles`, because that is what the source references
+  -- and a mirror keyed differently from its source is a mirror that can fail to
+  -- find a row. Part 159 §6 makes the same point about the same column.
+  user_id uuid not null references auth.users(id) on delete cascade,
+  version text not null,
+  -- One row per (person, version), exactly as part 84 keys its own: re-wording
+  -- the release ADDS a row rather than editing what somebody agreed to, and the
+  -- mirror has to be able to say they signed the old one and not the new one.
+  primary key (user_id, version)
+);
+
+comment on table public.liability_waiver_status is
+  'Whether somebody has signed the platform liability release, and which version — nothing else. A derived, column-limited mirror of public.liability_waivers, which stays readable only by its own subject (part 84). Approved by the owner on 13 September 2026 as a narrow, status-only reversal of that refusal: see the header of supabase/parts/2671 for what was widened, what is still refused, and why this is a table with a policy rather than a view or a SECURITY DEFINER function.';
+comment on column public.liability_waiver_status.user_id is
+  'The person who signed. References auth.users, like liability_waivers.user_id — a signer may be a coach or an owner and have no clients row at all.';
+comment on column public.liability_waiver_status.version is
+  'The version string of the wording they agreed to (src/lib/waiver.ts · WAIVER_VERSION). It identifies the wording; it is not the wording, and the wording is not readable here by anybody.';
+
+alter table public.liability_waiver_status enable row level security;
+
+-- ── 2. who may read it ─────────────────────────────────────────────────────
+
+-- The subject. A record kept about somebody that the person it is about cannot
+-- see is the defect part 2660 exists for, and it would be a strange one to
+-- introduce in the same file that lets their coach see it.
+drop policy if exists liability_waiver_status_own_r on public.liability_waiver_status;
+create policy liability_waiver_status_own_r on public.liability_waiver_status
+  for select using (user_id = (select auth.uid()));
+
+-- The coach they have RIGHT NOW, and nobody else. `is_my_client()` reads
+-- `clients.trainer_id` live, so a coach who has ended the coaching stops being
+-- able to read this the moment the relationship ends — the same scoping, the
+-- same helper and the same `(select …)` shape as every other coach-side policy
+-- in this schema (part 1903: one evaluation, not one per row).
+--
+-- This is the whole of the widening the owner approved. It is two columns wide
+-- because the table is two columns wide.
+drop policy if exists liability_waiver_status_coach_r on public.liability_waiver_status;
+create policy liability_waiver_status_coach_r on public.liability_waiver_status
+  for select using (public.is_my_client(user_id));
+
+-- There is no INSERT, UPDATE or DELETE policy, for anybody. The trigger in §4
+-- is the only writer, and part 84's rule that nobody may alter or withdraw the
+-- record after the fact has to hold for the mirror or the mirror is a way
+-- around it.
+
+-- ── 3. the grants ──────────────────────────────────────────────────────────
+--
+-- Supabase's ALTER DEFAULT PRIVILEGES hands `anon` and `authenticated` a full
+-- set of table privileges on anything created in `public`, so the grant that
+-- matters here is the one nobody wrote. Revoked from all three by name first —
+-- part 820's rule: a table's privileges are stated, never inherited, because
+-- RLS is the fence and a grant left sitting behind it is what a later,
+-- unrelated policy turns into a door.
+revoke all on public.liability_waiver_status from public, anon, authenticated;
+
+-- SELECT only, and table-level rather than column-level on purpose: every
+-- column of this table is a column the reader is entitled to, so there is
+-- nothing to withhold and nothing for `npm run check:grants` §2 to find missing
+-- when somebody adds a column in future — they will hit the policies above and
+-- this comment first.
+grant select on public.liability_waiver_status to authenticated;
+grant all on public.liability_waiver_status to service_role;
+
+-- ── 4. how a row gets here ─────────────────────────────────────────────────
+
+/**
+ * Copy the two status columns of a new waiver into the mirror.
+ *
+ * SECURITY DEFINER because the inserting session is the client's own and has
+ * no write on the mirror — deliberately, since nobody may write it directly.
+ * The definer function is therefore in the WRITE path; the read path is the two
+ * policies above and contains no function at all. See the header.
+ *
+ * It copies; it does not decide. `new.user_id` and `new.version` are the only
+ * two values it reads off the row, so there is no arrangement of the source
+ * that makes this function emit anything the header did not approve — a third
+ * column added to `liability_waivers` later is not silently mirrored.
+ *
+ * `on conflict do nothing` because the primary keys match: a re-insert of the
+ * same (person, version) is the same fact, and the trigger is not the place to
+ * argue about it. The backfill below relies on the same clause.
+ *
+ * search_path pinned, per scripts/check-definer.mjs: an unpinned definer
+ * function resolves `public.liability_waiver_status` against whatever the
+ * caller set, and this one runs as `postgres` with RLS off.
+ */
+create or replace function public.liability_waiver_mirror_status()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'pg_temp'
+as $function$
+begin
+  insert into public.liability_waiver_status (user_id, version)
+  values (new.user_id, new.version)
+  on conflict (user_id, version) do nothing;
+  return null;
+end;
+$function$;
+
+comment on function public.liability_waiver_mirror_status() is
+  'Mirrors (user_id, version) — and nothing else — from a new liability_waivers row into liability_waiver_status, which is the only surface a coach may read the fact of a signature from. See supabase/parts/2671.';
+
+drop trigger if exists liability_waivers_mirror_status on public.liability_waivers;
+create trigger liability_waivers_mirror_status
+  after insert on public.liability_waivers
+  for each row execute function public.liability_waiver_mirror_status();
+
+-- A trigger function is not callable by anybody, and `anon` is revoked BY NAME
+-- rather than left to `public`: part 2050's function was granted to PUBLIC by
+-- Postgres the moment it was created, which in a Supabase project includes
+-- anon, and it answered strangers for four hours. Part 141 §2 is the rule;
+-- scripts/check-grants.mjs is what keeps it.
+revoke all on function public.liability_waiver_mirror_status() from public;
+revoke all on function public.liability_waiver_mirror_status() from anon;
+revoke all on function public.liability_waiver_mirror_status() from authenticated;
+
+-- ── 5. the releases already signed ─────────────────────────────────────────
+--
+-- Without this the widening is a promise to new clients only, and a coach would
+-- read "has not signed" about everybody who signed before tonight — which is
+-- the exact false sentence this whole part exists to stop being generated. It
+-- claims nothing the source does not already say: two columns, copied, with the
+-- same conflict clause the trigger uses so re-applying this part is a no-op.
+
+insert into public.liability_waiver_status (user_id, version)
+select w.user_id, w.version
+  from public.liability_waivers w
+on conflict (user_id, version) do nothing;

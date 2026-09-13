@@ -30,6 +30,8 @@
   "files": [
     "src/lib/requestTimeout.ts",
     "src/lib/requestTimeout.test.ts",
+    "src/lib/coachWellness.ts",
+    "src/lib/coachWellness.test.ts",
     "src/lib/failedWrite.ts",
     "src/lib/failedWrite.test.ts",
     "src/lib/monthEnd.ts",
@@ -138,6 +140,7 @@
     "src/lib/firstRun.test.ts",
     "src/lib/coachFirstRun.test.ts",
     "src/lib/cadence.test.ts",
+    "src/lib/ownCadence.test.ts",
     "src/lib/coachReminders.test.ts",
     "src/lib/clientReminders.test.ts",
     "src/lib/screenHelp.test.ts",
@@ -477,6 +480,8 @@
     "src/lib/dialling.test.ts",
     "src/lib/clientPaperwork.ts",
     "src/lib/clientPaperwork.test.ts",
+    "src/lib/clientRelease.ts",
+    "src/lib/clientRelease.test.ts",
     "src/lib/coachMacros.ts",
     "src/lib/coachMacros.test.ts",
     "src/lib/settlementStamp.test.ts",
@@ -557,6 +562,10 @@
     "src/lib/reattribute.test.ts",
     "src/lib/closeYear.ts",
     "src/lib/closeYear.test.ts",
+    "src/lib/closeStatement.ts",
+    "src/lib/closeStatement.test.ts",
+    "src/lib/gymBanked.ts",
+    "src/lib/gymBanked.test.ts",
     "src/lib/goalDeadline.ts",
     "src/lib/goalDeadline.test.ts",
     "src/lib/upcomingWindow.ts",
@@ -650,6 +659,8 @@
     "src/lib/coachLogReview.ts",
     "src/lib/coachLogReview.test.ts",
     "src/lib/sessionPairing.ts",
-    "src/lib/sessionPairing.test.ts"
+    "src/lib/sessionPairing.test.ts",
+    "src/lib/clientInvite.ts",
+    "src/lib/clientInvite.test.ts"
   ]
 }

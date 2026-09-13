@@ -108,8 +108,15 @@ import { intakeLine, intakePrompt } from '../../src/lib/intake';
 // "Has this person signed it" — the coach's half of the question the client
 // portal has been able to answer since part 135.
 import { useClientPaperwork } from '../../src/ui/clientPaperwork';
+// And the other half of that question, which is not the coach's paperwork at
+// all: the PLATFORM liability release. Refused to every coach since part 84 and
+// narrowed by the owner on 13 September 2026 to two facts — signed or not, and
+// which version. supabase/parts/2671 is the argument and the policy.
+import { useClientRelease } from '../../src/ui/clientRelease';
 import { useNow, useToday } from '../../src/ui/today';
 import { paperworkLine, paperworkItemLine, paperworkOutstanding } from '../../src/lib/clientPaperwork';
+import { releaseLine, releaseVerdict, releaseOutstanding, RELEASE_PRIVACY_NOTE } from '../../src/lib/clientRelease';
+import { WAIVER_VERSION } from '../../src/lib/waiver';
 import { fmtDay, num1 } from '../../src/lib/format';
 import { worstStatus, isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { useAuthRevision } from '../../src/ui/authRevision';
@@ -369,6 +376,22 @@ export default function ClientScreen() {
    * accepted anything, and the section says that rather than reading three
    * tables to find nothing. */
   const paperwork = useClientPaperwork(auth.user?.id ?? null, queryable ? id : null);
+
+  /**
+   * And whether they have signed the platform's own release.
+   *
+   * A different record, a different owner and a different policy from the one
+   * above: `liability_waivers` (part 84) is the client's legal record and is
+   * readable by nobody but them. What this reads is the status mirror part 2671
+   * created — the person and the version, and there is no third column on it to
+   * read. The document stays shut.
+   *
+   * Hand-added clients are passed as null for the same reason as the paperwork
+   * above, and the section is not rendered for them at all: somebody with no
+   * account has not signed anything, and "they have not signed the release" is
+   * a sentence about a person rather than about a record.
+   */
+  const release = useClientRelease(queryable ? id : null);
 
   /* ── when were they last seen at all ────────────────────────────────────── */
 
@@ -1373,9 +1396,10 @@ export default function ClientScreen() {
     return Promise.all([
       r.refresh(), Promise.resolve(ap.reload()), Promise.resolve(refreshTenant()),
       gl.refresh(), Promise.resolve(ci.reload()), Promise.resolve(paperwork.reload()),
+      Promise.resolve(release.reload()),
       attReload(),
     ]);
-  }, [r, ap, refreshTenant, gl, ci, paperwork, attReload]);
+  }, [r, ap, refreshTenant, gl, ci, paperwork, release, attReload]);
   const pull = usePullToRefresh(reloadEverything);
 
   /* ── and the same set when the coach comes back ─────────────────────────
@@ -1810,6 +1834,44 @@ export default function ClientScreen() {
                 </View>
               </>
             )}
+          </Section>
+        ) : null}
+
+        {/* ── the platform release, which is not your paperwork ───────────
+            Directly under it because it is the same ninety seconds — a coach
+            about to put a stranger through a first session — and above
+            everything else because it is the only line on this screen that is
+            about whether to train them at all.
+
+            What it is NOT is the document. `liability_waivers` (part 84) is the
+            client's own legal record and no coach may read it; the owner
+            narrowed that on 13 September 2026 to status only, and this line is
+            the whole of the widening. The note underneath says so to the one
+            person who could otherwise go looking for the rest of it.
+
+            Rendered only for a client with an account: somebody the coach typed
+            in by hand has not signed anything, and saying so about a PERSON —
+            rather than about a record that does not exist — is an accusation
+            this screen has no business making. */}
+        {id && queryable ? (
+          <Section>
+            <SectionHead title="Liability Release" />
+            {(() => {
+              // One verdict, read once, so the flag and the sentence can never
+              // disagree about what the read said.
+              const verdict = releaseVerdict(release.status, release.signatures, WAIVER_VERSION);
+              const line = releaseLine(release.status, release.signatures, WAIVER_VERSION, who);
+              if (releaseOutstanding(verdict)) return <Flag tone={t.warn}>{line}</Flag>;
+              // A read that failed or came back short is stated, not flagged: a
+              // warning colour over an unknown is the same lie as a calm one,
+              // and it is the colour a coach stops reading. src/lib/clientRelease.ts
+              // makes the argument in full.
+              if (verdict === 'unreadable' || verdict === 'truncated') return <Flag tone={t.ink3}>{line}</Flag>;
+              return <Text style={{ ...ty.body, color: t.ink2 }}>{line}</Text>;
+            })()}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {RELEASE_PRIVACY_NOTE}
+            </Text>
           </Section>
         ) : null}
 

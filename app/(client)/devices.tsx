@@ -15,7 +15,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { BRAND } from '../../src/lib/brands';
 import { num, num1 } from '../../src/lib/format';
-import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, ActivityIndicator, Modal, TextInput, Switch } from 'react-native';
 import { Icon } from '../../src/ui/Icon';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -54,6 +54,12 @@ import {
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { fmtDay, fmtTime } from '../../src/lib/format';
+// The one switch in front of the sleep and water the member TYPES IN. It lives
+// on this screen and not on Recovery because it is the same question this
+// screen already answers about a watch — who sees what my body did — and
+// because a member with no wearable must still be able to find it. See
+// supabase/parts/2670 for why there is one switch and not two.
+import { useWellnessShare } from '../../src/ui/wellnessShare';
 // Distance in the member's own unit. See src/lib/distance.ts for why it is
 // derived from the length unit rather than being a third pill in Settings.
 import { distanceLabel, distanceUnitFor, metresLabel } from '../../src/lib/distance';
@@ -130,6 +136,11 @@ export default function Devices() {
  const du = distanceUnitFor(useSettings().lengthUnit);
  // Tonight's HRV and the member's own baseline for it.
  const hrv = useDeviceHrv();
+ // Whether this member's coach may read the nights and glasses they type in.
+ // Read here, changed here, and enforced in Postgres — the switch on this
+ // screen is the only thing that moves it, and a coach cannot (part 2670's
+ // clients_wellness_consent_guard).
+ const wellnessShare = useWellnessShare();
  // Re-render whenever the server proves something new about any device — a
  // token dying, a scope being refused, or a reconnect clearing both. Without
  // this the screen would go on showing whatever it decided on mount, which is
@@ -670,6 +681,16 @@ export default function Devices() {
 
  const G = layout.gutter;
 
+ // A switch that moved on screen and nowhere else is worse than one that
+ // refused: the member would believe they had stopped sharing. `setShared`
+ // checks the ROW COUNT rather than the absence of an error — PostgREST does
+ // not fail an update that RLS narrows to nothing — and the state is only
+ // adopted when the server holds the new value.
+ const toggleWellnessShare = async (on: boolean) => {
+  const ok = await wellnessShare.setShared(on);
+  if (!ok) Alert.alert('Not saved', 'That could not be changed. Your coach still sees what they saw before. Try again in a moment.');
+ };
+
  return (
  <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
  {/* The keyboard sat on the field being typed into. `automaticallyAdjustKeyboardInsets`
@@ -857,6 +878,59 @@ export default function Devices() {
     )}
    </Section>
   </>) : null}
+
+  {/* ── what your coach may see of the sleep and water you type ─────────
+      OUTSIDE the `connected.length` guard below, and that is the whole point
+      of it. The nights a member types by hand are the only sleep a member
+      with no wearable has, so a control that appeared once a watch was
+      connected would be missing for exactly the people it exists for.
+
+      One switch, for the nights AND the glasses, because the member is
+      answering one question — may my coach see what I log about myself. Two
+      controls over two tables written by one screen is how somebody comes to
+      believe they have stopped sharing because they turned off the one they
+      remembered. See supabase/parts/2670. */}
+  <Rule />
+  <Section>
+   <SectionHead title="Your Coach" note={wellnessShare.shared === true ? 'sharing' : undefined} />
+   <Text style={{ ...ty.label, color: t.ink2 }}>
+    The sleep and water you type in yourself are yours. Off by default — nothing of it reaches your coach until you say so here.
+   </Text>
+   <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.lg }}>
+    <View style={{ flex: 1 }}>
+     <Text style={{ ...ty.body, color: t.ink }}>Let my coach see these</Text>
+     <Text style={{ ...ty.label, color: t.ink3, marginTop: 3 }}>
+      Turning it off again hides the nights and glasses you have already logged, as well as the next ones. Only your current coach can see them, and only while they are your coach.
+     </Text>
+    </View>
+    <Switch
+     value={wellnessShare.shared === true}
+     onValueChange={toggleWellnessShare}
+     // Null means the flag could not be read. Disabled rather than drawn as
+     // "off", which would invite somebody to turn ON what may already be on
+     // and would have the control asserting a state nobody confirmed.
+     disabled={wellnessShare.shared === null}
+     // The words beside this are a SIBLING of it, not a parent, so a screen
+     // reader arriving here would otherwise announce a switch and its state
+     // with no name at all — on the control that decides who reads a member's
+     // sleep. The visible line says "these"; the spoken name says what they are.
+     accessibilityLabel="Let my coach see the sleep and water I log myself"
+     accessibilityHint={
+      wellnessShare.shared === null
+       ? 'Unavailable: whether this is on could not be read just now.'
+       : 'Turning it off again hides what you have already logged as well as what comes next.'
+     }
+     accessibilityState={{ disabled: wellnessShare.shared === null }}
+    />
+   </View>
+   {wellnessShare.shared === null ? (
+    // Not "off". A flag we could not read is not a decision the member made,
+    // and a screen that draws one as the other has answered for them.
+    <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+     Whether this is on could not be read just now, so it is shown as it is rather than guessed at. Nothing has changed either way.
+    </Flag>
+   ) : null}
+  </Section>
 
   {/* ── where sleep comes from ──────────────────────────────────────── */}
   {connected.length ? (<>

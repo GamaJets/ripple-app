@@ -124,7 +124,17 @@ import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isoToday } from '../../src/lib/dayPlan';
 import { plain, lengthLabel } from '../../src/lib/units';
-import { numUpTo } from '../../src/lib/format';
+import { numUpTo, fmtDay } from '../../src/lib/format';
+// The sleep and water the member types in by hand, and the switch that decides
+// whether a coach may see any of it. The gate is `sleep_logs_coach_read` and
+// `hydration_logs_coach_read` (supabase/parts/2670) and it is enforced by
+// Postgres — this screen cannot see what a member has not shared, and its whole
+// job here is to say WHICH of three silences it is looking at.
+import { useWellnessShare, WELLNESS_WINDOW_DAYS } from '../../src/ui/wellnessShare';
+import {
+  wellnessPanel, averageHours, averageGlasses, qualityMarks,
+  notSharedLine, unreadableLine, notAskedLine, nothingLoggedLine, truncatedLine,
+} from '../../src/lib/coachWellness';
 import { deltaLabel } from '../../src/lib/deltaLabel';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import {
@@ -397,8 +407,17 @@ export default function ClientBody() {
   // what a pull can honestly ask for.
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     r.refresh(),
-    ...(picked ? [load(picked, askable)] : []),
-  ]), [r, picked, askable, load]));
+    ...(picked ? [load(picked, askable), wellness.refresh()] : []),
+  ]), [r, picked, askable, load, wellness]));
+
+  // The member's typed sleep and water, read only if they have said so. Its own
+  // hook and its own statuses, because it fails independently of the scans: a
+  // refused `scans` read says nothing about their nights, and a member who has
+  // not shared their nights has a body composition that is still perfectly
+  // readable. `askable` travels with it for the same reason it travels with
+  // `load` — a hand-added client has no account, so nothing was ever asked of
+  // them and no read of theirs ever failed.
+  const wellness = useWellnessShare(picked, askable);
 
   const fullName = client?.name ?? '';
   const who = fullName ? fullName.split(' ')[0] : 'They';
@@ -446,6 +465,26 @@ export default function ClientBody() {
   const tape = useMemo(
     () => measureBoard(measStatus === 'error' ? null : sites),
     [measStatus, sites],
+  );
+
+  /* ── which of the silences this is ─────────────────────────────────────
+     Three empty screens with three different causes, and a coach acts
+     differently on each: the member has not shared (their decision, and not
+     ours to describe as an absence), the member shared and has logged nothing
+     (the only one a coach may raise with them), and the read failed (unknown).
+     `wellnessPanel` holds that precedence and is tested on it; this file only
+     draws whichever verdict comes back. */
+  const wellnessView = useMemo(
+    () => wellnessPanel({
+      askable,
+      shared: wellness.shared,
+      flagStatus: wellness.flagStatus,
+      sleepStatus: wellness.sleepStatus,
+      waterStatus: wellness.waterStatus,
+      sleep: wellness.sleep,
+      water: wellness.water,
+    }),
+    [askable, wellness.shared, wellness.flagStatus, wellness.sleepStatus, wellness.waterStatus, wellness.sleep, wellness.water],
   );
 
   const chip = (on: boolean) => ({
@@ -991,6 +1030,146 @@ export default function ClientBody() {
                     </Flag>
                   </Section>
                 ) : null}
+
+                {/* ── the nights and glasses they type in themselves ──────
+                    Backlog item Coach #33, built the way its refusal asked for
+                    rather than the way it was first written. `sleep_logs` and
+                    `hydration_logs` had exactly one policy each — the member's
+                    own — and part 109 refused to add a blanket coach read on
+                    the grounds that it would be the only sleep source skipping
+                    a member-controlled switch, for exactly the members with no
+                    wearable. supabase/parts/2670 is the switch; this is its
+                    reader.
+
+                    Nothing below is drawn from an absence. RLS answers a coach
+                    reading a member who has not shared with zero rows and NO
+                    error, which at the wire is identical to a member who
+                    shared and logged nothing — so the consent flag is read
+                    alongside the logs and `wellnessPanel` decides which of the
+                    two sentences is true. */}
+                <Rule />
+                <Section>
+                  <SectionHead
+                    title="Sleep &amp; Water"
+                    note={wellnessView.kind === 'shared' ? `last ${WELLNESS_WINDOW_DAYS} days` : undefined} />
+                  {wellnessView.kind === 'not-asked' ? (
+                    <Text style={{ ...ty.body, color: t.ink2 }}>{notAskedLine(voice)}</Text>
+                  ) : wellnessView.kind === 'loading' ? (
+                    <Text style={{ ...ty.body, color: t.ink3 }}>Reading what they have chosen to share…</Text>
+                  ) : wellnessView.kind === 'unreadable' ? (
+                    // Never "they have not shared" and never "nothing logged".
+                    // Both would be facts about the member invented out of our
+                    // own failed read.
+                    <Notice tone={t.warn} kicker="Unreadable" title="This could not be read"
+                      note={unreadableLine(voice)} />
+                  ) : wellnessView.kind === 'not-shared' ? (
+                    // Says nothing whatever about whether there is anything to
+                    // see. That half is not this account's to infer.
+                    <Text style={{ ...ty.body, color: t.ink2 }}>{notSharedLine(voice)}</Text>
+                  ) : (
+                    <>
+                      {/* ── the nights ──────────────────────────────────── */}
+                      {wellness.sleepStatus === 'error' ? (
+                        <Flag tone={t.warn}>
+                          Their sleep log could not be read just now. This is not a statement that
+                          there are no nights in it.
+                        </Flag>
+                      ) : wellnessView.nights.length === 0 ? (
+                        <Text style={{ ...ty.body, color: t.ink2 }}>
+                          {/* Only sayable because the read finished AND came
+                              back whole. Under 'partial' an empty list would
+                              mean the page was full of something else, which
+                              cannot happen — but the gate is stated rather
+                              than reasoned about at every call site. */}
+                          {wellnessView.nightsWhole
+                            ? nothingLoggedLine(voice)
+                            : 'Their nights came back at the row limit, so nothing can be said about what is in them.'}
+                        </Text>
+                      ) : (
+                        <>
+                          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md }}>
+                            <Text style={{ ...ty.title, ...numeric, color: t.ink }}>
+                              {/* A dash, not a zero, whenever the set is not
+                                  known to be whole — an average over a prefix
+                                  of somebody's nights is not their average. */}
+                              {fig(averageHours(wellnessView.nights, wellnessView.nightsWhole) == null
+                                ? null
+                                : numUpTo(averageHours(wellnessView.nights, wellnessView.nightsWhole), 1))}
+                            </Text>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>
+                              hours a night on average, over {wellnessView.nights.length}{' '}
+                              {wellnessView.nights.length === 1 ? 'night' : 'nights'} they logged
+                            </Text>
+                          </View>
+                          {wellnessView.nights.slice(0, 8).map((n) => (
+                            <View key={n.night} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.sm }}>
+                              <Text style={{ ...ty.caption, color: t.ink2, flex: 1 }}>{fmtDay(n.night)}</Text>
+                              {/* Two entries for one night are shown as two.
+                                  Averaging them would print a figure the
+                                  member never typed, which is the move
+                                  src/lib/readiness.ts refuses to make and is
+                                  not going to be made here for a coach. */}
+                              {n.entries.map((e, j) => (
+                                <Text key={j} style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
+                                  {numUpTo(e.hours, 1)}h{' '}
+                                  <Text style={{ color: t.ink3 }}
+                                    accessibilityLabel={`quality ${Math.round(e.quality)} out of 5`}>
+                                    {qualityMarks(e.quality)}
+                                  </Text>
+                                </Text>
+                              ))}
+                            </View>
+                          ))}
+                          {!wellnessView.nightsWhole ? (
+                            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{truncatedLine('nights')}</Flag>
+                          ) : null}
+                        </>
+                      )}
+
+                      {/* ── the water ───────────────────────────────────── */}
+                      <Rule inset={0} />
+                      {wellness.waterStatus === 'error' ? (
+                        <Flag tone={t.warn} style={{ marginTop: sp.md }}>
+                          Their water count could not be read just now, so no day below is a day
+                          they drank nothing.
+                        </Flag>
+                      ) : wellnessView.water.length === 0 ? (
+                        <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
+                          {wellnessView.waterWhole
+                            ? `No day in the last ${WELLNESS_WINDOW_DAYS} days has a glass count. A day with no row is a day they did not use the counter, which is not a day they drank nothing.`
+                            : 'Their water counts came back at the row limit, so nothing can be said about them.'}
+                        </Text>
+                      ) : (
+                        <>
+                          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.md, marginTop: sp.md }}>
+                            <Text style={{ ...ty.title, ...numeric, color: t.ink }}>
+                              {fig(averageGlasses(wellnessView.water, wellnessView.waterWhole) == null
+                                ? null
+                                : numUpTo(averageGlasses(wellnessView.water, wellnessView.waterWhole), 1))}
+                            </Text>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>
+                              {/* The divisor is days RECORDED, printed beside
+                                  the figure so a coach can see how thin it is.
+                                  Dividing by days elapsed would report every
+                                  day they did not open the app as a zero. */}
+                              glasses on average, across {wellnessView.water.length}{' '}
+                              {wellnessView.water.length === 1 ? 'day' : 'days'} they counted
+                            </Text>
+                          </View>
+                          {!wellnessView.waterWhole ? (
+                            <Flag tone={t.warn} style={{ marginTop: sp.md }}>{truncatedLine('days')}</Flag>
+                          ) : null}
+                        </>
+                      )}
+
+                      <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>
+                        These are typed in by hand, not measured by a device, and {voice.they}{' '}
+                        {voice.have} chosen to show them to you. {voice.they} can turn that off at
+                        any time, and doing so hides what is above as well as what comes next.
+                      </Text>
+                    </>
+                  )}
+                </Section>
               </View>
             ) : null}
           </>
