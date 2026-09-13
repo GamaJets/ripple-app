@@ -63,13 +63,41 @@
 // builds without notifications — a delivery receipt the app never receives. It
 // now reports what it can actually see (the rows written to the threads) and
 // says so plainly when the write fails.
+//
+// ── The facts that put each name on the list ──────────────────────────────
+//
+// The recipient list was `recipients.map((c) => c.name).join(', ')` — names and
+// nothing else, under one sentence defining the band. A coach about to write to
+// fourteen people could not check one of them without leaving the screen and
+// losing the message in the box, so they sent it. Every fact they needed was
+// already here and was being thrown away on the way in: `rankClients` computes
+// a sentence per client and only the band survived, `packLeft` had the number
+// and only the boolean survived, the roster has carried `adherence` all along.
+// src/lib/segmentFacts.ts picks the right one per segment and the list now
+// draws a row per person rather than a paragraph of names.
+//
+// ── And what became of the send, which is not "delivered" ─────────────────
+//
+// The report went into an `Alert` and the screen behind it was left blank —
+// indistinguishable from never having pressed the button. What stays on screen
+// now is src/lib/broadcastOutcome.ts's three figures, which are three separate
+// claims: ADDRESSED (the segment, which the guard above has already refused to
+// let be the size of a read), WRITTEN (rows the server handed back, one
+// `.select('id').single()` each), and DELIVERED — null, always, and said out
+// loud. A `messages` insert fires the trigger from part 26, which calls
+// notify-message, which posts to send-push, which hands it to Expo. Nothing on
+// that chain reports back here, and the last hop would only ever say a
+// notification was accepted — not that a handset was on, not that a banner
+// appeared, not that anybody read it. The gym-side log (src/lib/gymBroadcastLog
+// .ts) keeps addressed and delivered as two columns for the same reason; this
+// is that rule where the second figure can never be filled in.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useTenant } from '../../src/ui/tenant';
 import { useClientTags } from '../../src/ui/clientTags';
@@ -88,6 +116,10 @@ import {
   COMPUTED_SEGMENTS, segmentDef, segmentMembers, unassessed, unassessedNote,
   type ClientFacts, type SegmentKey,
 } from '../../src/lib/segments';
+import { recipientFact, factsCaption, type Addressed } from '../../src/lib/segmentFacts';
+import {
+  sendOutcome, outcomeLines, outcomeTitle, WHERE_THE_RECORD_IS, type SendOutcome,
+} from '../../src/lib/broadcastOutcome';
 import { BACK_ICON } from '../../src/ui/direction';
 
 export default function Broadcast() {
@@ -144,7 +176,21 @@ export default function Broadcast() {
    * the guard says "Reading who that is…" and the send is held, which is
    * exactly what a segment whose membership is unknown deserves.
    */
-  const [drift, setDrift] = useState<{ status: LoadStatus; byId: Map<string, StatusLevel | null> } | null>(null);
+  /**
+   * The band AND the sentence behind it.
+   *
+   * It held `StatusLevel | null` and nothing else, so `rankClients` computed
+   * "Nothing for 19 days — was 3.5 days a week" for every client and this
+   * screen dropped it on the floor, leaving a recipient list of bare names that
+   * a coach had no way to check. `reason` is clientDrift's own wording,
+   * carried rather than re-written here: a second set of sentences on this
+   * screen would be free to disagree with the band heading on the Clients tab
+   * about the same person.
+   */
+  const [drift, setDrift] = useState<{
+    status: LoadStatus;
+    byId: Map<string, { status: StatusLevel | null; reason: string }>;
+  } | null>(null);
   const [packs, setPacks] = useState<{ status: LoadStatus; byId: Map<string, { left: number | null; runOut: boolean }> } | null>(null);
   // Started, so an effect that fires twice does not read twice. A ref rather
   // than the state above: the state is set asynchronously and two renders in
@@ -162,14 +208,21 @@ export default function Broadcast() {
       const read = await readClientActivity(supabase, ids, { tenantId });
       const notAsked = new Set(read.notAsked);
       const inputs: DriftInput[] = ids.map((id) => ({ clientId: id, events: read.byClient[id] ?? [] }));
-      const byId = new Map<string, StatusLevel | null>();
+      const byId = new Map<string, { status: StatusLevel | null; reason: string }>();
       for (const d of rankClients(inputs)) {
         // A client the database was never asked about holds NO assessment. Their
         // empty event list is the absence of a question, not the absence of
         // activity, and letting it fall through as 'idle' would put every
         // hand-added client at the top of a list of people to chase — people who
         // have no thread to be chased in.
-        byId.set(d.clientId, notAsked.has(d.clientId) ? null : d.status);
+        // The reason goes with the band and is blanked in the same breath. A
+        // client nobody asked about has no verdict, so they must not carry a
+        // sentence describing one either — `assessDrift` still writes a reason
+        // for an empty event list, and that sentence is about a read that never
+        // happened.
+        byId.set(d.clientId, notAsked.has(d.clientId)
+          ? { status: null, reason: '' }
+          : { status: d.status, reason: d.reason });
       }
       // Truncated is 'partial' and 'partial' holds the send. The rows past the
       // ceiling are exactly the ones that would disprove somebody's silence.
@@ -251,7 +304,7 @@ export default function Broadcast() {
     const p = packs?.byId.get(c.id);
     return {
       clientId: c.id,
-      drift: drift ? drift.byId.get(c.id) ?? null : null,
+      drift: drift ? drift.byId.get(c.id)?.status ?? null : null,
       packLeft: p?.left ?? null,
       packRunOut: p?.runOut ?? false,
       adherence: c.adherence,
@@ -279,6 +332,31 @@ export default function Broadcast() {
   const segmentLabel = sel.kind === 'tag'
     ? `the “${sel.tag}” segment`
     : def ? def.object : 'your client list';
+
+  /**
+   * The same choice, in the shape src/lib/segmentFacts.ts takes.
+   *
+   * It carries the DEFINITION rather than the key, which is what makes the
+   * fallback below honest: a `SegmentKey` with no definition behind it cannot
+   * describe anybody, so it falls back to 'all' — no fact line at all — rather
+   * than to a segment whose rules nothing here knows.
+   */
+  const addressed: Addressed = sel.kind === 'tag'
+    ? { kind: 'tag', tag: sel.tag }
+    : def ? { kind: 'seg', def } : { kind: 'all' };
+  const factsNote = factsCaption(addressed);
+
+  /**
+   * What became of the last send, for as long as this screen is open.
+   *
+   * Kept in state rather than left in the `Alert`, which is gone the moment a
+   * thumb lands on it: a coach who sent to nineteen and had nineteen land was
+   * left looking at a blank composer, which is the same screen they would see
+   * if they had never pressed the button. Null until something has been sent —
+   * an outcome panel over a send that has not happened would be reporting on
+   * nothing.
+   */
+  const [outcome, setOutcome] = useState<SendOutcome | null>(null);
 
   /* Whether the LIST is trustworthy, as distinct from whether the send worked.
    *
@@ -344,6 +422,11 @@ export default function Broadcast() {
         clientId: r.clientId, name: nameOf(r.clientId), ok: r.ok, why: r.why,
       }));
       const report = bulkReport('message', outcomes);
+      // ADDRESSED is `ids`, not `recipients`. On a retry those differ on
+      // purpose — the retry goes to the threads that failed and to no others —
+      // and this panel is about the send that just happened, not about the
+      // segment it was drawn from an hour ago.
+      setOutcome(sendOutcome(ids.length, outcomes.filter((o) => o.ok).length));
       setFailed(report.retry);
       // The composer is only cleared when there is nothing left to send. A
       // coach whose message half-landed needs the words still in the box —
@@ -454,13 +537,51 @@ export default function Broadcast() {
                the guard's own sentence is already on screen, further down. */
             <Text style={{ ...ty.label, color: t.ink3 }}>No clients in this segment.</Text>
           ) : recipients.length === 0 ? null : (
-            <Text style={{ ...ty.body, color: t.ink2 }}>{recipients.map((c) => c.name).join(', ')}</Text>
+            /* A ROW PER PERSON, and under each name the fact that put them
+               there. This was `.join(', ')` — a paragraph of names under one
+               sentence defining the band, which is a definition and not
+               evidence about anybody on it. The coach's real question at this
+               moment is "is Tuesday's client in this?", and a comma-joined run
+               of fourteen names is the shape that cannot answer it.
+
+               `recipientFact` returns null rather than a dash when there is
+               nothing true to put under a name: an em dash here would be the
+               screen claiming it looked and found nothing, which for a drift
+               segment is exactly the claim it must not make. */
+            <View>
+              {factsNote ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>{factsNote}</Text>
+              ) : null}
+              {recipients.map((c, i) => {
+                const line = recipientFact(addressed, {
+                  driftReason: drift?.byId.get(c.id)?.reason ?? null,
+                  packLeft: packs?.byId.get(c.id)?.left ?? null,
+                  adherence: c.adherence,
+                  tags: tagsFor(c.id),
+                });
+                return (
+                  <View key={c.id}
+                    style={{ paddingVertical: sp.sm, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}>
+                    <Text style={{ ...ty.body, color: t.ink2 }}>{c.name}</Text>
+                    {line ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{line}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
           )}
 
           {/* Who it did not reach last time. Named, and still here, so the retry
-              below is about people rather than about a number. */}
+              below is about people rather than about a number.
+
+              The kicker was "Not delivered", which is the one word this screen
+              may not use loosely: what is known about these people is that no
+              `messages` row was written for them, and "delivered" would have
+              been the app claiming knowledge of a handset in the one place it
+              has none. See src/lib/broadcastOutcome.ts. */}
           {failed.length ? (
-            <Notice tone={t.warn} kicker="Not delivered" title={`${failed.length} did not get the last one`}
+            <Notice tone={t.warn} kicker="Not written" title={`${failed.length} did not get the last one`}
               note={`${listNames(failed.map(nameOf))} — nothing was written to their thread. Clients you added by hand have no account to message until they join.`} />
           ) : null}
         </Section>
@@ -497,6 +618,24 @@ export default function Broadcast() {
             <Cta label={busy ? 'Sending…' : claim.label ?? `Send to ${recipients.length}`} wide
               disabled={!body.trim() || !recipients.length || busy || !claim.allowed} onPress={send} />
           </View>
+
+          {/* ── what became of the last send ──────────────────────────────
+              Three figures, three separate claims, and the third is null and
+              stays null. The tone is `t.good` only when every addressed thread
+              was written — and even then the lines under it say that how many
+              of those reached a phone is unknown, because "all 19" is exactly
+              where a coach stops reading. `t.good` is a dot beside ink text,
+              never the ink: the scale reserves status colour for status and
+              none of these clears AA as type. */}
+          {outcome ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Notice
+                tone={outcome.addressed > 0 && outcome.written === outcome.addressed ? t.good : t.warn}
+                kicker="Your last send" title={outcomeTitle(outcome)}
+                note={outcomeLines(outcome).join('\n\n')} />
+              <Text style={{ ...ty.caption, color: t.ink3 }}>{WHERE_THE_RECORD_IS}</Text>
+            </View>
+          ) : null}
 
           {/* Retry goes to the threads that failed and to no others. Sending to
               the segment again would put the same words a second time in the

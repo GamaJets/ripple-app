@@ -65,6 +65,17 @@ import { floorFullLine, floorPendingNote, flushResultLine, keptOfflineLine } fro
 import {
   pastSessions, pastVerdict, PAST_STATES, PAST_STATE_LABEL, PAST_STATE_NOTE, type PastState,
 } from '../../src/lib/sessionHistory';
+// ── and WHO wrote the record ──────────────────────────────────────────────
+//
+// `pastVerdict` says what happened and when somebody said so. It could not say
+// who, because nothing in this app had ever read `sessions.outcome_by` — the
+// column supabase/parts/33 added, and the trigger there has been filling from
+// `auth.uid()` on every mark since. An outcome decides whether the hour is paid
+// for and it can be written by the coach, by the gym owner correcting it, or by
+// a back-office job; "marked 14 March" against all three is the record a coach
+// has to dispute a payroll line from. See src/lib/outcomeAuthor.ts for the three
+// things this line refuses to say.
+import { fetchOutcomeAuthors, markedByLine, type OutcomeAuthors } from '../../src/lib/outcomeAuthor';
 // ── Finishing a session, as opposed to merely marking it ──────────────────
 //
 // This screen was the ONLY way a session ever got an outcome, and it asks the
@@ -599,6 +610,32 @@ export default function TrainerSessions() {
     // the window does not blank every line that is already right.
     setLogs((p) => ({ ...p, status: 'loading' }));
     void fetchSessionLogCounts(supabase, ids).then((out) => { if (live) setLogs(out); });
+    return () => { live = false; };
+  }, [historyIds]);
+  /* ── who is on record as having marked each of these ─────────────────────
+   *
+   * A third read, its own again, and for the same reason the second one is:
+   * `sessions.outcome_by` sits on a row `fetchMySessions` already reads, but
+   * that function is shared with the dashboard card and widening its `select`
+   * would change what every caller carries. A label under a row fails the way a
+   * label should — 'error' and an empty map, and the marking queue above still
+   * draws.
+   *
+   * Keyed on the same `historyIds` as the logs, so widening the window re-reads
+   * both together rather than leaving one describing a set the other has left.
+   * The previous answer is kept while the next is in flight, so a wider read
+   * does not blank lines that are already right.
+   */
+  const [authors, setAuthors] = useState<OutcomeAuthors>(
+    { status: 'loading', bySession: new Map(), names: new Map() });
+  useEffect(() => {
+    const nothing: OutcomeAuthors = { status: 'ready', bySession: new Map(), names: new Map() };
+    if (!USE_SUPABASE) { setAuthors(nothing); return; }
+    const ids = historyIds ? historyIds.split(',') : [];
+    if (!ids.length) { setAuthors(nothing); return; }
+    let live = true;
+    setAuthors((p) => ({ ...p, status: 'loading' }));
+    void fetchOutcomeAuthors(supabase, ids).then((out) => { if (live) setAuthors(out); });
     return () => { live = false; };
   }, [historyIds]);
   /* The state is `pastVerdict`'s and is passed in rather than re-derived, so
@@ -1311,6 +1348,27 @@ export default function TrainerSessions() {
                         {v.state === 'unmarked' ? (
                           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{PAST_STATE_NOTE.unmarked}</Text>
                         ) : null}
+                        {/* ── and who said so ────────────────────────────
+                            The line above says the outcome; this says whose
+                            statement it is. It is the half a coach needs when
+                            the outcome is the one they disagree with — an
+                            outcome they did not record can be a gym owner's
+                            correction, and until now the record showed those
+                            two identically.
+
+                            `markedByLine` returns null for everything it is not
+                            entitled to say, including a session whose mark is
+                            still sitting in the floor queue on this phone. It
+                            never claims the session IS marked — `v.state` above
+                            is the only thing that says that, and an unmarked
+                            session gets no line here at all. */}
+                        {(() => {
+                          const said = markedByLine(
+                            authors.bySession.get(s.id), authors.status, uid, authors.names);
+                          return said ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{said}</Text>
+                          ) : null;
+                        })()}
                         {/* ── what was done in the hour ──────────────────
                             Drawn where it changes what somebody should do: on
                             a session recorded as DELIVERED, where "nothing is

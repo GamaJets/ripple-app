@@ -325,7 +325,7 @@ export default function Templates() {
         </Text>
 
         <Section>
-          <Cta label="Build a New Program" wide onPress={() => router.push('/(trainer)/builder')} />
+          <Cta label="Build a New Program" wide onPress={() => router.push({ pathname: '/(trainer)/builder', params: { from: 'trainerTemplates' } })} />
           {/* A tick-list is remembered by nobody. A group is the same fan-out
               with the list kept, so tomorrow the coach can still answer "who is
               on the bootcamp programme". */}
@@ -381,7 +381,7 @@ export default function Templates() {
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: sp.md }}>
                 <View style={{ flex: 1 }}><Cta label="Assign to Clients" wide onPress={() => openAssign(tpl)} /></View>
-                <Ghost label="Edit" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { templateId: tpl.id } })} />
+                <Ghost label="Edit" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { templateId: tpl.id, from: 'trainerTemplates' } })} />
                 {/* The row no longer leaves this list before the server has
                     counted it. It used to disappear on the tap and be reported
                     as a failure afterwards, which reads as a successful delete

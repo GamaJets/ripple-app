@@ -112,7 +112,9 @@ import { seedDecision, stillListed, pruneSelection, assignCtaLabel } from '../..
 import { foldsAfterRemoval, foldsForNewProgramme } from '../../src/lib/foldedDays';
 import { notifySuccess } from '../../src/ui/haptics';
 import { WEEK_DAYS } from '../../src/lib/weekStart';
-import { FORWARD_ICON } from '../../src/ui/direction';
+import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
+import { useBackTo } from '../../src/ui/backTo';
+import { backDestination } from '../../src/lib/backTo';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { DateSheet } from '../../src/ui/DateSheet';
 
@@ -367,6 +369,25 @@ export default function Builder() {
   const router = useRouter();
 
   const params = useLocalSearchParams();
+  // ── Why the Back arrow is conditional here and not on every other screen ──
+  //
+  // This screen is two things. It is the Programs TAB — tapped from the tab
+  // bar, where there is nothing behind it and an arrow would be a lie — and it
+  // is also where five other screens send a coach: a client's Training, a
+  // client's record, a group, the template library's Edit, and the Clients
+  // hub's Programs tile. Arriving that way, the tab bar lights up on Programs
+  // and the coach is stranded: the screen they were reading is gone and no
+  // control on this page returns to it.
+  //
+  // So the arrow follows the carried origin rather than the tab history. The
+  // history is no use — see src/lib/backTo.ts: a tab navigator's history holds
+  // one entry per route, so by the time a coach has opened two clients it no
+  // longer says where they just were. `from` is written by the screen that did
+  // the sending, and an unknown value resolves to null, which draws no arrow
+  // rather than sending somebody nowhere.
+  const from = typeof params.from === 'string' ? params.from : undefined;
+  const cameFrom = backDestination(from) !== null;
+  const goBack = useBackTo(from);
   /**
    * Who this is for — and nobody, unless the coach said so.
    *
@@ -1938,8 +1959,15 @@ export default function Builder() {
 
         {/* ── header ─────────────────────────────────────────────────────── */}
         <View style={{ paddingTop: sp.md }}>
-          <Text style={{ ...ty.micro, color: t.ink3 }}>Programmes</Text>
-          <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Programme Builder</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md }}>
+            {cameFrom ? (
+              <Ghost icon={BACK_ICON} onPress={goBack} a11yLabel="Back" />
+            ) : null}
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Programmes</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: 5 }}>Programme Builder</Text>
+            </View>
+          </View>
           <Text style={{ ...ty.label, color: t.ink3, marginTop: 4 }}>Build a weekly plan, save it as a template, and assign it to as many clients as you like.</Text>
         </View>
 

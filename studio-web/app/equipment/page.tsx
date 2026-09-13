@@ -40,6 +40,19 @@ import {
   type ConcurrentDemand,
 } from '@lib/gymEquipment';
 import { fetchClasses, type GymClass } from '@lib/gymSchedule';
+// What a machine has cost, out of the BOOKS. `gym_equipment_log.cost_cents` and
+// `gym_costs.amount_cents` are two claims about the same money and this module
+// exists to join them without adding them — see supabase/parts/2850. The spend
+// figure is the linked cost rows, deduplicated by cost id; the log figures that
+// reached no cost are named separately as money the gym's P&L does not know
+// about, and never counted.
+import {
+  fetchSpendLinks, fetchCostsByIds, machineSpend, offBooksNote, offBooksFirst,
+  linkBlocker, linkLogToCost, unlinkLogFromCost,
+  SPEND_COMES_FROM_THE_BOOKS_NOTE, SPEND_IS_NOT_RECONCILED_NOTE,
+  type SpendEntry,
+} from '@lib/equipmentSpend';
+import { fetchGymCosts, gymCostCategoryLabel, type GymCost } from '@lib/gymCosts';
 import { isoDate } from '@lib/format';
 import { money } from '@lib/gymRecord';
 import { readTenant, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
@@ -100,6 +113,31 @@ export default function EquipmentPage() {
   const [classes, setClasses] = useState<GymClass[] | null>(null);
   /** The maintenance and incident log. Null is unread, never an empty history. */
   const [log, setLog] = useState<LogEntry[] | null>(null);
+  /**
+   * The same log, read for the money question: the link to `gym_costs` and the
+   * figure typed on the entry, and nothing else.
+   *
+   * A second read of one table, deliberately. `fetchLog`'s `LogEntry` carries
+   * no `cost_id` — the column did not exist until supabase/parts/2850 — and
+   * src/lib/gymEquipment.ts is another lane's file in this wave, so it is left
+   * alone rather than widened underneath somebody. The duplication is written
+   * down in the header of src/lib/equipmentSpend.ts with what to do about it.
+   */
+  const [spend, setSpend] = useState<SpendEntry[] | null>(null);
+  /**
+   * The costs those links point at, by id, and a year of costs for the picker.
+   *
+   * Both null until read, and null is NOT an empty map: "none of this is in the
+   * books" out of a refused query would send an owner to re-type a fortnight of
+   * costs their accounts already hold, after which their P&L really would be
+   * wrong. `machineSpend` refuses on the null rather than answering over it.
+   *
+   * Read only for an OWNER. `gym_costs` is the owner's alone in part 700, so a
+   * trainer's read of it comes back empty with no error — which is the one
+   * shape that would produce that false sentence silently.
+   */
+  const [spendCosts, setSpendCosts] = useState<Map<string, GymCost> | null>(null);
+  const [recentCosts, setRecentCosts] = useState<GymCost[] | null>(null);
   /** The gym's own currency, for the cost on a service entry. There is no
    *  fallback: what an engineer charged is a permanent record. */
   const [ccy, setCcy] = useState<TenantCurrency>(null);
@@ -107,7 +145,7 @@ export default function EquipmentPage() {
   const [zone, setZone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const load = useCallback(async (tenantId: string): Promise<boolean> => {
+  const load = useCallback(async (tenantId: string, owner: boolean): Promise<boolean> => {
     // allSettled, not all: one failing read must not take the other with it.
     // Under Promise.all a refused gym_classes query also emptied the register,
     // so a gym with four machines out of action read as a gym with none — and
@@ -128,17 +166,56 @@ export default function EquipmentPage() {
     setClasses(cRes.status === 'fulfilled' ? cRes.value : null);
     setLog(lRes.status === 'fulfilled' ? lRes.value : null);
 
+    // The money question, and only for the owner. `gym_costs` is owner-only in
+    // part 700, and a trainer's read of it returns an empty set with NO ERROR —
+    // which would render as "none of this maintenance is in the books" to the
+    // one person who cannot check. So a trainer is not shown the section at all
+    // and these reads are not made.
+    //
+    // Sequential rather than in the batch above, because the second is keyed on
+    // the ids the first returned. Skipped entirely when no entry names a cost:
+    // a second round trip to learn that nothing is attached to nothing.
+    const sRes = owner
+      ? (await Promise.allSettled([fetchSpendLinks(supabase, tenantId)]))[0]
+      : null;
+    const linkedIds = sRes && sRes.status === 'fulfilled'
+      ? sRes.value.map((e) => e.costId).filter((id): id is string => !!id)
+      : [];
+    const scRes = sRes && sRes.status === 'fulfilled'
+      ? (linkedIds.length
+        ? (await Promise.allSettled([fetchCostsByIds(supabase, tenantId, linkedIds)]))[0]
+        : ({ status: 'fulfilled', value: new Map<string, GymCost>() } as const))
+      : null;
+    // A year of costs, for the picker that links a repair to one. Bounded at
+    // both ends because `fetchGymCosts` refuses a truncated read rather than
+    // paging, and a year of one gym's purchase ledger is what that refusal was
+    // sized for. A repair older than the window is still LINKABLE — the entry
+    // keeps whatever link it has and `fetchCostsByIds` above reads its cost
+    // whatever its age; what the window bounds is only what the picker offers.
+    const rcRes = owner
+      ? (await Promise.allSettled([
+        fetchGymCosts(supabase, tenantId, isoDate(new Date(Date.now() - 365 * DAY)), isoDate(new Date(Date.now() + DAY))),
+      ]))[0]
+      : null;
+
+    setSpend(sRes && sRes.status === 'fulfilled' ? sRes.value : null);
+    setSpendCosts(scRes && scRes.status === 'fulfilled' ? scRes.value : null);
+    setRecentCosts(rcRes && rcRes.status === 'fulfilled' ? rcRes.value : null);
+
     const trouble = [
       failure(kRes, 'the equipment register'),
       failure(cRes, "the coming week's classes"),
       failure(lRes, 'the maintenance and incident log'),
+      sRes ? failure(sRes, 'what this gym’s maintenance has cost') : null,
+      scRes ? failure(scRes, 'the costs behind those maintenance records') : null,
+      rcRes ? failure(rcRes, 'the costs a repair could be linked to') : null,
     ].filter((s): s is string => s !== null);
     setErr(trouble.length === 0 ? null : trouble.join(' · '));
 
-    // Whole means all three came back. `useFetched` stamps only on a whole
+    // Whole means every read came back. `useFetched` stamps only on a whole
     // read, so a register read without the coming week's classes leaves the
     // stamp where it was rather than dating a seat count nobody computed.
-    return settledLanded([kRes, cRes, lRes]);
+    return settledLanded([kRes, cRes, lRes, ...(sRes ? [sRes] : []), ...(scRes ? [scRes] : []), ...(rcRes ? [rcRes] : [])]);
   }, []);
 
   useEffect(() => {
@@ -151,7 +228,7 @@ export default function EquipmentPage() {
       if (who === ME_UNREADABLE) { setAuthUnread(true); return; }
       setAuthUnread(false);
       setMe(who);
-      if (!who?.tenantId) { setKit([]); setClasses([]); setLog([]); return; }
+      if (!who?.tenantId) { setKit([]); setClasses([]); setLog([]); setSpend([]); return; }
       // The error is read off the result. Not because the name matters — it is
       // a label — but because "we could not ask" and "there is no gym" must not
       // arrive at the rail as the same null. See the Shell's gymNameUnread prop.
@@ -174,7 +251,7 @@ export default function EquipmentPage() {
    * so it also moves under a tab nobody has touched.
    */
   const { at: readAt, busy: refetching, refresh } = useFetched(
-    () => (me?.tenantId ? load(me.tenantId) : Promise.resolve(false)),
+    () => (me?.tenantId ? load(me.tenantId, me.role === 'owner') : Promise.resolve(false)),
   );
 
   // The first read. Keyed on the tenant id rather than fired at the end of the
@@ -298,6 +375,18 @@ export default function EquipmentPage() {
         rows={log} kit={kit} unread={unread(log)} today={today}
         ccy={ccy} tenantId={tenantId} me={me} onChange={refresh}
       />
+      {/* Owner only, and not because the maintenance is private — a trainer
+          reads all of that already. `gym_costs` is the owner's alone in part
+          700 and a trainer's read of it comes back EMPTY WITH NO ERROR, so
+          showing them this section would tell them none of the gym's servicing
+          is in the books. Hiding it is the honest answer; a half-answer here is
+          a wrong one. */}
+      {me.role === 'owner' ? (
+        <WhatItHasCost
+          entries={spend} costs={spendCosts} pickable={recentCosts} kit={kit}
+          unread={unread(spend)} onChange={refresh}
+        />
+      ) : null}
       <AddKit tenantId={tenantId} onChange={refresh} />
     </Shell>
   );
@@ -499,6 +588,288 @@ function History({ rows, kit, unread, today, ccy, tenantId, me, onChange }: {
           empty="Nothing has been recorded. Until this wave the product kept one date per machine and deleted the note, so an empty log here is the state everything was in rather than a gym that has never serviced anything."
         />
       )}
+    </Section>
+  );
+}
+
+/* ── what the kit has cost, out of the books ───────────────────────────────── */
+
+/**
+ * The two halves of maintenance spend, joined and never added.
+ *
+ * ── The gap ───────────────────────────────────────────────────────────────
+ *
+ * The log above holds every service and what it cost. `gym_costs` holds what
+ * the gym paid for. Until supabase/parts/2850 they could not point at each
+ * other, so a gym servicing a rack got to keep one answer or the other: the
+ * figure on the log is invisible to /accounting, /close, /tax and /costs, which
+ * all read `gym_costs` and none of which reads the log — so the gym's own P&L
+ * is short by the whole of its maintenance spend — and a cost typed on /costs
+ * says nothing about which machine, so the register cannot answer for it.
+ *
+ * ── What this section is allowed to add up ────────────────────────────────
+ *
+ * The BOOKS. `machineSpend` sums the linked `gym_costs` rows, deduplicated by
+ * cost id because one engineer's invoice covering three machines is one cost
+ * and three log entries. The figures typed on the log are NOT added to that —
+ * they are the same money written down twice, and summing both gives exactly
+ * double. Entries whose figure reached no cost row are listed underneath as
+ * money the gym's P&L does not know about, which is a finding and not a
+ * subtotal.
+ *
+ * Where the two disagree the disagreement is printed. One invoice over three
+ * machines, a call-out fee in the books and the parts on the log, a quote typed
+ * here and the bill typed there — all ordinary, and none of them a reason for
+ * this screen to pick a side.
+ */
+function WhatItHasCost({ entries, costs, pickable, kit, unread, onChange }: {
+  /** The links, out of `fetchSpendLinks`. Null is unread, never "none". */
+  entries: SpendEntry[] | null;
+  /** The costs those links name, by id. Null is unread — and `machineSpend`
+   *  refuses on it rather than reporting a gym whose servicing is all off the
+   *  books. */
+  costs: Map<string, GymCost> | null;
+  /** A year of costs, for the picker. Null is a read that failed, in which case
+   *  nothing can be linked and the reason is said rather than the control
+   *  quietly being empty. */
+  pickable: GymCost[] | null;
+  kit: Equipment[] | null;
+  unread: Unread;
+  onChange: () => void;
+}) {
+  /** Which entry somebody is linking, and to what. */
+  const [linking, setLinking] = useState<SpendEntry | null>(null);
+  const [costId, setCostId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+
+  // The read's own status, in the vocabulary the library gates on. A failed
+  // read is 'error' and an unfinished one 'loading'; neither may be counted,
+  // and `machineSpend` is what refuses rather than each call site remembering.
+  const status: 'loading' | 'ready' | 'error' =
+    unread === 'loading' ? 'loading' : unread === 'failed' ? 'error' : 'ready';
+
+  const kitName = useMemo(
+    () => new Map((kit ?? []).map((e) => [e.id, e.name] as const)),
+    [kit],
+  );
+
+  /** One row per machine that has any maintenance money against it, plus one
+   *  for the entries that name no machine at all — an incident on a wet floor
+   *  still costs a gym money, and dropping it would understate the total. */
+  const perMachine = useMemo(() => {
+    const by = new Map<string, SpendEntry[]>();
+    for (const e of entries ?? []) {
+      if (e.costId == null && e.costCents == null) continue;
+      const key = e.equipmentId ?? '';
+      const list = by.get(key);
+      if (list) list.push(e); else by.set(key, [e]);
+    }
+    return [...by.entries()].map(([key, list]) => ({
+      key: key || 'none',
+      // The live name wins while there is one; `equipment_label` is what part
+      // 186 keeps for a machine that has since been retired, and without it a
+      // spend line reads "somebody serviced something".
+      name: (key && kitName.get(key)) || list.find((e) => e.equipmentLabel)?.equipmentLabel || null,
+      entries: list,
+      spend: machineSpend(list, costs, status),
+    })).sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+  }, [entries, costs, status, kitName]);
+
+  /** Everything with a figure on the log and no cost behind it, newest first —
+   *  the working list for getting a fortnight of repairs into the accounts. */
+  const offBooks = useMemo(
+    () => (status === 'ready' && entries
+      ? offBooksFirst(entries.filter((e) => !e.costId && e.costCents != null))
+      : null),
+    [entries, status],
+  );
+
+  const chosen = (pickable ?? []).find((c) => c.id === costId) ?? null;
+  const blocker = linking ? linkBlocker(linking, chosen) : null;
+
+  const link = async () => {
+    if (!linking || blocker || !chosen) return;
+    setBusy(true); setMsg(null); setDone(null);
+    try {
+      await linkLogToCost(supabase, linking.id, chosen.id);
+      setDone(`Linked. That repair now counts towards what ${linking.equipmentLabel ?? 'this machine'} has cost, out of the cost row — the figure on the log is the same money and is not added to it.`);
+      setLinking(null); setCostId('');
+      onChange();
+    } catch (e: any) {
+      setMsg(String(e?.message ?? e));
+    } finally { setBusy(false); }
+  };
+
+  const unlink = (e: SpendEntry) => {
+    unlinkLogFromCost(supabase, e.id)
+      .then(() => { setMsg(null); setDone('Unlinked. Both records are still there — only the sentence joining them has gone.'); onChange(); })
+      .catch((err: any) => setMsg(String(err?.message ?? err)));
+  };
+
+  const machineCols: Column<typeof perMachine[number]>[] = [
+    { key: 'name', header: 'Machine', value: (r) => r.name,
+      render: (r) => (r.name ? <>{r.name}</> : <span className="dash">not against a machine</span>) },
+    { key: 'spend', header: 'In the books', value: (r) => (r.spend.state === 'known' ? r.spend.costs : null), numeric: true,
+      render: (r) => {
+        if (r.spend.state !== 'known') return <span className="dash">{r.spend.why}</span>;
+        const { pots, unlabelled, unpriced } = r.spend.taken;
+        if (!pots.length) {
+          return <span className="dash">nothing of this is in the books</span>;
+        }
+        return (
+          <>
+            {/* One line per currency and never a sum across them. A gym that
+                paid a British engineer in pounds and a German one in euros has
+                two amounts of money, not one figure. */}
+            {pots.map((p) => <div key={p.currency}>{money(p.minorUnits, p.currency)}</div>)}
+            {unlabelled + unpriced > 0 ? (
+              <div style={{ color: 'var(--warn)', fontSize: 11.5 }}>
+                {unlabelled + unpriced} cost{unlabelled + unpriced === 1 ? '' : 's'} not in that figure
+              </div>
+            ) : null}
+          </>
+        );
+      } },
+    { key: 'costs', header: 'Cost rows', value: (r) => (r.spend.state === 'known' ? r.spend.costs : null), numeric: true,
+      render: (r) => (r.spend.state === 'known'
+        ? <>{r.spend.costs}</>
+        : <span className="dash">—</span>) },
+    { key: 'gap', header: 'Not in the books', value: (r) => (r.spend.state === 'known' ? r.spend.offBooks.length : null), numeric: true,
+      render: (r) => {
+        if (r.spend.state !== 'known') return <span className="dash">—</span>;
+        const n = r.spend.offBooks.length;
+        return n === 0 ? <span className="dash">none</span> : <span style={{ color: 'var(--warn)' }}>{n}</span>;
+      } },
+    { key: 'says', header: 'The two records', value: (r) => (r.spend.state === 'known' ? r.spend.disagrees.length : null),
+      render: (r) => {
+        if (r.spend.state !== 'known') return <span className="dash">—</span>;
+        const d = r.spend.disagrees;
+        if (!d.length) return <span className="dash">agree</span>;
+        const ccyGap = d.filter((x) => x.kind === 'currency').length;
+        return (
+          <span style={{ color: ccyGap ? 'var(--crit)' : 'var(--warn)' }}>
+            {ccyGap
+              ? `${ccyGap} in a different currency from the cost`
+              : `${d.length} differ${d.length === 1 ? 's' : ''} from the cost`}
+          </span>
+        );
+      } },
+  ];
+
+  const gapCols: Column<SpendEntry>[] = [
+    { key: 'machine', header: 'Machine', value: (e) => e.equipmentLabel,
+      render: (e) => ((e.equipmentId && kitName.get(e.equipmentId)) || e.equipmentLabel
+        ? <>{(e.equipmentId && kitName.get(e.equipmentId)) || e.equipmentLabel}</>
+        : <span className="dash">not against a machine</span>) },
+    { key: 'kind', header: 'What', value: (e) => e.kind },
+    { key: 'when', header: 'When', value: (e) => e.happenedOn },
+    { key: 'amount', header: 'On the log', value: (e) => e.costCents, numeric: true,
+      render: (e) => (e.costCents == null
+        ? <span className="dash">no figure</span>
+        : <>{money(e.costCents, e.currency)}</>) },
+    { key: 'link', header: '', align: 'right', value: () => null,
+      render: (e) => (
+        <button type="button" style={linkBtn}
+                onClick={() => { setLinking(e); setCostId(''); setMsg(null); setDone(null); }}
+                aria-label={`Link the ${e.kind} on ${e.happenedOn} to a cost in the books`}>
+          Link to a cost
+        </button>
+      ) },
+  ];
+
+  const linked = useMemo(
+    () => (entries ?? []).filter((e) => !!e.costId),
+    [entries],
+  );
+
+  return (
+    <Section
+      title="What the kit has cost"
+      sub="Maintenance money, read out of the gym's own books and joined to the machine it was spent on."
+    >
+      <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 12.5, maxWidth: '90ch' }}>
+        {SPEND_COMES_FROM_THE_BOOKS_NOTE}
+      </p>
+      {unread ? <Unresolved state={unread} what="what this gym's maintenance has cost" /> : (
+        <>
+          <DataTable noun="machines with maintenance spend"
+            rows={perMachine} columns={machineCols} rowKey={(r) => r.key}
+            empty="No maintenance money is recorded against any machine — no cost has been linked to a service, and no service carries a figure. That is a statement about the record, not about the engineers."
+          />
+          {offBooks && offBooks.length ? (
+            <div style={{ borderTop: '1px solid var(--ring)' }}>
+              <div style={{ padding: '11px 14px' }}>
+                <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>Recorded on the log, not in the books</h3>
+                <p style={{ margin: '4px 0 0', color: 'var(--ink3)', fontSize: 12, maxWidth: '86ch' }}>
+                  {offBooksNote(offBooks.length)}
+                </p>
+              </div>
+              <DataTable noun="maintenance records not in the books"
+                rows={offBooks} columns={gapCols} rowKey={(e) => e.id} empty="—" />
+            </div>
+          ) : null}
+          {linked.length ? (
+            <p style={{ margin: 0, padding: '11px 14px', borderTop: '1px solid var(--ring)', color: 'var(--ink3)', fontSize: 12, maxWidth: '90ch' }}>
+              {SPEND_IS_NOT_RECONCILED_NOTE}{' '}
+              {linked.length === 1
+                ? 'One maintenance record is linked to a cost.'
+                : `${linked.length} maintenance records are linked to a cost.`}
+              {' '}
+              <button type="button" style={linkBtn} onClick={() => { setLinking(linked[0]); setCostId(''); }}
+                      aria-label="Change which cost a linked maintenance record points at">
+                Change one
+              </button>
+            </p>
+          ) : null}
+        </>
+      )}
+      {msg ? <Banner tone="crit">{msg}</Banner> : null}
+      {done ? <Banner>{done}</Banner> : null}
+      {linking ? (
+        <div style={{ borderTop: '1px solid var(--ring)' }}>
+          <div style={formRow}>
+            <span style={{ fontSize: 12.5, color: 'var(--ink2)', maxWidth: '44ch' }}>
+              The {linking.kind} on <span className="mono">{linking.happenedOn}</span>
+              {linking.equipmentLabel ? <>, on {linking.equipmentLabel},</> : null}
+              {' '}is this cost in the books:
+            </span>
+            <select value={costId} onChange={(e) => setCostId(e.target.value)}
+                    style={{ ...field, flex: 2, minWidth: 260 }}
+                    aria-label="The cost in the books that this maintenance record's money is">
+              <option value="">
+                {pickable === null ? 'The costs could not be read' : 'Choose a cost'}
+              </option>
+              {(pickable ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.paidOn} · {gymCostCategoryLabel(c.category)} · {c.description}
+                  {c.amountCents == null || !c.currency ? '' : ` · ${money(c.amountCents, c.currency)}`}
+                </option>
+              ))}
+            </select>
+            <button type="button" style={primaryBtn} disabled={busy || !!blocker || !chosen} onClick={link}>
+              {busy ? 'Linking…' : 'Link it'}
+            </button>
+            {linking.costId ? (
+              <button type="button" style={linkBtn} onClick={() => { const e = linking; setLinking(null); unlink(e); }}>
+                Unlink it
+              </button>
+            ) : null}
+            <button type="button" style={linkBtn} onClick={() => { setLinking(null); setMsg(null); }}>Leave it</button>
+          </div>
+          {blocker ? (
+            <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '84ch' }}>{blocker}</p>
+          ) : null}
+          <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '88ch' }}>
+            Linking records that this repair&rsquo;s money is that cost. It copies no figure either
+            way and creates nothing: if the money is not in the books yet, record it on the{' '}
+            <a href="/costs" style={{ color: 'var(--brand)' }}>costs screen</a> first. One
+            engineer&rsquo;s invoice covering three machines is one cost linked from three records,
+            and it counts once.
+          </p>
+        </div>
+      ) : null}
     </Section>
   );
 }

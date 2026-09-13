@@ -21,6 +21,7 @@ import { maintenanceFor } from '../../src/lib/nutrition';
 import { num } from '../../src/lib/format';
 import { View, Text, TextInput, Pressable, ScrollView, Modal, Alert, KeyboardAvoidingView, Platform, AppState } from 'react-native';
 import { GuardedImage } from '../../src/ui/GuardedImage';
+import { SessionSteps } from '../../src/ui/SessionSteps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { hrFreshness, staleHrNote } from '../../src/lib/hrFreshness';
@@ -5479,9 +5480,23 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
             the browser risks the OS reclaiming the app and taking the whole
             session with it. "No demonstration yet" is the honest answer; losing
             an hour of logged work to a web search is not a fair price for it. */}
-        {demoOpen ? (
+        {demoOpen ? (<>
           <SessionDemo t={t} name={nameOf(ex)} videos={videos} videoStatus={videoStatus} preferTrainerId={preferTrainerId} />
-        ) : null}
+          {/* The words, under the picture. `exercises.instructions` and `tips`
+              were read by exactly ONE screen — the catalogue's own — so a member
+              standing at the rack got a clip or an animation and no cue at all,
+              on the screen where the cue is the thing they need. Same shape as
+              the `met` column: populated, and nobody asked.
+
+              `nameOf(ex)`, NOT `shownName(ex)`. The catalogue is keyed by the
+              stored English identity, so a translated name would look up
+              nothing and report every movement as having no instructions.
+
+              Inside `demoOpen` on purpose: it preserves the property the
+              disclosure above exists for — no catalogue read happens when the
+              member presses Start. */}
+          <SessionSteps name={nameOf(ex)} />
+        </>) : null}
 
         {/* Swap this movement, from inside the session. See `canSwap` above for
             why it goes away the moment a set is logged, and why that is not a

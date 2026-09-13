@@ -1693,11 +1693,15 @@ export default function ClientScreen() {
               )}
             </View>
             <Cta label={`Book ${who} a Session`} wide onPress={go('/(trainer)/calendar')} />
+            {/* The builder is the Programs TAB, so unlike every other row on
+                this screen it does not arrive with a way back to this record.
+                It is the only destination here handed an origin; the rest are
+                their own screens and carry their own Back. */}
             <View style={{ marginTop: sp.md }}>
               <ListRow icon="grid" title={programme ? 'Their Program' : `Build ${who} a Program`}
                 note={programmeLine(ap.status, programme?.title ?? null, programme?.days.length ?? null, who)}
                 tone={ap.status === 'error' ? t.warn : undefined}
-                onPress={go('/(trainer)/builder')} />
+                onPress={() => { if (id) router.push({ pathname: '/(trainer)/builder', params: { clientId: id, name: fullName, from: 'trainerClient' } } as any); }} />
             </View>
           </Section>
         ) : null}

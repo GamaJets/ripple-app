@@ -40,6 +40,16 @@ import { useExerciseVideos } from '../../src/ui/exerciseVideos';
 import { ExerciseVideo } from '../../src/ui/ExerciseVideo';
 import { DemoAnimation, FrameLoop } from '../../src/ui/ExerciseDemo';
 import { videoForExercise } from '../../src/lib/exerciseId';
+// ── which demonstration, out of the several this movement may have ─────────
+//
+// This screen renders the winner of a four-way order and said nothing about the
+// losers, which is right for the client it previews and wrong for the coach
+// reading it. Two coaches reported the same shape from opposite ends: one had
+// filmed a movement twice and could not tell which take their clients were
+// getting, and one spent an evening filming a lift a colleague at the same gym
+// had already covered. Both facts were in `videos` the whole time.
+import { clipSources, clipSourceLine } from '../../src/lib/clipSources';
+import { isWhole } from '../../src/ui/loadStatus';
 import { catalogueValue as cap } from '../../src/lib/format';
 import { FRAMES_ARE_UNHOSTED, demoCaption } from '../../src/lib/exerciseMedia';
 import { useExerciseMedia } from '../../src/ui/useExerciseMedia';
@@ -97,6 +107,19 @@ export default function TrainerExercise() {
     () => Promise.all([reloadDetail(), reloadVideos()]),
     [reloadDetail, reloadVideos],
   ));
+
+  // Everything held for this movement, and which of it is on screen. Built from
+  // the SAME values the branches below render — `animUrl` and `frames` after
+  // signing and after the licence gate, not from the raw columns — so the note
+  // cannot say the catalogue animation is available on a build that will not
+  // play it.
+  const sources = useMemo(
+    () => clipSources(name, videos, user?.id ?? null, { animation: animUrl != null, frames: frames.length > 0 }),
+    [name, videos, user?.id, animUrl, frames.length],
+  );
+  // 'partial' is not 'ready': a clip we matched is a fact, but "these are all of
+  // them" is a claim about a library we only read a prefix of.
+  const sourceNote = clipSourceLine(sources, isWhole(vidStatus));
 
   const chips = [detail?.equipment, detail?.level, detail?.mechanic, detail?.force]
     .filter((x): x is string => !!x)
@@ -188,6 +211,30 @@ export default function TrainerExercise() {
                 ? 'The exercise catalogue is only available once you are signed in, so this screen could not look this movement up. Sign in and its illustration, muscles and steps appear here.'
                 : 'This movement has no catalogue entry, so there is no illustration, description or muscle data for it. You can still put it in a program — your client sees the name you typed and whatever you write in the note.'} />
         )}
+
+        {/* Directly under the thing it is about. Gated on the catalogue read
+            having landed for the same reason the media above is: under 'error'
+            none of those branches ran, so "your client sees your own clip" would
+            describe a screen nobody is looking at. Null on the ordinary case —
+            one demonstration, and it is the one playing — so this is silent on
+            most movements and worth reading when it is not.
+
+            The condition is deliberately the one the media block above is drawn
+            under, character for character, so the caption and the thing it
+            describes appear and disappear together. `isWhole` here would leave
+            a picture on screen with nothing saying which of four it is. Every
+            claim in the caption that depends on having read the whole clip
+            library is gated where it is built, on `isWhole(vidStatus)`. */}
+        {/*
+          * whole-ok: `status` here is useExerciseDetail's, and that provider
+          * fetches ONE ROW by name. There is no page to truncate, so 'partial'
+          * is not among the answers it can give — and were it ever made
+          * pageable, this caption would still have to appear under exactly the
+          * conditions the picture it describes appears under.
+          */}
+        {status !== 'loading' && status !== 'error' && sourceNote ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{sourceNote}</Text>
+        ) : null}
 
         {FRAMES_ARE_UNHOSTED && frames.length ? (
           <View style={{ marginTop: sp.sm }}>

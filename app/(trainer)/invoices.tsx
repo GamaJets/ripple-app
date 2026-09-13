@@ -68,6 +68,8 @@ import {
   settleInvoice, setInvoiceChaseFrom,
   type InvoiceCurrency,
 } from '../../src/ui/coachInvoices';
+import { tellClientSettled } from '../../src/ui/invoiceSettled';
+import { settleNoticeBlocker, settleNoticeLine } from '../../src/lib/invoiceSettled';
 import { useMyCoachLogo } from '../../src/ui/coachLogo';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
@@ -440,17 +442,37 @@ export default function Invoices() {
     setBusy(false);
     if (!res.ok) { Alert.alert('Not recorded', res.error || 'Nothing changed.'); return; }
     const no = invoiceNumber(settleTarget.seq);
+    const billTo = settleTarget.billTo;
     setSettleTarget(null);
     setSettleDay('');
     setSettleNote('');
     await load();
-    // The client is deliberately not told, and it is said out loud rather than
-    // left to be discovered — a coach who assumes a receipt went out will not
-    // send one. See `settleInvoice` for why: a settlement is the coach agreeing
-    // with something the client already knows they did.
+    /**
+     * The client is told, which is new, and the coach is told which of three
+     * things happened to that notice.
+     *
+     * This used to say "Nobody has been told" — accurate, and the defect. A
+     * coach marked an invoice settled and the person who paid learned nothing;
+     * the only route to them was the coach remembering the share sheet.
+     *
+     * It is a NOTIFICATION rather than a screen, and that is forced rather than
+     * chosen: part 138 names and DROPS `coach_invoices_client_read`, so a
+     * client cannot read this row at all and there is no client invoice screen
+     * to send them to. The whole argument is in src/lib/invoiceSettled.ts. No
+     * new permission was needed — `notify_users()` has always allowed a coach
+     * to write into their own client's inbox and re-checks that on the server.
+     *
+     * `res.invoice` and not `settleTarget`: the body quotes `settled_on` as the
+     * SERVER stored it, so a day the function adjusted or refused cannot reach
+     * the client as a fact. The count `recordInbox` returns is what decides
+     * which sentence is drawn — an undeployed function, a refusal and a client
+     * who has left the roster all write nothing, and all three have to read as
+     * "send it to them yourself" rather than as silence.
+     */
+    const notified = res.invoice ? await tellClientSettled(res.invoice) : false;
     Alert.alert(
       `Invoice ${no} recorded as settled`,
-      'It is off your chase lists and out of the outstanding figure. Nobody has been told — send them the document again if you want them to have a copy that says it was paid.',
+      'It is off your chase lists and out of the outstanding figure.\n\n' + settleNoticeLine(notified, billTo),
     );
   };
 
@@ -1352,6 +1374,27 @@ export default function Invoices() {
               <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>
                 This records your own statement that the money arrived. Nothing about the document changes — it still says what it said when you issued it — and this is written once: if the money later goes back out, that is a refund or a chargeback and it happened on its own day. It cannot be undone, and a settled invoice cannot be voided either.
               </Text>
+              {/* ── who hears about it, said BEFORE the tap ──────────────────
+                  This settlement now writes the client an inbox row, and a
+                  coach is entitled to know that before they record it rather
+                  than from the alert afterwards — it is a message about their
+                  customer's money, sent under their name.
+
+                  Both halves are drawn, because both are wrong to leave
+                  unsaid. Where there is somebody to tell, the sheet says what
+                  they will be told and that it is worded as the coach's own
+                  record and not as a receipt. Where there is not — an invoice
+                  billed to a name with no account here, which is most of them
+                  for most coaches — it says so, so a coach does not walk away
+                  believing a notice went out. `settleNoticeBlocker` is the same
+                  reader `tellClientSettled` uses, so the sheet cannot promise
+                  something the write will not do. */}
+              {settleTarget ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  {settleNoticeBlocker({ ...settleTarget, settledOn: settleDay.trim() || today })
+                    ?? `${settleTarget.billTo} gets an inbox row saying you have recorded this one as paid, with the amount and the day you give below. It is worded as your own record rather than as a receipt, because that is what it is, and it carries no link — they still cannot read the document here, so send it to them if they want a copy.`}
+                </Text>
+              ) : null}
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>The day it arrived</Text>
               {/* A box that opens a month, not a box that raises a keyboard over
                   itself. The refused days are GREYED OUT in the sheet rather than

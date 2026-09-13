@@ -80,6 +80,7 @@ import {
 import { paceNote } from '../../src/lib/interventions';
 import { cadenceLine, overdueNote } from '../../src/lib/cadence';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
+import { OvernightChecks } from '../../src/ui/OvernightChecks';
 import { BACK_ICON } from '../../src/ui/direction';
 import { useScrollPad } from '../../src/ui/keyboardPad';
 
@@ -449,6 +450,23 @@ export default function Nudges() {
             ) : null}
           </>
         ) : null}
+
+        {/* ── what ran while nobody was looking ─────────────────────────────
+            OUTSIDE the chain above on purpose. Everything before this is the
+            drift read; this reads the coach's own `notifications` rows, and
+            the state it exists for is precisely the one where the two
+            disagree — a screen saying "nobody has broken their own pattern"
+            while the nightly pass that decides that has raised on every run
+            since Tuesday.
+
+            That is not hypothetical. For a day and a night in September all
+            five overnight passes failed on every single run (see the header of
+            supabase/parts/2560), and to every coach in the product it looked
+            like a calm week. src/lib/nightlyPasses.ts carries the whole
+            argument, including the part Repple cannot answer: whether a pass
+            RAN is kept in a table the app is not allowed to read. */}
+        <Rule />
+        <OvernightChecks />
       </ScrollView>
 
       <Modal visible={!!drafting} animationType="slide" onRequestClose={() => setDrafting(null)}>

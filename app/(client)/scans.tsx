@@ -440,6 +440,33 @@ export default function Scans() {
   );
   const muscleShading7 = useMemo(() => diagramShading(muscleBoard7), [muscleBoard7]);
 
+  // Four states, four sentences. A body with nothing lit is the same picture
+  // whether the read failed, part of the week never came back, the member is
+  // new, or they genuinely rested — and those are four different facts. The
+  // 'partial' branch is not decoration: without it a truncated read falls
+  // through to "Nothing logged in seven days", which is a claim about the
+  // member's week that nothing has established.
+  const muscleWeek = useMemo((): { head: string; body: string; mark?: string } => {
+    if (muscleBoard7.status === 'loading') {
+      return { head: 'Reading your week\u2026',
+        body: 'The body diagram, how long each muscle has rested, and what you train most and least.' };
+    }
+    if (muscleBoard7.status === 'error') {
+      return { head: 'Could not read this', mark: t.crit,
+        body: 'Your training is not affected — this panel could not read it.' };
+    }
+    if (muscleBoard7.status === 'partial') {
+      return { head: 'Part of your week is missing', mark: t.warn,
+        body: 'Some of the last seven days did not come back. What is shaded was trained; there may be more.' };
+    }
+    if (muscleShading7.hasWork) {
+      return { head: 'See it on the body',
+        body: 'The body diagram, how long each muscle has rested, and what you train most and least.' };
+    }
+    return { head: 'Nothing logged in seven days',
+      body: 'Log a session and the muscles it worked appear here.' };
+  }, [muscleBoard7.status, muscleShading7.hasWork, t.crit, t.warn]);
+
   const buildReport = () => {
     // `cd.weightSeries` is passed, and it is the difference between a document
     // that says a calisthenics member did almost no work and one that states
@@ -2336,32 +2363,35 @@ export default function Scans() {
           <SectionHead title="Muscles Worked" note="last 7 days" />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Your Muscles. Opens the body diagram, recovery map and muscle rankings."
+            accessibilityLabel={`Your Muscles. ${muscleWeek.head}. ${muscleWeek.body} Opens the body diagram, recovery map and muscle rankings.`}
             onPress={() => router.push('/(client)/muscles')}
             style={{ flexDirection: 'row', alignItems: 'center', gap: sp.lg }}
           >
+            {/* captions={false} because the figure sits in a ROW here, so its
+                own root shrink-wraps to about the width of the silhouette and
+                any sentence inside it wraps one letter per line. The words it
+                would have written are written below instead, in the column
+                that has the width for them — including the 'partial' one,
+                which is the whole reason this cannot simply be dropped. */}
             <MuscleBody
               side="front"
               intensity={muscleShading7.byLayer}
               status={muscleBoard7.status}
               height={150}
               surface={t.surface2}
+              captions={false}
             />
             <View style={{ flex: 1, gap: 6 }}>
-              {/* Three states, three sentences. A body with nothing lit is the
-                  same picture whether the read failed, the member is new, or
-                  they genuinely rested — and those are not the same fact. */}
               <Text style={{ ...ty.body, fontWeight: '600', color: t.ink }}>
-                {muscleBoard7.status === 'loading' ? 'Reading your week\u2026'
-                  : muscleBoard7.status === 'error' ? 'Could not read this'
-                  : muscleShading7.hasWork ? 'See it on the body'
-                  : 'Nothing logged in seven days'}
+                {muscleWeek.head}
               </Text>
-              <Text style={{ ...ty.caption, color: t.ink2 }}>
-                {muscleBoard7.status === 'error'
-                  ? 'Your training is not affected — this panel could not read it.'
-                  : 'The body diagram, how long each muscle has rested, and what you train most and least.'}
-              </Text>
+              {/* A status colour is a 6px mark and never the colour of a
+                  sentence — amber body text fails at 4.5:1 on this surface. */}
+              {muscleWeek.mark ? (
+                <Flag tone={muscleWeek.mark}>{muscleWeek.body}</Flag>
+              ) : (
+                <Text style={{ ...ty.caption, color: t.ink2 }}>{muscleWeek.body}</Text>
+              )}
             </View>
           </Pressable>
         </Section>

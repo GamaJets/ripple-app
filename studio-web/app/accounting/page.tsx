@@ -38,7 +38,7 @@ import { settledLanded } from '@lib/readLanded';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchPayments, money, type GymPayment } from '@lib/gymRecord';
 import {
-  monthWindow, recentMonths, monthKeyOf, monthEnded, inMonth,
+  monthWindow, recentMonths, monthKeyOf, monthEnded, inMonth, isOverdue,
   type MonthWindow,
 } from '@lib/monthEnd';
 import { isoDate } from '@lib/format';
@@ -99,11 +99,35 @@ import {
   standingLine, standingBlockers, STANDING_LABEL, CURRENT_FLAG_IS_NOT_A_PERIOD_NOTE,
   type TaxStanding, type TaxStandingDraft, type TaxStandingStatus,
 } from '@lib/gymTaxHistory';
+// Whether anything has actually been FILED for the period on screen. Part
+// 2641's sibling, and it carries the same rule with a heavier consequence: a
+// period no row covers is one NOBODY HAS ANSWERED FOR, never one this gym
+// failed to file for — which, printed over a quarter an accountant filed in a
+// portal Repple cannot see, is this product telling a business it is in
+// default. See supabase/parts/2910.
+import {
+  fetchTaxFilings, recordFiling, deleteFiling, filingsFor, kindsInUse, filingBlockers,
+  FILING_KINDS, FILING_KIND_LABEL, FILINGS_ARE_YOUR_OWN_RECORD,
+  type TaxFiling, type FilingKind, type FilingDraft,
+} from '@lib/taxFilings';
 import {
   createInvoice, setInvoiceStatus, settleInvoice, invoiceBlocker, parseAmount,
   dueAfter, isoDay, SETTABLE_INVOICE_STATUSES, INVOICE_STATUS_LABEL,
-  type InvoiceDraft,
+  type InvoiceDraft, type InvoiceStatus,
 } from '@lib/gymInvoices';
+// What the gym says it has DONE about what is late. The ageing table below has
+// always answered "who is overdue" exactly and answered nothing else, so an
+// owner who spent Monday morning working down it opened it on Thursday to the
+// same list in the same order — with nothing distinguishing the member who was
+// rung yesterday from the one nobody has spoken to since April. Every export
+// here is careful about the size of the claim: RECORDING A CHASE SENDS
+// NOTHING, and `CHASE_IS_A_RECORD_NOT_A_SEND` is printed above the form rather
+// than left in a help page. See supabase/parts/2820.
+import {
+  fetchInvoiceChases, recordChase, deleteChase, byInvoice, chaseState, chaseBlocker,
+  unchased, stalestChase, CHASE_VIA, CHASE_VIA_LABEL, CHASE_IS_A_RECORD_NOT_A_SEND,
+  type InvoiceChase, type ChaseVia,
+} from '@lib/invoiceChases';
 import {
   fetchMarks, markException, clearMark, markBlocker, partitionByMark, markKey,
   type MarkIndex, type MarkState, type ReconcileMark,
@@ -264,6 +288,33 @@ interface Books {
    * silently, on the page an accountant files from.
    */
   standings: Read<TaxStanding>;
+  /**
+   * What this gym says it has done to collect on its unpaid invoices
+   * (supabase/parts/2820).
+   *
+   * Its own read and its own failure, for a third reason on top of the two
+   * `drops` gives. The question this answers is asked of an ABSENCE — "which of
+   * these has nobody chased" — and a refused read has no rows either. Folded
+   * into the invoice query, a refusal would have printed "nobody has chased
+   * this" over a debt somebody rang about last week, which is the sentence that
+   * gets a member chased twice by two people or written off as unpursued.
+   *
+   * Read unscoped by month, like `drops`: the ageing table reaches back over
+   * every invoice ever issued, so one chased in June has to be explainable in
+   * September.
+   */
+  chases: Read<InvoiceChase>;
+  /**
+   * What this gym says it has FILED, for which stretch of days
+   * (supabase/parts/2910).
+   *
+   * Its own read and its own failure, for `standings`' two reasons and the one
+   * that makes this the most dangerous read on the page: the answer is taken
+   * off an ABSENCE, and the false sentence an empty read would produce is
+   * "nothing has been filed for this period" — about a business whose
+   * accountant filed it, in a portal this product has never seen.
+   */
+  filings: Read<TaxFiling>;
   /** The answers already given on this gym's reconciliation. Not scoped to the
    *  month: an exception raised in June is still an exception in September, and
    *  an answer keyed to a month would have to be given again each time. */
@@ -280,7 +331,7 @@ interface Books {
 const EMPTY: Books = {
   invoices: reading(), payments: reading(), settled: reading(), costs: reading(),
   receipts: reading(), receiptsWhole: true, drops: reading(), standings: reading(),
-  marks: new Map(), marksErr: null, online: reading(),
+  chases: reading(), filings: reading(), marks: new Map(), marksErr: null, online: reading(),
 };
 
 /* ── totals that refuse ────────────────────────────────────────────────────── */
@@ -419,7 +470,7 @@ export default function Accounting() {
     // empties the payments — and this screen would then report a month in which
     // the gym both billed nothing and took nothing, two wrong facts that agree
     // with each other and so look like a quiet month rather than a broken read.
-    const [iRes, pRes, sRes, mRes, oRes, cRes, dRes, tRes] = await Promise.allSettled([
+    const [iRes, pRes, sRes, mRes, oRes, cRes, dRes, tRes, hRes, fRes] = await Promise.allSettled([
       fetchInvoices(tenantId, mw.lastDay),
       fetchPayments(supabase, tenantId, since, until),
       fetchSettled(tenantId, mw.fromIso, mw.toIso),
@@ -444,6 +495,19 @@ export default function Accounting() {
       // from, and "was this business registered in September" is a question
       // that document has to be able to answer for itself.
       fetchTaxStandings(supabase, tenantId),
+      // What this gym says it has done about the invoices that are late. Its
+      // own read, because the answer is read off an ABSENCE of rows and a
+      // refusal folded into the invoice query would have produced "nobody has
+      // chased this" about invoices somebody chased last week. Unscoped by
+      // month for `fetchDrops`'s reason: the ageing table beside it reaches
+      // back over every invoice ever issued.
+      fetchInvoiceChases(supabase, tenantId),
+      // What this gym says it has filed. Read here rather than only on /tax
+      // because this is the page an accountant is handed, and "has this period
+      // been dealt with" is a question that document has to answer for itself
+      // — and because a refusal folded into another query would answer it
+      // "no", about a business that filed.
+      fetchTaxFilings(supabase, tenantId),
     ]);
 
     // The receipts, after the costs and only because of them: this read is
@@ -487,14 +551,16 @@ export default function Accounting() {
         receiptsWhole: recRes ? (recRes.status === 'fulfilled' && recRes.value.whole) : true,
         drops: landed(dRes, 'why this gym has not collected on some of its invoices'),
         standings: landed(tRes, 'what this gym has said about its tax registration'),
+        chases: landed(hRes, 'what this gym has done about its unpaid invoices'),
+        filings: landed(fRes, 'what this gym has filed'),
       },
     });
 
-    // Whole means all eight came back. `useFetched` stamps only on a whole read,
+    // Whole means all ten came back. `useFetched` stamps only on a whole read,
     // so a month whose settlements would not load leaves the stamp where it was
     // rather than dating a reconciliation that is missing one of the two
     // records it reconciles.
-    return settledLanded([iRes, pRes, sRes, mRes, oRes, cRes, dRes, tRes, ...(recRes ? [recRes] : [])]);
+    return settledLanded([iRes, pRes, sRes, mRes, oRes, cRes, dRes, tRes, hRes, fRes, ...(recRes ? [recRes] : [])]);
   }, []);
 
   useEffect(() => {
@@ -834,6 +900,8 @@ function Month({ at, zone, zoneErr, books, gymName, ccy, members, tenantId, me, 
                 tenantId={tenantId} me={me} onChange={onChange} />
       <Registration read={books.standings} rows={books.standings.rows ?? []} w={w}
                     tenantId={tenantId} me={me} onChange={onChange} />
+      <Filed read={books.filings} rows={books.filings.rows ?? []} w={w}
+             zone={zone} tenantId={tenantId} me={me} onChange={onChange} />
       <NetCash net={net} w={w} costs={books.costs} />
       <Register
         drops={books.drops} me={me}
@@ -842,6 +910,10 @@ function Month({ at, zone, zoneErr, books, gymName, ccy, members, tenantId, me, 
       />
       <Invoiced read={books.invoices} raised={raised} w={w} />
       <Ageing read={books.invoices} rows={outstanding} asAt={asAt} total={owedSum} />
+      <Chasing
+        read={books.chases} invoices={books.invoices} rows={outstanding} asAt={asAt}
+        zone={zone} tenantId={tenantId} me={me} onChange={onChange}
+      />
       <OnlineSales read={books.online} w={w} zone={zone} />
       <Reconcile
         books={books} w={w} inMonthPayments={inMonthPayments}
@@ -1540,6 +1612,244 @@ function Registration({ read, rows, w, tenantId, me, onChange }: {
             Record a registration period
           </button>
           {' · '}A stretch of days and what was true of them. {CURRENT_FLAG_IS_NOT_A_PERIOD_NOTE}
+        </p>
+      )}
+    </Section>
+  );
+}
+
+/* ── what was actually filed ───────────────────────────────────────────────── */
+
+/**
+ * Whether anything has been filed covering the month on screen, and the record
+ * of what.
+ *
+ * ── The gap ───────────────────────────────────────────────────────────────
+ *
+ * A gym files a return on its sales, a payroll return, a set of accounts. The
+ * product held no record of it, so an owner opening a period in September saw
+ * exactly what they saw in April — the figures, and no way to tell whether they
+ * had been filed on. "Have we dealt with this?" and "when did we file, and what
+ * was the reference?" both lived in an email folder.
+ *
+ * ── NOBODY HAS ANSWERED is not NOT FILED ─────────────────────────────────
+ *
+ * This is part 2641's rule and the harm is bigger here. Every gym running
+ * Repple today has recorded nothing for every period it has ever traded,
+ * because this table did not exist. "Nothing has been filed for Q3", printed
+ * over a quarter an accountant filed in a portal this product cannot see, is
+ * Repple telling a business it is in default — and an owner who reads it rings
+ * their accountant or files twice.
+ *
+ * So every sentence on this section comes out of `filingsFor`, which has four
+ * answers and no boolean, and taxFilings.test.ts sweeps every one of them for
+ * the words this screen may not say.
+ *
+ * ── And it shows only the kinds this gym actually files ───────────────────
+ *
+ * `kindsInUse` decides. Five rows of "nobody has answered" against every kind
+ * of return in the world is a block nobody reads, after which the one that
+ * matters is invisible too — the same argument the write-off column in the
+ * register makes for staying blank on a live invoice. A gym that has never
+ * filed a payroll return is not nagged about one; the form still offers all
+ * five, so the first one is recordable.
+ */
+function Filed({ read, rows, w, zone, tenantId, me, onChange }: {
+  read: Read<TaxFiling>; rows: TaxFiling[]; w: MonthWindow;
+  /** `tenants.timezone`. The day a return was filed on is the gym's day, not
+   *  the day it happens to be wherever the person recording it is sitting — and
+   *  this is the record of whether a deadline was met. */
+  zone: string | null;
+  tenantId: string; me: Me; onChange: () => void;
+}) {
+  // The GYM's day. `filingBlockers` refuses a filing dated into the future
+  // against it, which is the rule supabase/parts/2910 cannot hold —
+  // `current_date` is STABLE and Postgres rejects it in a CHECK.
+  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
+
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<FilingKind>('sales_tax');
+  const [periodFrom, setPeriodFrom] = useState(w.firstDay);
+  const [periodTo, setPeriodTo] = useState(w.lastDay);
+  const [filedOn, setFiledOn] = useState(today);
+  const [reference, setReference] = useState('');
+  const [filedBy, setFiledBy] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const status: 'loading' | 'ready' | 'error' =
+    read.state === 'loading' ? 'loading' : read.state === 'failed' ? 'error' : 'ready';
+
+  // Null under anything but a whole read — "this gym files these kinds" is
+  // itself a claim, and a failed read may not make it.
+  const used = kindsInUse(rows, status);
+
+  /**
+   * One line per kind this gym files, or — when the read did not come back —
+   * one line saying so.
+   *
+   * A gym that has recorded nothing at all still gets a line, under
+   * 'sales_tax', because otherwise the section would be silently empty on
+   * exactly the screens where the answer is "nobody has answered for this
+   * month" and that is the thing worth knowing.
+   */
+  const lines = useMemo(() => {
+    const kinds = used === null ? (['sales_tax'] as FilingKind[]) : (used.length ? used : (['sales_tax'] as FilingKind[]));
+    return kinds.map((k) => ({
+      kind: k,
+      label: FILING_KIND_LABEL[k],
+      answer: filingsFor(rows, k, w.firstDay, w.lastDay, status, w.label),
+    }));
+  }, [used, rows, w.firstDay, w.lastDay, w.label, status]);
+
+  const draft: FilingDraft = { kind, periodFrom, periodTo, filedOn, reference, filedBy };
+  const blockers = filingBlockers(draft, today);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (blockers.length) { setErr(blockers[0]); return; }
+    setBusy(true); setErr(null); setSaved(null);
+    try {
+      await recordFiling(supabase, tenantId, { ...draft, createdBy: me.id });
+      setSaved('Recorded. Every period this covers now carries that answer, and the ones it does not are still unanswered rather than unfiled.');
+      setReference(''); setFiledBy(''); setOpen(false);
+      onChange();
+    } catch (e: any) {
+      setErr(writeFailedText(e, {
+        what: 'That filing',
+        unchanged: 'nothing has been recorded and every period reads exactly as it did',
+        howToCheck: 'Reload this page and read the list below before entering it again, so one submission is not recorded twice.',
+      }));
+    } finally { setBusy(false); }
+  };
+
+  const remove = (f: TaxFiling) => {
+    deleteFiling(supabase, f.id)
+      .then(() => { setErr(null); setSaved(`That record has been removed. It is the record that has gone, not the filing — if the return really was submitted, record it again with the right details.`); onChange(); })
+      .catch((e: any) => setErr(writeFailedText(e, {
+        what: 'That record of a filing',
+        unchanged: 'it is still on the list and still answers for the period it covers',
+        howToCheck: 'Reload this page: the list carries whichever rows are actually stored.',
+      })));
+  };
+
+  const cols: Column<TaxFiling>[] = [
+    { key: 'kind', header: 'What', value: (f) => (f.kind ? FILING_KIND_LABEL[f.kind] : null),
+      render: (f) => (f.kind
+        ? <>{FILING_KIND_LABEL[f.kind]}</>
+        // Never relabelled as "other". A kind this build does not recognise
+        // must not be able to silently answer for a period a different return
+        // was due for.
+        : <span className="dash">a kind this console does not recognise</span>) },
+    { key: 'from', header: 'Covering', value: (f) => f.periodFrom,
+      render: (f) => <>{f.periodFrom} to {f.periodTo}</> },
+    { key: 'filed', header: 'Filed on', value: (f) => f.filedOn },
+    { key: 'by', header: 'By', value: (f) => f.filedBy,
+      render: (f) => f.filedBy ?? <span className="dash">not recorded</span> },
+    { key: 'ref', header: 'Reference', value: (f) => f.reference,
+      render: (f) => (f.reference
+        ? <span className="mono">{f.reference}</span>
+        : <span className="dash">none recorded</span>) },
+    { key: 'remove', header: '', align: 'right', value: () => null,
+      render: (f) => (
+        <button type="button" className="no-print" style={linkBtn} onClick={() => remove(f)}
+                aria-label={`Remove the record of what was filed on ${f.filedOn}`}>
+          Remove
+        </button>
+      ) },
+  ];
+
+  return (
+    <Section
+      title="What has been filed"
+      sub={`Whether anything is recorded as filed covering ${w.label}, and the reference for it. Repple files nothing and is told nothing — every row here is one somebody typed.`}
+    >
+      <Part read={read} what="what this gym has filed"
+            cost="whether anything has been filed for this month is unknown, which is NOT the same as nothing having been">
+        <>
+          <div style={{ borderBottom: '1px solid var(--ring)' }}>
+            {lines.map((l) => (
+              <p key={l.kind} style={{
+                margin: 0, padding: '10px 14px', fontSize: 13, maxWidth: '92ch',
+                color: l.answer.state === 'filed' ? 'var(--ink2)'
+                  : l.answer.state === 'partly' ? 'var(--warn)'
+                  : 'var(--ink3)',
+              }}>
+                <strong style={{ color: 'var(--ink2)' }}>{l.label}</strong>
+                {' — '}
+                {l.answer.line}
+              </p>
+            ))}
+          </div>
+          <DataTable noun="recorded filings"
+            rows={rows} columns={cols} rowKey={(f) => f.id}
+            empty="Nothing recorded. Every period on this screen therefore reads as one nobody has answered for — which is what it is, and is deliberately not the same as a period this gym did not file for."
+          />
+        </>
+      </Part>
+      {err ? <Banner tone="crit">{err}</Banner> : null}
+      {saved ? <Banner>{saved}</Banner> : null}
+      {open ? (
+        <form onSubmit={save} className="no-print" style={{ borderTop: '1px solid var(--ring)' }}>
+          <div style={formRow}>
+            <select value={kind} onChange={(e) => setKind(e.target.value as FilingKind)}
+                    style={{ ...field, flex: 2, minWidth: 240 }} aria-label="What was filed">
+              {FILING_KINDS.map((k) => <option key={k} value={k}>{FILING_KIND_LABEL[k]}</option>)}
+            </select>
+            <label style={dateLabel}>
+              covering
+              <input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)}
+                     style={{ ...field, width: 148 }} aria-label="The first day this filing covers" />
+            </label>
+            <label style={dateLabel}>
+              to
+              <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)}
+                     style={{ ...field, width: 148 }} aria-label="The last day this filing covers, inclusive" />
+            </label>
+            <label style={dateLabel}>
+              filed
+              <input type="date" value={filedOn} onChange={(e) => setFiledOn(e.target.value)}
+                     style={{ ...field, width: 148 }} aria-label="The day it was filed" />
+            </label>
+            <input value={filedBy} onChange={(e) => setFiledBy(e.target.value)} placeholder="Who filed it"
+                   style={{ ...field, flex: 1, minWidth: 150 }}
+                   aria-label="Who filed it — the owner, or the accountant's firm" />
+            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Reference"
+                   style={{ ...field, flex: 1, minWidth: 150 }}
+                   aria-label="The submission reference or receipt number" />
+            <button type="submit" disabled={busy || blockers.length > 0} style={primaryBtn}>
+              {busy ? 'Recording…' : 'Record it'}
+            </button>
+            <button type="button" style={linkBtn} onClick={() => { setOpen(false); setErr(null); }}>Leave it</button>
+          </div>
+          {/* Every reason at once rather than the first, so somebody who has
+              three fields wrong is not corrected three times. */}
+          {blockers.length ? (
+            <ul style={{ margin: '0 14px 12px', paddingLeft: 18, fontSize: 12.5, color: 'var(--warn)', maxWidth: '82ch' }}>
+              {blockers.map((b) => <li key={b} style={{ marginBottom: 4 }}>{b}</li>)}
+            </ul>
+          ) : null}
+          <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '88ch' }}>
+            The dates are the stretch the filing COVERS, both inclusive, and they need not be one of
+            this console&rsquo;s own periods &mdash; a financial year running from 1 April to 31 March
+            is recorded as exactly that. If a return was later amended, record the second filing as
+            well: both stay, because a later submission does not undo an earlier one.
+          </p>
+        </form>
+      ) : (
+        <p className="no-print" style={{ margin: 0, padding: '10px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '92ch' }}>
+          <button type="button" style={linkBtn} onClick={() => {
+            setOpen(true); setSaved(null);
+            // Seeded with the month on screen and the gym's today — a
+            // SUGGESTION, and the commonest case. An owner recording a quarter
+            // widens the dates; one recording last week's submission moves the
+            // filing day back.
+            setPeriodFrom(w.firstDay); setPeriodTo(w.lastDay); setFiledOn(today);
+          }}>
+            Record something filed
+          </button>
+          {' · '}{FILINGS_ARE_YOUR_OWN_RECORD}
         </p>
       )}
     </Section>
@@ -2417,6 +2727,303 @@ function Ageing({ read, rows, asAt, total }: {
           ) : null}
         </>
       </Part>
+    </Section>
+  );
+}
+
+/* ── chasing what is late ──────────────────────────────────────────────────── */
+
+/**
+ * What the gym has DONE about the invoices the section above says are late.
+ *
+ * ── The gap this fills ────────────────────────────────────────────────────
+ *
+ * Ageing answers "who is overdue" exactly, and answers nothing else. An owner
+ * who worked down that list on Monday — three emails, a phone call, a word at
+ * the desk — opened it on Thursday to the same list in the same order, with
+ * nothing on it separating the member who was rung yesterday from the one
+ * nobody has spoken to since April. So the same person gets chased twice by two
+ * people, or not at all because each assumed the other had; and at the year end
+ * `WRITE_OFF_PROMPT` asks why a debt is not being collected, about a debt whose
+ * honest answer is "we chased it four times" and which the gym cannot evidence.
+ *
+ * ── RECORDING A CHASE SENDS NOTHING, and this screen says so ─────────────
+ *
+ * Nothing here emails, messages or telephones anybody. The banner at the top of
+ * the section is `CHASE_IS_A_RECORD_NOT_A_SEND` and it is rendered every time
+ * rather than once in a help page, because the whole risk of this feature is an
+ * owner reading "Chased by email" as "Repple emailed them" — and then not
+ * ringing somebody, on the strength of a message that was never sent.
+ *
+ * `CHASE_VIA_LABEL` carries the same care in six strings: "By email" is a thing
+ * the gym did, "Email sent" would be a delivery this product is claiming.
+ *
+ * ── The invoice itself is never touched ──────────────────────────────────
+ *
+ * Not its status, not a stamp on it. Lateness here is `isOverdue` against the
+ * DUE DATE, which is the house rule and the reason 'overdue' is absent from
+ * `SETTABLE_INVOICE_STATUSES` — and a chase must not become a way of moving an
+ * invoice out of a band it genuinely sits in. It is also why this cannot be a
+ * column on `gym_invoices`: that table carries `gym_invoice_notify()`, which
+ * mails the member on a status write.
+ */
+function Chasing({ read, invoices, rows, asAt, zone, tenantId, me, onChange }: {
+  /** The chase log. Its own read and its own failure — see `Books.chases`. */
+  read: Read<InvoiceChase>;
+  /** The invoice read, so a section whose LIST is unknown says that rather than
+   *  drawing an empty working list under a heading about what is late. */
+  invoices: Read<Invoice>;
+  /** Everything still unpaid as at the reporting date, the same set the Ageing
+   *  section above bands. */
+  rows: Invoice[];
+  asAt: string;
+  zone: string | null;
+  tenantId: string; me: Me; onChange: () => void;
+}) {
+  // The GYM's day, for the date box and for "how long ago". It is NOT `asAt`:
+  // for a finished month that is the month end, and a chase made this morning
+  // did not happen on 31 August. The reader's day stays the fallback for a gym
+  // that has not set a zone, exactly as it does in `Register` above.
+  const today = gymDay(Date.now(), zone) ?? isoDate(new Date());
+
+  const [openFor, setOpenFor] = useState<Invoice | null>(null);
+  const [chasedOn, setChasedOn] = useState(today);
+  const [via, setVia] = useState<ChaseVia>('email');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const status: 'loading' | 'ready' | 'error' =
+    read.state === 'loading' ? 'loading' : read.state === 'failed' ? 'error' : 'ready';
+
+  const index = useMemo(() => (read.rows ? byInvoice(read.rows) : null), [read.rows]);
+
+  /**
+   * The invoices that are actually past their due date as at the reporting
+   * date.
+   *
+   * `isOverdue` and not the status column, which is the house rule and is why
+   * 'overdue' is not a status an owner can set. The cast is the one place the
+   * console's `string | null` meets the library's union, and it is safe in the
+   * direction that matters: a stored status outside the union falls through
+   * `!== 'open'` to false, so an unrecognised row is never CLAIMED to be late.
+   */
+  const overdue = useMemo(
+    () => rows.filter((i) => isOverdue({ status: i.status as InvoiceStatus, dueOn: i.dueOn }, asAt)),
+    [rows, asAt],
+  );
+
+  // Null under anything but a whole read of the log. An empty array here would
+  // be the claim "every overdue invoice has been chased", and a failed read is
+  // not entitled to make it.
+  const never = unchased(overdue, index, status);
+
+  // Of the ones that HAVE been chased, how long the longest-waiting has gone
+  // since its last chase. Built from each invoice's most recent chase, so an
+  // invoice rung twice counts once and at its newest. Invoices nobody has
+  // chased are excluded by `stalestChase` rather than given a huge number —
+  // they are on the list above instead, which is a different problem.
+  const stalest = useMemo(() => {
+    if (!index) return null;
+    const latest = overdue.map((i) => index.get(i.id)?.[0]).filter((c): c is InvoiceChase => !!c);
+    return stalestChase(latest, today);
+  }, [index, overdue, today]);
+
+  const openChase = (inv: Invoice) => {
+    setOpenFor(inv); setChasedOn(today); setVia('email'); setNote('');
+    setErr(null); setSaved(null);
+  };
+
+  const blocker = openFor
+    ? chaseBlocker({ invoiceId: openFor.id, chasedOn, via, note }, today, openFor.issuedOn)
+    : null;
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!openFor) return;
+    if (blocker) { setErr(blocker); return; }
+    setBusy(true); setErr(null); setSaved(null);
+    try {
+      await recordChase(supabase, tenantId, {
+        invoiceId: openFor.id, chasedOn, via, note, createdBy: me.id,
+      });
+      setSaved('Recorded against that invoice. Nothing was sent to anybody — this is the gym’s own note that it asked.');
+      setOpenFor(null); setNote('');
+      onChange();
+    } catch (e: any) {
+      setErr(writeFailedText(e, {
+        what: 'That chase',
+        // Both halves matter and the second is the one an owner will actually
+        // be wondering about at this moment.
+        unchanged: 'nothing has been recorded against the invoice, and nothing was sent to anybody either way',
+        howToCheck: 'Reload this page and read the invoice’s history before entering it again.',
+      }));
+    } finally { setBusy(false); }
+  };
+
+  const remove = (c: InvoiceChase) => {
+    deleteChase(supabase, c.id)
+      .then(() => { setErr(null); setSaved(`The chase dated ${c.chasedOn} has been removed. The others on that invoice are untouched.`); onChange(); })
+      .catch((e: any) => setErr(writeFailedText(e, {
+        what: 'That chase',
+        unchanged: 'it is still on the invoice and still counted in its history',
+        howToCheck: 'Reload this page: the history carries whichever rows are actually stored.',
+      })));
+  };
+
+  const cols: Column<Invoice>[] = [
+    { key: 'member', header: 'Member', value: (i) => i.memberName },
+    { key: 'due', header: 'Due', value: (i) => i.dueOn,
+      render: (i) => (i.dueOn ? <>{i.dueOn}</> : <span className="dash">none set</span>) },
+    { key: 'age', header: 'Days past due', value: (i) => (i.dueOn ? daysPast(i.dueOn, asAt) : null), numeric: true,
+      render: (i) => {
+        if (!i.dueOn) return <span className="dash">cannot be aged</span>;
+        const n = daysPast(i.dueOn, asAt);
+        return n == null ? <span className="dash">due date unreadable</span> : <>{n}</>;
+      } },
+    { key: 'amount', header: 'Amount', value: (i) => i.amountCents, numeric: true,
+      render: (i) => (i.amountCents == null
+        ? <span className="dash">no amount recorded</span>
+        : <>{money(i.amountCents, i.currency)}</>) },
+    // The column this whole section exists for. Three answers and never two:
+    // chased, not chased, and NOT KNOWN — the third is what a failed read gets,
+    // because "nobody has chased this" over a debt somebody rang about last
+    // week is the sentence that gets them rung twice.
+    { key: 'done', header: 'What the gym has done',
+      value: (i) => {
+        const s = chaseState(index?.get(i.id), status, today);
+        return s.state === 'never' ? 'nothing recorded' : s.line;
+      },
+      render: (i) => {
+        const s = chaseState(index?.get(i.id), status, today);
+        if (s.state === 'never') {
+          return <span style={{ color: 'var(--warn)' }}>No chase recorded</span>;
+        }
+        return <span style={{ color: s.state === 'unread' ? 'var(--ink3)' : 'var(--ink2)' }}>{s.line}</span>;
+      } },
+    { key: 'record', header: '', align: 'right', value: () => null,
+      render: (i) => (
+        <button type="button" className="no-print" style={linkBtn} onClick={() => openChase(i)}
+                aria-label={`Record that this gym chased the invoice billed to ${i.memberName ?? 'this member'}`}>
+          Record a chase
+        </button>
+      ) },
+  ];
+
+  const history = openFor && index ? index.get(openFor.id) ?? [] : [];
+
+  return (
+    <Section
+      title="Chasing what is late"
+      sub={`The invoices past their due date as at ${asAt}, and what this gym says it has done about each of them. Lateness is computed from the due date, never from a status somebody set by hand.`}
+    >
+      {/* Every render, not once in a help page. The entire risk of this feature
+          is "Chased by email" being read as "Repple emailed them" by an owner
+          who then does not ring somebody. */}
+      <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13, maxWidth: '88ch' }}>
+        {CHASE_IS_A_RECORD_NOT_A_SEND}
+      </p>
+      <Part read={invoices} what="the invoice register"
+            cost="what is late is unknown, so there is no list to have chased or not chased">
+        <>
+          <p style={{ margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13, maxWidth: '88ch' }}>
+            {overdue.length === 0
+              ? <>Nothing is past its due date as at {asAt}. Invoices with no due date on them are never overdue and are not counted here &mdash; they are in the ageing table&rsquo;s &ldquo;undated&rdquo; band above.</>
+              : never === null
+                ? <>
+                    {overdue.length} invoice{overdue.length === 1 ? ' is' : 's are'} past due as at {asAt}.{' '}
+                    <span style={{ color: 'var(--warn)' }}>
+                      Which of them have been chased could not be read, so there is no working list here.
+                      That is not a gym that has chased none of them.
+                    </span>
+                  </>
+                : <>
+                    {overdue.length} invoice{overdue.length === 1 ? ' is' : 's are'} past due as at {asAt},
+                    and <strong>{never.length}</strong> of {overdue.length === 1 ? 'it has' : 'them have'} no
+                    chase recorded at all.
+                    {stalest == null ? null : <> Of the rest, the one waiting longest was last chased {stalest} {stalest === 1 ? 'day' : 'days'} ago.</>}
+                  </>}
+          </p>
+          <DataTable noun="overdue invoices" rows={overdue} columns={cols} rowKey={(i) => i.id}
+                     empty="Nothing past due." />
+        </>
+      </Part>
+      {err ? <Banner tone="crit">{err}</Banner> : null}
+      {saved ? <Banner>{saved}</Banner> : null}
+      {openFor ? (
+        <div className="no-print" style={{ borderTop: '1px solid var(--ring)' }}>
+          <form onSubmit={save}>
+            <div style={formRow}>
+              <span style={{ fontSize: 12.5, color: 'var(--ink2)', maxWidth: '40ch' }}>
+                What the gym did about the invoice billed to{' '}
+                <strong>{openFor.memberName ?? 'this member'}</strong>
+                {openFor.number == null ? null : <> (no. {openFor.number})</>}.
+              </span>
+              <label style={dateLabel}>
+                on
+                <input type="date" value={chasedOn} onChange={(e) => setChasedOn(e.target.value)}
+                       style={{ ...field, width: 148 }}
+                       aria-label="The day the gym chased this invoice" />
+              </label>
+              <select value={via} onChange={(e) => setVia(e.target.value as ChaseVia)}
+                      style={{ ...field, minWidth: 170 }}
+                      aria-label="How the gym asked for the money">
+                {CHASE_VIA.map((v) => <option key={v} value={v}>{CHASE_VIA_LABEL[v]}</option>)}
+              </select>
+              <input value={note} onChange={(e) => setNote(e.target.value)}
+                     placeholder="What was said, or what came back"
+                     style={{ ...field, flex: 2, minWidth: 200 }}
+                     aria-label="What was said, or what came back" />
+              <button type="submit" disabled={busy || !!blocker} style={primaryBtn}>
+                {busy ? 'Recording…' : 'Record it'}
+              </button>
+              <button type="button" style={linkBtn} onClick={() => { setOpenFor(null); setErr(null); }}>Leave it</button>
+            </div>
+            {blocker ? (
+              <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '80ch' }}>{blocker}</p>
+            ) : null}
+            <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '86ch' }}>
+              The date is the day it HAPPENED, not the day it is being written down &mdash; Friday&rsquo;s
+              phone calls typed up on Monday are dated Friday. The note is optional: &ldquo;rang, no
+              answer&rdquo; is a complete chase. Nothing about the invoice changes, and nothing is sent.
+            </p>
+          </form>
+          {history.length ? (
+            <div style={{ borderTop: '1px solid var(--ring)', padding: '11px 14px' }}>
+              <h3 style={{ fontSize: 13, margin: 0, color: 'var(--ink2)' }}>Already recorded against this invoice</h3>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--ink2)' }}>
+                {history.map((c) => (
+                  <li key={c.id} style={{ marginBottom: 4 }}>
+                    <span className="mono">{c.chasedOn}</span>
+                    {' — '}
+                    {c.via ? CHASE_VIA_LABEL[c.via].toLowerCase() : <span className="dash">means not recorded</span>}
+                    {c.note ? <> &mdash; {c.note}</> : null}
+                    {' '}
+                    {/* A deletion and not an edit: a chase is an event that
+                        happened once, so correcting it is removing the row
+                        describing an act nobody performed. The other rows on
+                        the invoice are untouched, which is the whole argument
+                        for a row per chase rather than a counter. */}
+                    <button type="button" style={linkBtn} onClick={() => remove(c)}
+                            aria-label={`Remove the chase recorded on ${c.chasedOn}`}>
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {read.state === 'failed' ? (
+        <Banner tone="crit">
+          What this gym has done about its unpaid invoices could not be read
+          {read.why ? <> &mdash; {read.why}</> : null}. The invoices above are real and their lateness
+          is real; whether anybody has chased them is <strong>unknown</strong>, which is not the same
+          as nobody having done so. Anything already recorded still stands.
+        </Banner>
+      ) : null}
     </Section>
   );
 }

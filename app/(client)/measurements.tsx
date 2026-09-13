@@ -23,7 +23,7 @@
 // a client logged was captioned the day before it happened for anybody west of
 // Greenwich — the exact bug src/lib/localDate.ts exists for. Every date here
 // now goes through it, and every figure says how long ago it was taken.
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, TextInput, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -36,7 +36,9 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Hero, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useSettings } from '../../src/ui/settings';
-import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote } from '../../src/lib/units';
+import { lengthIn, lengthLabel, lengthToCm, lengthDeltaIn, plain, convertedNote, weightLabel } from '../../src/lib/units';
+import { pairScan, gapNote, PAIR_WINDOW_DAYS } from '../../src/lib/tapeVsScan';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, todayISO, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
 import { useClientData } from '../../src/ui/clientData';
 import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
@@ -51,6 +53,78 @@ import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 const GOAL_READS: Partial<Record<(typeof METRICS)[number]['key'], 'girth'>> = { waist: 'girth', hips: 'girth' };
 
 const fmtDate = shortDayLabel;
+
+/**
+ * The InBody scan taken beside one tape entry — the composition figures a
+ * member wants in the same eyeful as the waist, rather than two screens away.
+ *
+ * The rule lives in src/lib/tapeVsScan.ts, tested under node; this draws its
+ * answer. Four outcomes are kept apart, because they are four different
+ * statements about the member's own record:
+ *
+ *   a scan near this entry   — the figures, with how far off the day was
+ *   no scan near it          — sayable ONLY over a whole read
+ *   a truncated scan read    — there may be one we did not receive
+ *   a failed scan read       — we could not look
+ *
+ * The third and fourth exist because `cd.scans` is `[]` under both an empty
+ * history and a refused read, and "no scan that week" said to somebody who
+ * scans every fortnight is the app denying their own record back to them. See
+ * src/ui/loadStatus.ts.
+ */
+function ScanBeside({ t, tapeISO, scans, scansStatus, wu, dense }: {
+  t: ReturnType<typeof useTheme>;
+  tapeISO: string;
+  scans: { at: string; bodyFatPct?: number | null; weightKg?: number | null; skeletalMuscleKg?: number | null }[];
+  scansStatus: LoadStatus;
+  wu: 'kg' | 'lb';
+  /** The history list, where this is one caption line rather than a block. */
+  dense?: boolean;
+}) {
+ const paired = pairScan(tapeISO, scans);
+ if (paired) {
+  // Each figure only where the scan actually carried it. A scan sheet that
+  // reported no skeletal muscle prints no muscle — not a dash standing in a
+  // row of real numbers, and certainly not a zero.
+  const parts = [
+   paired.bodyFatPct != null ? `${plain(paired.bodyFatPct, 1)}% body fat` : null,
+   paired.weightKg != null ? weightLabel(paired.weightKg, wu) : null,
+   paired.skeletalMuscleKg != null ? `${weightLabel(paired.skeletalMuscleKg, wu)} muscle` : null,
+  ].filter(Boolean) as string[];
+  return (
+   <View style={{ marginTop: dense ? 5 : sp.md }}>
+    <Text style={{ ...ty.caption, color: t.ink2 }}>
+     <Text style={{ fontWeight: '600' }}>Scan · </Text>{parts.join(' · ')}
+    </Text>
+    {/* The scan's OWN date, spelled out, never the tape's. Two instruments on
+        two days is the thing being shown here, so collapsing them onto one
+        date would undo the whole point of drawing them together. */}
+    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+     {gapNote(paired.gapDays)} · {dayLabel(paired.at)}
+    </Text>
+   </View>
+  );
+ }
+ // The history list says nothing where there is no scan to say it about.
+ // The sentence is worth printing once, under the newest entry, where a member
+ // is deciding whether to book one; printed under all thirty rows of a tape
+ // history it is thirty identical lines, and a note that fires every time is a
+ // note nobody reads.
+ if (dense) return null;
+ const note = scansStatus === 'loading'
+  ? null
+  : scansStatus === 'error'
+  ? 'Your scans could not be read, so we cannot tell you whether one was taken near this.'
+  : scansStatus === 'partial'
+  ? 'Only part of your scan history could be read — there may be a scan near this one that is not shown.'
+  : isWhole(scansStatus)
+  ? `No scan within ${PAIR_WINDOW_DAYS} days of this entry.`
+  : null;
+ if (!note) return null;
+ return (
+  <Text style={{ ...ty.caption, color: t.ink3, marginTop: dense ? 5 : sp.md }}>{note}</Text>
+ );
+}
 
 export default function Measurements() {
  const t = useTheme();
@@ -81,6 +155,17 @@ export default function Measurements() {
  // src/ui/settings.tsx and supabase/parts/61-unit-preference.sql.
  const lu = useSettings().lengthUnit;
  const note = convertedNote(lu);
+ // The scan figures beside the tape are WEIGHTS, and a member's weight unit is
+ // a separate preference from their length unit — cm with lb is an ordinary
+ // pairing, and reading one off the other would put pounds on a tape.
+ const wu = useSettings().weightUnit;
+ // The scans in the shape the pairing rule takes. `takenAt` is the scans
+ // table's own column name; `at` is what every dated record in src/lib is keyed
+ // by. Mapped here rather than inside the rule, which has no business knowing a
+ // provider's column names.
+ const scanPoints = useMemo(() => cd.scans.map((s) => ({
+  at: s.takenAt, bodyFatPct: s.bodyFatPct, weightKg: s.weightKg, skeletalMuscleKg: s.skeletalMuscleKg,
+ })), [cd.scans]);
 
  const latest = entries[0];
  const prev = entries[1];
@@ -269,6 +354,15 @@ export default function Measurements() {
       </View>
      );
     })}
+    {/* ── the scan taken beside these figures ──────────────────────────
+        A tape measurement and an InBody reading are two instruments on the
+        same body, and this app filed them on two screens — so nobody could
+        read a waist against the body-fat figure taken the same week without
+        holding one of them in their head while they navigated to the other.
+        The window and the wording are in src/lib/tapeVsScan.ts. */}
+    <View style={{ paddingTop: sp.sm }}>
+     <ScanBeside t={t} tapeISO={latest.at} scans={scanPoints} scansStatus={cd.scansStatus} wu={wu} />
+    </View>
    </Section>
   </>) : null}
 
@@ -336,6 +430,11 @@ export default function Measurements() {
        </Pressable>
       ) : null)}
      </View>
+     {/* Every dated tape entry carries the scan that stands beside it, not
+         just the newest: the comparison people actually make is over months —
+         "the waist kept coming down while the body fat held" — and that is a
+         reading of the HISTORY rather than of the last row in it. */}
+     <ScanBeside t={t} tapeISO={e.at} scans={scanPoints} scansStatus={cd.scansStatus} wu={wu} dense />
      {fixing && fixing.at === e.at ? (
       <View style={{ marginTop: sp.md, backgroundColor: t.surface2, borderRadius: radius.sm, padding: sp.md }}>
        <Text style={{ ...ty.caption, color: t.ink3 }}>

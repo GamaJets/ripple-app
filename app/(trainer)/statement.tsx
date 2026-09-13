@@ -61,6 +61,9 @@ import {
   STATEMENT_NOT, STATEMENT_NOT_THE_WHOLE_BOOK, STATEMENT_STRIPE_IS_THE_RECORD, PERIOD_IS_YOURS,
   type Statement, type StatementInput, type StatementPeriod, type YearStart,
 } from '../../src/lib/coachStatement';
+import {
+  statementLines, LINES_ARE_NOT_EVERYTHING, LINES_ARE_NOT_NETTED,
+} from '../../src/lib/statementLines';
 import { fetchStatementInput } from '../../src/ui/coachStatement';
 import { DateSheet } from '../../src/ui/DateSheet';
 import { MIN_TARGET } from '../../src/lib/a11y';
@@ -262,6 +265,28 @@ export default function StatementOfRecord() {
   const pull = usePullToRefresh(load);
 
   const statement: Statement | null = useMemo(() => (input ? coachStatement(input) : null), [input]);
+
+  /**
+   * The rows behind the third button, drawn on the screen that sends them.
+   *
+   * "Share the Line Items as CSV" has been on this page since the file was
+   * written and the page had never shown a single line it contains. So the one
+   * artefact here that names a client, a date and an individual amount left the
+   * phone unread: a coach could not check, before it reached an accountant,
+   * that the invoice to the client who disputed it was in there, that a cost
+   * they thought they had deleted was not, or that a refund is on the day they
+   * remember. First sight of the contents was somebody else's inbox.
+   *
+   * `statementLines` is the same reader as the file — same splits, same
+   * accessors, same order, same converters — and src/lib/statementLines.test.ts
+   * parses the CSV `statementItemsCsv` actually builds and asserts cell for cell
+   * that these lines are its item rows. That test is what licenses drawing them
+   * twice at all: src/lib/coachSettlements.ts's doctrine is that a document
+   * about money shows its own snapshot, and a screen that filtered even
+   * slightly differently would have the coach vouching for lines that were
+   * never sent.
+   */
+  const lines = useMemo(() => (input ? statementLines(input) : null), [input]);
 
   // Only when EVERY read landed whole. A "nothing here" reassurance drawn over
   // a refused read is the one sentence this screen must never say to a
@@ -620,6 +645,72 @@ export default function StatementOfRecord() {
             </Section>
 
             <Rule />
+
+            {/* ── the lines the third button sends ───────────────────────
+                Every row this app holds itself, one line each, in the order
+                and the wording the file carries them in. Sales and renewals
+                are absent from both for the reason `LINES_ARE_NOT_EVERYTHING`
+                gives, and that is said here rather than left to be inferred
+                from a list that looks short.
+
+                Nothing in this block is added up, and there is no signed
+                amount: money in and money back out are in one list and the
+                heading above each says which way, so no column of it totals to
+                anything. The per-currency totals are the sections above. */}
+            <Section>
+              <SectionHead title="The Lines In This Period"
+                note={lines && lines.total != null ? String(lines.total) : undefined} />
+              {lines?.withheld ? (
+                <Flag style={{ marginTop: sp.sm }}>{lines.withheld}</Flag>
+              ) : (
+                <>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{LINES_ARE_NOT_NETTED}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{LINES_ARE_NOT_EVERYTHING}</Text>
+                </>
+              )}
+            </Section>
+
+            <Rule />
+
+            {(lines?.groups ?? []).map((g) => (
+              <View key={g.part}>
+                <Section>
+                  {/* The count is stated only under a whole read. Null is
+                      unknown and is drawn as nothing rather than as a zero —
+                      the withheld sentence below says which. */}
+                  <SectionHead title={g.title} note={g.count != null ? String(g.count) : undefined} />
+                  {g.withheld ? <Flag style={{ marginTop: sp.sm }}>{g.withheld}</Flag> : null}
+                  {/* Only under a WHOLE read may this page say a part is
+                      empty. Under any other status the rows below are what came
+                      back and not what there is, and "nothing here" over a
+                      refused read is the worst sentence this screen can print
+                      about somebody's own income. */}
+                  {g.lines.length === 0 && g.count === 0 ? (
+                    <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
+                      Nothing of this kind is on record in this period. Every read behind it came back in full, so this is your record rather than a failure.
+                    </Text>
+                  ) : null}
+                  {g.lines.map((l) => (
+                    <View key={l.key} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: sp.md, paddingVertical: 6 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ ...ty.label, color: t.ink }}>{l.who ? `${l.who} — ${l.what}` : l.what}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{l.when} · {l.status}</Text>
+                        {/* On the line, beside the empty figure, rather than
+                            once at the top: a row is read on its own, and a
+                            missing currency shown as a dash reads as nothing
+                            charged. */}
+                        {l.note ? <Text style={{ ...ty.caption, color: t.ink2, marginTop: 2 }}>{l.note}</Text> : null}
+                      </View>
+                      {/* Never a bare number. `money` is null exactly where the
+                          file's amount cell is empty, and the dash stands with
+                          the sentence above it rather than alone. */}
+                      <Text style={{ ...ty.label, ...numeric, color: t.ink }}>{l.money ?? '—'}</Text>
+                    </View>
+                  ))}
+                </Section>
+                <Rule />
+              </View>
+            ))}
 
             {/* ── what it is not, on the screen as well as on the file ──── */}
             <Section>

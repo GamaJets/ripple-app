@@ -68,6 +68,18 @@ import {
   compareRows, compareBasis, compareSummary, readingText, deltaText, spanLabel,
   selectionFromParams, COMPARE_DISCLAIMER,
 } from '../../src/lib/photoCompare';
+// Which way the person was facing, which `progress_photos.pose` has recorded
+// all along and nothing has ever read — so a front-on March photo could sit
+// beside a side-on September one under one heading and one set of figures. See
+// src/lib/photoPose.ts, including what it refuses to do: it never looks at a
+// picture, and it never chooses the pair.
+import { fetchPhotoPoses, poseLabel, poseMismatchNote, type Pose } from '../../src/lib/photoPose';
+// The long view of the body. src/lib/longView.ts gave the TRAINING side its
+// year and the body side kept only snapshots — this screen included, which
+// until now showed two days the member had to pick and nothing either side of
+// them. See src/ui/BodyYear.tsx.
+import { BodyYear } from '../../src/ui/BodyYear';
+import { useNow } from '../../src/ui/today';
 import { shareText } from '../../src/lib/exportShare';
 import { BACK_ICON, END_ALIGN } from '../../src/ui/direction';
 
@@ -81,6 +93,11 @@ export default function Compare() {
   const router = useRouter();
   const cd = useClientData();
   const wu = useSettings().weightUnit;
+  // Today, from the app's own clock rather than a `Date.now()` read inside a
+  // memo. Nothing unmounts this screen when the phone is pocketed, so a window
+  // anchored at mount would still end on yesterday's month tomorrow morning —
+  // see src/ui/today.ts.
+  const now = useNow();
   const params = useLocalSearchParams<{ before?: string | string[]; after?: string | string[] }>();
 
   // `null` is "not asked yet, or the ask failed" — never "you have none". The
@@ -121,6 +138,25 @@ export default function Compare() {
   // its own status and its own three sentences on this screen, and none of them
   // had a way back.
 
+  // The pose of each photo, keyed by id, or null when nobody has asked yet or
+  // the ask failed — the same three states as the list above it, and for the
+  // same reason. An empty map would say "none of your photos has a pose
+  // recorded", which is a statement about the member's own records that a
+  // failed read cannot make.
+  const [poses, setPoses] = useState<Map<string, Pose | null> | null>(null);
+  const [posesErr, setPosesErr] = useState(false);
+  const loadPoses = useCallback(async () => {
+    try {
+      setPoses(await fetchPhotoPoses());
+      setPosesErr(false);
+    } catch (e) {
+      reportError('compare.photos.poses', e);
+      setPoses(null);
+      setPosesErr(true);
+    }
+  }, []);
+  useEffect(() => { void loadPoses(); }, [loadPoses]);
+
   const loadShares = useCallback(async () => {
     setSharesErr(null);
     try {
@@ -141,8 +177,8 @@ export default function Compare() {
   // The shares read is in the pull now too. It was the one read on this screen
   // with no way back at all.
   const pull = usePullToRefresh(useCallback(() => {
-    void loadPhotos(); void loadShares(); cd.reload();
-  }, [loadPhotos, loadShares, cd.reload]));
+    void loadPhotos(); void loadShares(); void loadPoses(); cd.reload();
+  }, [loadPhotos, loadShares, loadPoses, cd.reload]));
 
   // The pair named in the URL, seeded ONCE the photo list has landed.
   //
@@ -192,6 +228,14 @@ export default function Compare() {
   // The app's resolver, and guarded: this string also goes into the summary
   // the member shares, where "Invalid Date" would travel out of the app.
   const dayOf = (p: ProgressPhoto) => fmtFullDay(p.takenAt);
+  /** What the member said about this photo, or null. `?? null` rather than
+   *  `.get()` alone: an id missing from the map is a photo nobody labelled, and
+   *  `undefined` and "no pose" must not be two different things downstream. */
+  const poseOf = (p: ProgressPhoto): Pose | null => poses?.get(p.id) ?? null;
+  // Said only when both photos are labelled and the labels disagree. Never on
+  // an unlabelled pair — which is every pair today — because a caveat that
+  // fires on every comparison is a caveat nobody reads.
+  const poseWarning = pair ? poseMismatchNote(poseOf(pair.before), poseOf(pair.after)) : null;
 
   const sendFigures = () => {
     if (!pair || !rows) return;
@@ -264,6 +308,14 @@ export default function Compare() {
                         )}
                         <Text style={{ ...ty.label, fontWeight: '500', color: t.ink, marginTop: 6 }}>{label}</Text>
                         <Text style={{ ...ty.caption, color: t.ink3 }}>{dayOf(ph)}</Text>
+                        {/* The view the member said this was. Absent when they
+                            were never asked, which is every photo taken before
+                            the column was read — and an absent label prints
+                            nothing at all rather than "Unknown", which would
+                            claim the app looked at the picture. */}
+                        {poseLabel(poseOf(ph)) ? (
+                          <Text style={{ ...ty.caption, color: t.ink3 }}>{poseLabel(poseOf(ph))}</Text>
+                        ) : null}
                         {/* "Can my coach see this one?" answered on the picture
                             itself, including the honest non-answer when the
                             grants could not be read. */}
@@ -274,6 +326,24 @@ export default function Compare() {
                     ))}
                   </View>
                   <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>{spanLabel(pair.days)}</Text>
+
+                  {/* ── two different views ─────────────────────────────────
+                      Above the figures, because it qualifies the pictures and
+                      not the readings: the weight and the body fat are true of
+                      both days whichever way the camera pointed, and the shape
+                      is the part that is not comparable across an angle. */}
+                  {poseWarning ? (
+                    <Flag tone={t.warn} style={{ marginTop: sp.md }}>{poseWarning}</Flag>
+                  ) : null}
+                  {/* And the honest non-answer. Without it a failed pose read
+                      is indistinguishable from two photos that match: the
+                      warning above simply does not appear, which is exactly
+                      what it looks like when there is nothing to warn about. */}
+                  {posesErr ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, textAlign: 'center', marginTop: sp.sm }}>
+                      We couldn’t check whether these two show the same view. Pull down to try again.
+                    </Text>
+                  ) : null}
 
                   {/* ── the readings from those two days ──────────────────
                       The InBody scan recorded on each photo's own calendar
@@ -380,7 +450,11 @@ export default function Compare() {
                     <Pressable key={p.id} onPress={() => toggle(p.id)}
                       accessibilityRole="button"
                       accessibilityState={{ selected: selIdx >= 0 }}
-                      accessibilityLabel={`Progress photo from ${dayOf(p)} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}`}
+                      // The view is spoken where it is known and omitted where
+                      // it is not. A clause saying "pose not recorded" on every
+                      // thumbnail would add four words to every photo in the
+                      // strip to convey nothing.
+                      accessibilityLabel={`Progress photo from ${dayOf(p)}${poseLabel(poseOf(p)) ? `, ${poseLabel(poseOf(p))?.toLowerCase()}` : ''} · ${shState === 'sent' ? 'sent to your coach' : shState === 'private' ? 'only you can see it' : 'not known whether your coach can see it'}`}
                       accessibilityHint="Tap to add it to the comparison above">
                       <View style={{ borderRadius: radius.md, borderWidth: selIdx >= 0 ? 2 : 0, borderColor: t.brand, overflow: 'hidden' }}>
                         {p.url ? (
@@ -412,6 +486,26 @@ export default function Compare() {
             </Section>
           </View>
         )}
+
+        {/* ── the year ─────────────────────────────────────────────────────
+            Outside the photo branch above on purpose. This panel is drawn from
+            the SCAN history, which a member has whether or not they have ever
+            taken a progress photo — and "one photo so far" is exactly the
+            member most likely to have a year of weigh-ins and nothing that
+            shows them. Gating it on having two photos would hide a year of
+            their own measurements behind a camera. */}
+        <Rule />
+        <BodyYear
+          scans={cd.scans}
+          status={cd.scansStatus}
+          unit={wu}
+          // The goal decides which direction of travel is progress, and it is
+          // withheld when the PROFILE read did not land: `cd.goal` falls back
+          // to a constructed default, and a default goal would have the panel
+          // congratulate somebody for moving the way somebody else wanted to.
+          goal={cd.profileStatus === 'ready' ? cd.goal : null}
+          now={now.getTime()}
+        />
       </ScrollView>
     </SafeAreaView>
   );

@@ -138,6 +138,20 @@ import {
   WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, planVsActual,
   loadCheck, loadTally, loadLine, LOAD_TOLERANCE,
 } from '../../src/lib/planVsActual';
+// ── the programme the client rewrote ──────────────────────────────────────
+//
+// The coach half of `client_plan_edits`. The READER is the member's own —
+// src/ui/planEditsShared.ts, which goes through the one shape parser in
+// src/lib/planEdits.ts — so the two screens cannot disagree about what is
+// stored; src/lib/planEditsDiff.ts is what this screen adds, which is resolving
+// the stored slugs against the assignment above so a coach reads a movement
+// name where the member could only be shown a day and a kind of change.
+import { fetchSharedPlanEdits, type SharedPlanEdits } from '../../src/ui/planEditsShared';
+import {
+  KEY_HAS_NO_WEEK, editAge, planEditDiffLine, planEditsCoachNote, planEditsDiff,
+} from '../../src/lib/planEditsDiff';
+import { agePhrase } from '../../src/lib/freshness';
+import { appLocale } from '../../src/lib/locale';
 import { historyBoard, historyLine, blockSpanLine } from '../../src/lib/programHistory';
 import { reviewProgram, checksLine, type Finding } from '../../src/lib/programReview';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -600,25 +614,120 @@ export default function ClientTraining() {
   /* ── what they were on before ──────────────────────────────────────────── */
   const history = useProgramHistory(picked);
 
+  /* ── and what they made of what they were given ────────────────────────
+   *
+   * `client_plan_edits` holds every swap, removal, addition and corrected set
+   * the member made to the programme above. Until today it was written by one
+   * screen (src/ui/planEdits.tsx) and read by nothing at all; the member can now
+   * see their own copy, and this is the coach's — which is the copy that was
+   * the point of storing it.
+   *
+   * The SAME reader the member's screen uses, `fetchSharedPlanEdits`, called
+   * with the client's id. `client_plan_edits_coach_r` (supabase/parts/204) is
+   * SELECT on `is_my_client(client_id)`, so one function serves both sides and
+   * the two cannot grow two opinions about the shape of the blob. No write half
+   * exists and none is added here — see the section below on why.
+   *
+   * Its own state, because it fails on its own: a refused read of these must
+   * never be drawn as a client who has followed the programme as written, which
+   * is the one thing a coach would act on immediately.
+   */
+  const [planEdits, setPlanEdits] = useState<SharedPlanEdits | null>(null);
+  const [planEditStatus, setPlanEditStatus] = useState<LoadStatus>('loading');
+  /** The client this answer is allowed to land under. The same guard `wanted`
+   *  gives the log read, and for the same reason: tapping through a book starts
+   *  a read per tap and they do not return in order, so without it one client's
+   *  rewritten programme is drawn under another client's name. */
+  const wantedEdits = useRef<string | null>(null);
+  const loadPlanEdits = useCallback(async (id: string | null, ask: boolean) => {
+    wantedEdits.current = id;
+    if (!id) { setPlanEdits(null); setPlanEditStatus('ready'); return; }
+    // A client typed into the book by hand has no account and therefore no row
+    // to read. 'error' rather than 'ready', for the reason `load` gives above:
+    // zero rows with no error is not an answer about that person.
+    if (!ask) { setPlanEdits(null); setPlanEditStatus('error'); return; }
+    setPlanEditStatus('loading'); setPlanEdits(null);
+    const res = await fetchSharedPlanEdits(id);
+    if (wantedEdits.current !== id) return;
+    setPlanEdits(res.shared);
+    setPlanEditStatus(res.status);
+  }, []);
+  useFocusEffect(useCallback(() => {
+    if (!USE_SUPABASE) return;
+    void loadPlanEdits(picked, askable);
+  }, [picked, askable, loadPlanEdits]));
+
   /* ── pull to refresh ───────────────────────────────────────────────────
    *
-   * Six reads: what this client actually trained (`load`, which is already the
+   * Seven reads: what this client actually trained (`load`, which is already the
    * focus read), the book, the programme assigned to them, what they were on
-   * before, the movement catalogue, and the injury acknowledgements.
+   * before, the movement catalogue, the injury acknowledgements, and the
+   * changes the client has made to the programme.
    *
    * The plan-versus-actual comparison on this screen is drawn ACROSS the
    * assignment and the logged sessions, so refreshing the sessions without the
    * assignment would compare this week's work against last week's plan and
-   * report the difference as the client's. */
+   * report the difference as the client's. The same holds for the client's own
+   * edits, which are resolved against that assignment by name. */
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     r.refresh(), Promise.resolve(assigned.reload()), Promise.resolve(history.reload()),
     cat.reload(), acks.refresh(),
-    ...(picked ? [load(picked, rangeDays, askable)] : []),
-  ]), [r, assigned, history, cat, acks, picked, rangeDays, askable, load]));
+    ...(picked ? [load(picked, rangeDays, askable), loadPlanEdits(picked, askable)] : []),
+  ]), [r, assigned, history, cat, acks, picked, rangeDays, askable, load, loadPlanEdits]));
   const hist = useMemo(
     () => historyBoard(history.rows, history.status, program, startsOn, assigned.status),
     [history.rows, history.status, program, startsOn, assigned.status],
   );
+
+  /* ── the client's rewrite, against what was assigned ───────────────────
+   *
+   * Resolved against `compareWeek` — the week of the block their own Train tab
+   * is showing them — and not against week one. The stored key is
+   * `dayIdx:exerciseKey` with no week on it (see `KEY_HAS_NO_WEEK`), so week
+   * one would name week one's Monday movement at a coach for a change made in
+   * week six. The same week `planVsActual` above compares against, so the two
+   * sections on this screen cannot be talking about different Mondays.
+   *
+   * Null days under anything but a settled assignment, so the diff answers
+   * 'unmatched' and says the programme could not be read rather than listing
+   * changes with no movement names and letting that read as changes to nothing.
+   */
+  const editDiff = useMemo(() => planEditsDiff({
+    edits: planEdits ? planEdits.edits : null,
+    editStatus: planEditStatus,
+    readable: planEdits ? planEdits.readable : false,
+    days: assigned.status === 'ready' ? compareWeek?.days ?? null : null,
+  }), [planEdits, planEditStatus, assigned.status, compareWeek]);
+  const editAged = useMemo(
+    () => editAge(planEdits?.updatedAt ?? null, nowMs),
+    [planEdits, nowMs],
+  );
+  /**
+   * The day the client last changed anything, in the READER's locale.
+   *
+   * Null and never a dash — `planEditsCoachNote` writes a sentence with no date
+   * in it rather than one built around a hole, which is what
+   * scripts/check-prose.mjs exists for. `Date.parse` on a timestamptz is a full
+   * instant, not a bare `YYYY-MM-DD` being compared as a string.
+   */
+  const editWhen = useMemo(() => {
+    const iso = planEdits?.updatedAt ?? null;
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms)
+      ? new Date(ms).toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' })
+      : null;
+  }, [planEdits]);
+  const editNote = useMemo(() => planEditsCoachNote({
+    diff: editDiff, who, whenWords: editWhen,
+    ageWords: editAged.ageMs == null ? null : agePhrase(editAged.ageMs),
+    stale: editAged.stale,
+  }), [editDiff, who, editWhen, editAged]);
+  /** A load in the CLIENT's unit, like every other figure on this screen: these
+   *  are numbers the client typed into their own phone, and a coach saying
+   *  "how did 100 feel" to somebody whose app said 220 looks like a coach who
+   *  was not paying attention. `unitFor` has already decided whose. */
+  const editLoad = useCallback((v: number | null) => liftLabel(v, unit), [unit]);
 
   /** A finding's figures in the coach's own unit. The rules module deals in
    *  kilograms and formats nothing — the same render boundary the builder
@@ -1063,6 +1172,122 @@ export default function ClientTraining() {
                     ) : null}
                   </Section>
                 )}
+
+                {/* ── what the client made of it ───────────────────────────
+                    n=26. `client_plan_edits` has been written by the member's
+                    plan screen since supabase/parts/204 and read back by
+                    NOTHING in any of the three apps. The member can now see
+                    their own copy; this is the coach's, and it is the copy the
+                    column was created for — "they have swapped this four weeks
+                    running" was the sentence the header of part 204 said was
+                    being typed into a React state and thrown away.
+
+                    Drawn OUTSIDE the programme chain above on purpose. A member
+                    keeps their corrections when a coach unassigns a block, and
+                    a coach who has just taken somebody off a programme is
+                    exactly the coach who wants to see what that person had been
+                    quietly fixing about it. `planEditsDiff` answers 'unmatched'
+                    when there is no assignment to resolve names against and the
+                    sentence says so.
+
+                    ── WHAT A COACH MAY DO ABOUT IT, AND WHY IT IS NOTHING ──
+
+                    There is no Accept control here and it is a decision rather
+                    than an omission. Accepting a swap means writing it into
+                    `assigned_programs`, and the stored key cannot say WHICH
+                    WEEK of the block the member made it in: `uid()` in
+                    app/(client)/workouts.tsx is `dayIdx:exerciseKey` where the
+                    index is into the days of whatever week their Train tab was
+                    showing. On a twelve-week block, accepting a change made in
+                    week six would silently rewrite week one — a coach would
+                    press a button labelled "accept what they asked for" and get
+                    a different session changed.
+
+                    Nor could the acceptance be RECORDED. There is no
+                    acknowledgement column on this table, so an accepted change
+                    would go on appearing in this list for ever with no way to
+                    mark it dealt with, and the second read would show the coach
+                    a member still asking for something already given them.
+
+                    Both of those are schema, and this item has none. So the
+                    reading half is what ships, and the two things a coach can
+                    do about a change are the two that already exist and are
+                    honest: rewrite the block themselves, where they can see
+                    which week they are editing, or ask the member about it. */}
+                <Section>
+                  <SectionHead
+                    title="What They Changed"
+                    note={editDiff.state === 'ready' && editDiff.rows.length ? `${editDiff.rows.length}` : undefined}
+                  />
+                  <Text style={{ ...ty.body, color: t.ink2 }}>{editNote}</Text>
+
+                  {/* The week the keys were resolved against, said out loud and
+                      only where there is more than one to confuse. */}
+                  {editDiff.state === 'ready' && editDiff.rows.length && program && weekCount(program) > 1 ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{KEY_HAS_NO_WEEK}</Text>
+                  ) : null}
+
+                  {editDiff.rows.length ? (
+                    <View style={{ marginTop: sp.md }}>
+                      {editDiff.rows.map((row) => (
+                        <View key={row.id} style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm, marginTop: sp.sm }}>
+                          {/* A mark beside ink-coloured text, never coloured
+                              text: `t.warn` as type fails the contrast gate and
+                              none of these is a fault of the client's anyway.
+                              The kind is carried by the sentence as well as the
+                              glyph, so the glyph is never the only channel. */}
+                          <Text style={{ ...ty.label, width: 14, color: row.resolved ? t.ink3 : t.ring }}>
+                            {row.kind === 'swap' ? '⇄' : row.kind === 'removed' ? '×' : row.kind === 'custom' ? '+' : '≡'}
+                          </Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ ...ty.label, color: t.ink }}>
+                              {planEditDiffLine(row, who, editLoad)}
+                            </Text>
+                            {/* The member's own set-by-set table, as a count.
+                                There is no per-set figure in the programme to
+                                put beside it — `ProgramExercise` carries one
+                                `sets` for the whole movement — so a column of
+                                rows against a column of dashes would be a
+                                comparison in shape only. */}
+                            {row.tableRows ? (
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                                They keep their own numbers set by set here, {row.tableRows} row
+                                {row.tableRows === 1 ? '' : 's'} of them.
+                              </Text>
+                            ) : null}
+                            {!row.resolved ? (
+                              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                                This programme no longer names that movement, so the change is about the
+                                block they were on when they made it.
+                              </Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))}
+
+                      {/* Said rather than left to be discovered by a coach
+                          hunting for a button that is not there. */}
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                        These are {who}&apos;s own corrections to their copy of the plan and nothing here changes
+                        what you assigned. A change is stored against a day and not against a week, so the only
+                        safe place to take one of these into the programme is the builder, where you can see
+                        which week you are editing.
+                      </Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.md }}>
+                        <Ghost
+                          label="Edit the Programme"
+                          onPress={() => router.push({ pathname: '/(trainer)/builder', params: picked ? { clientId: picked, from: 'trainerClientTraining' } : { from: 'trainerClientTraining' } })}
+                        />
+                        {picked && fullName ? (
+                          <Ghost
+                            label="Ask Them About It"
+                            onPress={() => router.push({ pathname: '/(trainer)/chat', params: { clientId: picked, name: fullName } })}
+                          />
+                        ) : null}
+                      </View>
+                    </View>
+                  ) : null}
+                </Section>
 
                 {/* ── the checks, run again ────────────────────────────────
                     Seven rules that ran once against a draft in the builder and

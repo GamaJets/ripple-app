@@ -31,6 +31,22 @@
 // app, a token store, a sync worker and a chart-of-accounts mapping, none of
 // which exists. So this is the other one, done honestly.
 //
+// ── Two things on this screen are NOT the typed figures ──────────────────
+//
+// The month-end verdict and the costs form, both added above the P&L and both
+// reading the gym's own records rather than this phone's AsyncStorage key.
+//
+// They are here because this is the owner's money screen and they were on no
+// phone screen at all: whether the month can be closed, and what is stopping
+// it, existed only on the web console, and `gym_costs` had only the console's
+// form — so an owner paying a supplier at a counter carried the line in their
+// head until they were next at a desk.
+//
+// Neither is ever combined with what the owner typed below. The costs list and
+// the "Total Expenses / Mo" field are two different records of two different
+// things, and src/lib/gymCosts.ts refuses netting under a heading in capitals.
+// The close is read-only here; see src/lib/ownerClose.ts for why.
+//
 // Rebuilt on the instrument-panel kit (`src/ui/kit`) and the scale
 // (`src/theme/scale`). Every provider, conditional, handler, route and the
 // AsyncStorage persistence are preserved — only the presentation changed: the
@@ -82,6 +98,28 @@ import { fetchGymZone } from '../../src/lib/gymZone';
 import { Fetched } from '../../src/ui/fetched';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { BACK_ICON } from '../../src/ui/direction';
+/* ── whether this month can be closed ──────────────────────────────────────
+ *
+ * The whole verdict — 'closeable' or 'blocked', and the blockers in the words
+ * `closeBlockers` writes them — already existed and lived on a laptop. An owner
+ * anywhere else could not find out whether their month was signed off, whether
+ * it could be, or which sessions nobody had marked. The card reads; it does not
+ * close, and it says why.
+ */
+import { useOwnerMonthClose } from '../../src/ui/gymMonthClose';
+import { MonthCloseCard } from '../../src/ui/MonthCloseCard';
+/* ── what the gym paid for, written down where it was paid ─────────────────
+ *
+ * `gym_costs` had one writer in the product and it was the console, so an owner
+ * paying a supplier at a counter carried the amount, the payee and the day in
+ * their head until they were next at a desk — and part 182 LOCKS a month, so a
+ * line that misses the close cannot be added at all until the month is
+ * reopened. Deliberate capture with the console's own fields and the console's
+ * own gate; never a quick-add. See src/lib/ownerCostEntry.ts, and part 2730 for
+ * why nothing may ever create one of these rows on somebody's behalf.
+ */
+import { useOwnerCosts } from '../../src/ui/ownerCosts';
+import { GymCostEntry } from '../../src/ui/GymCostEntry';
 
 const KEY = 'repple.owner.financials';
 // One formatter for the whole owner app, rather than 'AED ' typed here and '$'
@@ -121,6 +159,20 @@ export default function Financials() {
   // field. The header below names the missing setting instead.
   const cur = tenant?.currency ?? null;
   const money = (n: number) => moneyIn(n, cur);
+  /* ── the month end, read-only ────────────────────────────────────────────
+   * The verdict `buildClose` computes for the console, on the phone. Its own
+   * hook rather than reads written here: it needs seven of them — the five
+   * `CLOSE_PARTS`, the per-coach rates and the record of closed months — and
+   * every decision about what each silence means is in src/lib/ownerClose.ts
+   * with a test under plain node. */
+  const monthClose = useOwnerMonthClose();
+  const { refresh: refreshMonthClose } = monthClose;
+  /* The gym's outgoings for the month it is in, and the one write on this
+   * screen. Handed the close's own zone and its record of closed months rather
+   * than reading either again: one answer to "is August filed" per screen, or
+   * the card and the form disagree about whether a cost may be dated into it. */
+  const costs = useOwnerCosts(monthClose.zone, monthClose.closes);
+  const { refresh: refreshCosts } = costs;
   const [fin, setFin] = useState<FinInputs>(emptyFinances);
   const [hydrated, setHydrated] = useState(false);
   /**
@@ -226,7 +278,14 @@ export default function Financials() {
    *  phone's own AsyncStorage and has nothing to re-read; the four checks on
    *  this screen are that local figure against the register, and the register
    *  is the half that can be out of date. */
-  const reread = useCallback(() => setAgain((n) => n + 1), []);
+  const reread = useCallback(() => {
+    setAgain((n) => n + 1);
+    // The month-end card reads seven more things, none of them through the
+    // effect `again` drives. A Refresh that left them alone would put a
+    // yesterday's verdict under a line claiming the screen was read just now.
+    refreshMonthClose();
+    refreshCosts();
+  }, [refreshMonthClose, refreshCosts]);
 
   // The zone read that used to sit here is gone with the thing it was for.
   // It existed to cut ONE instant — "thirty days ago" — into the gym's own
@@ -649,6 +708,35 @@ export default function Financials() {
         <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>
           {reviewBasis()}
         </Text>
+
+        {/* ── the month end ────────────────────────────────────────────────
+            Above the typed figures and outside the `hydrated` gate on purpose:
+            everything below this line is the owner's own P&L, typed into this
+            phone, and the close is the opposite — the gym's records, read, and
+            the one month-end question with a deadline on it. A gym that has
+            never typed a figure still has an August to close.
+
+            Read-only. See src/lib/ownerClose.ts for why the button is on the
+            console and why its absence is printed rather than left to be
+            noticed. */}
+        <MonthCloseCard close={monthClose} />
+
+        <Rule />
+
+        {/* ── money out ───────────────────────────────────────────────────
+            Beside the close rather than under the typed figures, and for the
+            same reason the close is here: these are the gym's own records, and
+            everything below is what the owner typed into this phone. The two
+            are never added to each other — src/lib/gymCosts.ts refuses netting
+            under a heading in capitals, and this screen's own "Total Expenses"
+            field is a different, local number that nothing here writes to. */}
+        <GymCostEntry
+          costs={costs}
+          currency={cur}
+          closesUnread={!isWhole(monthClose.closes.status)}
+        />
+
+        <Rule />
 
         {!hydrated ? null : editing ? (
           /* ── entry form ───────────────────────────────────────────────── */

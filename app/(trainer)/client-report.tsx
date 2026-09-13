@@ -38,13 +38,13 @@
 // statement about what could not be read: no rating, no percentage, no
 // attendance rate, no clinical word. See the header of the builder.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, TextInput, Pressable, Alert } from 'react-native';
+import { View, Text, ScrollView, TextInput, Pressable, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { EmptyRoster } from '../../src/ui/EmptyRoster';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, grown, type as ty } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useSettings } from '../../src/ui/settings';
 import { useBrand } from '../../src/ui/brand';
@@ -67,6 +67,7 @@ import { useMyCoachLogo } from '../../src/ui/coachLogo';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   coachClientReportDoc, coachReportShareBlurb, sessionTally, countableRows,
+  type CoachClientReportDoc,
   type CoachSessionRow, type ReportScan, type ReportMeasureEntry, type ReportInjury,
 } from '../../src/lib/coachClientReport';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -411,20 +412,40 @@ export default function ClientReport() {
     coachNote: note.trim() || null,
   });
 
+  /* ── the document, before it leaves ────────────────────────────────────
+   *
+   * n=41. This screen could describe the report — how many sessions, how many
+   * scans, which reads failed — and a coach could not READ it. The one control
+   * on it built the document and handed it straight to the share sheet, so the
+   * first person ever to see the page was the client, or the coach taking them
+   * on. A document with somebody's body on it and a coach's own words at the
+   * bottom is the last thing in this app that should be sent unseen.
+   *
+   * The confirming Alert it replaces said the right things and showed none of
+   * them: a blurb ABOUT the document is not the document, and the caveat
+   * "2 parts could not be read" is unactionable without seeing where the holes
+   * fell.
+   *
+   * ── Why the TEXT and not the HTML ────────────────────────────────────
+   *
+   * There is no WebView in this app and this is not the screen to add one to.
+   * `coachClientReportDoc` builds both halves off one pass — every figure, every
+   * caveat and every standing statement is written into `T` beside the `H` it
+   * writes into the page — which is why the Alert this replaces could already
+   * tell a coach that the plain-text fallback leaves nothing out. So the text
+   * IS the document: same sections, same order, same words, without the
+   * typesetting. Showing the typeset page and sending a different one would be
+   * the worse failure of the two.
+   */
+  const [preview, setPreview] = useState<CoachClientReportDoc | null>(null);
   const send = () => {
     if (!picked) return;
-    const doc = build();
-    Alert.alert(
-      'Send this record',
-      coachReportShareBlurb(doc, fullName) + '\n\n'
-      + (pdfExportAvailable()
-        ? 'It goes as a PDF through your phone’s share sheet, so it can reach them, or the coach taking them on, however you choose.'
-        : 'This build cannot produce a PDF, so it goes as plain text instead. Nothing is left out of it: every figure and every caveat is in the text.'),
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => { void shareDoc(doc.html, doc.text, 'Coaching record'); } },
-      ],
-    );
+    // Built at the moment the coach asks to see it, and the SAME object is what
+    // gets shared — not rebuilt on the way out. A rebuild would re-read `reads`
+    // and `note` as they stand a second later, so a coach could approve one
+    // document and send another, which is precisely the gap this control exists
+    // to close.
+    setPreview(build());
   };
 
   const overall = worstStatus(
@@ -570,6 +591,98 @@ export default function ClientReport() {
           </>
         )}
       </ScrollView>
+
+      {/* ── the document, on the screen, before it goes ───────────────────
+          n=41. What a coach saw before this existed was a panel of counts and
+          a confirming Alert, and the first human being to read the actual page
+          was whoever it was sent to.
+
+          A full-screen Modal rather than a Section on the scroll: the point is
+          that the coach reads the document, and a preview competing with the
+          form that produced it invites them to skim it. It is also the
+          confirmation step — there is no second Alert — so the two controls at
+          the bottom are the whole decision, and the one that sends is the one
+          that has to be reached past the text.
+
+          `preview` is the doc built at the moment the coach asked to see it,
+          and it is the object that gets shared. Rebuilding on the way out would
+          let the reads move underneath an approved document. */}
+      <Modal visible={!!preview} animationType="slide" onRequestClose={() => setPreview(null)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top', 'bottom']}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingHorizontal: layout.gutter, paddingTop: sp.md }}>
+            <Ghost icon={BACK_ICON} a11yLabel="Back to the report" onPress={() => setPreview(null)} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>Before you send it</Text>
+              <Text style={{ ...ty.title, color: t.ink, marginTop: sp.xs }}>The Document</Text>
+            </View>
+          </View>
+
+          {preview ? (
+            <>
+              <Text style={{ ...ty.label, color: t.ink3, paddingHorizontal: layout.gutter, marginTop: sp.sm }}>
+                {coachReportShareBlurb(preview, fullName)}
+              </Text>
+
+              {/* The caveats again, where the decision is made. They are on the
+                  document's own front page as well; a coach about to press
+                  Send should not have to find them by reading down. */}
+              {preview.caveats.length ? (
+                <View style={{ paddingHorizontal: layout.gutter, marginTop: sp.sm }}>
+                  <Flag>
+                    {preview.caveats.length} part{preview.caveats.length === 1 ? '' : 's'} of this could not be read
+                    and the document says so where the figures would have been. Sending it is not wrong — an
+                    honest gap is better than a missing page — but it is worth trying again first.
+                  </Flag>
+                </View>
+              ) : null}
+
+              <ScrollView
+                style={{ flex: 1, marginTop: sp.md }}
+                contentContainerStyle={{ paddingHorizontal: layout.gutter, paddingBottom: sp.xl }}
+                showsVerticalScrollIndicator
+              >
+                {/* The text the share sheet carries, verbatim. Not a summary of
+                    it and not a second rendering of the same facts: a preview
+                    that is assembled separately is a preview that can disagree
+                    with what was sent, which is worse than no preview at all.
+
+                    `selectable` so a coach can lift a line out of it into the
+                    message thread without sending the whole document. */}
+                {/* `grown`, not a pinned 21: React Native never scales a
+                    lineHeight, so a reader who has turned their text up would get
+                    larger letters inside the same gaps and a document that
+                    overlaps itself. This is the one screen where somebody reads
+                    several hundred lines in a row. */}
+                <Text selectable style={{ ...ty.label, color: t.ink2, lineHeight: grown(21) }}>
+                  {preview.text}
+                </Text>
+              </ScrollView>
+
+              <View style={{ paddingHorizontal: layout.gutter, paddingTop: sp.md, flexDirection: 'row', gap: sp.md }}>
+                <View style={{ flex: 1 }}>
+                  <Cta label="Not Yet" tone={t.surface2} wide onPress={() => setPreview(null)} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Cta
+                    label="Send It"
+                    wide
+                    onPress={() => {
+                      const doc = preview;
+                      setPreview(null);
+                      void shareDoc(doc.html, doc.text, 'Coaching record');
+                    }}
+                  />
+                </View>
+              </View>
+              <Text style={{ ...ty.caption, color: t.ink3, paddingHorizontal: layout.gutter, marginTop: sp.sm }}>
+                {pdfExportAvailable()
+                  ? 'It goes as a PDF through your phone\u2019s share sheet, typeset with your mark on it. The words are the ones above.'
+                  : 'This build cannot produce a PDF, so it goes as the plain text above, exactly as you are reading it. Nothing is left out of it.'}
+              </Text>
+            </>
+          ) : null}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }

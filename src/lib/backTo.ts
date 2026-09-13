@@ -37,6 +37,16 @@ export const BACK_TO = {
   clientWorkouts: '/(client)/workouts',
   ownerLibrary: '/(owner)/library',
   trainerBuilder: '/(trainer)/builder',
+  // The five screens that send a coach INTO the builder. The builder is also
+  // the Programs tab root, so it cannot simply draw a Back arrow the way a
+  // detail screen does: tapped from the tab bar there is nowhere behind it,
+  // and an arrow that pops the tab history would land on whatever screen the
+  // history last reordered to the front. Carrying the origin is what lets the
+  // arrow exist only on the paths where somebody was actually sent here.
+  trainerClient: '/(trainer)/client',
+  trainerClientTraining: '/(trainer)/client-training',
+  trainerDashboard: '/(trainer)/dashboard',
+  trainerGroup: '/(trainer)/group',
   trainerLibrary: '/(trainer)/library',
   // The coach's template library, whose Platform Programmes section opens the
   // exercise detail from inside an expanded programme. Without a carried

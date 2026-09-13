@@ -94,6 +94,37 @@ import { localDate } from '../../src/lib/localDate';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { appLocale } from '../../src/lib/locale';
 import { BACK_ICON } from '../../src/ui/direction';
+// ── the four things a coach could do for everybody except themselves ──────
+//
+// The client app has a Lifting Tools screen, a Personal Records board, a Trends
+// screen, a Consistency heatmap and a Recovery screen. Grepped before any of
+// this was written: `plateMath`, `warmupRamp`, `personalRecords`, `shownStreak`,
+// `useWellness`, `useHabits` and `useReadiness` had NO importer anywhere under
+// app/(trainer). A coach who lifts had none of it.
+//
+// They are panels rather than five new routes, and that is not a shortcut.
+// app/(trainer)/_layout.tsx is a six-item tab bar plus a long list of detail
+// screens, and its own header records what happened the one time a route was
+// added to it without thinking — "Programs" rendered as "Progra…". That file is
+// not this lane's to edit, so the work lands where a coach already is when they
+// want it: on the screen about their own training.
+//
+// Every one of them is built on the CLIENT hooks and the client modules, which
+// is the rule this codebase has settled: trainers self-track, there is no
+// client→trainer promotion, and a coach-side self-tracking screen reuses the
+// same providers rather than copying the client screen or asking a coach to
+// keep a second account. `useWorkoutLog` reads `user_id = auth.uid()`, so in
+// this app everything below is the coach's own and can never be a client's.
+//
+// Collapsed by default, with a line of their own subject still readable while
+// they are shut. A coach opening this screen mid-session to log a lift must not
+// have to scroll past five boards to reach the box they came for.
+import { Disclosure } from '../../src/ui/Disclosure';
+import { LiftingToolsPanel } from '../../src/ui/LiftingToolsPanel';
+import { OwnRecordsPanel } from '../../src/ui/OwnRecordsPanel';
+import { OwnTrendsPanel } from '../../src/ui/OwnTrendsPanel';
+import { OwnConsistencyPanel } from '../../src/ui/OwnConsistencyPanel';
+import { OwnRecoveryPanel } from '../../src/ui/OwnRecoveryPanel';
 
 /** How many days back "Recent" reaches. Beyond a fortnight this stops being a
  *  log a coach reads and starts being a history screen, which is not what this
@@ -196,6 +227,27 @@ export default function MyTraining() {
   /** The sets this week's total could not price, in the words every other
    *  screen uses for them. Null when there are none. */
   const unpricedNote = tonnageNote({ kg: wk.volumeKg, unknownSets: wk.unpricedSets });
+  /* ── whether the weigh-ins behind a bodyweight record were actually read ──
+   *
+   * `myWeights` is EMPTY both for a coach who has never weighed in and for a
+   * coach whose check-in read failed, and those are opposite facts: the first
+   * means a pull-up has no load and belongs on the reps board, the second means
+   * it has one and this screen cannot see it. Without the distinction the
+   * records board silently drops every bodyweight lift on a bad read and says
+   * nothing — which is exactly what app/(client)/records.tsx did for months
+   * before it learnt to ask `scansStatus`. */
+  const weighInsKnown = isWhole(ci.status);
+  /** What a coach is told when there is no daily water goal to fill against.
+   *
+   *  Not the client app's sentence. That one offers Daily Habits, which lives
+   *  in the client portal; a coach cannot open it, and `water_goal_glasses` is
+   *  a `clients` column a coach has no row in — so their goal is permanently
+   *  null and no route this app has would change it. Saying so is honest;
+   *  offering a door that is not there is not. The COUNT is unaffected. */
+  const noWaterGoal =
+    'There is no daily water goal on a coach account — that target lives on a client record, and '
+    + 'you do not have one. The count is still yours and still real; there is just nothing to fill '
+    + 'it against.';
 
   /* ── logging by text ─────────────────────────────────────────────────── */
 
@@ -677,6 +729,19 @@ export default function MyTraining() {
 
           <Rule />
 
+          {/* ── the arithmetic a coach does at the rack ───────────────────
+              n=93. Right under the logging form, because that is where it is
+              wanted: a coach works out 87.5% of their top single, or which
+              plates make 102.5, between two sets — not on a screen they have
+              to go and find. Nothing in it reads or writes anything, so it can
+              never show a stale answer. */}
+          <Disclosure title="Lifting Tools"
+            note="Estimated 1RM, training percentages, plate maths and a warm-up ramp. Nothing here is logged.">
+            <LiftingToolsPanel unit={wu} />
+          </Disclosure>
+
+          <Rule />
+
           {/* ── today ────────────────────────────────────────────────────── */}
           <Section>
             <SectionHead title="Today" note={known && today ? `${today.entries.length}` : undefined} />
@@ -730,6 +795,52 @@ export default function MyTraining() {
 
           <Rule />
 
+          {/* ── what the log adds up to ───────────────────────────────────
+              n=97, in three parts, because they answer three questions and one
+              screen that answered all of them at once would be unreadable:
+              what is your best (records), which way is it going (trends), and
+              how often are you actually doing it (consistency).
+
+              All three take `status === 'error' ? null : log`, for the reason
+              every other screen in this app does it: `useWorkoutLog` keeps
+              whatever it had before a failure, and a stale array drawn as a
+              record board is the one thing a record board must never present
+              as current. Null is the only value that makes a panel say it
+              could not read. */}
+          <Disclosure title="Your Records"
+            note="Your best set for every movement you have logged — barbell, bodyweight and holds.">
+            <OwnRecordsPanel
+              log={status === 'error' ? null : log}
+              status={status}
+              weights={myWeights}
+              weightsKnown={weighInsKnown}
+              unit={wu} />
+          </Disclosure>
+
+          <Rule />
+
+          <Disclosure title="Your Trends"
+            note="Ten weeks of your own volume, and one lift at a time over the days you did it.">
+            <OwnTrendsPanel
+              log={status === 'error' ? null : log}
+              status={status}
+              weights={myWeights}
+              unit={wu}
+              nowMs={nowMs} />
+          </Disclosure>
+
+          <Rule />
+
+          <Disclosure title="Your Consistency"
+            note="Your streak, your totals, and twelve weeks of your own training days.">
+            <OwnConsistencyPanel
+              log={status === 'error' ? null : log}
+              status={status}
+              nowMs={nowMs} />
+          </Disclosure>
+
+          <Rule />
+
           {/* ── which muscles the coach's own work landed on ───────────────
               The same four blocks a coach reads about a client, about
               themselves, off the same panel and the same modules — Training
@@ -776,6 +887,20 @@ export default function MyTraining() {
               voice={{ they: 'You', their: 'your', have: 'have' }}
             />
           </Section>
+
+          <Rule />
+
+          {/* ── the other half of training ────────────────────────────────
+              n=96. Placed after the muscle board and not before it, because
+              that board already carries a Recovery Map about the same body and
+              reading two recovery sections in a row invites them to be read as
+              one claim. They are not: the map is about which muscles were
+              worked and when, and this is sleep, water and the readiness score
+              built from them. */}
+          <Disclosure title="Your Recovery"
+            note="Your readiness score taken apart, today’s water, and the nights you have logged.">
+            <OwnRecoveryPanel noGoalNote={noWaterGoal} />
+          </Disclosure>
 
           <Rule />
 

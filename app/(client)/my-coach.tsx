@@ -58,7 +58,7 @@ import { MIN_TARGET } from '../../src/lib/a11y';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { useReadDeadline } from '../../src/ui/readDeadline';
 // The reader's locale, resolved once with a fallback — never a literal tag.
 import { appLocale } from '../../src/lib/locale';
@@ -81,6 +81,27 @@ import { editCount } from '../../src/lib/planEdits';
 import {
   fetchCoachCredentials, fetchMyReview, canReview, writeReview, withdrawReview,
 } from '../../src/ui/reviews';
+// ── Everything the member wrote, and everything the coach wrote to them ────
+//
+// Two things this screen was the natural home for and neither had one.
+//
+// `my_review_of(p_coach)` needs a coach id, and the only two places in the
+// client app that hold one are `my_coach_profile()` — which stops answering
+// when coaching ends — and a row of the directory, which lists opted-in coaches
+// only. So a review of a coach the member has LEFT, or of one who never ticked
+// "list me", was unreachable to its own author while the coach could still read
+// it and reply to it. supabase/parts/2790 adds the read that asks the question
+// the member actually has.
+//
+// `coach_feedback` had the opposite problem: readable, and shown one note at a
+// time. app/(client)/dashboard.tsx renders `coachNotes[0]` clipped at four
+// lines and nothing else in any of the three apps renders the rest.
+import { fetchMyReviews } from '../../src/ui/myReviews';
+import {
+  myReviewsNote, myReviewRatingLine, myReviewVisibilityLine, myReviewEditedLine,
+  type MyCoachReview,
+} from '../../src/lib/myReviews';
+import { CoachAdvice } from '../../src/ui/CoachAdvice';
 import { useToday } from '../../src/ui/today';
 import {
   credentialBadge, credentialLine, expiryLine, sortCredentials, insuranceClaim, insuranceLine,
@@ -256,6 +277,44 @@ export default function MyCoach() {
     })();
     return () => { cancelled = true; };
   }, [myId, tick]);
+
+  // ── every review this member has written, not just the one above ────────
+  //
+  // Keyed on nobody. `my_coach_reviews()` (supabase/parts/2790) takes no
+  // argument — every row it returns was written by the caller — which is what
+  // makes it able to answer about coaches this screen has no id for: the ones
+  // the member has left, and the ones who never listed themselves.
+  //
+  // Its own effect rather than a fourth entry in the coach-keyed Promise.all
+  // above, and for the same reason that block exists: this read is about the
+  // MEMBER, it does not need a coach id, and behind one it would not run at all
+  // for the member who most needs it — somebody with no current coach, who is
+  // exactly the person holding reviews they cannot reach.
+  const [written, setWritten] = useState<MyCoachReview[]>([]);
+  const [writtenStatus, setWrittenStatus] = useState<LoadStatus>('loading');
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setWrittenStatus('loading');
+      const r = await fetchMyReviews();
+      if (cancelled) return;
+      setWritten(r.rows);
+      setWrittenStatus(r.status);
+    })();
+    return () => { cancelled = true; };
+  }, [tick]);
+
+  // The current coach's review has its own block further up, with the form and
+  // the withdraw button on it. Showing it a second time in the list below would
+  // put the same words on one screen twice and give the member two places to
+  // change one thing. It is filtered out only where we actually KNOW who the
+  // current coach is: under a failed profile read `coachId` is null, the block
+  // above is not drawn at all, and nothing is hidden here to match a section
+  // that is not on screen.
+  const otherWritten = useMemo(
+    () => written.filter((r) => r.coachId !== coachId),
+    [written, coachId],
+  );
 
   // The four reads behind this screen: the coach's profile, their branding,
   // their credentials, and this member's own review and whether they may leave
@@ -526,6 +585,23 @@ export default function MyCoach() {
             <View style={{ marginTop: sp.lg }}>
               <Cta label="Message Coach" wide onPress={() => go('/(client)/messages')} />
             </View>
+
+            <Rule />
+
+            {/* ── what they have actually written to you ──────────────────
+                `coach_feedback` is the advice this coach leaves on this member,
+                and until now the member's whole view of it was one line on the
+                dashboard: `coachNotes[0]`, clipped at four lines. Note two and
+                everything before it were unreachable in all three apps, while
+                the coach kept reading the lot from their own client detail —
+                so neither side had any reason to think anything was missing.
+
+                Here rather than on the dashboard because a dashboard that grows
+                a noticeboard stops being a dashboard; that is the argument the
+                gym-notice block on that screen already makes for itself, and it
+                ends "the rest are one tap away in Notices". The coach's advice
+                had no Notices. This is it. */}
+            <CoachAdvice clientId={myId} coachName={coach.name} />
 
             <Rule />
 
@@ -805,6 +881,70 @@ export default function MyCoach() {
             </Section>
           </>
         )}
+
+        {/* ── the reviews you have written ────────────────────────────────
+            OUTSIDE the ternary above, on purpose, and it is the whole reason
+            this block is worth having. Every branch of that ternary except the
+            last is a member with no readable coach — they are training alone,
+            or the profile read failed — and a member who has LEFT their coach
+            is precisely the person holding a review they had no way to reach.
+            Nested inside, this would have appeared only for people who did not
+            need it.
+
+            It says nothing about a coach on its own account: every sentence
+            comes from src/lib/myReviews.ts, where the three visibility states
+            are asserted on, because "on their public profile" said about a
+            review that is not on one is a claim about who is reading somebody's
+            words. */}
+        <Rule />
+        <Section>
+          <SectionHead title="Coaches You Have Reviewed" />
+          <Text style={{ ...ty.label, color: t.ink3 }}>
+            {myReviewsNote(
+              // `isWhole`, not `!== 'error'`. Under 'loading' the list is empty
+              // because nothing has arrived, and under 'partial' it is a prefix
+              // — and the figure in this sentence is a count.
+              writtenStatus,
+              isWhole(writtenStatus) ? otherWritten.length : 0,
+              // Whether the block further up is already showing one of these.
+              // Without it, a member whose only review is of their current
+              // coach would be told they have never reviewed anybody, six
+              // inches under their own words.
+              coachId != null && written.some((r) => r.coachId === coachId),
+            )}
+          </Text>
+
+          {/* Drawn whenever any came back, 'partial' included: reviews that
+              arrived are real reviews, and withholding them would hide somebody
+              from their own words. It is the sentence above that declines to
+              say how many there are. */}
+          {otherWritten.map((r, i) => (
+            <View key={r.id} style={{ paddingVertical: sp.md, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: t.ring }}>
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{myReviewRatingLine(r)}</Text>
+              {r.body ? (
+                /* `grown`, never a pinned lineHeight: this is a paragraph of
+                   the member's own writing and the longest run of text in the
+                   row, so it is the first thing to overlap itself at a large
+                   text size. */
+                <Text style={{ ...ty.body, color: t.ink2, marginTop: 6, lineHeight: grown(22) }}>{r.body}</Text>
+              ) : null}
+              {r.coachReply ? (
+                <View style={{ marginTop: sp.md, paddingStart: sp.md, borderStartWidth: 2, borderStartColor: t.ring }}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>THEIR REPLY</Text>
+                  <Text style={{ ...ty.body, color: t.ink2, marginTop: 3 }}>{r.coachReply}</Text>
+                </View>
+              ) : null}
+              {/* Who can read it. Three states and three sentences, and the
+                  colour is `t.ink3` rather than `t.warn` even for a withdrawn
+                  one: a withdrawn review is a thing the member chose, not a
+                  warning, and warn ink fails the contrast gate as text. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{myReviewVisibilityLine(r)}</Text>
+              {myReviewEditedLine(r) ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{myReviewEditedLine(r)}</Text>
+              ) : null}
+            </View>
+          ))}
+        </Section>
       </ScrollView>
 
       {/* The same sheet the coach's side uses, with the member's own wording

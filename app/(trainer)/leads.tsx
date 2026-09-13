@@ -45,6 +45,28 @@
 //            which reads as broken attribution instead of a failed read.
 //   ready    the list is the list.
 //
+// ── The order this screen draws, and the order it does not ───────────────
+//
+// `shapeLeads` sorts newest-first and the list below keeps that, because that is
+// the order a coach scans. It is also the order that buries the enquiry that
+// costs them a client: the one from eleven days ago sinks one place for every
+// new arrival, and it sinks faster the better the marketing works. So the wait
+// gets a section of its own, above the list, oldest first —
+// src/lib/leadWait.ts, which carries the whole argument for why that is a
+// separate queue rather than a re-sort of a list somebody is scanning.
+//
+// ── ONE conversion figure, and six refusals ──────────────────────────────
+//
+// A coach wants to know how many of the people who asked about them became
+// clients, and this screen holds rows that look like they answer it. Almost
+// every fraction that can be built out of them is a lie — the app cannot see an
+// enquiry that arrived by phone, cannot see a click, and cannot read a
+// non-match as a non-join. src/lib/leadConversion.ts finds the one figure that
+// survives, prints it with its denominator in the same sentence and never as a
+// percentage, and names the six it will not compute WITH THE REASON FOR EACH —
+// because a coach who finds no conversion figure assumes the app has not got
+// round to it and works one out by hand off the counts that are on screen.
+//
 // ── Contact is one field, and the app never guesses ───────────────────────
 //
 // `contact` holds whatever the person typed. `contactKind` in src/lib/leads.ts
@@ -67,7 +89,16 @@ import {
   FOLLOW_UP_LABEL, FOLLOW_UP_WHEN, followUpDraft, followUpLink, followUpRecord,
   type LeadRow, type LeadState, type FollowUpKind,
 } from '../../src/lib/leads';
+import {
+  LEAD_WAIT_TITLE, waitingLeads, hasLeadWait, leadWaitCountNote, leadWaitLine,
+  leadWaitNote, longestWaitingLine,
+} from '../../src/lib/leadWait';
+import {
+  CONVERSION_TITLE, CONVERSION_DENOMINATOR_NOTE, CONVERSION_NUMERATOR_NOTE,
+  WITHHELD_CONVERSIONS, conversionFigureLine, enquiryConversion,
+} from '../../src/lib/leadConversion';
 import { telUrl, DIAL_UNAVAILABLE_NOTE } from '../../src/lib/dialling';
+import { useNow } from '../../src/ui/today';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { fetchMyCoachBrand } from '../../src/ui/coachBrand';
 import { ScreenHelp } from '../../src/ui/ScreenHelp';
@@ -149,6 +180,35 @@ export default function TrainerLeads() {
   ));
 
   const listed = book.rows.filter((r) => filter === 'all' || r.state === filter);
+
+  /* ── how long nobody has done anything ─────────────────────────────────
+   *
+   * `useNow()` and not `new Date()` in a memo. This screen is registered
+   * `href: null` in app/(trainer)/_layout.tsx, so it mounts once and is never
+   * torn down — not by backgrounding the phone — and a wait measured from a
+   * clock that stopped at mount reads "2 days" on the Thursday of the week it
+   * was opened. The whole point of this section is the number of days, so a
+   * frozen one would be the single worst value on the screen. See
+   * src/ui/today.ts.
+   *
+   * `followUpsUnread` is passed through rather than folded into the predicate:
+   * under a failed note read, `followUpsFor` returning nothing means "we did
+   * not see a note", which is not "there is no note", and the section says so
+   * instead of asserting nobody has touched these people. */
+  const now = useNow();
+  const waitBook = waitingLeads(
+    book.rows,
+    (id) => book.followUpsFor(id).length > 0,
+    !book.followUpsUnread,
+    now.getTime(),
+    book.status,
+  );
+  const waitCount = leadWaitCountNote(waitBook, book.status);
+  const waitNote = leadWaitNote(waitBook);
+  const longest = longestWaitingLine(waitBook, book.status);
+
+  /* ── the one figure, computed over the same rows the list draws ────────── */
+  const conversion = enquiryConversion(book.rows, book.status);
 
   const mark = (lead: LeadRow, state: LeadState) => {
     void book.setState(lead.id, state).then((r) => {
@@ -400,6 +460,59 @@ export default function TrainerLeads() {
             self. src/lib/screenHelp.ts holds them; one dismissible row. */}
         <ScreenHelp screen="coach-enquiries" />
 
+        {/* ── who has been waiting longest ──────────────────────────────────
+            Above the list and not a re-sort of it: the list below is scanned
+            top-down and a list that re-orders under the thumb makes the next
+            tap land on somebody else. This is a queue — short, worked from the
+            top, read once — and the longest wait is at the top of it by
+            definition. Drawn only when there IS one; a coach who has cleared
+            their enquiries is not shown an empty box congratulating them.
+
+            Nothing in here accuses the coach of anything. This app sends
+            nothing and never saw the phone call they made from the gym floor,
+            so every sentence is about the record and not about them. */}
+        {hasLeadWait(waitBook) ? (
+          <Section>
+            <SectionHead title={LEAD_WAIT_TITLE} note={waitCount ?? undefined} />
+            {longest ? (
+              <Text style={{ ...ty.head, color: t.ink }}>{longest}</Text>
+            ) : null}
+            {waitNote ? (
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{waitNote}</Text>
+            ) : null}
+
+            <View style={{ marginTop: sp.md }}>
+              {waitBook.rows.map((w, i) => (
+                // One node per row, labelled as one sentence: a name read out
+                // on its own and a wait read out after it are two swipes for a
+                // fact that is only a fact together.
+                <View
+                  key={w.lead.id}
+                  accessible
+                  accessibilityRole="text"
+                  accessibilityLabel={`${w.lead.name}. ${leadWaitLine(w)}`}
+                  style={{ paddingVertical: sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}
+                >
+                  <Text style={{ ...ty.body, color: t.ink }}>{w.lead.name}</Text>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{leadWaitLine(w)}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* The one action, and it moves the list below rather than doing
+                anything to an enquiry: everything you can DO to one of these
+                people is already on their card, and a second set of buttons is
+                a second place the two can disagree. */}
+            {waitBook.rows.length > 0 ? (
+              <View style={{ marginTop: sp.lg }}>
+                <Ghost label="Show Only New"
+                  a11yLabel="Filter the list below to new enquiries"
+                  onPress={() => setFilter('new')} />
+              </View>
+            ) : null}
+          </Section>
+        ) : null}
+
         <Section>
           <SectionHead title="Your enquiries" />
           <Text style={{ ...ty.label, color: t.ink2 }}>{book.note}</Text>
@@ -457,15 +570,81 @@ export default function TrainerLeads() {
           )}
         </Section>
 
+        {/* ── the one conversion figure ──────────────────────────────────────
+            A ratio, never a percentage, and the denominator is inside the same
+            sentence as the numerator rather than in a caption under it. A
+            figure whose whole meaning is its denominator must not be
+            renderable without one, and the way that rule gets broken is
+            somebody setting the top number in a big font.
+
+            `conversionFigureLine` returns the REASON when there is no figure,
+            so this Text says something true in all four read states and there
+            is no branch here that can print a zero the app has not measured. */}
+        <Section>
+          <SectionHead title={CONVERSION_TITLE} />
+          <Text style={{ ...ty.body, color: t.ink }}>{conversionFigureLine(conversion)}</Text>
+          {conversion.kind === 'figure' ? (
+            <View style={{ marginTop: sp.lg }}>
+              {/* Both halves of the fraction are described, every time it is
+                  shown. The bottom one is the house rule — a percentage over
+                  the leads the app can see is not a conversion rate and the
+                  screen must say what it is counting — and the top one is
+                  there because a coach reading "3" reads it as "and the other
+                  fifteen did not", which is a conclusion about their own
+                  marketing drawn from fifteen unknowns. */}
+              <Flag tone={t.ink3}>{CONVERSION_DENOMINATOR_NOTE}</Flag>
+              <View style={{ marginTop: sp.md }}>
+                <Flag tone={t.ink3}>{CONVERSION_NUMERATOR_NOTE}</Flag>
+              </View>
+            </View>
+          ) : null}
+        </Section>
+
+        {/* ── and the ones it refuses ─────────────────────────────────────────
+            Written out rather than left as a silence. A coach who looks for a
+            conversion rate and does not find one assumes the app has not got
+            round to it, and works one out by hand off the two counts that ARE
+            on this screen — which is the exact figure every reason below says
+            is wrong. Each one is a fact about the data, not a policy. */}
+        <Section>
+          <SectionHead title="Figures This Will Not Show" />
+          <Text style={{ ...ty.label, color: t.ink2 }}>
+            Each of these is a number somebody could work out from this screen, and each one would be wrong for a
+            reason that is about the data rather than about your marketing.
+          </Text>
+          {WITHHELD_CONVERSIONS.map((w, i) => (
+            <View
+              key={w.figure}
+              accessible
+              accessibilityRole="text"
+              accessibilityLabel={`${w.figure}. ${w.why}`}
+              style={{ paddingTop: sp.md, marginTop: i ? sp.md : sp.md, borderTopWidth: i ? hairline : 0, borderTopColor: t.ring }}
+            >
+              <Text style={{ ...ty.body, color: t.ink }}>{w.figure}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{w.why}</Text>
+            </View>
+          ))}
+        </Section>
+
         <Section>
           <SectionHead title="What this cannot see" />
           <Text style={{ ...ty.body, color: t.ink2 }}>{MISTYPED_CODE_NOTE}</Text>
           <View style={{ marginTop: sp.md }}>
             <Rule />
           </View>
+          {/* This paragraph used to read "an enquiry is never joined to an
+              account", and part 204 made that false: an account created with
+              the enquiry's exact email address on the enquiry's exact code
+              stamps the row, and the card above says so. What is still true is
+              the half that matters — the match is exact, so its absence is
+              not an answer. Left wrong, this sentence contradicted a green
+              badge four inches above it, which is how a screen teaches a coach
+              that it does not know what it is talking about. */}
           <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>
-            An enquiry is never joined to an account, so this screen cannot tell you whether one of these people later
-            signed up. Marking an enquiry closed says you are finished with it — it does not say how it ended.
+            An enquiry is matched to an account only when the email address and the code are both exactly the same, so
+            a match is evidence and the absence of one is not. Somebody who joined on a different code, signed up with
+            another address, or was added by you by hand looks the same here as somebody who never came back. Marking an
+            enquiry closed says you are finished with it — it does not say how it ended.
           </Text>
           <View style={{ marginTop: sp.lg }}>
             <Ghost label="What Your Ads Cost" onPress={() => router.push('/(trainer)/ad-spend')} />

@@ -61,7 +61,7 @@ import { View, Text, Pressable, ScrollView, TextInput, Alert, Switch, Linking } 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Cta, ListRow, Flag } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Cta, ListRow, Flag, Notice, Ghost } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 import { useOwnerOps } from '../../src/ui/ownerOps';
 import { useAnnouncements } from '../../src/ui/announcements';
@@ -135,6 +135,22 @@ import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
  * refusal instead of drawing "Saved" over an unchanged row.
  */
 import { saveGymProfile } from '../../src/lib/gymPolicy';
+/* ── what this gym pays a coach FOR ────────────────────────────────────────
+ *
+ * `tenants.session_pay_policy` is written from the web console and from nowhere
+ * else, and `useTenant` does not read the column at all — so the owner's own app
+ * had no sight of the setting every payroll figure in the product is computed
+ * from, while every COACH could read it on theirs (src/ui/coachPayTerms.ts).
+ *
+ * Read-only here, deliberately. See the header of src/lib/ownerPayPolicy.ts:
+ * changing it re-prices months already worked and not yet settled, which is a
+ * decision taken with a payroll run on the screen rather than on a train.
+ */
+import { useGymPayPolicy } from '../../src/ui/gymPayPolicy';
+import {
+  payOutcomeLines, policyHeadNote, WHERE_THE_POLICY_IS_SET,
+  POLICY_UNREAD_NOTE, POLICY_NO_GYM_NOTE, POLICY_UNSET_NOTE,
+} from '../../src/lib/ownerPayPolicy';
 import {
   parseGymZone, zoneOptions, gymTimeLabel, gymDay, readerZone, fetchGymZone,
 } from '../../src/lib/gymZone';
@@ -250,6 +266,10 @@ export default function OwnerOps() {
   // revenue hero were all quietly multiplying by it. The fallback copy those
   // three screens carry for a null fee could never have drawn.
   const { tenant, status: tenantStatus, updateTenant, refresh: refreshTenant } = useTenant();
+  // The fee's other half: what the fee is multiplied BY. Its own read rather
+  // than a wider `useTenant`, for the reason src/ui/gymPayPolicy.ts gives.
+  const payPolicy = useGymPayPolicy();
+  const { refresh: refreshPayPolicy } = payPolicy;
   const cur = tenant?.currency ?? null;
   // Null means "the owner has not touched the field", so it mirrors the tenant
   // as that read lands. A useState seeded from `tenant` would seed from null —
@@ -657,7 +677,11 @@ export default function OwnerOps() {
     setReadTick((n) => n + 1);
     reloadNotices();
     refreshTenant();
-  }, [reloadNotices, refreshTenant]);
+    // The pay policy is a sixth read and not part of the tenant row this
+    // provider holds, so a Refresh that skipped it would leave one section on
+    // the tab older than the line claiming when the tab was read.
+    refreshPayPolicy();
+  }, [reloadNotices, refreshTenant, refreshPayPolicy]);
   const pull = usePullToRefresh(refreshAll);
 
   // Both reads landed AND both are whole. Either one being a prefix makes
@@ -836,6 +860,74 @@ export default function OwnerOps() {
                   <Cta wide label={feeBusy ? 'Saving…' : 'Save Session Fee'} disabled={feeBusy}
                     onPress={() => { void saveFee(); }} />
                 </View>
+              </>)}
+            </Section>
+
+            <Rule />
+
+            {/* ── what this gym pays a coach FOR ───────────────────────────
+                The other half of the fee above, and the half the owner could
+                not see. The fee says what a session is worth; this says which
+                sessions count — and `payrollOf` multiplies the two.
+
+                Shown and not set, which is the whole design of the section:
+                `GymProfilePatch` records that a change here re-prices months
+                already worked and not yet settled, and that is a decision taken
+                over a payroll run rather than on a phone. See the header of
+                src/lib/ownerPayPolicy.ts. */}
+            <Section>
+              <SectionHead title="What You Pay Coaches For"
+                note={policyHeadNote(payPolicy.view) ?? undefined} />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                Which outcomes a coach is paid for. Payroll, Staff and the month close each count payable
+                sessions against this, and every coach reads the same answer in their own app.
+              </Text>
+              {payPolicy.status === 'loading' ? (
+                <Empty tone={t.ink3}>Reading your gym…</Empty>
+              ) : payPolicy.view.kind === 'unread' ? (
+                <Notice tone={t.warn} kicker="Pay policy" title="What you pay for could not be read"
+                  note={POLICY_UNREAD_NOTE}>
+                  <View style={{ marginTop: sp.md }}>
+                    <Ghost label="Try Again" onPress={payPolicy.refresh}
+                      a11yLabel="Read what this gym pays coaches for again" />
+                  </View>
+                </Notice>
+              ) : payPolicy.view.kind === 'no_gym' ? (
+                <Empty tone={t.ink3}>{POLICY_NO_GYM_NOTE}</Empty>
+              ) : (<>
+                {payPolicy.view.kind === 'unset' ? (
+                  // A Flag rather than warn-coloured words: check:contrast
+                  // refuses a status hue as text ink, and the tone belongs on
+                  // the mark. Said above the lines rather than below, because
+                  // the lines under an unset policy are three "not stated"s and
+                  // this is the sentence that explains them.
+                  <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{POLICY_UNSET_NOTE}</Flag>
+                ) : null}
+                {payOutcomeLines(payPolicy.view).map((line, i) => (
+                  <View key={line.outcome} style={{
+                    flexDirection: 'row', alignItems: 'flex-start', gap: sp.md,
+                    paddingVertical: sp.md,
+                    borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring,
+                  }}>
+                    {/* Three states, three marks, and the words beside them say
+                        the same thing — the dot is never the only channel. */}
+                    <View style={{
+                      width: 6, height: 6, borderRadius: 3, marginTop: 6,
+                      backgroundColor: line.answer === 'paid' ? t.good
+                        : line.answer === 'unstated' ? t.warn : t.ink3,
+                    }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                        {line.outcome} · {line.answer === 'paid' ? 'Paid'
+                          : line.answer === 'unpaid' ? 'Not paid' : 'Not stated'}
+                      </Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{line.note}</Text>
+                    </View>
+                  </View>
+                ))}
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {WHERE_THE_POLICY_IS_SET}
+                </Text>
               </>)}
             </Section>
 

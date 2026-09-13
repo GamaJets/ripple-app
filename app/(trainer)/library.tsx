@@ -80,7 +80,24 @@ import {
 } from '../../src/lib/rosterExercise';
 import { liftIn } from '../../src/lib/units';
 import { deltaLabel } from '../../src/lib/deltaLabel';
-import { type LoadStatus } from '../../src/ui/loadStatus';
+// ── programming for the floor the client is actually standing on ───────────
+//
+// A coach writing a week for somebody in a hotel gym, or in a garage with a
+// barbell and nothing else, was choosing from six hundred movements with no way
+// to exclude the ones that assume a cable stack. The column has been on the row
+// all along — the owner's library has filtered on it since it shipped — and the
+// coach, who is the person actually writing the programme, could not.
+//
+// The rule lives in src/lib/equipmentFacet.ts rather than here because it is
+// the SAME rule that screen uses, and a second hand-written case-insensitive
+// compare is how two screens come to disagree about what "barbell" matches.
+// Its header carries the live count that shapes it: 190 of 615 rows record no
+// equipment at all, which is why a null is a chip of its own and why a lit kit
+// chip has to say how many rows it could not place.
+import {
+  ALL_KIT, UNRECORDED_KIT, equipmentChips, matchesEquipment, unplacedByEquipment, equipmentGapNote,
+} from '../../src/lib/equipmentFacet';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
 
@@ -102,8 +119,24 @@ function muscleGroups(rows: CatalogueRow[]): string[] {
 const inGroup = (field: string | null, chip: string) =>
   chip === ALL || (field || '').trim().toLowerCase() === chip.toLowerCase();
 
-function Chips({ options, value, onChange }: {
+/** What the row says the movement is performed on.
+ *
+ *  Says so even when the answer is "we do not know", and always, rather than
+ *  leaving the slot blank on the 190 rows that hold no equipment. A blank there
+ *  reads as "needs nothing", which is how a cable fly ends up in a programme
+ *  written for somebody with a pair of dumbbells and a doorway. The same
+ *  sentence app/(owner)/library.tsx puts on its rows, word for word, because a
+ *  coach and an owner looking at the same movement must not be told two
+ *  different things about it. */
+const kitLabel = (r: CatalogueRow) => (r.equipment ? cap(r.equipment) : 'Equipment not recorded');
+
+function Chips({ options, value, onChange, a11y }: {
   options: string[]; value: string; onChange: (v: string) => void;
+  /** What a screen reader says the chip will DO. Passed in because this row is
+   *  now drawn twice over two different columns, and "Show Cable only" read
+   *  out as a muscle group is worse than no label — the two rows look the same
+   *  and only the spoken name tells them apart. */
+  a11y: (v: string) => string;
 }) {
   const t = useTheme();
   return (
@@ -112,7 +145,7 @@ function Chips({ options, value, onChange }: {
         const on = value.toLowerCase() === o.toLowerCase();
         return (
           <Pressable key={o} onPress={() => onChange(o)} accessibilityRole="button"
-            accessibilityLabel={o === ALL ? 'Show every muscle group' : `Show ${o} only`}
+            accessibilityLabel={a11y(o)}
             accessibilityState={{ selected: on }}
             style={{ paddingHorizontal: sp.md, paddingVertical: sp.sm, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface2 }}>
             <Text style={{ ...ty.label, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }}>{o}</Text>
@@ -140,6 +173,11 @@ export default function TrainerLibrary() {
 
   const [q, setQ] = useState('');
   const [group, setGroup] = useState(ALL);
+  // The kit chip. `ALL_KIT` and `ALL` are the same string, and deliberately so
+  // — this state is compared by matchesEquipment(), which owns the meaning of
+  // every chip value including that one, so it is spelled the way that module
+  // spells it rather than reusing this file's constant and hoping they agree.
+  const [kit, setKit] = useState(ALL_KIT);
   // Paged. Six hundred rows mounted at once is a visibly janky scroll on an
   // older phone, and nobody reads past the first screenful.
   const [shown, setShown] = useState(PAGE);
@@ -208,6 +246,11 @@ export default function TrainerLibrary() {
   }, [rosterJudged]);
 
   const groups = useMemo(() => muscleGroups(rows), [rows]);
+  // Derived from the WHOLE catalogue, not from the rows the search and the
+  // group chip have already selected: chips that reshuffled as you typed would
+  // move the kit you were reaching for out from under your thumb, and a kit
+  // that disappeared because of the search could not be used to widen it again.
+  const kits = useMemo(() => equipmentChips(rows.map((r) => r.equipment)), [rows]);
 
   // A chip can vanish underneath the selection — a reload that comes back
   // without the row the chip was derived from. Left alone the screen would
@@ -215,6 +258,13 @@ export default function TrainerLibrary() {
   useEffect(() => {
     if (!groups.some((g) => g.toLowerCase() === group.toLowerCase())) setGroup(ALL);
   }, [groups, group]);
+  useEffect(() => {
+    // Only once rows have actually landed. While the catalogue is in flight or
+    // failed, `kits` is just [All] and clearing on that would wipe the coach's
+    // filter every time they pulled to refresh.
+    if (!rows.length) return;
+    if (!kits.some((k) => k.toLowerCase() === kit.toLowerCase())) setKit(ALL_KIT);
+  }, [kits, kit, rows.length]);
 
   // The two slug sets the clip column is read from. Built with the same rule
   // the player uses (exerciseId.ts) so what this screen promises and what the
@@ -236,7 +286,12 @@ export default function TrainerLibrary() {
 
   // Signed in one request rather than one per row — see useCatalogueThumbs.
   const term = q.trim().toLowerCase();
-  const list = useMemo(
+  // The search and the muscle group alone. Held apart from the kit filter so
+  // the "could not place these" sentence is counted over the same rows the kit
+  // filter is applied to, rather than over the whole catalogue — a coach who
+  // has narrowed to Chest and is looking at eleven rows must not be told about
+  // 190 unlabelled ones, 180 of which are not on this screen either way.
+  const scoped = useMemo(
     // Both names, and the catalogue's synonyms — see matchesSearch() in
     // src/lib/catalogueLocale.ts. A coach who learned the movement in English
     // and a coach reading the German library must find the same row from the
@@ -245,7 +300,15 @@ export default function TrainerLibrary() {
     () => rows.filter((r) => inGroup(r.group, group) && matchesSearch(term, r.name, r.display, r.synonyms)),
     [rows, group, term],
   );
-  useEffect(() => { setShown(PAGE); }, [term, group]);
+  const list = useMemo(() => scoped.filter((r) => matchesEquipment(r.equipment, kit)), [scoped, kit]);
+  // Rows the search and the group DID select and the kit chip could not judge:
+  // the catalogue never recorded what they are performed on, so they are absent
+  // from the list below and it is not because they failed the test. Said on the
+  // screen, because a filter that silently drops a third of the catalogue is a
+  // shorter list presented as a complete one.
+  const unplacedByKit = unplacedByEquipment(scoped.map((r) => r.equipment), kit);
+  const kitGap = equipmentGapNote(unplacedByKit, kit, isWhole(status));
+  useEffect(() => { setShown(PAGE); }, [term, group, kit]);
   const page = list.slice(0, shown);
   const thumbFor = useCatalogueThumbs(page);
 
@@ -298,12 +361,16 @@ export default function TrainerLibrary() {
   // the movements, and a clip-library prefix undercounts the matches.
   const clipCountable = countable && clipsKnown && ownershipKnown;
 
-  const filtering = term !== '' || group !== ALL;
+  const filtering = term !== '' || group !== ALL || kit !== ALL_KIT;
+  const clearFilters = () => { setQ(''); setGroup(ALL); setKit(ALL_KIT); };
   const emptyLine = () => {
     if (!filtering) return 'The catalogue is empty.';
     const bits: string[] = [];
     if (term) bits.push(`“${q.trim()}”`);
     if (group !== ALL) bits.push(group);
+    // Named as the state it is, not as the chip's label: "No movement matches
+    // Chest · Not recorded" reads as a kit called Not Recorded.
+    if (kit !== ALL_KIT) bits.push(kit === UNRECORDED_KIT ? 'no recorded equipment' : kit);
     return `No movement matches ${bits.join(' · ')}.`;
   };
 
@@ -368,7 +435,29 @@ export default function TrainerLibrary() {
         </View>
 
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Muscle group</Text>
-        <Chips options={groups} value={group} onChange={setGroup} />
+        <Chips options={groups} value={group} onChange={setGroup}
+          a11y={(g) => (g === ALL ? 'Show every muscle group' : `Show ${g} only`)} />
+
+        {/* Only once there are kits to offer. On an unread catalogue this row
+            is [All] alone — a filter with one option, which is not a filter and
+            reads as a control that has broken. */}
+        {kits.length > 1 ? (
+          <>
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Equipment</Text>
+            <Chips options={kits} value={kit} onChange={setKit}
+              a11y={(k) => (k === ALL_KIT ? 'Show every kind of equipment'
+                : k === UNRECORDED_KIT ? 'Show movements whose equipment the catalogue does not record'
+                  : `Show ${k} movements only`)} />
+          </>
+        ) : null}
+
+        {/* Directly under the control that causes it, not buried by the list.
+            A coach who narrows to Dumbbell and reads "142 of 615" has no way to
+            know that 190 movements were never tested against that chip because
+            nobody recorded what they use. */}
+        {kitGap ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{kitGap}</Text>
+        ) : null}
 
         <Section>
           <SectionHead
@@ -425,7 +514,7 @@ export default function TrainerLibrary() {
                   <Text style={{ ...ty.label, color: t.ink3 }}>{emptyLine()}</Text>
                   {filtering ? (
                     <View style={{ flexDirection: 'row', marginTop: sp.md }}>
-                      <Ghost label="Clear Filters" onPress={() => { setQ(''); setGroup(ALL); }} />
+                      <Ghost label="Clear Filters" onPress={clearFilters} />
                     </View>
                   ) : null}
                 </View>
@@ -448,7 +537,7 @@ export default function TrainerLibrary() {
                         <Pressable
                           onPress={() => router.push({ pathname: '/(trainer)/exercise', params: { name: r.name, from: 'trainerLibrary' } })}
                           accessibilityRole="button"
-                          accessibilityLabel={[r.display.text, via ? `matched ${via}` : null, r.group ? cap(r.group) : null, note].filter(Boolean).join('. ')}
+                          accessibilityLabel={[r.display.text, via ? `matched ${via}` : null, r.group ? cap(r.group) : null, kitLabel(r), note].filter(Boolean).join('. ')}
                           style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
                           <ExerciseThumb uri={thumbFor(r)} t={t} size={44} />
                           <View style={{ flex: 1 }}>
@@ -456,8 +545,19 @@ export default function TrainerLibrary() {
                                 row navigates by and what a programme stores.
                                 Only the label moves. */}
                             <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{r.display.text}</Text>
+                            {/* The kit sits AFTER the muscle group, not before
+                                it. The owner's library leads with equipment
+                                because "does this assume kit we do not own" is
+                                the question that screen is open to answer; a
+                                coach builds a split by muscle group and reaches
+                                for equipment second. But it has to be on the
+                                row at all now that it is a filter: with Dumbbell
+                                lit and no kit on the line there is nothing
+                                saying WHY these rows and not the others, and a
+                                row that says nothing is indistinguishable from
+                                one the catalogue never labelled. */}
                             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
-                              {[r.group ? cap(r.group) : 'Muscle group not recorded', fallbackTag(r.display)].filter(Boolean).join(' · ')}
+                              {[r.group ? cap(r.group) : 'Muscle group not recorded', kitLabel(r), fallbackTag(r.display)].filter(Boolean).join(' · ')}
                             </Text>
                             {/* Its own line, and only when the title cannot
                                 explain itself: a search for "butt kicks" that

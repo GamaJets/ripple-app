@@ -528,7 +528,7 @@ export default function Groups() {
                       {/* One person's copy, edited without touching anybody
                           else's — which is the whole reason the group owns the
                           list and not the plan. */}
-                      <Ghost label="Just Theirs" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { clientId: id } })} />
+                      <Ghost label="Just Theirs" onPress={() => router.push({ pathname: '/(trainer)/builder', params: { clientId: id, from: 'trainerGroup' } })} />
                       <Pressable onPress={() => Alert.alert('Remove from group?', `Take ${m.name} out of “${open.name}”? This does not change the programme they are on.`, [
                         { text: 'Keep', style: 'cancel' },
                         { text: 'Remove', style: 'destructive', onPress: async () => {

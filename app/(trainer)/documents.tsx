@@ -42,7 +42,15 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+// How many people have accepted each document, on the document — the answer
+// this screen already held behind a per-document panel and never put where the
+// question is asked. src/lib/docAcceptance.ts has the whole argument, including
+// why no number is produced from a read that was cut short.
+import {
+  ACCEPTANCE_COUNTS_UNCOUNTABLE_NOTE, COUNTABLE_DOCUMENTS_CAP,
+  acceptedCount, acceptedLine, acceptedNeedsMark, tallyAcceptances,
+} from '../../src/lib/docAcceptance';
 import { fmtDay } from '../../src/lib/format';
 import {
   COACH_DOC_IMMUTABLE_NOTE, COACH_DOC_REACH_NOTE, DOC_MIME_TYPES, checkUpload,
@@ -88,6 +96,14 @@ export default function CoachDocumentsScreen() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [standing, setStanding] = useState<Standing[] | null>(null);
   const [standingStatus, setStandingStatus] = useState<LoadStatus>('ready');
+  /* How many people have accepted each document, keyed by document id, for the
+   * whole list at once. Null is UNKNOWN — a read that failed, or one that was
+   * never attempted — and is never an empty tally, because "no acceptances" and
+   * "we could not ask" are opposite facts about somebody's signed paperwork.
+   * `countStatus` carries the other half: 'partial' means the rows are real and
+   * are not all of them, under which no count may be stated at all. */
+  const [counts, setCounts] = useState<Record<string, number> | null>(null);
+  const [countStatus, setCountStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   // Which document's SEND panel is open. Separate from `openId` above on
   // purpose: "who has accepted it" and "who is it even in front of" are two
   // questions, and a coach opening the second one has not stopped wanting the
@@ -110,6 +126,12 @@ export default function CoachDocumentsScreen() {
 
   const load = useCallback(async () => {
     if (!USE_SUPABASE) { setStatus('ready'); return; }
+    /* Every bail-out below says so about the counts as well. Leaving them where
+     * they were would carry the PREVIOUS read's numbers under the next list —
+     * "4 people have accepted this" against a document whose acceptances we
+     * have just failed to read, which is the shape of claim this screen exists
+     * to be careful with. Null is UNKNOWN and draws no number. */
+    const noCounts = () => { setCounts(null); setCountStatus('error'); };
     try {
       // Both of these used to be 'ready', and 'ready' is the one status this
       // screen's render treats as a licence to say "You haven't added any
@@ -120,11 +142,11 @@ export default function CoachDocumentsScreen() {
       // 'error' means UNKNOWN (src/ui/loadStatus.ts), which is exactly what
       // this is, and the render already draws it as "could not be read".
       const { data: sess } = await supabase.auth.getSession();
-      if (!sess?.session) { setStatus('error'); return; }
+      if (!sess?.session) { setStatus('error'); noCounts(); return; }
       const { data: auth, error: authErr } = await supabase.auth.getUser();
-      if (authErr) { setStatus('error'); return; }
+      if (authErr) { setStatus('error'); noCounts(); return; }
       const id = auth?.user?.id ?? null;
-      if (!id) { setStatus('error'); return; }
+      if (!id) { setStatus('error'); noCounts(); return; }
       setUid(id);
       const { data, error } = await supabase.from('coach_documents')
         .select('id, coach_id, title, path, mime, bytes, required, retired_at, created_at')
@@ -133,7 +155,7 @@ export default function CoachDocumentsScreen() {
         .limit(capLimit());
       // An empty list under a failed read means "we could not ask", and a coach
       // told they have no paperwork on file would upload it a second time.
-      if (error) { setStatus('error'); return; }
+      if (error) { setStatus('error'); noCounts(); return; }
       const page = capped(data);
       setDocs(shapeDocs(page.rows.map((r: any): RawCoachDoc => ({
         id: r.id, coach_id: r.coach_id, title: r.title, path: r.path, mime: r.mime,
@@ -141,7 +163,55 @@ export default function CoachDocumentsScreen() {
         created_at: r.created_at, accepted_at: null,
       }))));
       setStatus(page.truncated ? 'partial' : 'ready');
-    } catch (e) { reportError('coachDocs.load', e); setStatus('error'); }
+
+      /* ── how many have accepted each of them ─────────────────────────────
+       *
+       * One read for the whole list, rather than the per-document RPC behind
+       * the Who's Accepted panel. `coach_document_acceptances` is readable
+       * here without anything being widened: `coach_doc_accept_own_r`
+       * (supabase/parts/135 §4) admits a coach to the acceptance rows of their
+       * OWN documents through an `exists` on `coach_documents.coach_id =
+       * auth.uid()`, and `authenticated` holds `select` on the table. The ids
+       * in the filter come straight out of the list above, which was itself
+       * `.eq('coach_id', id)` — so this cannot be pointed at anybody else's
+       * paperwork even by mistake, and it goes nowhere near part 84.
+       *
+       * Only `document_id` is selected. Who accepted and when is the panel's
+       * business and stays there; a count needs neither. */
+      const ids = page.rows.map((r: any) => String(r.id)).filter(Boolean);
+      if (ids.length === 0) {
+        // A completed read of an empty list. Nothing to count and nothing
+        // unknown about it — the tally is genuinely empty rather than absent.
+        setCounts({});
+        setCountStatus('ready');
+      } else if (ids.length > COUNTABLE_DOCUMENTS_CAP) {
+        // Not a row cap: PostgREST takes the `in` filter in the query string,
+        // so past this the URL is the thing that breaks, and a request that is
+        // quietly cut produces a count that is quietly wrong. 'partial' is the
+        // honest status for "the rows would be real and would not be all of
+        // them", and under it no number is drawn at all.
+        setCounts(null);
+        setCountStatus('partial');
+      } else {
+        const { data: acc, error: accErr } = await supabase
+          .from('coach_document_acceptances')
+          .select('document_id')
+          .in('document_id', ids)
+          .limit(capLimit());
+        if (accErr) {
+          reportError('coachDocs.counts', accErr);
+          noCounts();
+        } else {
+          const accPage = capped(acc);
+          setCounts(tallyAcceptances(accPage.rows as { document_id?: unknown }[]));
+          // 'partial' is not 'ready' (src/ui/loadStatus.ts). A tally built from
+          // a prefix of the acceptance rows under-counts every document it
+          // touches, and an under-count here reads as clients who have not
+          // signed — which is the one direction a coach acts on.
+          setCountStatus(accPage.truncated ? 'partial' : 'ready');
+        }
+      }
+    } catch (e) { reportError('coachDocs.load', e); setStatus('error'); noCounts(); }
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -448,6 +518,32 @@ export default function CoachDocumentsScreen() {
   const live = docs.filter((d) => !d.retired);
   const retired = docs.filter((d) => d.retired);
   const accepted = standing?.filter((s) => s.acceptedAt).length ?? 0;
+  /* `isWhole(countStatus)`, never `countStatus !== 'error'`. The claim these
+   * counts make is "this many people have signed your waiver", and both of the
+   * statuses that comparison would admit produce a wrong one: under 'loading'
+   * the tally is null and every document reads as unsigned, and under 'partial'
+   * it is built from a prefix and under-counts every document it touches. */
+  const countsWhole = isWhole(countStatus);
+  /* Said once, above the list, rather than against every row. The coach needs
+   * to know the numbers are missing; they do not need to be told eleven times.
+   *
+   * Only when there is paperwork for it to be about, and only when the DOCUMENT
+   * list itself was read: when that failed the screen is already saying so over
+   * the whole list, and "the counts could not be worked out" underneath it is a
+   * second sentence about the same failure.
+   *
+   * Written as the two statuses it WANTS rather than as `!== 'error' && !==
+   * 'loading'`, which is the enumeration scripts/check-whole.mjs exists for and
+   * which would be admitting 'partial' by accident rather than on purpose. Here
+   * 'partial' is wanted: a truncated document list is still a list of real
+   * documents, and the coach is owed the sentence about their counts. Nothing
+   * is counted on the strength of it — `countsWhole` above is what gates the
+   * numbers, and it is `isWhole`. */
+  const countsUnstated = docs.length > 0
+    && (status === 'ready' || status === 'partial')
+    && (countStatus === 'error' || countStatus === 'partial');
+  /** The acceptance line for one document, or null when no number may be said. */
+  const acceptedFor = (d: CoachDoc) => acceptedCount(counts, d.id, countsWhole);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -495,6 +591,14 @@ export default function CoachDocumentsScreen() {
               </Text>
             )}
 
+            {/* A mark and a sentence, not a silent absence of numbers. A coach
+                who sees no count against any document would read it as a
+                screen that has never had the feature, and would go back to
+                opening the panels one at a time. */}
+            {countsUnstated ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{ACCEPTANCE_COUNTS_UNCOUNTABLE_NOTE}</Flag>
+            ) : null}
+
             <Section>
               <Cta label={busy ? 'Uploading…' : 'Add a document'} onPress={addDocument} disabled={busy || !HAS_NATIVE_DOCUMENT_PICKER} wide />
               {/* Disabled with the reason beside it rather than live and inert.
@@ -530,6 +634,25 @@ export default function CoachDocumentsScreen() {
                           {sizeLabel(d.bytes)} · added {fmtDay(d.createdAt)}
                         </Text>
                       </Pressable>
+
+                      {/* The answer to "is this signed?", on the document, so
+                          it is not three taps and three reads away. The panel
+                          below still gives the names and the denominator —
+                          `standingLine` — which is the other half of the
+                          question and the half that needs a roster read.
+
+                          A `<Flag>` only for the case that wants acting on: a
+                          required document nobody has accepted. Never
+                          warn-coloured words; `t.warn` as ink is below AA on
+                          the light palettes. */}
+                      {(() => {
+                        const n = acceptedFor(d);
+                        const line = acceptedLine(n, d.required);
+                        if (!line) return null;
+                        return acceptedNeedsMark(n, d.required)
+                          ? <Flag tone={t.warn} style={{ marginTop: sp.sm }}>{line}</Flag>
+                          : <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{line}</Text>;
+                      })()}
 
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, marginTop: sp.md }}>
                         <Switch
@@ -671,6 +794,18 @@ export default function CoachDocumentsScreen() {
                       <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
                         Withdrawn · added {fmtDay(d.createdAt)}
                       </Text>
+                      {/* Only when somebody did. A retired document is not in
+                          front of anybody any more, so "Nobody has accepted
+                          this yet" against one would be describing a question
+                          that is no longer being asked — and the acceptances it
+                          DID collect are the reason it stays readable to the
+                          people who gave them. */}
+                      {(() => {
+                        const n = acceptedFor(d);
+                        return n !== null && n > 0
+                          ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{acceptedLine(n, false)}</Text>
+                          : null;
+                      })()}
                     </Pressable>
                   </View>
                 ))}

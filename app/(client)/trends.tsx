@@ -31,6 +31,11 @@ import { deltaLabel, deltaMoved, deltaSign } from '../../src/lib/deltaLabel';
 import { shortDayLabel } from '../../src/lib/bodyFigures';
 import { est1RM } from '../../src/lib/streaks';
 import { entryTonnage, setLoadKg, tonnageNote, type BodyweightHistory, type Tonnage } from '../../src/lib/bodyweightSets';
+// A hold is not a lift, and this screen is where that stopped being true. See
+// src/lib/holdTrend.ts: `bestOf` below fed seconds to Epley, so a plank drew an
+// "estimated 1-rep max" out of a stopwatch on the same axis as a bench press.
+import { isTimedSet, holdLabel } from '../../src/lib/timedSets';
+import { holdSeries, heldMovements, liftedMovements, holdChangeSecs, holdLoadNote } from '../../src/lib/holdTrend';
 import { useClientData } from '../../src/ui/clientData';
 import type { WorkoutEntry } from '../../src/lib/mockData';
 import { Rule, Section, SectionHead, Hero, KpiRow, Ghost, Spark, fig } from '../../src/ui/kit';
@@ -50,11 +55,38 @@ const WEEKS = 10;
 // second number as the load, and on a bodyweight set that number is zero — so
 // a member who trains on rings charted a flat run of zeros across ten weeks
 // and was told they had logged no volume at all.
-function bestOf(e: WorkoutEntry, history: BodyweightHistory): number {
-  return (e.sets || []).reduce((m, s, i) => {
-    const load = setLoadKg(e, i, s, history, e.t);
-    return load != null && s[0] ? Math.max(m, est1RM(load, s[0])) : m;
-  }, 0);
+// ── and a hold is not a lift, which this reduced over anyway ──────────────
+//
+// `setLoadKg` knows about bodyweight and knows nothing about holds, so on a
+// timed set this ran `est1RM(load, s[0])` where `s[0]` is SECONDS. An 88 kg
+// member's 45-second plank charted as est1RM(88, 45) ≈ 220 kg — a strength
+// figure computed from a stopwatch, plotted under the words "Estimated 1-rep
+// max" and tall enough to press every real lift on the chart into the bottom
+// pixel. src/lib/timedSets.ts refuses this arithmetic in as many words, and
+// tonnage, the rep board and the progression rule all skip holds already. This
+// was the one place that did not.
+//
+// ── null, because zero is a figure ────────────────────────────────────────
+//
+// It returned 0 for an entry it could not read, and 0 is an estimated one-rep
+// max of nothing. A member who does pull-ups and has never been weighed has no
+// priceable set anywhere (src/lib/bodyweightSets.ts), so every day of their
+// training charted at zero and the KPI beside it printed "0 kg". Null is the
+// honest answer and <Spark> draws it as a gap — the day stays on the axis, the
+// line breaks across it, and no figure is invented for it.
+function bestOf(e: WorkoutEntry, history: BodyweightHistory): number | null {
+  const rows = e.sets || [];
+  let best: number | null = null;
+  for (let i = 0; i < rows.length; i++) {
+    if (isTimedSet(e, i)) continue;
+    const reps = rows[i][0];
+    if (!reps) continue;
+    const load = setLoadKg(e, i, rows[i], history, e.t);
+    if (load == null) continue;
+    const v = est1RM(load, reps);
+    if (best == null || v > best) best = v;
+  }
+  return best;
 }
 
 export default function Trends() {
@@ -156,7 +188,13 @@ export default function Trends() {
     return names;
   }, [log]);
   // → trend of best est-1RM. The chip row is what the 24 is for.
-  const exercises = useMemo(() => movements.slice(0, 24), [movements]);
+  //
+  // Movements that were LIFTED, not every movement in the log. A member whose
+  // only isometric work is a plank got a "Plank" chip on a chart captioned
+  // "Estimated 1-rep max", and tapping it drew the stopwatch arithmetic `bestOf`
+  // above now refuses — a chip that leads only to a gap is worse than no chip.
+  // The holds have their own chart below, in their own units.
+  const exercises = useMemo(() => liftedMovements(log).slice(0, 24), [log]);
   const [sel, setSel] = useState<string | null>(null);
   const selName = sel || exercises[0] || null;
 
@@ -175,8 +213,8 @@ export default function Trends() {
   // The best estimated max of the day is that day's point, which is the same
   // rule `bestOf` already applies inside one entry.
   const allSessions = useMemo(() => {
-    if (!selName) return [] as { t: string; v: number }[];
-    const byDay = new Map<string, { t: string; v: number }>();
+    if (!selName) return [] as { t: string; v: number | null }[];
+    const byDay = new Map<string, { t: string; v: number | null }>();
     for (const e of log) {
       if (e.exercise !== selName || !e.sets || !e.sets.length) continue;
       // Null when the timestamp will not parse. Such an entry is dropped rather
@@ -192,7 +230,11 @@ export default function Trends() {
       if (!cur) byDay.set(day, { t: e.t, v });
       else byDay.set(day, {
         t: Date.parse(e.t) > Date.parse(cur.t) ? e.t : cur.t,
-        v: Math.max(cur.v, v),
+        // The best READABLE max of the day. `Math.max` over a null would have
+        // coerced it to zero and handed the day a max of nothing — the
+        // afternoon a member did their squats and then a plank would have
+        // charted at the plank.
+        v: cur.v == null ? v : v == null ? cur.v : Math.max(cur.v, v),
       });
     }
     return [...byDay.values()].sort((a, b) => +new Date(a.t) - +new Date(b.t));
@@ -205,15 +247,50 @@ export default function Trends() {
   // best of the last quarter of their training. Neither line named the window.
   const CHART_SESSIONS = 12;
   const series = useMemo(() => allSessions.slice(-CHART_SESSIONS), [allSessions]);
+  // ── the days that produced a reading, out of the days on the axis ───────
+  //
+  // A day with no readable estimated max is a gap in the line (see `bestOf`),
+  // and every figure beside the chart has to be computed over the readings
+  // rather than over the slots. `Math.max(1, ...)` used to do this job and did
+  // it by floor: a member with no priceable set anywhere got a "Best" of 1 kg,
+  // which is a figure nobody lifted printed as if somebody had.
+  const readable = useMemo(() => series.filter((s): s is { t: string; v: number } => s.v != null), [series]);
   // Over everything read, not over the twelve on the chart.
-  const maxE = Math.max(1, ...allSessions.map((s) => s.v));
-  const first = series.length ? series[0].v : 0;
-  const last = series.length ? series[series.length - 1].v : 0;
-  const delta = last - first;
-  // The span, converted once. Null only if the series is empty, which the
-  // `series.length >= 2` guard below already excludes — so the KPI is never
-  // handed a stand-in zero for a change nobody measured.
-  const deltaShown = weightDeltaIn(delta, wu);
+  const allReadable = useMemo(() => allSessions.filter((s): s is { t: string; v: number } => s.v != null), [allSessions]);
+  const maxE = allReadable.length ? Math.max(...allReadable.map((s) => s.v)) : null;
+  const first = readable.length ? readable[0].v : null;
+  const last = readable.length ? readable[readable.length - 1].v : null;
+  // The span, converted once, and null when either end of it was never
+  // measured. It was `last - first` over two stand-in zeros, so a movement with
+  // no priceable set reported a change of nothing as though it had been weighed.
+  const deltaShown = first != null && last != null ? weightDeltaIn(last - first, wu) : null;
+
+  // ── the other quantity, on its own axis ────────────────────────────────
+  //
+  // A hold is a duration and a lift is a mass, and nothing above may compare
+  // them — see `bestOf`. What was missing is the other half of that: having
+  // taken planks and dead hangs off every chart they do not belong on, the app
+  // never gave them one they do. `holdRecords` on Records is a BOARD — one row,
+  // one best, the day it happened — so a member whose hang has gone from twenty
+  // seconds to seventy across four months reads a single "1:10" and nothing
+  // that says it moved.
+  //
+  // Its own chips, its own selection and its own seconds. Deliberately not a
+  // second line on the chart above: two units on one axis is the bug, drawn.
+  const holdNames = useMemo(() => heldMovements(log).slice(0, 24), [log]);
+  const [holdSel, setHoldSel] = useState<string | null>(null);
+  const holdName = holdSel || holdNames[0] || null;
+  const allHolds = useMemo(() => (holdName ? holdSeries(log, holdName) : []), [log, holdName]);
+  // The same twelve-point window as the strength chart, and the same duty to
+  // say so when the figures beside it count more days than the line draws.
+  const holds = useMemo(() => allHolds.slice(-CHART_SESSIONS), [allHolds]);
+  const holdBest = allHolds.length ? Math.max(...allHolds.map((p) => p.secs)) : null;
+  const holdNow = holds.length ? holds[holds.length - 1].secs : null;
+  // Seconds, and no conversion anywhere: a second is a second in both units,
+  // which is exactly why a hold may not be drawn against a load. Null when
+  // there is only one day, because one hold is not a direction of travel.
+  const holdMoved = holdChangeSecs(holds);
+  const holdNote = holdLoadNote(holds);
 
   // Presentation-only: this week is the last bucket; a flat run of zeros is not
   // a trend, so the chart only draws once something has actually been lifted.
@@ -390,19 +467,23 @@ export default function Trends() {
                       // an unknown fraction of the member's training — and the
                       // "since" date is not when they started, it is where the
                       // read stopped.
-                      label: 'Est. 1RM', value: logKnown ? fig(est1RMIn(last, wu)) : fig(null), unit: logKnown ? wu : undefined,
+                      label: 'Est. 1RM', value: logKnown && last != null ? fig(est1RMIn(last, wu)) : fig(null), unit: logKnown && last != null ? wu : undefined,
                       // `deltaShown >= 0` put a plus on an unchanged 1RM, and
                       // `delta >= 0` gave that same nothing the accent dot the
                       // row uses to mean "you moved the right way". Both now
                       // ask the figure that is printed, which has its own arm
                       // for nothing. The day the session series starts is named
                       // rather than left to be inferred from the chart below.
-                      good: logKnown && deltaMoved(deltaShown) ? deltaSign(deltaShown) === '+' : undefined,
-                      delta: logKnown && series.length >= 2 && deltaMoved(deltaShown)
-                        ? deltaLabel(deltaShown, { since: shortDayLabel(series[0].t), unit: wu })
+                      // `since` is the first day that produced a READING, not
+                      // the first slot on the chart: a line that opens with a
+                      // gap was dating its own change from a day it has no
+                      // figure for.
+                      good: logKnown && deltaShown != null && deltaMoved(deltaShown) ? deltaSign(deltaShown) === '+' : undefined,
+                      delta: logKnown && readable.length >= 2 && deltaShown != null && deltaMoved(deltaShown)
+                        ? deltaLabel(deltaShown, { since: shortDayLabel(readable[0].t), unit: wu })
                         : logKnown ? undefined : 'not all read',
                     },
-                    { label: 'Best', value: logKnown ? fig(est1RMIn(maxE, wu)) : fig(null), unit: logKnown ? wu : undefined },
+                    { label: 'Best', value: logKnown && maxE != null ? fig(est1RMIn(maxE, wu)) : fig(null), unit: logKnown && maxE != null ? wu : undefined },
                     // Days this movement was trained — see the fold in
                     // `allSessions`, which keys a Map by `dayKeyOf(e.t)` and
                     // keeps one point per day. Counted per row it read
@@ -437,6 +518,17 @@ export default function Trends() {
                         sessions were both reported a day early. */}
                     <Spark data={series.map((s) => s.v)} labels={series.map((s) => s.t)} />
                   </>) : null}
+                  {/* A break in the line is a day this rule could not price,
+                      and an unexplained hole reads as a day off. It is not:
+                      it is a day whose sets were all at a bodyweight nobody
+                      has recorded — the one thing the member can actually do
+                      something about. */}
+                  {logKnown && readable.length < series.length ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      The line breaks where a day had no set this rule could price — a set done at your own
+                      bodyweight needs a weight on record for that day. Those days are still on the axis.
+                    </Text>
+                  ) : null}
                 </>
               ) : (
                 <Text style={{ ...ty.label, color: t.ink3 }}>No sets logged for this exercise yet.</Text>
@@ -444,6 +536,89 @@ export default function Trends() {
             </>
           )}
         </Section>
+
+        {/* ── how long you held it ───────────────────────────────────────
+            A chart of its own, in seconds, and never a line on the one above.
+
+            The app has prescribed holds since `buildProgram` was written, has
+            accepted them since src/lib/timedSets.ts, and refuses — correctly —
+            to price one as tonnage or as an estimated max. Records prints the
+            longest ever. Nothing anywhere drew the one thing isometric training
+            actually gives you, which is that the number goes up.
+
+            Three things this section is careful about:
+
+            · The axis is seconds and carries nothing else. A 60-second hold
+              with a plate is a harder 60 seconds than a bare one and it is
+              plotted at the same height, so `holdLoadNote` says so rather than
+              folding the plate into the duration.
+            · "Best" is the best HOLD, compared against holds. It is never put
+              beside the est-1RM above, and the two are not summed, ranked or
+              differenced anywhere on this screen.
+            · The figures are gated on `logKnown` like every other figure here.
+              A longest-ever over a truncated read is a subtotal wearing a
+              record's clothes. */}
+        {holdNames.length ? (<>
+          <Rule />
+          <Section>
+            <SectionHead title="Hold Trend" note="Time held" />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: sp.sm, paddingEnd: G }}>
+              {holdNames.map((n) => {
+                const on = n === holdName;
+                return (
+                  // Reads in the member's language, keyed on the English name
+                  // the log is written under — the same rule as the chip row
+                  // above it.
+                  <Pressable key={n} onPress={() => setHoldSel(n)}
+                    accessibilityRole="button" accessibilityLabel={movement(n)} accessibilityState={{ selected: on }}
+                    style={{ backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.pill, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                    <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink2 }} numberOfLines={1}>{movement(n)}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <View style={{ height: sp.lg }} />
+            <KpiRow items={[
+              {
+                label: 'Longest Held',
+                value: logKnown && holdNow != null ? holdLabel(holdNow) : fig(null),
+                // Through `deltaLabel`, not a hand-rolled sign — it owns the
+                // arm for nothing moved ("No change since 4 May", never "+0 s")
+                // and takes the day measured FROM as a required field.
+                // Whole seconds: `decimals: 0`, because the log stores a hold as
+                // a whole second and a tenth here would be a place finer than
+                // the record it came from.
+                good: logKnown && deltaMoved(holdMoved, 0) ? deltaSign(holdMoved, 0) === '+' : undefined,
+                delta: logKnown && holds.length >= 2
+                  ? deltaLabel(holdMoved, { since: shortDayLabel(holds[0].t), unit: 's', decimals: 0 })
+                  : logKnown ? undefined : 'not all read',
+              },
+              { label: 'Best', value: logKnown && holdBest != null ? holdLabel(holdBest) : fig(null) },
+              { label: 'Days Held', value: logKnown ? fig(allHolds.length) : fig(null) },
+            ]} />
+            {logKnown && allHolds.length > holds.length ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                Best and Days Held count all {allHolds.length} days you held this movement. The chart below draws the last {holds.length}.
+              </Text>
+            ) : null}
+            {holds.length >= 2 ? (<>
+              <View style={{ height: sp.lg }} />
+              {/* Seconds, stated as seconds. <Spark> draws its own axis from
+                  the same days it plots, so the dates under the line are the
+                  days of the holds above them rather than a hand-rolled row
+                  that has to be kept in step. */}
+              <Spark data={holds.map((p) => p.secs)} labels={holds.map((p) => p.day)} unit=" s" />
+            </>) : null}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              {holds.length < 2
+                ? 'One day so far. Log this hold again and the line draws.'
+                : 'Your longest hold of each day. A hold is time, not weight, so it is never added to the tonnage above or read as an estimated max.'}
+            </Text>
+            {holdNote ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{holdNote}</Text>
+            ) : null}
+          </Section>
+        </>) : null}
 
         <Rule />
 

@@ -40,6 +40,21 @@ import { readByIds } from '@lib/idLookup';
 import { fetchSessions, type PtSession } from '@lib/gymSessions';
 import { fetchPasses, passStatus, remainingUses, type GymPass } from '@lib/gymPasses';
 import { fetchInvites, inviteState, type MemberInvite } from '@lib/memberInvites';
+// What the gym is actually asking each member for. The price book has never
+// been drawn beside it anywhere in this console — see src/lib/priceBook.ts for
+// why the bill and not the payment is the thing compared to a list price.
+import { fetchInvoices, type GymInvoiceRow } from '@lib/gymInvoices';
+import {
+  fetchPriceBook, priceRows, summarisePrices, driftLine, otherCurrencyNote,
+  priceAges, priceAgeLine, A_YEAR_DAYS,
+  PRICE_STATE_LABEL, PRICE_STATE_MEANS, PRICE_AGE_LABEL, WHY_PRICE_AGE_IS_UNKNOWN,
+  type PricedPlan, type PriceStamps, type PriceRow, type PriceAge,
+} from '@lib/priceBook';
+// Who the app can reach, and who is a name the gym typed into a box.
+import {
+  appAccountSplit, offAppWithheld, APP_ACCOUNT_LABEL, APP_ACCOUNT_MEANS,
+  COUNTS_ARE_NOT_A_TOTAL, type OffAppPerson,
+} from '@lib/appAccounts';
 import {
   fetchMemberRecords, saveMemberRecord, byMember, parseTags, tagsText,
   contactLine, searchableFields, isEmptyPatch,
@@ -56,7 +71,7 @@ import { isoDate } from '@lib/format';
 // payment, a door visit, a booking, an invite — was drawn on whichever laptop
 // was open, so the same member's last visit read as two different days at two
 // desks in two countries.
-import { gymDateText, gymDateTimeText, whoseClockNote } from '@lib/gymWhen';
+import { calendarDateText, gymDateText, gymDateTimeText, whoseClockNote } from '@lib/gymWhen';
 import { gymDay, parseGymZone } from '@lib/gymZone';
 import {
   fetchMemberNotes, addMemberNote, noteBlocker, withLegacy, noteAttribution, MAX_NOTE,
@@ -129,6 +144,20 @@ export default function Members() {
   /** `tenants.timezone`, or null when the gym has not set one. */
   const [zone, setZone] = useState<string | null>(null);
   const [rec, setRec] = useState<MemberRecord>(EMPTY);
+  /**
+   * The price book, and the bills raised against the memberships on it.
+   *
+   * Held beside `rec` rather than inside it, for the reason `gymRecs` below is:
+   * `MemberRecord` is src/lib/memberView.ts's shape and this screen is not that
+   * module's only reader. Two more slices, loaded and failing on their own, so
+   * a refused price book costs the drift table and nothing else on the page.
+   */
+  const [plans, setPlans] = useState<Slice<PricedPlan>>(sliceLoading());
+  /** Whether this database can date a price change at all — see
+   *  supabase/parts/2880. Null until the price book has been read, and null is
+   *  not 'no-column': one is a question nobody has asked yet. */
+  const [stamps, setStamps] = useState<PriceStamps | null>(null);
+  const [invoices, setInvoices] = useState<Slice<GymInvoiceRow>>(sliceLoading());
   const [sel, setSel] = useState<string | null>(null);
   /**
    * What the GYM knows about each person: contact, next of kin, an operational
@@ -152,12 +181,21 @@ export default function Members() {
 
   const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setRec(EMPTY);
+    setPlans(sliceLoading());
+    setInvoices(sliceLoading());
+    setStamps(null);
     const sinceIso = new Date(Date.now() - WINDOW_DAYS * DAY).toISOString();
+    // The upper bound on the invoice read, on the GYM's clock — the same day
+    // `today` is drawn on below, and the reader's own only where the gym has
+    // never set a zone. An invoice dated tomorrow is post-dated billing and is
+    // not what anybody is being asked for today; /close and /tax bound the same
+    // read the same way.
+    const upToDay = gymDay(Date.now(), zone) ?? isoDate(new Date());
 
     // Seven independent reads, and deliberately not one Promise.all with a
     // single catch. A door log that 500s must not take the payments down with
     // it — the page is allowed to be partial, but only if it says which part.
-    const [memberships, payments, visits, bookings, sessions, passes, invites] = await Promise.all([
+    const [memberships, payments, visits, bookings, sessions, passes, invites, book, bills] = await Promise.all([
       slice(() => fetchMemberships(supabase, tenantId)),
       slice(() => fetchPayments(supabase, tenantId)),
       slice(() => fetchVisits(supabase, tenantId, { sinceIso })),
@@ -165,8 +203,13 @@ export default function Members() {
       slice(() => fetchSessions(supabase, tenantId, sinceIso)),
       slice(() => fetchPasses(supabase, tenantId)),
       slice(() => fetchInvites(supabase, tenantId)),
+      readPriceBook(tenantId),
+      slice(() => fetchInvoices(supabase, tenantId, upToDay)),
     ]);
     setRec({ memberships, payments, visits, bookings, sessions, passes, invites });
+    setPlans(book.plans);
+    setStamps(book.stamps);
+    setInvoices(bills);
 
     // Read after the seven above rather than beside them, and separately, so a
     // gym that has not applied part 197 yet — where this table does not exist —
@@ -182,16 +225,25 @@ export default function Members() {
       setGymRecsErr(e?.message ?? 'The gym’s own notes on your members could not be read.');
     }
 
-    // Whole means all eight reads answered. `useFetched` stamps only on a whole
+    // Whole means all ten reads answered. `useFetched` stamps only on a whole
     // read, so a refresh that lost the door log leaves the stamp where it was
     // and the section's own banner is what says which read is missing —
     // counting what the server confirmed, not what was sent. A TRUNCATED slice
     // still counts as an answer: see src/lib/readLanded.ts, and the truncation
     // has a banner of its own.
+    //
+    // The price book and the bills are in the list, not exempt from it: a stamp
+    // saying "read just now" over a drift table built from a price book that
+    // did not arrive is the same false claim as one over a missing door log.
     return recsLanded && slicesLanded([
       memberships, payments, visits, bookings, sessions, passes, invites,
+      book.plans, bills,
     ]);
-  }, []);
+    // `zone` because the invoice read is bounded on the GYM's day. The reader is
+    // held in a ref and reassigned every render (components/Fetched.tsx), so a
+    // new identity here does not re-fire anything; it is picked up by the next
+    // refresh, which is what a zone arriving after the first read should do.
+  }, [zone]);
 
   /**
    * Kept current, and it says when it was last read.
@@ -524,6 +576,11 @@ export default function Members() {
         </Banner>
       ) : null}
 
+      {/* Above the form that sends things, deliberately. It answers the question
+          an owner has just before pressing send — who will this actually reach —
+          rather than reporting it afterwards in `deliveryNote`'s count. */}
+      <AppAccounts rec={rec} nowMs={nowMs} />
+
       <Reach
         dossiers={dossiers} doorLogLive={doorLive} me={me} tenantId={tenantId}
         gymName={gymName} gymRecs={gymRecs}
@@ -556,6 +613,10 @@ export default function Members() {
           </p>
         </Section>
       )}
+
+      <PriceAgainstPaid rec={rec} plans={plans} invoices={invoices} />
+
+      <PriceAges plans={plans} stamps={stamps} zone={zone} nowMs={nowMs} />
     </Shell>
   );
 }
@@ -569,6 +630,26 @@ async function slice<T>(run: () => Promise<T[]>): Promise<Slice<T>> {
     return sliceReady(await run());
   } catch (e: any) {
     return sliceFailed(e?.message ?? 'The read failed.');
+  }
+}
+
+/**
+ * The price book, and whether this database can date a price change.
+ *
+ * Its own reader rather than `slice()` because it returns two facts, and the
+ * second one has to survive a failure: `stamps` goes null when the read fails,
+ * which is a different sentence from 'no-column' and is why `priceAges` keeps
+ * 'unreadable' and 'no-column' apart. A failed read reported as "this database
+ * has no such column" would send an owner to apply a part they already have.
+ */
+async function readPriceBook(tenantId: string): Promise<{
+  plans: Slice<PricedPlan>; stamps: PriceStamps | null;
+}> {
+  try {
+    const book = await fetchPriceBook(supabase, tenantId);
+    return { plans: sliceReady(book.plans), stamps: book.stamps };
+  } catch (e: any) {
+    return { plans: sliceFailed(e?.message ?? 'The read failed.'), stamps: null };
   }
 }
 
@@ -771,6 +852,321 @@ function Roster({ rec, dossiers, reads, sel, onPick, ccy, gymRecs, query, onQuer
           rows={shown} columns={cols} rowKey={(d) => d.memberId}
           empty="No memberships recorded yet. Open one under Money and this page fills in."
         />
+      ) : null}
+    </Section>
+  );
+}
+
+/* ── who is on the app ─────────────────────────────────────────────────────── */
+
+/**
+ * Which of the people this gym calls members can actually be sent anything.
+ *
+ * A gym's roster is two kinds of record and this console drew them as one: the
+ * people holding memberships, every one of whom has a Repple account because
+ * `memberships.member_id` cannot point anywhere else, and the people the gym
+ * typed into the invite box who have never claimed one. The second group are
+ * members in every sense the gym means and are reachable by nothing this screen
+ * can send. Until now the only place that difference surfaced was `deliveryNote`
+ * AFTER a notice had gone out, as a number: "delivered to 34 of 41 inboxes".
+ *
+ * The two counts are never added. See `COUNTS_ARE_NOT_A_TOTAL`, which is on the
+ * screen under them: they count different records and this database cannot join
+ * them, so a sum would double-count exactly the people who were chased twice.
+ */
+function AppAccounts({ rec, nowMs }: { rec: MemberRecord; nowMs: number }) {
+  // `nowMs` is the instant the reads landed, handed down rather than read here:
+  // a clock read inside a memo keyed on rows is frozen at the render that built
+  // it, and an invite expiring at noon would stay "open" on a desk console left
+  // up all day.
+  const split = useMemo(
+    () => appAccountSplit(rec.memberships, rec.invites, nowMs),
+    [rec.memberships, rec.invites, nowMs],
+  );
+  const withheld = offAppWithheld(rec.memberships, rec.invites);
+  const c = split.counts;
+  const people = split.offTheApp;
+
+  const cols: Column<OffAppPerson>[] = [
+    {
+      key: 'name', header: 'Person', value: (p) => p.name ?? p.email ?? '￿',
+      render: (p) => p.name ?? <span className="dash">no name was typed</span>,
+    },
+    {
+      key: 'email', header: 'Address', value: (p) => p.email,
+      render: (p) => p.email
+        ? <span className="mono" style={{ fontSize: 12 }}>{p.email}</span>
+        : <span className="dash">none left</span>,
+    },
+    {
+      key: 'state', header: 'State', value: (p) => APP_ACCOUNT_LABEL[p.state],
+      render: (p) => APP_ACCOUNT_LABEL[p.state],
+    },
+  ];
+
+  // Only the states actually on the page get a sentence under it. A legend
+  // listing all four would explain an erased account to a gym that has never
+  // erased one, and the two that matter would be read past.
+  const legend = [...new Set((people ?? []).map((p) => p.state))];
+
+  return (
+    <Section
+      title="On the App"
+      sub="Everybody holding a membership has a Repple account — this database cannot record a membership without one. The people below are the ones the gym typed in, and nothing sent from this console reaches them."
+    >
+      <div
+        style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 1, background: 'var(--ring)', borderBottom: '1px solid var(--ring)',
+        }}
+      >
+        <Kpi
+          label={APP_ACCOUNT_LABEL['on-the-app']} value={c.onTheApp}
+          note={sliceNote(rec.memberships, 'the membership list') ?? 'people a notice reaches'}
+        />
+        <Kpi
+          label={APP_ACCOUNT_LABEL.invited} value={c.invited}
+          tone={c.invited ? 'warn' : undefined}
+          note={sliceNote(rec.invites, 'the invitations') ?? 'reachable only by email'}
+        />
+        <Kpi
+          label={APP_ACCOUNT_LABEL['invite-lapsed']} value={c.inviteLapsed}
+          note={sliceNote(rec.invites, 'the invitations') ?? 'needs sending again'}
+        />
+        <Kpi
+          label={APP_ACCOUNT_LABEL['account-erased']} value={c.accountErased}
+          note={sliceNote(rec.memberships, 'the membership list') ?? 'the membership is kept for the books'}
+        />
+      </div>
+
+      <p style={{ margin: 0, padding: '11px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+        {COUNTS_ARE_NOT_A_TOTAL}
+      </p>
+
+      {withheld ? (
+        <div style={{ padding: '0 14px 12px' }}>
+          <Banner>{cap(withheld)}</Banner>
+        </div>
+      ) : null}
+
+      {people ? (
+        <DataTable noun="people"
+          rows={people} columns={cols} rowKey={(p) => p.key}
+          empty="Everybody on this roster holds an account, and no invitation is outstanding. Anything posted from this screen reaches all of them." />
+      ) : null}
+
+      {legend.length ? (
+        <ul style={{ margin: 0, padding: '4px 14px 14px 30px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {legend.map((s) => (
+            <li key={s}><strong style={{ color: 'var(--ink2)' }}>{APP_ACCOUNT_LABEL[s]}</strong>: {APP_ACCOUNT_MEANS[s]}</li>
+          ))}
+        </ul>
+      ) : null}
+    </Section>
+  );
+}
+
+/* ── the price book against what is actually charged ───────────────────────── */
+
+/**
+ * Every live membership beside the list price of the plan it was sold on.
+ *
+ * The drift is the point: a gym sets a price, then sells at the old one, keeps
+ * a founder on a 2019 figure, agrees a corporate rate on the phone and puts the
+ * list price up. Every one of those is deliberate and none of them was visible
+ * anywhere — /money draws the price book, the memberships and the payments in
+ * three tables and never puts two of them on one line.
+ *
+ * The two things this screen will not do are in src/lib/priceBook.ts and they
+ * are load-bearing: it never subtracts across two currencies, and it never
+ * folds a member whose price it could not read into "on the list price".
+ */
+function PriceAgainstPaid({ rec, plans, invoices }: {
+  rec: MemberRecord;
+  plans: Slice<PricedPlan>;
+  invoices: Slice<GymInvoiceRow>;
+}) {
+  const rows = useMemo(
+    () => priceRows({ memberships: rec.memberships, plans, invoices }),
+    [rec.memberships, plans, invoices],
+  );
+  const sum = rows ? summarisePrices(rows) : null;
+
+  const cols: Column<PriceRow>[] = [
+    {
+      key: 'name', header: 'Member', value: (r) => r.memberName ?? '￿',
+      render: (r) => r.memberName ?? <span className="dash">erased account</span>,
+    },
+    {
+      key: 'plan', header: 'Plan', value: (r) => r.planName,
+      render: (r) => r.planName ?? <span className="dash">none attached</span>,
+    },
+    {
+      key: 'list', header: 'List Price', value: (r) => r.listCents ?? null, numeric: true,
+      // Each side carries its OWN currency and is drawn in it. A column headed
+      // with one currency over figures denominated in two is how a gym reads a
+      // EUR bill as pounds.
+      render: (r) => money(r.listCents, r.listCurrency) ?? <span className="dash">not read</span>,
+    },
+    {
+      key: 'billed', header: 'Last Bill', value: (r) => r.billedCents ?? null, numeric: true,
+      render: (r) => money(r.billedCents, r.billedCurrency)
+        ?? <span className="dash">{r.state === 'not-billed' ? 'never billed' : 'not read'}</span>,
+    },
+    {
+      key: 'diff', header: 'Difference', value: (r) => r.diffCents ?? null, numeric: true,
+      render: (r) => {
+        if (r.diffCents != null) {
+          const t = money(r.diffCents, r.listCurrency);
+          return t ? <span style={{ color: r.diffCents === 0 ? 'var(--ink3)' : 'var(--warn)' }}>{t}</span>
+            : <span className="dash">not stateable</span>;
+        }
+        // Not a dash on its own: this cell is the one an owner's eye goes to,
+        // and empty here would read as "no difference".
+        return <span className="dash">{r.state === 'other-currency' ? 'not compared' : 'not known'}</span>;
+      },
+    },
+    {
+      key: 'when', header: 'Billed On', value: (r) => r.billedOn,
+      // A bare YYYY-MM-DD off a `date` column: already a day, so it is spelled
+      // in the reader's locale and in no zone at all. `gymDateText` would move
+      // it by one for readers far enough east or west of the gym.
+      render: (r) => calendarDateText(r.billedOn) ?? <span className="dash">no bill</span>,
+    },
+    {
+      key: 'state', header: 'State', value: (r) => PRICE_STATE_LABEL[r.state],
+      render: (r) => (
+        <span style={{ color: r.state === 'on-list' ? 'var(--ink3)' : 'var(--ink)' }}>
+          {PRICE_STATE_LABEL[r.state]}
+        </span>
+      ),
+    },
+  ];
+
+  // One sentence per currency PAIR, not per member: the wording depends only on
+  // the two codes, so fifty EUR bills against a GBP plan produce one line.
+  const mixed = [...new Set((rows ?? []).map(otherCurrencyNote).filter((n): n is string => n != null))];
+  const legend = [...new Set((rows ?? []).map((r) => r.state))];
+
+  return (
+    <Section
+      title="The Price Book Against What Is Charged"
+      sub="Every live membership beside the list price of the plan it was sold on. What a member is CHARGED is the last invoice raised against their membership; what they have PAID is a different question and is on their record above."
+    >
+      {rows && sum ? (
+        <p style={{ margin: 0, padding: '11px 14px', fontSize: 13, color: 'var(--ink2)' }}>
+          {driftLine(sum, rows.length)}
+        </p>
+      ) : null}
+
+      {rec.memberships.state === 'loading' ? <Loading /> : null}
+      {rec.memberships.state === 'failed' ? (
+        <Failed reason={(rec.memberships as { reason: string }).reason} what="the membership list" />
+      ) : null}
+      {rec.memberships.state === 'partial' ? (
+        <Truncated what="the membership list" cap={rec.memberships.cap} />
+      ) : null}
+
+      {rows ? (
+        <DataTable noun="memberships"
+          rows={rows} columns={cols} rowKey={(r) => r.membershipId}
+          empty="No live membership to hold against the price book." />
+      ) : null}
+
+      {mixed.length ? (
+        <ul style={{ margin: 0, padding: '4px 14px 0 30px', fontSize: 12.5, color: 'var(--warn)' }}>
+          {mixed.map((n) => <li key={n}>{n}</li>)}
+        </ul>
+      ) : null}
+
+      {legend.length ? (
+        <ul style={{ margin: 0, padding: '10px 14px 14px 30px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {legend.map((s) => (
+            <li key={s}><strong style={{ color: 'var(--ink2)' }}>{PRICE_STATE_LABEL[s]}</strong>: {PRICE_STATE_MEANS[s]}</li>
+          ))}
+        </ul>
+      ) : null}
+    </Section>
+  );
+}
+
+/* ── a price that has not moved ────────────────────────────────────────────── */
+
+/**
+ * How long each plan on sale has been at its price.
+ *
+ * Until supabase/parts/2880 is applied every row here says the same thing, and
+ * that is the honest output rather than a broken one: `membership_plans` carries
+ * the price and the day the ROW was made, `price_cents` is written over in
+ * place, and nothing in this database records when it last moved. The three
+ * things that look like an answer — `created_at`, a row-wide `updated_at`, and
+ * the absence of a 'price-changed' event — are each wrong in a way that would
+ * flag plans that were repriced last month, and an owner who acts on one of
+ * those never trusts the screen again. The part's header argues all three.
+ */
+function PriceAges({ plans, stamps, zone, nowMs }: {
+  plans: Slice<PricedPlan>;
+  stamps: PriceStamps | null;
+  zone: string | null;
+  nowMs: number;
+}) {
+  const ages = useMemo(() => priceAges(plans, stamps, nowMs), [plans, stamps, nowMs]);
+
+  const cols: Column<PriceAge>[] = [
+    { key: 'plan', header: 'Plan', value: (a) => a.planName },
+    {
+      key: 'when', header: 'Price Last Moved', value: (a) => a.changedAt,
+      // A `timestamptz`, so this one IS an instant and is drawn on the gym's
+      // clock like every other stamp on this page.
+      render: (a) => gymDateText(a.changedAt, zone) ?? <span className="dash">not recorded</span>,
+    },
+    {
+      key: 'days', header: 'Days at This Price', value: (a) => a.days ?? null, numeric: true,
+      render: (a) => a.days == null
+        ? <span className="dash">not known</span>
+        : String(a.days),
+    },
+    {
+      key: 'state', header: 'State', value: (a) => PRICE_AGE_LABEL[a.state],
+      render: (a) => (
+        <span style={{ color: a.state === 'stale' ? 'var(--warn)' : 'var(--ink)' }}>
+          {PRICE_AGE_LABEL[a.state]}
+        </span>
+      ),
+    },
+  ];
+
+  // One line per REASON, not per plan. Before the part is applied that is a
+  // single sentence for the whole table, which is exactly what it is.
+  const why = [...new Set((ages ?? []).map((a) => a.why).filter((w): w is NonNullable<typeof w> => w != null))];
+
+  return (
+    <Section
+      title="How Long a Price Has Sat Still"
+      sub={`Plans on sale, and how long each has been at its price. A year here is ${A_YEAR_DAYS} days. Retired plans are left out: nothing is sold on them.`}
+    >
+      {ages ? (
+        <p style={{ margin: 0, padding: '11px 14px', fontSize: 13, color: 'var(--ink2)' }}>
+          {priceAgeLine(ages)}
+        </p>
+      ) : null}
+
+      {plans.state === 'loading' ? <Loading /> : null}
+      {plans.state === 'failed' ? (
+        <Failed reason={plans.reason} what="the price book" />
+      ) : null}
+      {plans.state === 'partial' ? <Truncated what="the price book" cap={plans.cap} /> : null}
+
+      {ages ? (
+        <DataTable noun="plans"
+          rows={ages} columns={cols} rowKey={(a) => a.planId}
+          empty="No plan is on sale, so there is no price to date." />
+      ) : null}
+
+      {why.length ? (
+        <ul style={{ margin: 0, padding: '10px 14px 14px 30px', fontSize: 12.5, color: 'var(--ink3)' }}>
+          {why.map((w) => <li key={w}>{WHY_PRICE_AGE_IS_UNKNOWN[w]}</li>)}
+        </ul>
       ) : null}
     </Section>
   );

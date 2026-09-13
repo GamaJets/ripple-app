@@ -654,6 +654,40 @@ export function firstRunReleases(
   return [rel];
 }
 
+/**
+ * Whether a stored position is a stamp that nobody was ever shown.
+ *
+ * ── The bug this exists to end, which is the SAME bug twice ───────────────
+ *
+ * firstRunReleases above fixed "no stored position". It could not fix the
+ * accounts that already had one, and those are the accounts the first bug
+ * created: the pre-fix build wrote `lastSeen = CURRENT_RELEASE` silently on
+ * first launch, for everybody. A position equal to the current release makes
+ * unseenReleases return nothing, forever — so the readers who were robbed by
+ * the first bug are precisely the readers the first fix cannot reach. Reported
+ * again, months later: "Still not getting the What's New screen when opening
+ * the Client or Coach apps. It appears on the Studio app." Studio appears to
+ * work only because it is a separate bundle with its own storage, which the
+ * broken build never wrote to.
+ *
+ * The stamp cannot be un-written and must not be: erasing it would be a guess
+ * dressed up as a fact. So the dismissal is recorded as a SECOND fact, next to
+ * it. A position with a matching dismissal was read by somebody. A position
+ * with no dismissal beside it was written by a machine, and is not evidence
+ * that anybody read anything.
+ *
+ * Only the CURRENT release is ever in question. A position BEHIND current is
+ * already handled — unseenReleases shows the gap — and a reader who dismissed
+ * 1.3.0 before this existed is asked again only while 1.3.0 is still current,
+ * once, and never after 1.4.0 ships.
+ */
+export function stampWasNeverShown(seen: string | null, read: string | null, current: string): boolean {
+  if (!isVersion(seen) || !isVersion(current)) return false;
+  // Behind or ahead of current is not this question.
+  if (seen.trim() !== current.trim()) return false;
+  return !(isVersion(read) && read.trim() === current.trim());
+}
+
 /** Semver-ish compare on dot-separated numbers. Returns >0 when a is newer. */
 export function compareVersions(a: string, b: string): number {
   const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);

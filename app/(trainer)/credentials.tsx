@@ -43,7 +43,7 @@ import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, type as ty } from '../../src/theme/scale';
 import { useAuth } from '../../src/ui/auth';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import {
   fetchCoachCredentials, addCredential, updateCredential, deleteCredential,
   fetchReviews, replyToReview,
@@ -57,6 +57,14 @@ import {
   CLAIM_NOTE_COACH, MAX_TITLE, MAX_ISSUER, MAX_REFERENCE,
   type Credential, type CredentialDraft, type CredentialKind,
 } from '../../src/lib/coachCredentials';
+// The one sentence at the top of this screen that answers "has anything
+// lapsed?" without reading the list. Pure, and it holds no date logic of its
+// own — see src/lib/credentialExpiry.ts on why a second opinion about what
+// "expired" means is how two screens come to disagree about whether somebody
+// may be on a gym floor.
+import {
+  expirySummary, expirySummaryLine, expirySummaryNeedsMark,
+} from '../../src/lib/credentialExpiry';
 import {
   reviewListState, reviewerLabel, gymLine, unansweredCount, validateReply,
   askMomentNote, reviewAskDraft, askListNote, ASK_IS_UNFILTERED, WHO_REVIEWED_IS_HIDDEN,
@@ -221,6 +229,14 @@ export default function TrainerCredentials() {
   const listState = reviewListState(revStatus, reviews);
   const waiting = unansweredCount(reviews, revStatus);
   const insurance = insuranceClaim(creds, today);
+  // `isWhole(credStatus)`, not `credStatus !== 'error'`. The reassuring branch
+  // of this summary is "Nothing has lapsed", and under 'loading' that would be
+  // computed over the empty array this screen initialises with — a coach whose
+  // insurance ran out in March told, for the length of a gym-network read, that
+  // everything is in date. `expirySummary` refuses to reassure on anything but
+  // a whole read; passing the flag honestly is the other half of that.
+  const expiry = expirySummary(creds, today, isWhole(credStatus));
+  const expiryLineText = expirySummaryLine(expiry);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
@@ -242,6 +258,29 @@ export default function TrainerCredentials() {
           <Notice tone={t.ink3} kicker="Read this first" title="Repple does not check these"
             note={CLAIM_NOTE_COACH} />
         </View>
+
+        {/* ── has anything lapsed? ───────────────────────────────────────
+            Above the list, because the list is sorted with the expired ones
+            LAST (`sortCredentials`, and deliberately — a lapsed certification
+            is not hidden, it just stops sitting at the top). Between that and
+            the per-row `expiryLine`, the fact that matters most was the fact
+            furthest down the screen: a coach with six qualifications and a
+            policy had to read seven rows to find out their cover ran out in
+            March. The screen already knew.
+
+            Below the honesty notice rather than above it: that notice is first
+            "before anything is typed" by an argued decision in this file's
+            header, and this is a status line, not a claim about verification.
+
+            A `<Flag>` when it needs urgency, never warn-coloured words —
+            `t.warn` as ink is 3.87–4.08:1 on the three light palettes. */}
+        {expiryLineText ? (
+          expirySummaryNeedsMark(expiry) ? (
+            <Flag tone={t.warn} style={{ marginTop: sp.lg }}>{expiryLineText}</Flag>
+          ) : (
+            <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>{expiryLineText}</Text>
+          )
+        ) : null}
 
         {/* ── credentials ───────────────────────────────────────────────── */}
         <Section>

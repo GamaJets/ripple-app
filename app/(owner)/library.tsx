@@ -46,9 +46,24 @@ import { BACK_ICON } from '../../src/ui/direction';
  *
  *  Not "Bodyweight". A null equipment column means nobody wrote down what this
  *  movement is performed on — which is a gap in our data, and filing it under
- *  bodyweight would be inventing a fact about 88 exercises. It gets a chip of
- *  its own so those rows are still reachable rather than falling out of every
- *  filter and off the screen. */
+ *  bodyweight would be inventing a fact about a movement. A cable fly landing
+ *  in a hotel-room programme is what that invention costs.
+ *
+ *  It gets a chip of its own so those rows stay reachable rather than falling
+ *  out of every filter and off the screen.
+ *
+ *  ── on the figure that used to be here ──────────────────────────────────
+ *
+ *  This comment said "88 exercises". Measured against the live catalogue on
+ *  13 Sep 2026 it is 190 of 615 — near enough a THIRD of the movements, not
+ *  the seventh the old number implied. Nobody wrote 88 carelessly; it was
+ *  true when it was written, and the catalogue grew underneath it.
+ *
+ *  So the number is dated here rather than stated flat, and it is deliberately
+ *  not load-bearing: nothing reads it, the chip is derived from the rows in
+ *  hand, and the count a screen shows is counted at the time. A figure in
+ *  prose is a claim with no test behind it — the most it can honestly do is
+ *  say when somebody last looked. */
 const UNRECORDED = 'Not recorded';
 
 const ALL = 'All';

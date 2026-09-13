@@ -35,6 +35,7 @@ import { useSessions, useSessionWaitlistCounts, useLateCancelCharges, useMyCance
 // broadcast. See that module's header: 'nobody' is the only outcome that
 // licenses it, and it is the only one `mayReoffer` returns true for.
 import { mayReoffer } from '../../src/lib/waitlistPromotion';
+import { fetchSessionWaitlists, waitlistWhoLine, type SessionWaitlists } from '../../src/lib/sessionWaitlist';
 import { useAvailability, upcomingDates, useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 // Why a coach's open slots have stopped being generated, and the one honest
@@ -126,6 +127,12 @@ import {
   unrebooked, rebookingListable, rebookCoverageNote, unrebookedHeading, unrebookedNote,
   noUnrebookedLine, REBOOK_CANCELLED_GAP_NOTE,
 } from '../../src/lib/rebooking';
+// The same diary read, arranged by PERSON rather than by day — what each client
+// has actually taken over the next fortnight. See src/lib/bookedAhead.ts.
+import {
+  BOOKED_AHEAD_DAYS, bookedAhead, bookedAheadHeading, bookedAheadListable,
+  bookedAheadNote, nobodyBookedAheadLine,
+} from '../../src/lib/bookedAhead';
 import {
   blockDates, summariseBlocks, blockSummaryLine, blockPlanLabel,
   cancelAndBlockBody, cancelAndBlockLabel, sessionsBlocking,
@@ -425,6 +432,40 @@ export default function TrainerSchedule() {
   // before they do it rather than after.
   const bookedIds = sessions.filter((x) => x.status === 'booked').map((x) => x.id).sort();
   const { counts: waitCounts, status: waitStatus, reload: reloadWaits } = useSessionWaitlistCounts(bookedIds);
+  /* ── and WHO is in those queues ──────────────────────────────────────────
+   *
+   * The count above has been on this row for a while and it is the half that
+   * decides an action: cancelling an hour somebody is waiting for hands it
+   * straight over rather than throwing it open. The half it could not give is
+   * the one the coach needs the moment the push fails — `promoteWaitlist` below
+   * already renders "we couldn't notify them, so tell them yourself", to a coach
+   * who had no way of finding out who "them" was.
+   *
+   * Nothing new was needed on the server. `session_waitlist_trainer_r`
+   * (supabase/parts/142) grants select on every column of every queue row for a
+   * session this coach owns; `useSessionWaitlistCounts` selects `session_id`
+   * alone and tallies it, which is all it was ever asked for.
+   *
+   * A FOLLOW-UP read, scoped by the sweep. The sweep asks about every booked
+   * hour on the calendar; this asks only about the handful that came back with
+   * somebody behind them, which on most diaries is none and costs no read at
+   * all. Under anything but a whole sweep it asks about nothing: `isWhole`, not
+   * `!== 'error'`, because a count off a truncated read cannot say which
+   * sessions have queues — and the count line below already says so in words.
+   */
+  const queuedKey = isWhole(waitStatus)
+    ? bookedIds.filter((id) => (waitCounts.get(id) ?? 0) > 0).join(',')
+    : '';
+  const [waitWho, setWaitWho] = useState<SessionWaitlists>({ status: 'ready', bySession: new Map() });
+  const reloadWaitWho = useCallback(async () => {
+    const ids = queuedKey ? queuedKey.split(',') : [];
+    // Not a failure and not an empty queue: nobody is waiting for anything, so
+    // there is nothing to ask and 'ready' over an empty map is the true answer.
+    if (!ids.length) { setWaitWho({ status: 'ready', bySession: new Map() }); return; }
+    setWaitWho((p) => ({ ...p, status: 'loading' }));
+    setWaitWho(await fetchSessionWaitlists(supabase, ids));
+  }, [queuedKey]);
+  useEffect(() => { void reloadWaitWho(); }, [reloadWaitWho]);
   // The fees this coach's clients have actually been charged — rows in
   // `charges`, which nothing in this product wrote until part 126. The coach is
   // the one who collects them, so they are the one who has to be able to see
@@ -781,6 +822,11 @@ export default function TrainerSchedule() {
   const pull = usePullToRefresh(useCallback(() => Promise.all([
     refresh(), refreshRoster(), Promise.resolve(refreshClasses()),
     Promise.resolve(reloadWaits()), Promise.resolve(reloadFees()),
+    // The names in those queues, alongside the counts and not after them. A
+    // member leaving a waitlist does it from their own phone, and a refresh
+    // that moved the count and left the names would name somebody who has
+    // gone — which on this screen is a person the coach then rings.
+    reloadWaitWho(),
     Promise.resolve(reloadSeries()), Promise.resolve(reloadAvail()),
     Promise.resolve(reloadPolicy()),
     // The plan on each booked row is resolved from these. A pull that moved
@@ -789,7 +835,7 @@ export default function TrainerSchedule() {
     // exactly the state the row's own caveat is about, and a coach who pulls
     // to clear it should actually be clearing it.
     Promise.resolve(ap.reload()),
-  ]), [refresh, refreshRoster, refreshClasses, reloadWaits, reloadFees, reloadSeries, reloadAvail, reloadPolicy, ap]));
+  ]), [refresh, refreshRoster, refreshClasses, reloadWaits, reloadWaitWho, reloadFees, reloadSeries, reloadAvail, reloadPolicy, ap]));
   // What is running. An ended arrangement stays in the table for the record and
   // is not listed — a coach's screen is their week, not their history — but it
   // is counted, so the empty state can tell "you have never made one" apart
@@ -1398,6 +1444,14 @@ export default function TrainerSchedule() {
    * list, and `rebookCoverageNote` says so rather than letting a short list
    * read as a clean book. */
   const quiet = rebookingListable(sessionsStatus) ? unrebooked(sessions, now.getTime()) : [];
+
+  /* And the other side of the same coin: who HAS taken something, and how much.
+   * A month grid is arranged by time, so "what has Priya got booked?" was a
+   * coach tapping through fourteen days and remembering. Off the same rows,
+   * with no extra read — see src/lib/bookedAhead.ts, which makes the same
+   * 'partial' argument rebooking.ts does and for the same reason: this looks
+   * only forwards, and the cut on a newest-first read is behind. */
+  const ahead = bookedAheadListable(sessionsStatus) ? bookedAhead(sessions, now.getTime()) : [];
 
   // Time the coach is NOT available. The database withdraws the open slots
   // inside the period as it writes the block, because an offer left standing
@@ -3269,6 +3323,29 @@ export default function TrainerSchedule() {
                     </Text>
                   </View>
                 ) : null}
+                {/* And who they are, in the order the server will hand the hour
+                    over in — `joined_at` then `seq`, the pair
+                    `_promote_session_waitlist` reads. Drawn under the count and
+                    indented with it, because it is the same thought finished:
+                    somebody is behind this hour, and here is who.
+
+                    Its own status, not the count's. The two are separate reads
+                    and one can come back without the other; `waitlistWhoLine`
+                    names nobody under 'partial', because a cut read can lose the
+                    head of a queue and the head is the only name that promises
+                    anything. It also returns null on an empty queue, so the race
+                    between the two reads shows the count alone rather than a
+                    sentence contradicting it. */}
+                {s.status === 'booked' && (waitCounts.get(s.id) ?? 0) > 0 ? (() => {
+                  const queue = waitWho.bySession.get(s.id) ?? [];
+                  const said = waitlistWhoLine(
+                    queue.map((e) => slotWhoName(e.clientId, roster, rosterStatus)), waitWho.status);
+                  return said ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2, marginStart: 11 }}>
+                      {said}
+                    </Text>
+                  ) : null;
+                })() : null}
                 {s.approvedAt ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
                     <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: t.good }} />
@@ -3493,6 +3570,82 @@ export default function TrainerSchedule() {
         </Section>
 
         <Rule />
+
+        {/* ── the fortnight each client has booked out ───────────────────
+            The diary, arranged by person. Every row of this comes off the
+            sessions this screen already holds — the question is not one this
+            app could not answer, it is one the month grid cannot be READ for,
+            because a grid is arranged by time and "what has Priya got booked?"
+            is a question about Priya.
+
+            It sits immediately above Not Rebooked on purpose: the two are the
+            same read cut in half, and a coach scanning down sees who is on the
+            book and who has fallen off it in one pass.
+
+            Shown under 'partial' with no caveat, which nothing else on this
+            screen does. src/lib/bookedAhead.ts carries the argument and it is
+            the one src/lib/rebooking.ts already makes: the sessions read is
+            newest-first, so the cut is at the OLD end, and a booking that
+            exists cannot have fallen off the end of it. This module reads no
+            history at all, so there is nothing for a truncation to cost.
+
+            Withheld entirely from a coach with nothing in the diary, for the
+            same reason Not Rebooked is: a section that appears before the
+            first client is one a coach learns to scroll past. */}
+        {bookedAheadListable(sessionsStatus) && sessions.some((s) => s.status === 'booked') ? (
+          <>
+            <Section>
+              <SectionHead title="Booked Ahead" note={`Next ${BOOKED_AHEAD_DAYS} days`} />
+              {bookedAheadHeading(ahead.length) ? (
+                <>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                    {bookedAheadHeading(ahead.length)} — what each of them has taken, soonest first.
+                  </Text>
+                  {ahead.map((a, i) => {
+                    const tap = tapOf(a.clientId);
+                    return (
+                      <View key={a.clientId}>
+                        {i > 0 ? <Rule /> : null}
+                        <Pressable disabled={!tap.can} onPress={() => openClient(tap)}
+                          accessibilityRole={tap.can ? 'button' : undefined}
+                          accessibilityLabel={`${slotWhoName(a.clientId, roster, rosterStatus)}. ${bookedAheadNote(a, dateLabel)}${tap.can ? '' : ` ${clientTapLabel(tap)}`}`}
+                          hitSlop={hitSlopFor(MIN_TARGET)}
+                          style={{ minHeight: MIN_TARGET, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: t.brand }} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>
+                              {slotWhoName(a.clientId, roster, rosterStatus)}
+                            </Text>
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>
+                              {bookedAheadNote(a, dateLabel)}
+                            </Text>
+                            {/* A tap this screen will refuse is refused in
+                                words, on the row, rather than doing nothing. */}
+                            {!tap.can && tap.why ? (
+                              <Text style={{ ...ty.caption, color: t.ink2, marginTop: 3 }}>{tap.why}</Text>
+                            ) : null}
+                          </View>
+                          {tap.can ? <Icon name={FORWARD_ICON} size={16} color={t.ink3} /> : null}
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </>
+              ) : (
+                <Text style={{ ...ty.label, color: t.ink3 }}>{nobodyBookedAheadLine()}</Text>
+              )}
+              {/* The one thing this list is not. These are the coach's own
+                  rows, so a quiet fortnight here is not a quiet fortnight for
+                  the client — they may be training with somebody else in the
+                  same gym, and nothing readable from here says otherwise. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                Your own diary only. A client with nothing here may still be booked in with another coach.
+              </Text>
+            </Section>
+
+            <Rule />
+          </>
+        ) : null}
 
         {/* ── who had an appointment and has none ────────────────────────
             The other absence. A calendar draws days and a client who stopped

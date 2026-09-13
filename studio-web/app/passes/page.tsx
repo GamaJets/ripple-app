@@ -27,6 +27,14 @@
 // empty" and "the read failed" render differently everywhere on this page,
 // because a failed roster query drawn as an empty roster would report that not
 // one pass holder has ever joined this gym.
+//
+// The page also answers a second question the console could not ask at all:
+// what each pass TYPE sold, and what it brought in. /money renders the price
+// book — a name, a price, a credit count — and nothing anywhere said how many
+// of a pack the desk had actually sold. See `Sold` below. It takes a fifth
+// read, the price book itself, held outside the record and outside the
+// freshness stamp on the same footing as the contact read, because it is the
+// only input that can put a row on that table reading zero.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase, loadMe, ME_UNREADABLE, type Me } from '@/lib/supabase';
 import { ConsoleGate, Loading } from '@/components/Gate';
@@ -36,7 +44,17 @@ import { amount, NO_CURRENCY_NOTE, type TenantCurrency } from '@/lib/currency';
 import { DataTable, type Column } from '@/components/DataTable';
 import { fetchMemberships, fetchPlans, money, summarise } from '@lib/gymRecord';
 import { fetchPassVisits } from '@lib/passVisits';
-import { fetchPasses } from '@lib/gymPasses';
+import { fetchPasses, fetchPassTypes, type PassType } from '@lib/gymPasses';
+// What each type actually SOLD, as against what the price book says it costs.
+// The rule lives in src/lib and is asserted under plain node, because every
+// figure it produces is one an owner would withdraw a product over: two
+// currencies are never added, an unpriced sale is never counted as a free one,
+// and a type nobody has bought still gets a row.
+import {
+  passTypeSales, salesTotals, PASS_KIND_LABEL,
+  BOOK_UNREAD_NOTE, LOST_TYPE_NOTE, PRICE_MOVED_NOTE,
+  type PassTypeSale,
+} from '@lib/passTypeSales';
 import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { toCsv } from '@lib/gymExport';
@@ -110,6 +128,19 @@ export default function Passes() {
   // "we could not ask" send an owner to two different places.
   const [contacts, setContacts] = useState<Map<string, GymMemberRecord> | null>(null);
   const [contactsErr, setContactsErr] = useState<string | null>(null);
+  /**
+   * The pass PRICE BOOK — `gym_pass_types`.
+   *
+   * Held beside `rec` rather than inside it, and read on the same footing as
+   * `contacts` above, for the reason that read gives: one section degrading is
+   * better than a page that will not load. It is the only input that can say a
+   * pass type sold NOTHING — the passes alone can only show the types that did
+   * — so null here is not an empty book. It is `BOOK_UNREAD_NOTE`: a table of
+   * the products that sold, presented as such, rather than a claim that these
+   * are the products the gym offers.
+   */
+  const [types, setTypes] = useState<PassType[] | null>(null);
+  const [typesErr, setTypesErr] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // Four reads, deliberately not one Promise.all behind a single catch. A
@@ -134,6 +165,27 @@ export default function Passes() {
       slice(() => fetchPlans(supabase, tenantId)),
     ]);
     setRec({ passes, memberships, visits, plans });
+
+    // The price book, on its own error and outside the wholeness stamp below.
+    //
+    // Outside it deliberately: the stamp is the age of the last read that was
+    // whole, and every FIGURE it stands over — the conversion counts, the
+    // interval, the two money tiles — is computed without this. Folding a fifth
+    // read into that boolean would move the stamp for a read none of those
+    // tiles depend on. The sales table is the one section that does depend on
+    // it, and it states its own failure in its own words, which is the same
+    // trade the contact read makes one screen down.
+    try {
+      const book = await fetchPassTypes(supabase, tenantId);
+      setTypes(book);
+      setTypesErr(null);
+    } catch (e: any) {
+      // Null, never `[]`. An empty book says the gym has defined no pass types
+      // — a fact about the gym — and this is a query that did not come back.
+      setTypes(null);
+      setTypesErr(e?.message ?? 'The pass price book could not be read.');
+    }
+
     // Whole only when all four came back. The stamp under the tiles is the age
     // of the last read that was whole, so a refresh in which the price book
     // failed does not move it — the banner beside it names which part is
@@ -429,6 +481,7 @@ export default function Passes() {
       <Holders c={c} rec={rec} ccy={ccy} contacts={contacts} />
       <Hosts c={c} rec={rec} />
       <Money c={c} rec={rec} ccy={ccy} />
+      <Sold rec={rec} types={types} typesErr={typesErr} />
     </Shell>
   );
 }
@@ -1014,6 +1067,201 @@ function Money({ c, rec, ccy }: {
         </>
       ) : null}
     </Section>
+  );
+}
+
+/**
+ * What each pass type actually sold.
+ *
+ * ── the question nothing answered ─────────────────────────────────────────
+ *
+ * A gym defines a pass type with a price and a number of credits, and
+ * studio-web/app/money/page.tsx renders that definition — the price book. That
+ * was the whole of it: no screen in the console said how many of a pack the
+ * desk has sold, or what those sales brought in, so a product that has sold
+ * twice since March looked exactly like the one that sells every week.
+ *
+ * Both halves of the answer were already in this page's memory. `fetchPasses`
+ * reads every `gym_passes` row for the conversion report above and each one
+ * carries `pass_type_id`, `paid_cents` and its own `currency`. The price book
+ * is the one thing that was missing, and it is here only so that a type which
+ * sold NOTHING can have a row: that row is the most actionable one on the
+ * table, and it cannot be derived from the sales.
+ *
+ * ── what this table refuses ───────────────────────────────────────────────
+ *
+ *  · It never adds two currencies. A type sold in both has two amounts on its
+ *    row, side by side, and `salesTotals` keeps them apart at the bottom too.
+ *    The whole-gym tile above WITHHOLDS under a mix, which is right for a
+ *    headline; a per-product table whose best-selling row is blank is useless,
+ *    so this names both instead.
+ *  · It never multiplies the price by the count. `issuePass` copies the price
+ *    onto the pass at the moment of sale, so a repriced type has older sales at
+ *    the older price — see PRICE_MOVED_NOTE.
+ *  · It never counts an unpriced pass as a free one. "Sold 40, 12 of them
+ *    priced" is on the row; a zero would say the pack earns nothing.
+ */
+function Sold({ rec, types, typesErr }: {
+  rec: PassConversionRecord; types: PassType[] | null; typesErr: string | null;
+}) {
+  // `rowsOf` and not `rec.passes.rows`: a loading, failed or TRUNCATED read
+  // hands back null, and a sales table computed over the first page of a gym's
+  // passes is a set of subtotals with product names on them.
+  const passes = rowsOf(rec.passes);
+  const rows = useMemo(
+    () => (passes ? passTypeSales(types, passes) : null),
+    [types, passes],
+  );
+  const tot = useMemo(() => (rows ? salesTotals(rows) : null), [rows]);
+
+  const cols: Column<PassTypeSale>[] = [
+    {
+      key: 'type', header: 'Pass type',
+      // The unattributable row has no name and must not sort as an empty
+      // string, which would put it at the top of the gym's product table.
+      value: (r) => r.name ?? 'zzz',
+      render: (r) => (
+        <>
+          {r.name ?? <span className="dash">— type could not be read</span>}
+          <div style={{ fontSize: 11.5, color: 'var(--ink3)', marginTop: 2 }}>
+            {r.kind ? PASS_KIND_LABEL[r.kind] : 'kind not read'}
+            {r.inBook
+              ? (r.active ? '' : ' · withdrawn from sale')
+              : r.typeId ? ' · no longer in the price book' : ''}
+          </div>
+        </>
+      ),
+    },
+    {
+      key: 'price', header: 'Price now', numeric: true,
+      value: (r) => r.listPriceCents,
+      // The ROW's own currency, not the gym's. A type priced before the gym
+      // changed currency is still priced in the old one, and `money()` withholds
+      // rather than borrowing a code.
+      render: (r) => r.listPriceCents == null
+        ? <span className="dash">{r.typeId ? '— not in the book' : '—'}</span>
+        : money(r.listPriceCents, r.listCurrency) ?? <span className="dash">— no currency on this type</span>,
+    },
+    {
+      key: 'credits', header: 'Credits each', numeric: true,
+      value: (r) => r.uses,
+      render: (r) => r.uses == null ? <span className="dash">—</span> : num(r.uses),
+    },
+    {
+      key: 'sold', header: 'Sold', numeric: true,
+      value: (r) => r.sold,
+      render: (r) => (
+        <>
+          {num(r.sold)}
+          {r.sold > r.priced ? (
+            <div style={{ fontSize: 11.5, color: 'var(--warn)', marginTop: 2 }}>
+              {num(r.sold - r.priced)} with no price recorded
+            </div>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: 'took', header: 'Took',
+      // Sorted by CURRENCY CODE and never by amount. Ranking this column by the
+      // integer would put 86,000 fils above 24,000 pence, which is not a
+      // comparison — there is no rate anywhere in this product that would make
+      // it one. Count is the ranking that survives two moneys, and it is the
+      // column beside this one.
+      value: (r) => r.take[0]?.currency ?? '',
+      render: (r) => <Take take={r.take} />,
+    },
+    {
+      key: 'used', header: 'Credits used', numeric: true,
+      value: (r) => r.creditsSpent,
+      render: (r) => r.creditsSold === 0
+        ? <span className="dash">—</span>
+        : `${num(r.creditsSpent)} of ${num(r.creditsSold)}`,
+    },
+  ];
+
+  return (
+    <Section
+      title="What each pass type sold"
+      sub="The price book is what a pass costs. This is what the desk actually sold and what came in — the two are not the same question, and only the first one had a screen."
+    >
+      {rec.passes.state === 'loading' ? <Loading /> : null}
+      {rec.passes.state === 'failed' ? <Failed reason={reasonOf(rec.passes)} part="passes" /> : null}
+      <Truncated s={rec.passes} part="passes" />
+
+      {/* Printed above the table rather than under it. A reader who takes this
+          for the gym's product list and then reads the correction has already
+          drawn the conclusion this sentence exists to stop. */}
+      {typesErr ? (
+        <div style={{
+          margin: 0, padding: '11px 14px', borderBottom: '1px solid var(--ring)',
+          borderLeft: '3px solid var(--crit)', fontSize: 12.5, color: 'var(--ink2)',
+        }}>
+          {BOOK_UNREAD_NOTE}
+          <div className="mono" style={{ marginTop: 6, fontSize: 11.5, color: 'var(--ink3)' }}>{typesErr}</div>
+        </div>
+      ) : null}
+
+      {rows ? (
+        <>
+          <DataTable
+            noun="pass types"
+            rows={rows}
+            columns={cols}
+            rowKey={(r) => r.typeId ?? 'unattributable'}
+            empty={types && types.length === 0
+              ? 'No pass types and no passes. Until a type exists on the Money screen the desk cannot sell a drop-in, so there is nothing here to have sold.'
+              : 'No pass has ever been issued on any of these types.'}
+          />
+          {tot ? (
+            <p style={{ margin: 0, padding: '14px 16px', fontSize: 12.5, color: 'var(--ink2)', maxWidth: 820 }}>
+              {num(tot.sold)} pass{tot.sold === 1 ? '' : 'es'} sold across {num(tot.types)} type{tot.types === 1 ? '' : 's'}
+              {tot.sold > tot.priced ? `, ${num(tot.sold - tot.priced)} of them with no price recorded` : ''}
+              {tot.neverSold > 0
+                ? `. ${num(tot.neverSold)} type${tot.neverSold === 1 ? ' has' : 's have'} never been sold at all`
+                : ''}
+              {tot.take.length ? <> — that came to <Take take={tot.take} inline />.</> : '.'}
+            </p>
+          ) : null}
+          <p style={{ margin: 0, padding: '0 16px 14px', fontSize: 12, color: 'var(--ink3)', maxWidth: 820 }}>
+            {PRICE_MOVED_NOTE}
+          </p>
+          {rows.some((r) => r.typeId === null) ? (
+            <p style={{ margin: 0, padding: '0 16px 14px', fontSize: 12, color: 'var(--ink3)', maxWidth: 820 }}>
+              {LOST_TYPE_NOTE}
+            </p>
+          ) : null}
+        </>
+      ) : null}
+    </Section>
+  );
+}
+
+/**
+ * An amount of one money per line, and never a sum of two.
+ *
+ * The unstated bucket prints the INTEGER, said to be minor units, rather than a
+ * figure with a decimal point invented two places from the right: a ¥60,000
+ * sale rendered "600.00" is a different number, not an amount whose currency is
+ * unknown. studio-web/app/coach/roster/page.tsx reached the same wall on
+ * `client_purchases` and answers it the same way.
+ */
+function Take({ take, inline }: { take: PassTypeSale['take']; inline?: boolean }) {
+  if (!take.length) return <span className="dash">— nothing priced</span>;
+  return (
+    <>
+      {take.map((t, i) => (
+        <span
+          key={t.currency ?? 'unstated'}
+          style={inline ? undefined : { display: 'block' }}
+        >
+          {i > 0 && inline ? ' and ' : null}
+          {t.currency
+            ? money(t.cents, t.currency)
+            : <span className="mono" style={{ color: 'var(--warn)' }}>{String(t.cents)} in minor units, currency not recorded</span>}
+        </span>
+      ))}
+    </>
   );
 }
 

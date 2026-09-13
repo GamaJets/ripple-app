@@ -133,7 +133,7 @@ export type { BodySide };
  *            nothing, and none of those is this week.
  */
 export function MuscleBody({
-  side, intensity, status, ramp, height, surface, legend = true, style,
+  side, intensity, status, ramp, height, surface, legend = true, captions = true, style,
 }: {
   side: BodySide;
   /** Intensity 0..1 per DRAWN layer name — `drawnIntensity` in src/lib/muscleMap.ts. */
@@ -150,6 +150,23 @@ export function MuscleBody({
   /** The colour the diagram is drawn ON. The unlit body is mixed over it. */
   surface?: string;
   legend?: boolean;
+  /**
+   * Whether this component writes the sentences the picture cannot say — the
+   * caution, and the "drawn on the other side" note.
+   *
+   * True everywhere the body owns a column of its own. FALSE when the caller
+   * has laid the figure out in a ROW beside its own text, because then this
+   * component's root view shrink-wraps to the figure's width — about 65 points
+   * at height 150 — and a <Flag> inside it wraps one character per line. That
+   * is not a hypothetical: it shipped on the Progress tab, where "Nothing
+   * trained in this period." rendered as a vertical column of single letters.
+   *
+   * Turning them off is therefore a PROMISE, not a convenience: a caller that
+   * passes false takes on saying all four states itself, including 'partial'.
+   * Silence about a truncated read is the failure this whole component's
+   * caution exists to prevent.
+   */
+  captions?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   const t = useTheme();
@@ -250,14 +267,14 @@ export function MuscleBody({
         </Animated.View>
       </View>
 
-      {caution ? (
+      {captions && caution ? (
         <Flag tone={status === 'error' ? t.crit : status === 'partial' ? t.warn : t.ink3}
           style={{ marginTop: sp.md }}>
           {caution}.
         </Flag>
       ) : null}
 
-      {missing.length ? (
+      {captions && missing.length ? (
         <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
           {`${missing.length} muscle${missing.length === 1 ? '' : 's'} you trained ${missing.length === 1 ? 'is' : 'are'} drawn on the ${side === 'front' ? 'back' : 'front'} of the body: ${missing.map(sayLayer).join(', ')}.`}
         </Flag>

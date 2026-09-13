@@ -81,7 +81,16 @@ import { useExerciseCatalogue } from '../../src/ui/exerciseDetail';
 import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { exerciseSlug } from '../../src/lib/exerciseId';
 import { num } from '../../src/lib/format';
-import { isAcademyClip } from '../../src/lib/exerciseId';
+import { isAcademyClip, videoForExercise } from '../../src/lib/exerciseId';
+// ── two rows, one movement, and only one of them ever plays ────────────────
+//
+// This list is the clip library, one row per clip, and nothing on it said when
+// two rows were the same movement. A coach who re-filmed a lift they were not
+// happy with had both takes sitting here looking equally live, while
+// videoForExercise served whichever came back first from a read ordered by
+// nothing in particular — so the take they meant to replace kept playing and
+// the screen agreed with them that it had been replaced.
+import { clipsPerMovement, movementSlug, duplicateClipNote } from '../../src/lib/clipSources';
 import { supabase } from '../../src/lib/supabase';
 import { chunkIds, uniqueIds } from '../../src/lib/idLookup';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -687,6 +696,10 @@ export default function TrainerVideos() {
   // local-only leftovers and nothing else, so it is not the size of the library
   // and must not be printed as though it were.
   const known = status === 'ready';
+  // How many rows of this library are the same movement. Built once rather than
+  // per row: the answer is the same for every row and re-deriving it inside the
+  // map is a scan of the whole list for each of its entries.
+  const perMovement = useMemo(() => clipsPerMovement(vids), [vids]);
   const done = vids.filter((v) => v.uploaded).length;
   const G = layout.gutter;
   const sheet = { backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: 30, ...elevation.e2 };
@@ -873,6 +886,19 @@ export default function TrainerVideos() {
             const open = openId === v.id;
             const busy = visBusy === v.id;
             const vis = visOf(v.visibility);
+            // Whether this row is one of several for its movement, and whether
+            // it is the one a client would actually be served. Asked through
+            // videoForExercise rather than by re-deriving the precedence here:
+            // a row that claims to be the one that plays while the player
+            // chooses a different clip is worse than saying nothing at all.
+            const held = perMovement.get(movementSlug(v)) ?? 0;
+            // Null when the player cannot resolve this name at all — a clip
+            // filed under an exercise_id its filename does not slug to. Saying
+            // "a client sees a different one" there would be a claim about a
+            // precedence nobody ran; the row stays quiet instead.
+            const plays = videoForExercise(v.name, vids, myId);
+            const collision = plays == null ? null
+              : duplicateClipNote(held, plays.id === v.id, isWhole(status));
             return (
               <View key={v.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
@@ -883,11 +909,21 @@ export default function TrainerVideos() {
                   </Pressable>
 
                   <Pressable onPress={() => tapRow(v)} style={{ flex: 1 }} accessibilityRole="button"
-                    accessibilityLabel={`${movement(v.name)}, ${v.group}. ${v.uploaded ? (mine ? `Seen by: ${vis.label}` : 'Recorded') : 'Not recorded yet'}`}>
+                    accessibilityLabel={[`${movement(v.name)}, ${v.group}.`, v.uploaded ? (mine ? `Seen by: ${vis.label}` : 'Recorded') : 'Not recorded yet', collision].filter(Boolean).join(' ')}>
                     <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }} numberOfLines={1}>{movement(v.name)}</Text>
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }} numberOfLines={1}>
                       {v.group}{v.uploaded ? '' : ' · not recorded yet'}{localOnly ? ' · this phone only' : ''}
                     </Text>
+                    {/* Its own line rather than another clause on the one
+                        above, which is already three facts long and clipped to
+                        one line — this is the fact that changes what the coach
+                        does next, and it must not be the one that falls off the
+                        end. Ink, not t.warn as type: the status palette fails
+                        AA as text on every theme (src/theme/scale.ts), and two
+                        clips for one movement is not an error anyway. */}
+                    {collision ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{collision}</Text>
+                    ) : null}
                   </Pressable>
 
                   {mine ? (

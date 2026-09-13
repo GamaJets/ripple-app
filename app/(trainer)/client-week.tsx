@@ -21,17 +21,33 @@
 // rest day has the messaging thread, and the disagreement is shown to both of
 // them rather than settled behind one of their backs.
 //
-// ── Nothing here is a record ──────────────────────────────────────────────
+// ── NO MARKED DAY IS EVER DRAWN AS SOMETHING THAT HAPPENED ────────────────
 //
-// Every judgement is src/lib/dayPlan.ts's and every sentence comes from
-// src/lib/coachWeek.ts, which puts `planOutcome` and `planConflict` into the
-// coach's voice and can be tested without a database. This screen reads no
-// training log and says so out loud on every day that has passed — see the
-// header of coachWeek.ts for why reading one honestly would need the client's
-// timezone, which the schema does not store. So there is no path through this
-// file that draws a plan as something that happened: no tick, no percentage, no
-// "completed", and past days are drawn quieter than future ones rather than
-// resolved.
+// Every judgement about a marked day is src/lib/dayPlan.ts's and every sentence
+// comes from src/lib/coachWeek.ts, which puts `planOutcome` and `planConflict`
+// into the coach's voice and can be tested without a database. No row in either
+// list carries a tick, a percentage or the word "completed", and past days are
+// drawn quieter than future ones rather than resolved. The reason is in the
+// header of coachWeek.ts: `workouts.performed_at` is an INSTANT and this schema
+// holds no client timezone, so deciding that a logged set landed on their
+// Tuesday is a guess, and a guess rendered as a tick beside somebody's own plan
+// is the worst version of it.
+//
+// ── And the one thing that IS read against the record ─────────────────────
+//
+// n=44. This screen used to read no training log at all, which meant a coach
+// could see what a client intended and nothing whatever about what they did —
+// the plan and the record were two screens and the reconciliation was performed
+// by a human being with a thumb.
+//
+// `src/lib/planVsActual.ts` is the module that can answer that WITHOUT breaking
+// the refusal above, and its own header names this file as the precedent it is
+// preserving. It works over a WINDOW OF DAYS and never over a named weekday, it
+// produces no percentage, and it answers 'unknown' rather than 'not logged'
+// whenever the read did not actually cover the window. So the section it feeds
+// sits on its own, below the two lists, and says which prescribed MOVEMENTS
+// were logged in the last four weeks. It never touches a row in Ahead or
+// Already Gone, and no day on this screen has gained a mark.
 //
 // ── Whose today ───────────────────────────────────────────────────────────
 //
@@ -65,6 +81,23 @@ import { blockPosition } from '../../src/lib/programStart';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { clientWeek } from '../../src/lib/clientBlock';
 import { isoToday, DAY_TYPE_LABEL, type PlannedDay, type PlannedDayType } from '../../src/lib/dayPlan';
+// ── the record, against the plan ──────────────────────────────────────────
+//
+// n=44. The one module that can compare the two without claiming a session
+// happened on a named weekday, which is the refusal this screen is built
+// around — see the file header and the header of planVsActual.ts, which names
+// this file as the precedent it preserves.
+import { supabase } from '../../src/lib/supabase';
+import { reportError } from '../../src/lib/reportError';
+import { capLimit, capped } from '../../src/lib/rowCap';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
+import { rowToEntry, type WorkoutRow } from '../../src/lib/workoutRow';
+import type { WorkoutEntry } from '../../src/lib/mockData';
+import { dayKeyOf } from '../../src/lib/entryEdit';
+import {
+  WINDOW_DAYS, WINDOW_IS_NOT_A_WEEKDAY, coverageLine, loadLine, loadTally, planVsActual,
+} from '../../src/lib/planVsActual';
+import { useMovementName } from '../../src/ui/catalogueTranslations';
 import { subjectOf, subjectChange, type RouteParam } from '../../src/lib/routeSubject';
 import {
   coachWeek, planWindow, dayHeading, whenLabel, coachPlanLine, coachConflictLine,
@@ -72,6 +105,16 @@ import {
   type CoachPlanDay, type ScheduledFocus,
 } from '../../src/lib/coachWeek';
 import { BACK_ICON } from '../../src/ui/direction';
+
+// Written out here, on one line, rather than imported from the library beside
+// the logic that consumes them. scripts/check-schema.mjs resolves a select list
+// that arrives as a named constant only within the file that names it, so a
+// shared constant is a select list nothing compares against the SQL or against
+// the live database — which is exactly how `workouts.session_mins` came to be
+// declared, committed, generated into setup.sql and never run, breaking every
+// workout save for two days. Every other screen in this group declares its own
+// for the same reason.
+const WORKOUT_COLS = 'id, performed_at, exercise, sets, feel, cardio, kcal, session_mins, logged_by, amended_at';
 
 /** A day type's mark colour. A mark beside ink-coloured text, never coloured
  *  text: the scale reserves status colour for status and none of these clears
@@ -88,6 +131,10 @@ function markFor(type: PlannedDayType, t: ReturnType<typeof useTheme>): string {
 
 export default function ClientWeek() {
   const t = useTheme();
+  // Movement names here come out of the client's LOG and out of the programme
+  // JSON, both of which store the English identity. A German coach reads the
+  // library in German and would otherwise read this section in English.
+  const { textOf: movement } = useMovementName();
   const router = useRouter();
   const r = useRoster();
   const ap = useAssignedPrograms();
@@ -150,17 +197,83 @@ export default function ClientWeek() {
     void load(picked);
   }, [picked, load]);
 
-  // Three reads: the client's planned days, the roster the picker and the
-  // header come off, and the programme assignments — which decide which week
-  // of a block is on screen, so a refresh that moved the days and left the
-  // assignment would lay this week's plan out against last week's block.
-  const pull = usePullToRefresh(useCallback(() => Promise.all([
-    r.refresh(), Promise.resolve(ap.reload()),
-    ...(picked ? [load(picked)] : []),
-  ]), [r, ap, picked, load]));
-
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
   const who = client?.name.split(' ')[0] ?? 'They';
+  /**
+   * Whether the server may be asked about this person at all.
+   *
+   * A client typed into the book by hand has a `coach_clients` row and no user
+   * account, so `workouts` holds nothing for them — and the read would come
+   * back with zero rows and NO error, which this screen would otherwise draw as
+   * a person who has trained none of their programme. The roster is the only
+   * thing that knows which table the row came from; see
+   * src/lib/clientRecord.ts. `handAdded` undefined is "the roster has not
+   * said", which goes on asking — only an explicit true withholds.
+   */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
+  /* ── what they actually logged ─────────────────────────────────────────
+   *
+   * n=44. Its own read and its own status, because it fails on its own: a
+   * refused log read must never be drawn as a client who did none of it, and
+   * `planVsActual` answers 'unknown' rather than 'not-logged' for exactly that.
+   * Null under 'error' is what lets it — an empty array must not be able to
+   * arrive there meaning two things.
+   *
+   * The window is `WINDOW_DAYS` and NOT the planned-day window above. They are
+   * two different questions — a fortnight of intentions, four weeks of record —
+   * and the section prints its own span rather than borrowing the other's.
+   */
+  const [log, setLog] = useState<WorkoutEntry[] | null>(null);
+  const [logStatus, setLogStatus] = useState<LoadStatus>('loading');
+  /** The client this log is allowed to land under. Same guard as `wanted`
+   *  above: a slow answer for the first client tapped must not be drawn under
+   *  the second client's name, and on this screen that would be one person's
+   *  training reported as another's. */
+  const wantedLog = useRef<string | null>(null);
+  const loadLog = useCallback(async (id: string | null, ask: boolean) => {
+    wantedLog.current = id;
+    if (!id) { setLog(null); setLogStatus('ready'); return; }
+    if (!ask) { setLog(null); setLogStatus('error'); return; }
+    setLogStatus('loading'); setLog(null);
+    // Newest first, and `id` settles the ties: one session writes every exercise
+    // with the SAME `performed_at`, so an order on the timestamp alone has ties
+    // in it by construction and the server may break them differently on each
+    // read. The window is a filter on the QUERY rather than on what came back,
+    // so a client with years of history is read under the cap instead of being
+    // truncated into 'partial' for ever.
+    const { data, error } = await supabase
+      .from('workouts')
+      .select(WORKOUT_COLS)
+      .eq('user_id', id)
+      .gte('performed_at', new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString())
+      .order('performed_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(capLimit());
+    if (wantedLog.current !== id) return;
+    if (error) {
+      reportError('clientWeek.workouts', error);
+      setLog(null); setLogStatus('error');
+      return;
+    }
+    const page = capped((data ?? []) as unknown as WorkoutRow[]);
+    setLog(page.rows.map(rowToEntry));
+    setLogStatus(page.truncated ? 'partial' : 'ready');
+  }, []);
+  useEffect(() => {
+    if (!USE_SUPABASE) return;
+    void loadLog(picked, askable);
+  }, [picked, askable, loadLog]);
+
+  // Four reads: the client's planned days, the roster the picker and the
+  // header come off, the programme assignments — which decide which week of a
+  // block is on screen, so a refresh that moved the days and left the
+  // assignment would lay this week's plan out against last week's block — and
+  // the training log the last section compares that same week against.
+  const pull = usePullToRefresh(useCallback(() => Promise.all([
+    r.refresh(), Promise.resolve(ap.reload()),
+    ...(picked ? [load(picked), loadLog(picked, askable)] : []),
+  ]), [r, ap, picked, load, loadLog, askable]));
 
   // The programme this coach has assigned them, or null. Null covers three
   // different situations — none assigned, the read failed, and a programme
@@ -207,6 +320,47 @@ export default function ClientWeek() {
     () => coachWeek(status === 'error' ? null : days, todayISO, focusOn),
     [status, days, todayISO, focusOn],
   );
+
+  /**
+   * The oldest day the log read actually reached.
+   *
+   * This is what lets a TRUNCATED read still say a movement was not logged.
+   * `capped()` hands back the newest rows, so a client whose four weeks crossed
+   * the cap has their last fortnight read in full and only the start of the
+   * window missing — and `planVsActual` downgrades to 'unknown' only when the
+   * read stops INSIDE the window rather than refusing everybody with a long
+   * history. Null when nothing came back carrying a readable timestamp, which
+   * is itself "not known" and never "the window was covered".
+   */
+  const oldestLogged = useMemo(() => {
+    if (!log || !log.length) return null;
+    let oldest: string | null = null;
+    for (const e of log) {
+      const d = dayKeyOf(e.t);
+      // A bare `YYYY-MM-DD` compared as a string, which is exactly what it is
+      // for. Nothing here parses one as an instant.
+      if (d && (oldest == null || d < oldest)) oldest = d;
+    }
+    return oldest;
+  }, [log]);
+
+  /**
+   * The prescribed week against the record.
+   *
+   * `shownWeek` and not week one — the same week every conflict above is
+   * computed against, so the two halves of this screen cannot be talking about
+   * different Mondays. Null log under 'error', which is the only way the
+   * comparison can answer 'unknown' rather than 'not-logged'.
+   */
+  const pva = useMemo(() => planVsActual({
+    days: shownWeek?.days ?? null,
+    programStatus: ap.status,
+    log: logStatus === 'error' ? null : log,
+    logStatus,
+    todayISO,
+    oldestDay: oldestLogged,
+  }), [shownWeek, ap.status, logStatus, log, todayISO, oldestLogged]);
+  const loads = useMemo(() => loadLine(loadTally(pva.movements), who), [pva, who]);
 
   const caveat = ap.status === 'loading' ? null : programmeCaveat(!!programme, who);
 
@@ -412,6 +566,93 @@ export default function ClientWeek() {
                       </>
                     ) : null}
                   </>
+                )}
+
+                {/* ── the plan against the record ──────────────────────────
+                    n=44. Everything above this line is what the client INTENDED.
+                    This is the only part of the screen that reads what they
+                    actually logged, and it is deliberately not attached to any
+                    of those days: `planVsActual` works over a window of days
+                    and never over a named weekday, because `performed_at` is an
+                    instant and this schema holds no client timezone. Its own
+                    header names this file as the precedent for that refusal.
+
+                    So: no tick beside a marked day, no percentage, and
+                    'unknown' rather than 'not logged' wherever the read did not
+                    cover the window. `WINDOW_IS_NOT_A_WEEKDAY` says all of that
+                    on the screen rather than only in this comment. */}
+                {logStatus === 'loading' ? (
+                  <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading what they logged&hellip;</Text></Section>
+                ) : (
+                  <Section>
+                    <SectionHead title="Plan Against Record" note={`last ${WINDOW_DAYS} days`} />
+                    <Text style={{ ...ty.body, color: t.ink2 }}>{coverageLine(pva, WINDOW_DAYS, who)}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>{WINDOW_IS_NOT_A_WEEKDAY}</Text>
+
+                    {pva.state === 'ready' ? pva.days.map((d, di) => (
+                      <View key={`${d.day}-${di}`} style={{ marginTop: sp.md, paddingTop: di ? sp.md : 0, borderTopWidth: di ? hairline : 0, borderTopColor: t.ring }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>{d.day}{d.focus ? ` · ${d.focus}` : ''}</Text>
+                        {d.movements.map((m) => (
+                          <View key={m.slug || m.name} style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginTop: 4 }}>
+                            {/* A 6pt dot, and the state spelled out in ink at
+                                the end of the same row. The tone is never the
+                                text colour: `t.warn` and `t.good` are tuned to
+                                the 3:1 a mark needs and are 3.87-4.08:1 as type
+                                on the light palettes. Colour is the second
+                                channel here and never the only one. */}
+                            <View style={{ width: 14, alignItems: 'center' }}>
+                              <View style={{
+                                width: 6, height: 6, borderRadius: 3,
+                                backgroundColor: m.coverage === 'logged' ? t.good
+                                  : m.coverage === 'not-logged' ? t.warn : t.ring,
+                              }} />
+                            </View>
+                            <Text style={{ ...ty.label, color: t.ink, flex: 1 }}>{movement(m.name)}</Text>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>
+                              {m.coverage === 'logged'
+                                ? `logged ${m.daysLogged} day${m.daysLogged === 1 ? '' : 's'}`
+                                : m.coverage === 'not-logged' ? 'not logged' : 'could not be answered'}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )) : null}
+
+                    {/* The load, as counts. No figure is printed here and that
+                        is not an omission: a load belongs in the CLIENT's own
+                        unit — app/(trainer)/client-training.tsx resolves whose
+                        through `unitFor` and prints them there — and this
+                        screen reads no unit. A count needs none. */}
+                    {pva.state === 'ready' && loads ? (
+                      <View style={{ marginTop: sp.lg, paddingTop: sp.md, borderTopWidth: hairline, borderTopColor: t.ring }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Prescribed load against what was lifted</Text>
+                        <Text style={{ ...ty.body, color: t.ink2, marginTop: 4 }}>{loads}</Text>
+                      </View>
+                    ) : null}
+
+                    {/* The other half of the conversation: work they logged that
+                        this programme does not name. Spelled as they typed it. */}
+                    {pva.offPlan.length ? (
+                      <View style={{ marginTop: sp.lg }}>
+                        <Text style={{ ...ty.micro, color: t.ink3 }}>Logged but not prescribed</Text>
+                        <Text style={{ ...ty.label, color: t.ink2, marginTop: 4 }}>{pva.offPlan.map(movement).join(' \u00b7 ')}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>
+                          Work outside the programme is not a fault; it is the part of {who}&rsquo;s training the
+                          plan does not describe.
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {logStatus === 'partial' ? (
+                      <View style={{ marginTop: sp.md }}>
+                        <Flag tone={t.warn}>
+                          Their logged training came back at the row limit, so the four weeks above are
+                          read from the most recent end. A movement shown as not logged was answered
+                          against the part of the window the read reached.
+                        </Flag>
+                      </View>
+                    ) : null}
+                  </Section>
                 )}
 
                 {/* ── whose copy of the programme every clash above was drawn
