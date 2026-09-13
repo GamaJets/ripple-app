@@ -195,44 +195,128 @@ eq(score({ hydrationPct: 3 })!.score, score({ hydrationPct: 1 })!.score,
 //
 // A measured night beats a typed one for the same date, a night nobody recorded
 // contributes nothing and shortens the window, and no gap is ever filled.
+//
+// Every call below passes `now`. It is not tidiness: without it the window is
+// the real clock's, these fixed dates drift out of it as the calendar moves,
+// and the file would start failing on a day nobody changed anything. That the
+// old assertions did NOT need a `now` is the defect restated — there was no
+// window for them to sit inside.
 const measured = (night: string, minutes: number) => ({ night, outcome: 'measured', minutesAsleep: minutes });
 const unknownNight = (night: string) => ({ night, outcome: 'unknown', minutesAsleep: null });
+/** Local 1 Sep 2026, evening. The 3-night window is 1 Sep, 31 Aug, 30 Aug. */
+const NOW = new Date(2026, 8, 1, 21, 0, 0);
 {
-  const s = readinessSleep([measured('2026-09-01', 480), measured('2026-08-31', 420)], [], 3);
+  const s = readinessSleep([measured('2026-09-01', 480), measured('2026-08-31', 420)], [], 3, NOW);
   eq(s.avgHours, 7.5, 'two measured nights average to the mean of the two, over two rather than over the window');
   eq(s.nights.length, 2, 'and the window is the nights that exist, not the count asked for');
   eq(s.fromDevice, 2, 'both are attributed to a device');
   eq(s.fromTyped, 0, 'and none to the log');
+  eq(s.state, 'scored', 'two real nights inside the window is a scored read');
+  eq(s.windowNights, 3, 'and the answer carries the window it was taken over, so nobody has to be told it separately');
 }
 {
-  const s = readinessSleep([], [], 3);
+  const s = readinessSleep([], [], 3, NOW);
   eq(s.avgHours, null, 'NO NIGHTS YIELDS NULL HOURS — not zero, which readinessScore would have to refuse anyway');
   eq(s.nights.length, 0, 'and no nights behind it');
+  eq(s.state, 'none', 'nothing anywhere is "none" — the member has recorded nothing, and nothing failed');
 }
 {
   // A failed read is not a night of no sleep. An 'unknown' night carries no
   // figure and must not enter the average as one.
-  const s = readinessSleep([unknownNight('2026-09-01'), measured('2026-08-31', 480)], [], 3);
+  const s = readinessSleep([unknownNight('2026-09-01'), measured('2026-08-31', 480)], [], 3, NOW);
   eq(s.avgHours, 8, 'AN UNKNOWN NIGHT IS SKIPPED, NOT AVERAGED IN AS ZERO — one night of eight hours averages to eight');
   eq(s.nights.length, 1, 'and the window shortens to the nights that are real');
 }
 {
   const at = new Date(2026, 8, 1, 9, 0, 0).toISOString(); // 1 Sep, local morning
-  const s = readinessSleep([measured('2026-09-01', 300)], [{ at, hours: 9 }], 3);
+  const s = readinessSleep([measured('2026-09-01', 300)], [{ at, hours: 9 }], 3, NOW);
   eq(s.avgHours, 5, 'a device measurement beats a typed night for the same date rather than being averaged with it');
   eq(s.fromDevice, 1, 'and the night is attributed to the device');
   eq(s.fromTyped, 0, 'not to the log it displaced');
 }
 {
   const at = new Date(2026, 7, 30, 9, 0, 0).toISOString(); // 30 Aug, local morning
-  const s = readinessSleep([measured('2026-09-01', 480)], [{ at, hours: 6 }], 3);
+  const s = readinessSleep([measured('2026-09-01', 480)], [{ at, hours: 6 }], 3, NOW);
   eq(s.avgHours, 7, 'a typed night on a date no device covered is used, and averaged with the measured one');
   eq(s.fromTyped, 1, 'and counted as typed, so a screen can say where each came from');
 }
 {
-  const s = readinessSleep([measured('2026-09-01', 480), measured('2026-08-31', 480), measured('2026-08-30', 480), measured('2026-08-29', 60)], [], 3);
+  const s = readinessSleep([measured('2026-09-01', 480), measured('2026-08-31', 480), measured('2026-08-30', 480), measured('2026-08-29', 60)], [], 3, NOW);
   eq(s.nights.length, 3, 'the window caps at the count asked for');
   eq(s.avgHours, 8, 'and takes the NEWEST three — an older, shorter night outside the window does not drag the average down');
+}
+
+// ── the window, and what an empty one is allowed to say ───────────────────
+//
+// THE LANE 21 CASE, WHICH IS THE REASON THIS SECTION EXISTS. The typed log
+// arrives from src/ui/wellness.tsx unfiltered by date — `sleep_logs`, newest
+// first, no window — so the three newest nights on record were taken however
+// old they were. A member who last logged 30 July to 1 August, opening the app
+// on 13 September, scored 100 out of 100 and was told "Great day to push".
+{
+  const sept13 = new Date(2026, 8, 13, 9, 0, 0); // local, 13 Sep 2026
+  const july = [
+    { at: new Date(2026, 7, 1, 9, 0, 0).toISOString(), hours: 8 },  // 1 Aug
+    { at: new Date(2026, 6, 31, 9, 0, 0).toISOString(), hours: 8 }, // 31 Jul
+    { at: new Date(2026, 6, 30, 9, 0, 0).toISOString(), hours: 8 }, // 30 Jul
+  ];
+  const s = readinessSleep([], july, 3, sept13);
+  eq(s.avgHours, null,
+    'SIX-WEEK-OLD NIGHTS DO NOT SCORE — this returned 8 hours, and readinessScore turned it into 100 out of 100 with "Great day to push"');
+  eq(s.nights.length, 0, 'and no night is offered for a sentence to be built around');
+  eq(s.state, 'stale',
+    'A LOG THAT STOPPED IS NOT AN EMPTY LOG — "stale" is what lets a screen say the last night is older than the window rather than "log a night of sleep"');
+  eq(readinessScore({ avgSleepHours: s.avgHours, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 0 }), null,
+    'and the score is withheld rather than being 100 or 0 — a readiness score over no nights is not a readiness score');
+}
+{
+  // The boundary, from both sides, on the same clock. Today counts; the night
+  // one day past the window does not.
+  const sept13 = new Date(2026, 8, 13, 9, 0, 0);
+  const edge = readinessSleep([measured('2026-09-11', 480)], [], 3, sept13);
+  eq(edge.avgHours, 8, 'the third night back — 11 Sep for a window ending on the 13th — is inside it');
+  eq(edge.state, 'scored', 'and scores');
+  const past = readinessSleep([measured('2026-09-10', 480)], [], 3, sept13);
+  eq(past.avgHours, null, 'THE FOURTH NIGHT BACK IS OUTSIDE AND IS DROPPED — one day is the whole difference');
+  eq(past.state, 'stale', 'and it is recorded-but-old rather than absent');
+}
+{
+  // Mixed: one night inside, several outside. The answer is real and short, and
+  // the count is what a span sentence has to be built from — a two-night mean
+  // must never be printed as a seven-night one.
+  const sept13 = new Date(2026, 8, 13, 9, 0, 0);
+  const s = readinessSleep(
+    [measured('2026-09-12', 300), measured('2026-09-08', 480), measured('2026-09-07', 480)],
+    [], 3, sept13,
+  );
+  eq(s.nights.length, 1, 'only the night inside the window survives');
+  eq(s.avgHours, 5, 'AND THE AVERAGE IS OVER THAT NIGHT ALONE — the two older ones must not lift it towards eight');
+  eq(s.state, 'scored', 'a window with some nights in it is a real answer, with a known hole');
+  eq(s.windowNights, 3, 'and it still reports the window, so "1 of the last 3 nights" can be said truthfully');
+}
+{
+  // 'stale' is about the window and not about the source. A device half that is
+  // already bounded to seven nights still has nights outside a three-night one.
+  const sept13 = new Date(2026, 8, 13, 9, 0, 0);
+  const s = readinessSleep([measured('2026-09-09', 480), measured('2026-09-08', 480)], [], 3, sept13);
+  eq(s.state, 'stale', 'device nights older than the readiness window are stale too, not absent');
+  eq(s.fromDevice, 0, 'and nothing outside the window is counted towards the provenance of an average that does not exist');
+}
+{
+  // A clock we cannot read is not a member who has not slept. This is the
+  // fourth silence, and it must not borrow the sentence belonging to 'none'.
+  const s = readinessSleep([measured('2026-09-01', 480)], [], 3, new Date('not a date'));
+  eq(s.state, 'unknown', 'AN UNDRAWABLE WINDOW IS "UNKNOWN", NOT "NONE" — a failed read is not an empty list');
+  eq(s.avgHours, null, 'and it scores nothing');
+  eq(s.nights.length, 0, 'over nothing');
+}
+{
+  // The night keys are compared as strings, never parsed. `new Date('2026-09-13')`
+  // is UTC midnight, which is 12 Sep for most of the Americas and 14 Sep for
+  // nobody — parsing either side of this comparison shifts the whole window.
+  const sept13 = new Date(2026, 8, 13, 23, 30, 0); // late evening, local
+  const s = readinessSleep([measured('2026-09-13', 480)], [], 3, sept13);
+  eq(s.avgHours, 8, "tonight's own night key is inside a window drawn at half past eleven, in every zone this runs in");
 }
 
 // ── deviceSleepStore: what survives a relaunch, and what may not ──────────
@@ -316,9 +400,9 @@ const night = (over: Partial<MergedNight> = {}): MergedNight => ({
     night: n, minutesAsleep: 480, provider: 'whoop', sourceId: 'whoop',
     sourceName: 'WHOOP', family: 'whoop', basis: 'asleep',
   }));
-  eq(readinessSleep(allFailed, [], 3).avgHours, null,
+  eq(readinessSleep(allFailed, [], 3, NOW).avgHours, null,
     'without the kept nights a total read failure leaves readiness nothing to score — which is correct, and is why it used to disappear');
-  const backed = readinessSleep(withStored(allFailed, stored), [], 3);
+  const backed = readinessSleep(withStored(allFailed, stored), [], 3, NOW);
   eq(backed.avgHours, 8, 'WITH THEM, THE SCORE SURVIVES AN OFFLINE MORNING — from real nights real devices really measured');
   const r = readinessScore({ avgSleepHours: backed.avgHours, hydrationPct: null, recoveryPct: null, workoutsLast2Days: 0 });
   ok(r != null && r.score === 100, 'and readiness is a number again rather than a dash that nothing on screen explains');

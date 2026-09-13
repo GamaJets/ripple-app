@@ -200,12 +200,51 @@ interface FoodLogValue {
    * A counter rather than a flag: two back-dates are two re-reads.
    */
   pastRevision: number;
+  /**
+   * Whether this account has EVER logged a meal. `null` while nothing has been
+   * able to say.
+   *
+   * ── why this is here and not derived from `entries` ─────────────────────
+   *
+   * Everything else on this provider is about TODAY, deliberately, and that is
+   * right: a meal from Tuesday must never reach Wednesday's remaining
+   * calories. But the Getting Started checklist asks a different question —
+   * "have you ever logged a meal" — and both screens that draw it were
+   * answering it from `entries.length > 0`, which is today's list. So the item
+   * ticked in the evening and un-ticked itself at midnight, `checklistLeft`
+   * never reached zero, and the onboarding row stayed pinned to the home
+   * screen of a member who had logged every meal for six months.
+   *
+   * This is the honest answer to that question and nothing else reads it. It
+   * is NOT a streak and must never become one: there is no window in it, no
+   * "recently", and no date floor on the query behind it. Once true it stays
+   * true, because "you have logged a meal" is a thing that happened.
+   *
+   * Null is the usual meaning here: no read has answered. A checklist row off
+   * a null draws a dash, counts as neither done nor outstanding, and keeps the
+   * list from calling itself finished — src/lib/firstRun.ts.
+   */
+  everLogged: boolean | null;
 }
 
 /** Per-account, so signing out and back in as somebody else on a shared gym
  *  phone cannot show one client another client's meals — and cannot count
  *  them into their macros, which is the part that would be acted on. */
 const cacheKey = (uid: string) => `repple.food:${uid}`;
+
+/**
+ * The device's note that this account has logged a meal at some point.
+ *
+ * Written ONLY as a `'1'`, and only once we have seen a meal — either on this
+ * device or on the server. The absence of the key is "nobody has told this
+ * handset", never "no": a fresh install of a two-year member has no key and
+ * asks the server, exactly as it should. That is what keeps this a cache of a
+ * yes rather than a cache of an answer.
+ *
+ * Per-account for the same reason `cacheKey` is: a shared gym phone must not
+ * hand one member another member's history.
+ */
+const everKey = (uid: string) => `repple.food.ever:${uid}`;
 
 const startOfTodayISO = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString(); };
 const rowToEntry = (r: any): FoodEntry => ({

@@ -35,7 +35,28 @@
 // rather than on a filename or an order: both products have reordered and
 // renamed columns across versions, and a positional reader would file weights
 // as reps the first time either of them shipped a change.
+//
+// ── Whose day a session belongs to ───────────────────────────────────────
+//
+// The LIFTER'S. Both formats write the session's date-time as a local wall
+// clock with no offset — "2026-09-10 18:00:00" is six in the evening where the
+// lifter was standing — so the instant is read in the reader's own zone and the
+// day is taken from that instant LOCALLY, through `dayKeyOfDate`.
+//
+// It used to be `at.slice(0, 10)` off the ISO string, which is the UTC day, and
+// that is the same defect src/lib/localDate.ts and src/lib/ownTraining.ts have
+// both already been written against. It breaks the fold in BOTH directions:
+//
+//   west of Greenwich  a morning and an evening session on one day straddle
+//                      UTC midnight and become two entries for one day
+//   east of Greenwich  a late night and the next morning share a UTC day and
+//                      two separate training days collapse into one entry
+//
+// Either way the count of sessions this screen promises — "one session per day
+// per lift" — is a count of UTC days rather than of the days the person trained
+// on, and every streak and adherence figure derived from the import inherits it.
 import type { WorkoutEntry } from './mockData';
+import { dayKeyOfDate } from './entryEdit';
 
 /** Which export this is. */
 export type LiftingSource = 'strong' | 'hevy';
@@ -132,10 +153,11 @@ const pick = (head: string[], names: string[]): number => {
 /**
  * Read a whole export into sessions.
  *
- * One entry per (day, exercise), because that is what a `workouts` row is —
- * `entriesToWrite` in the logging screens groups the same way, and an entry per
- * SET would multiply somebody's session count by five and every streak and
- * adherence figure with it.
+ * One entry per (local day, exercise), because that is what a `workouts` row is
+ * — `entriesToWrite` in the logging screens groups the same way, and an entry
+ * per SET would multiply somebody's session count by five and every streak and
+ * adherence figure with it. The day is the LIFTER's, read off the instant in
+ * their own zone; the header says what taking it in UTC instead cost.
  */
 export function previewLiftingImport(text: string): LiftingImportPreview {
   const lines = String(text ?? '').split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -202,8 +224,12 @@ export function previewLiftingImport(text: string): LiftingImportPreview {
     // negative number is refused.
     if (!Number.isFinite(kg) || kg < 0) { note('the weight could not be read'); continue; }
 
-    const at = new Date(ms).toISOString();
-    const key = at.slice(0, 10) + '|' + exercise.toLowerCase();
+    const when = new Date(ms);
+    const at = when.toISOString();
+    // The LIFTER's calendar day, not the UTC one. `at.slice(0, 10)` reads the
+    // instant in UTC and splits an evening session off its own day west of
+    // Greenwich while merging two days into one east of it — see the header.
+    const key = dayKeyOfDate(when) + '|' + exercise.toLowerCase();
     const e = byKey.get(key);
     if (e) e.sets.push([reps, kg]);
     else byKey.set(key, { at, exercise, sets: [[reps, kg]] });

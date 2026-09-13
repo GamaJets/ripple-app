@@ -57,6 +57,18 @@
 //   · THREE SENTENCES FOR AN EMPTY LIST. Loading, failed and genuinely empty
 //     are different, and only the third may say that nothing was cancelled.
 //     `emptyCancellationsLine` holds that where a test can reach it.
+//   · AND A FOURTH EMPTY, WHICH IS NOT ON THAT LIST. A client the coach typed
+//     into Add Client is a `coach_clients` row with no account, and
+//     `sessions.client_id` references `clients(id)` — so they cannot be booked
+//     and cannot be cancelled. The read ran for them anyway, because
+//     `coach_clients.id` is `uuid DEFAULT gen_random_uuid()` and passes every
+//     shape test, and returned zero rows with no error. The screen printed
+//     `emptyCancellationsLine`'s 'ready' branch: "No session of theirs with you
+//     has been cancelled since this record began" — a reassurance about
+//     somebody's reliability, invented out of the absence of an account, on the
+//     screen a coach reads to decide whether to keep holding their slot. It is
+//     a THIRD kind of answer and it does not go through that function: see
+//     `askable` below and src/lib/clientRecord.ts.
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -74,6 +86,7 @@ import { useAuth } from '../../src/ui/auth';
 import { useRoster } from '../../src/ui/roster';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { useClientCancellations } from '../../src/ui/cancellations';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import {
   actorOf, actorLine, actionLine, noticeLine, noticeWords, emptyCancellationsLine,
   NO_RATE_NOTE, BEST_EFFORT_NOTE, RECORD_START_NOTE, ENDED_SERIES_NOTE,
@@ -127,8 +140,35 @@ export default function ClientCancellationsScreen() {
   const moved = subjectChange(seenParam, clientId);
   if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
 
-  const c = useClientCancellations(uid, picked);
   const client = useMemo(() => r.roster.find((x) => x.id === picked) ?? null, [r.roster, picked]);
+
+  /**
+   * Whether the server may be asked about this person at all.
+   *
+   * A client the coach typed into Add Client is a `coach_clients` row with no
+   * account behind it, and `sessions.client_id` references `clients(id)` — so
+   * such a person cannot be booked, cannot therefore be cancelled, and has no
+   * row in `session_cancellations` that could ever exist. The read ran anyway
+   * (`coach_clients.id` is `uuid DEFAULT gen_random_uuid()`, so the id passes
+   * every shape test there is), came back with zero rows and no error, and the
+   * screen printed the fourth branch of `emptyCancellationsLine`: "Nothing on
+   * record. No session of theirs with you has been cancelled since this record
+   * began." That is a sentence of reassurance about somebody's reliability,
+   * assembled out of the absence of an account, on the screen a coach reads to
+   * decide whether to keep holding a Tuesday evening for them.
+   *
+   * Computed at render rather than inside the hook, so a roster that arrives
+   * AFTER the read and says this row was typed in by hand withdraws the answer
+   * rather than leaving it standing. `handAdded` undefined is "the roster has
+   * not said", which goes on asking — only an explicit true withholds. See
+   * src/lib/clientRecord.ts.
+   */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
+  // Null, not `picked`, when there is nothing to ask about. The `!askable`
+  // branch below takes the whole page before any of this is drawn, so nothing
+  // reads the hook's cleared state as an answer about the person.
+  const c = useClientCancellations(uid, askable ? picked : null);
   // The word the sentences about this person are built round. A first name
   // where the roster gave one, and a plain pronoun otherwise — never `fig()`,
   // because these strings are running prose and a dash as the subject of a
@@ -276,6 +316,36 @@ export default function ClientCancellationsScreen() {
                 Pick somebody to see what has been cancelled between you.
               </Text>
             </Section>
+          </>
+        ) : !askable ? (
+          /* ── the third answer ────────────────────────────────────────────
+             Not "nothing of theirs has been cancelled" and not "the read
+             failed". This person is a name the coach typed into their own book:
+             a `coach_clients` row with no account behind it, and
+             `sessions.client_id` references `clients(id)` — so there has never
+             been an hour of theirs to cancel. Nothing was refused, because
+             nothing was ever entitled to be asked.
+
+             The whole record takes this branch rather than one section of it.
+             The three tallies and the list are the same claim said twice, and
+             a page of them under one notice still reads as a person with a
+             clean record.
+
+             The same distinction `wellnessPanel`'s `not-asked` kind keeps apart
+             from `unreadable` in src/lib/coachWellness.ts. */
+          <>
+            <Rule />
+            <Section>
+              <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                note={`You added ${who === 'They' ? 'them' : who} to your book by hand, so there is no account to book an hour against and nothing of theirs has ever been in your calendar. This is not a clean cancellation record and it is not a failed read — there is nothing here to have a record of. Invite them from your client list and this screen starts from the day they join.`} />
+            </Section>
+            {client ? (
+              <Section>
+                <Ghost label="Open Their Client Screen"
+                  a11yLabel={`Open the client screen for ${client.name}, where you can invite them`}
+                  onPress={() => router.push({ pathname: '/(trainer)/client', params: { clientId: client.id, name: client.name } })} />
+              </Section>
+            ) : null}
           </>
         ) : (
           <>

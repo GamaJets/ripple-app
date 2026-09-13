@@ -17,39 +17,77 @@ const eq = (got: unknown, want: unknown, msg: string) => {
   if (got !== want) errors.push(`${msg} — got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
 };
 
+/* ── whose day these two figures are ──────────────────────────────────────
+ *
+ * `today` is a bare `YYYY-MM-DD`: a calendar day with no instant and no offset
+ * in it, and the READER's own. It stays a literal for exactly that reason.
+ *
+ * `joinedAt` is the other kind of value — a `created_at` INSTANT — and the
+ * tenure is how many of the reader's calendar days sit between the two. So a
+ * fixture cannot pin it to a UTC clock time: '2026-09-13T08:00:00Z' is the 13th
+ * only as far west as UTC−8, and at UTC−11 it is the evening of the 12th. Every
+ * assertion below then slid a day, and for a long time nothing ran west of
+ * Greenwich to notice: the whole of section 1 read a day early at Pacific/Midway
+ * — "joined today" came back as 'joined yesterday', a first week as '8 days',
+ * and the day before an anniversary as '1 year'.
+ *
+ * `joined` builds the instant from a LOCAL wall clock instead and lets each zone
+ * decide which instant that is, which is what a join date actually is: eight in
+ * the morning wherever the coach signed them up. Eight rather than midnight so
+ * no fixture can land in an hour a daylight-saving jump deleted.
+ */
+const joined = (y: number, m: number, d: number) => new Date(y, m - 1, d, 8, 0, 0, 0).toISOString();
+
 const TODAY = '2026-09-13';
 
 /* ── 1. tenure, which is the whole reason this item exists ────────────────── */
 
-eq(tenureLabel('2026-09-13T08:00:00Z', TODAY), 'joined today', 'today reads as today');
-eq(tenureLabel('2026-09-12T08:00:00Z', TODAY), 'joined yesterday', 'and yesterday as yesterday');
-eq(tenureLabel('2026-09-06T08:00:00Z', TODAY), '7 days on your book', 'a first week is counted in days');
-eq(tenureLabel('2026-08-16T08:00:00Z', TODAY), '4 weeks on your book', 'a month or so is counted in weeks');
-eq(tenureLabel('2026-03-13T08:00:00Z', TODAY), '6 months on your book', 'half a year is counted in months');
-eq(tenureLabel('2024-09-13T08:00:00Z', TODAY), '2 years on your book', 'two years is two years');
-eq(tenureLabel('2025-09-13T08:00:00Z', TODAY), '1 year on your book', 'and one year is singular');
+eq(tenureLabel(joined(2026, 9, 13), TODAY), 'joined today', 'today reads as today');
+eq(tenureLabel(joined(2026, 9, 12), TODAY), 'joined yesterday', 'and yesterday as yesterday');
+eq(tenureLabel(joined(2026, 9, 6), TODAY), '7 days on your book', 'a first week is counted in days');
+eq(tenureLabel(joined(2026, 8, 16), TODAY), '4 weeks on your book', 'a month or so is counted in weeks');
+eq(tenureLabel(joined(2026, 3, 13), TODAY), '6 months on your book', 'half a year is counted in months');
+eq(tenureLabel(joined(2024, 9, 13), TODAY), '2 years on your book', 'two years is two years');
+eq(tenureLabel(joined(2025, 9, 13), TODAY), '1 year on your book', 'and one year is singular');
 
 // The point of the whole rule, stated as an assertion: these two rows carry the
 // same rating and are not the same sentence.
-ok(tenureLabel('2026-09-04T08:00:00Z', TODAY) !== tenureLabel('2024-01-04T08:00:00Z', TODAY),
+ok(tenureLabel(joined(2026, 9, 4), TODAY) !== tenureLabel(joined(2024, 1, 4), TODAY),
   'a nine-day-old client and a two-year client do not read alike');
 
 // 364 days must not be reported as twelve months — a year has its own band, and
 // rounding 364/30.44 lands on 12.
-eq(tenureLabel('2025-09-14T08:00:00Z', TODAY), '11 months on your book',
+eq(tenureLabel(joined(2025, 9, 14), TODAY), '11 months on your book',
   'the day before a year is still months, and never twelve of them');
 
 // The absences.
 eq(tenureLabel(null, TODAY), null, 'no join date says nothing rather than "joined today"');
 eq(tenureLabel(undefined, TODAY), null, 'and neither does a missing one');
 eq(tenureLabel('nonsense', TODAY), null, 'an unparseable date says nothing');
-eq(tenureLabel('2026-09-20T08:00:00Z', TODAY), null,
+eq(tenureLabel(joined(2026, 9, 20), TODAY), null,
   'a join date in the future is a disagreeing clock, not a negative tenure');
 
 // A bare YYYY-MM-DD is a calendar day and must not be dragged back through UTC
 // midnight. Were it parsed as UTC, this would read as yesterday west of
 // Greenwich — which is exactly the defect the house rule names.
 eq(tenureLabel('2026-09-13', TODAY), 'joined today', 'a bare date is the day it says it is');
+
+// The same rule from the other side: a join INSTANT is read on the reader's
+// clock, so the first and last half-hours of their day are both still today.
+// Read in UTC, the first would be yesterday everywhere east of Greenwich and
+// the last tomorrow everywhere west of it. Both sides are asserted against the
+// day the constructed moment actually falls on, so the assertion holds whatever
+// the zone does to that wall clock.
+{
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const dayOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const early = new Date(2026, 8, 13, 0, 30, 0, 0);
+  const late = new Date(2026, 8, 13, 23, 30, 0, 0);
+  eq(tenureLabel(early.toISOString(), dayOf(early)), 'joined today',
+    'someone signed up just after midnight joined today, not yesterday');
+  eq(tenureLabel(late.toISOString(), dayOf(late)), 'joined today',
+    'and someone signed up just before it joined today, not tomorrow');
+}
 
 /* ── 2. last seen, and the two sentinels that are not elapsed times ───────── */
 
@@ -129,7 +167,7 @@ eq(scanFact({ visceralFat: 9, leanMassKg: 52.1 }), null,
 /* ── 6. the row as a whole ────────────────────────────────────────────────── */
 
 const FULL: RowClient = {
-  joinedAt: '2024-09-13T08:00:00Z',
+  joinedAt: joined(2024, 9, 13),
   lastActive: '3d ago',
   unread: 2,
   injuries: [{ area: 'knee', severity: 'mild', isNew: true }],

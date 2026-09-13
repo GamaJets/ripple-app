@@ -1,8 +1,17 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- A month-end close that said nothing about what the passes sold
 -- ═══════════════════════════════════════════════════════════════════════════
--- NOT APPLIED. Written by the owner month-close lane; apply, rebuild
--- supabase/setup.sql with `npm run db:build`, and then run the advisors.
+-- APPLIED to the live database on 13 Sep 2026, as migration
+-- part_2970_close_pass_sales. supabase/setup.sql was rebuilt with
+-- `npm run db:build` and the advisors were run afterwards: the four columns
+-- are additive and carry no function, so they add no SECURITY DEFINER surface
+-- and nothing new is executable by anon.
+--
+-- Applied ahead of the code that reads it, deliberately. fetchCloses now
+-- SELECTs these four columns by name, and a select naming a column the
+-- database does not have fails with 42703 — which would have taken the close
+-- screen, the payroll screen and the owner's close card down together. The
+-- part goes first; the code follows.
 --
 --
 -- ── WHAT IS WRONG ─────────────────────────────────────────────────────────

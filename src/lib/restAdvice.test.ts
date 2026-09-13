@@ -85,6 +85,19 @@ ok(oneNight.note !== full.note,
 ok(full.note.includes('device’s recovery score'),
   'and the signals behind it travel with it, exactly as readinessMadeOf renders them');
 
+// THE SPAN MUST BE ONE THE AVERAGE WAS REALLY TAKEN OVER. `nights` and
+// `windowNights` arrive from the screen as two independent numbers, so nothing
+// here can check that the mean really came from that window — and the old
+// `n >= w` folded a disagreement into the flattering direction, printing "over
+// the last 3 nights" for a five-night mean. That is the same false sentence
+// `readinessSleep` was producing with no window at all.
+ok(readOf({ nights: 5, windowNights: 3 }).note.includes('over the last 5 nights'),
+  `a five-night average is never described as a three-night one — got ${JSON.stringify(readOf({ nights: 5, windowNights: 3 }).note)}`);
+ok(!readOf({ nights: 5, windowNights: 3 }).note.includes('last 3 nights'),
+  'and the shorter, flattering span is not named at all');
+ok(readOf({ nights: 1, windowNights: 1 }).note.includes('over the last 1 night'),
+  'a one-night window reads as one night, singular');
+
 /* ── 4. a score standing over a short read is still short ─────────────────── */
 
 eq(readOf({ status: 'partial' }).mayBeMissing, true,
@@ -152,6 +165,14 @@ const noneBody = restAdvice({
 }).body;
 ok(!noneBody.includes('could not'),
   `a member with no watch is not told a read failed — got ${JSON.stringify(noneBody)}`);
+// 'none' now covers two members: the one who has never logged a night, and the
+// one whose most recent night is older than the readiness window — see
+// `readinessSleep`'s 'stale'. Both reach here with no score and no watch, and
+// "no night is logged" was a false statement about the second one's history.
+ok(!noneBody.includes('no night is logged'),
+  `a member whose log has simply stopped has logged plenty of nights — got ${JSON.stringify(noneBody)}`);
+ok(noneBody.includes('nothing recent is on record'),
+  'what is true of both is that nothing RECENT is on record, which is also all this screen needed to say');
 
 /* ── 9. an unread log still refuses to judge, readiness or no readiness ──── */
 

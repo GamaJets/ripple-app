@@ -1092,7 +1092,7 @@ export default function Payroll() {
           Period
           <select
             value={periodKey}
-            onChange={(e) => setPeriodKey(e.target.value)}
+            onChange={(e) => setPicked(e.target.value)}
             style={field}
           >
             {periods.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
@@ -1649,7 +1649,30 @@ function Adjustments({ trainers, rows, rowsUnread, ccy, tenantId, me, period, on
   const [kind, setKind] = useState<AdjustmentKind>('bonus');
   const [amt, setAmt] = useState('');
   const [note, setNote] = useState('');
-  const [on, setOn] = useState(period.toDate);
+  /**
+   * Which day this adjustment falls on — held as "nobody has typed one".
+   *
+   * This was `useState(period.toDate)`, read once when the section mounted. The
+   * period picker above it changes without remounting this form, so an owner
+   * who opened the screen on August and switched to July was left with a date
+   * box still reading 31 August, and `appliesOn` below is WRITTEN: the bonus
+   * lands in the month they had just navigated away from, on the row the next
+   * run reads, and the box on screen said so in small grey digits nobody
+   * re-reads before pressing Add.
+   *
+   * Null means nobody has typed one, so the default follows the period in force
+   * instead of the period that was in force at mount. A date the owner actually
+   * typed is theirs and stays — that is the whole reason the two states are
+   * distinguishable at all.
+   *
+   * Bare `YYYY-MM-DD` on both sides and never parsed: `period.toDate` is a
+   * calendar date, `<input type="date">` speaks the same string, and the column
+   * it is written to is a `date`. Putting it through `new Date()` to "normalise"
+   * it is how the last day of a month becomes the second-to-last west of
+   * Greenwich.
+   */
+  const [on, setOn] = useState<string | null>(null);
+  const appliesOn = on ?? period.toDate;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -1666,7 +1689,7 @@ function Adjustments({ trainers, rows, rowsUnread, ccy, tenantId, me, period, on
     try {
       await addAdjustment(supabase, tenantId, {
         trainerId, kind, amountCents: r.cents, currency: ccy,
-        note, appliesOn: on, createdBy: me.id,
+        note, appliesOn, createdBy: me.id,
       });
       setAmt(''); setNote('');
       onChange();
@@ -1710,7 +1733,7 @@ function Adjustments({ trainers, rows, rowsUnread, ccy, tenantId, me, period, on
         <input value={amt} onChange={(e) => setAmt(e.target.value)} inputMode="decimal"
                placeholder={ccy ? `Amount (${ccy})` : 'Amount'} style={{ ...field, width: 130 }}
                aria-label="How much, as a positive number" />
-        <input type="date" value={on} onChange={(e) => setOn(e.target.value)} style={{ ...field, width: 148 }}
+        <input type="date" value={appliesOn} onChange={(e) => setOn(e.target.value)} style={{ ...field, width: 148 }}
                aria-label="The date this belongs to" />
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What it is for"
                style={{ ...field, flex: 2, minWidth: 180 }} aria-label="Why this adjustment exists" />

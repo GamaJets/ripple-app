@@ -17,8 +17,9 @@
 //
 // Compile with tsc, then run under plain node.
 import {
-  habitStreaks, streakFor, previousDay, habitStreakFigure, habitStreakNote,
-  habitStreakCaveat, type HabitTickRow, type HabitStreak,
+  habitStreaks, streakFor, previousDay, nextDay, daysBefore, habitStreakFigure,
+  habitStreakNote, habitStreakCaveat, STREAK_WINDOW_DAYS,
+  type HabitTickRow, type HabitStreak,
 } from './habitStreaks';
 
 const errors: string[] = [];
@@ -84,6 +85,34 @@ eq(previousDay('2028-02-29'), '2028-02-28', 'though a real one steps normally');
 
 eq(previousDay('not a day'), null, 'an unreadable day steps nowhere');
 eq(previousDay('2026-09-13T10:00:00Z'), null, 'and neither does a timestamp — this takes day keys');
+
+// `nextDay` is the mirror, and the provider leans on it for one thing: on a
+// truncated read the oldest day that came back is itself a partial day, so the
+// oldest day that can be SPOKEN FOR is the one above it.
+eq(nextDay('2026-09-12'), '2026-09-13', 'the day after the 12th');
+eq(nextDay('2026-08-31'), '2026-09-01', 'and across a month edge');
+eq(nextDay('2025-12-31'), '2026-01-01', 'and across a year edge');
+eq(nextDay('2028-02-28'), '2028-02-29', 'into a leap day');
+eq(nextDay('2027-02-28'), '2027-03-01', 'and over one in a year that has none');
+eq(nextDay('2011-12-29'), '2011-12-30', 'the day Samoa skipped is still a label');
+eq(nextDay('2026-02-30'), null, 'a date that never existed steps nowhere');
+
+// Round trips, including over every edge above.
+for (const d of ['2026-09-13', '2026-03-01', '2026-01-01', '2028-03-01', '2012-01-01', '2011-12-30']) {
+  eq(nextDay(previousDay(d)!), d, `${d} survives a step down and back`);
+  eq(previousDay(nextDay(d)!), d, `${d} survives a step up and back`);
+}
+
+// `daysBefore` is `previousDay` applied n times and nothing cleverer, because a
+// step is the only operation this file has that is known to be right.
+eq(daysBefore('2026-09-13', 0), '2026-09-13', 'nought days before today is today');
+eq(daysBefore('2026-09-13', 1), '2026-09-12', 'one day before');
+eq(daysBefore('2026-09-13', STREAK_WINDOW_DAYS - 1), '2026-06-15', 'the window opens thirteen weeks back');
+eq(daysBefore('2026-09-13', -1), null, 'a negative span is refused rather than walked');
+eq(daysBefore('2026-09-13', Number.NaN), null, 'and so is an unusable one');
+eq(daysBefore('2026-09-13', 99999), null, 'and one past the guard');
+eq(daysBefore('rubbish', 3), null, 'an unreadable day has no day before it');
+eq(STREAK_WINDOW_DAYS, 91, 'thirteen weeks — see the note on the constant');
 
 /* ── 2. the plain run ─────────────────────────────────────────────────────── */
 
@@ -455,6 +484,23 @@ eq(streakFor([], 'water'), null, 'and nothing to look up in an empty list');
   eq(r.days, 400, 'four hundred consecutive days is four hundred in every zone');
   eq(r.silentDays, 0, 'with no hole invented by a clocks change');
   eq(r.from, days[399], 'and it opens where the walk says it does');
+}
+
+/* ── 9. the safety guard is a floor, not a quiet stop ─────────────────────── */
+//
+// Every bound the walk has comes from data. A malformed one — a row dated in
+// the year 200, a window computed off a NaN — would otherwise walk a day at a
+// time for as long as the arithmetic allowed. The guard stops it, and stopping
+// for OUR reasons rather than the member's is exactly what `bounded` means: a
+// guard that stopped quietly would report ten years as the whole of a longer
+// run, as a fact.
+{
+  const days: string[] = ['2026-09-13'];
+  for (let i = 1; i < 3700; i++) days.push(previousDay(days[i - 1])!);
+  const r = run(ticks('water', days), TODAY);
+  eq(r.days, 3660, 'the walk stops at the ten-year guard');
+  eq(r.bounded, true, 'and says the run may be longer rather than stating ten years as the figure');
+  ok(habitStreakFigure(r).unit.includes('or more'), 'the unit carries it');
 }
 
 if (errors.length) {

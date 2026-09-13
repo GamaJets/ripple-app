@@ -49,6 +49,8 @@ const sleepOf = (d: number, t: number): ReadinessSleep => {
     nights,
     fromDevice: d,
     fromTyped: t,
+    windowNights: 3,
+    state: nights.length ? 'scored' : 'none',
   };
 };
 
@@ -280,6 +282,99 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
     'Health Connect cannot report sleep, so it does not count as a device that looked');
 }
 
+// ── a log that stopped, which is the sixth absence ────────────────────────
+//
+// Until `readinessSleep` was given a window there was no such state: a member
+// whose last logged night was six weeks old had those nights averaged and
+// scored, and this file printed "over the last 3 nights" about them. With the
+// window, the nights are dropped and the score is withheld — and the sentence
+// that arrives in their place must not be either of the two that already
+// existed. "No sleep on record" is false of a log that holds thirty nights,
+// and "Log a night of sleep" reads as a claim that they never have.
+{
+  const stale: ReadinessSleep = { avgHours: null, nights: [], fromDevice: 0, fromTyped: 0, windowNights: 3, state: 'stale' };
+  const noScore = { readiness: null, sleep: stale } as Partial<ReadinessBreakdownInput>;
+
+  const withWatch = br({ ...noScore, readiness: null });
+  eq(withWatch.absence, 'Nothing on record for the last 3 nights — the most recent night you have is older than that.',
+    'A LOG THAT STOPPED IS NAMED AS ONE, not as a log that is empty');
+  eq(withWatch.status, 'ready',
+    'and nothing failed, so it is a complete answer — "stale" must never be dressed up as a broken read');
+  eq(lineFor(withWatch, 'sleep').state, 'no-record', 'there is no record IN THE WINDOW, which is the only span this row speaks about');
+  eq(lineFor(withWatch, 'sleep').detail, 'nothing recorded for the last 3 nights — the most recent night you have is older than that',
+    'and the row says which, rather than implying nothing was ever logged');
+
+  const noWatch = br({ ...noScore, sources: [], readiness: null });
+  eq(noWatch.absence, 'The most recent night you logged is older than the last 3 nights, so there is no readiness to show yet.',
+    'a member with no watch is told about their log, not sent to connect a device they may not want');
+
+  // A read that failed still outranks it: a device we could not reach may be
+  // holding last night, and "your log has stopped" would be a claim we cannot
+  // make while we have not managed to look.
+  const devErr = br({ ...noScore, sources: [{ name: 'WHOOP', status: 'error', nights: 0 }], readiness: null });
+  eq(devErr.absence, 'We could not read your devices just now, so there is no readiness to show — it does not mean you slept badly.',
+    'an unreachable device outranks a stale log, because it may be holding the night that would have refuted it');
+  eq(lineFor(devErr, 'sleep').state, 'unread', 'and the row is unread rather than no-record');
+}
+
+// ── a window that could not be drawn ──────────────────────────────────────
+//
+// 'unknown' is the clock's failure and not the member's, and the cost of
+// folding it into 'none' is a screen telling somebody to log a night when the
+// problem is that we could not work out which nights count as recent.
+{
+  const unknown: ReadinessSleep = { avgHours: null, nights: [], fromDevice: 0, fromTyped: 0, windowNights: 3, state: 'unknown' };
+  const b = br({ readiness: null, sleep: unknown });
+  eq(lineFor(b, 'sleep').state, 'unread', 'AN UNDRAWABLE WINDOW IS UNREAD, NOT NO-RECORD');
+  eq(lineFor(b, 'sleep').detail, 'we could not work out which nights to read, so we cannot say what you have recorded',
+    'and says whose failure it was');
+  eq(b.absence, 'We could not work out which nights to read just now, so there is no readiness to show — it does not mean you slept badly.',
+    'the absence refuses to blame the member');
+  eq(b.status, 'error', 'and it is an error, because the absence is ours');
+}
+
+// ── the span is the window the AVERAGE was taken over ─────────────────────
+//
+// The sentence and the arithmetic used to be two copies of one number: the
+// window came from the caller and the nights came from `readinessSleep`, and
+// when the second had no window at all the first went on naming one. The span
+// is now built from `sleep.windowNights`, which is the run the mean was
+// actually taken from.
+{
+  // The caller's `windowNights` disagrees with the sleep read's. The answer
+  // that did the averaging wins.
+  const overSeven: ReadinessSleep = {
+    avgHours: 7.5,
+    nights: [{ night: '2026-08-30', hours: 7.5, from: 'device' }, { night: '2026-08-29', hours: 7.5, from: 'device' }],
+    fromDevice: 2, fromTyped: 0, windowNights: 7, state: 'scored',
+  };
+  const b = br({ sleep: overSeven, windowNights: 3 });
+  eq(lineFor(b, 'sleep').detail, '7h 30m a night over 2 of the last 7 nights, all measured by a device',
+    'A TWO-NIGHT MEAN OVER A SEVEN-NIGHT WINDOW IS SAID AS ONE — the caller’s 3 is not allowed to rename the span');
+
+  // Filled window: no "n of" clause, and the number is still the sleep read's.
+  const filled: ReadinessSleep = {
+    avgHours: 8,
+    nights: [0, 1, 2, 3, 4, 5, 6].map((k) => ({ night: `2026-08-${String(30 - k).padStart(2, '0')}`, hours: 8, from: 'device' as const })),
+    fromDevice: 7, fromTyped: 0, windowNights: 7, state: 'scored',
+  };
+  eq(lineFor(br({ sleep: filled, windowNights: 3 }), 'sleep').detail,
+    '8h a night over the last 7 nights, all measured by a device',
+    'and a full window drops the "n of" rather than inventing a shorter one');
+
+  // The shape the whole change exists to stop, asserted from the other side:
+  // more nights averaged than the window names. It cannot come out of
+  // readinessSleep any more, and if it ever does the sentence tells the truth.
+  const tooMany: ReadinessSleep = {
+    avgHours: 8,
+    nights: [0, 1, 2, 3, 4].map((k) => ({ night: `2026-08-${String(30 - k).padStart(2, '0')}`, hours: 8, from: 'typed' as const })),
+    fromDevice: 0, fromTyped: 5, windowNights: 3, state: 'scored',
+  };
+  eq(lineFor(br({ sleep: tooMany }), 'sleep').detail,
+    '8h a night over the last 5 nights, all from the nights you logged',
+    'FIVE NIGHTS ARE NEVER DESCRIBED AS THREE — a span must be one the average was really taken over');
+}
+
 // ── a figure that is not a figure ─────────────────────────────────────────
 //
 // `readinessSleep` cannot produce any of these — it returns a null average
@@ -291,17 +386,17 @@ const lineFor = (b: ReturnType<typeof br>, key: string) => b.lines.find((l) => l
 {
   const oneNight = { night: '2026-08-30', hours: 7.5, from: 'device' as const };
 
-  const zero = br({ sleep: { avgHours: 0, nights: [oneNight], fromDevice: 1, fromTyped: 0 }, readiness: null });
+  const zero = br({ sleep: { avgHours: 0, nights: [oneNight], fromDevice: 1, fromTyped: 0, windowNights: 3, state: 'scored' }, readiness: null });
   eq(lineFor(zero, 'sleep').state, 'no-record',
     'an average of nought hours is the absence of a night, not a night of no sleep');
 
   // The other side of the same guard: half an hour IS a figure and must survive.
-  const half = br({ sleep: { avgHours: 0.5, nights: [oneNight], fromDevice: 1, fromTyped: 0 } });
+  const half = br({ sleep: { avgHours: 0.5, nights: [oneNight], fromDevice: 1, fromTyped: 0, windowNights: 3, state: 'scored' } });
   eq(lineFor(half, 'sleep').state, 'scored', 'and a short night is still a night');
   eq(lineFor(half, 'sleep').detail, '0h 30m a night over 1 of the last 3 nights, measured by a device',
     'shown as what the device reported');
 
-  const noNights = br({ sleep: { avgHours: 7.5, nights: [], fromDevice: 0, fromTyped: 0 }, readiness: null });
+  const noNights = br({ sleep: { avgHours: 7.5, nights: [], fromDevice: 0, fromTyped: 0, windowNights: 3, state: 'scored' }, readiness: null });
   eq(lineFor(noNights, 'sleep').state, 'no-record',
     'an average with no nights under it cannot say how many nights it ran over, so it does not claim to');
 }

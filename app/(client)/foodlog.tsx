@@ -76,7 +76,22 @@ import { useToast } from '../../src/ui/toast';
 import { useFoodLog, useFoodHistory, type FoodEntry } from '../../src/ui/foodLog';
 import { isWhole } from '../../src/ui/loadStatus';
 import { todayKey } from '../../src/lib/offlineQueue';
-import { unsentNote } from '../../src/lib/offlineQueue';
+import { unsentNote, type WriteOutcome } from '../../src/lib/offlineQueue';
+// The meal you forgot to log. Everything this screen wrote was stamped with the
+// instant of the tap, so a member who forgot dinner could not add it in the
+// morning — and the correction sheet below says so in as many words. The day is
+// chosen here; src/lib/foodLogging.ts turns it into the instant to write, and
+// its header holds the decision a back-dated row turns on (it never lapses).
+import {
+  MAX_BACKDATE_DAYS, backdateDays, dayLabel, dayLongLabel, readLogDay,
+  backdateNote, backdatedStoredNote, backdatedUnsentNote,
+} from '../../src/lib/foodLogging';
+// `useToday()`, never `useMemo(() => todayKey(), [])`. This screen is registered
+// with `href: null` and is mounted once for the life of the app, so a day read
+// at mount is a day that stops moving — see src/ui/today.ts and
+// scripts/check-frozen-day.mjs. It matters more here than almost anywhere: a
+// frozen "today" would silently turn every log into a back-date.
+import { useToday } from '../../src/ui/today';
 import { readFoodEdit, foodChanged } from '../../src/lib/entryEdit';
 import { useCoachNutrition } from '../../src/ui/coachNutrition';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -184,6 +199,41 @@ export default function FoodLog() {
    return live.length === ids.length ? ids : live;
   });
  }, [fl.entries]);
+
+ // ── which day a meal is being logged to ─────────────────────────────────
+ //
+ // NULL means "today, whatever today is", and that is the whole reason it is
+ // nullable rather than seeded with a date string. This screen stays mounted
+ // across midnight. A member who left it open last night with the day seeded to
+ // yesterday's string would, this morning, be silently back-dating every meal
+ // they logged — the exact failure scripts/check-frozen-day.mjs exists for,
+ // arriving through the state rather than through a memo. Null tracks the
+ // clock; only a day the member deliberately picked is held.
+ const today = useToday();
+ const [pickedDay, setPickedDay] = useState<string | null>(null);
+ const dayChoices = backdateDays(today, MAX_BACKDATE_DAYS);
+ // A choice that has fallen out of the window — the app was open across
+ // midnight with the oldest day selected — returns to today, and the selected
+ // chip visibly moves back to Today so nothing about it is silent. `readLogDay`
+ // is still the gate at the moment of the tap either way.
+ const logDay = pickedDay && dayChoices.includes(pickedDay) ? pickedDay : today;
+ const backdating = logDay !== today;
+ const dayWarning = backdateNote(logDay, today);
+
+ /**
+  * The instant to stamp, read at the moment of the tap.
+  *
+  * Not computed with the day and held: a member can pick "Today" at 23:58 and
+  * tap Log at 00:01, and `readLogDay` takes `new Date()` afresh so that meal is
+  * stamped this morning rather than filed under a day that has ended. Returns
+  * null having already said why, so every caller can bail on one falsy check.
+  */
+ const stampFor = (): { at: string; backdated: boolean } | null => {
+  const r = readLogDay(logDay);
+  if (!r.ok) { Alert.alert('Check the day', r.reason); return null; }
+  return { at: r.at, backdated: r.backdated };
+ };
+
  const [q, setQ] = useState('');
  const [nl, setNl] = useState(''); const [nlBusy, setNlBusy] = useState(false);
  // ── Search foods ────────────────────────────────────────────────────────
@@ -333,6 +383,40 @@ export default function FoodLog() {
      `No connection, so ${what} is not in your food log on the server yet. It is counting toward today and goes up on its own next time you have signal.`)
    : Alert.alert('Not logged',
      `${what} was rejected by your food log, so it is not saved and it is not counting toward today. Adding it again as it is will be rejected again.`);
+
+ /**
+  * The same three outcomes, said about a meal that went to ANOTHER day.
+  *
+  * A separate function rather than a flag on `warnUnsaved`, because two of the
+  * three sentences above are wrong about a back-dated row and the third is
+  * missing entirely:
+  *
+  *  · 'stored' is normally silent, because the member watches the meal appear
+  *    in the list and the day's calories drop. A back-dated one changes NOTHING
+  *    on the screen they are looking at, so a successful log and a dead button
+  *    are indistinguishable. It gets a sentence saying where the meal went.
+  *  · 'unsent' normally says "it is counting toward today". A back-dated one is
+  *    not counting toward today and must not claim to be. What it does promise
+  *    is the queue decision: it keeps its own day whenever it goes up, and it
+  *    is never dropped for having waited — src/lib/foodLogging.ts sets out why
+  *    that is the opposite of what happens to a planned day in the same
+  *    situation.
+  *  · 'refused' says "not counting toward today", which is true but useless
+  *    here; the member needs to know which day now has nothing in it.
+  */
+ const sayBackdated = (what: string, out: WriteOutcome, day: string) => {
+  if (out === 'stored') { toast.say(`${what} — ${backdatedStoredNote(day, today)}`); return; }
+  if (out === 'unsent') { Alert.alert('Saved on this phone', `${what}: ${backdatedUnsentNote(day, today)}`); return; }
+  Alert.alert('Not logged',
+   `${what} was rejected by your food log, so it is not saved and nothing was added to ${dayLongLabel(day, today)}. Adding it again as it is will be rejected again.`);
+ };
+
+ /** One place that reports a write, whichever day it went to. */
+ const sayLogged = (what: string, out: WriteOutcome, backdated: boolean, day: string) => {
+  if (backdated) { sayBackdated(what, out, day); return; }
+  if (out === 'stored') { notifySuccess(); return; }
+  warnUnsaved(what, out);
+ };
  // Gone: an `add(f: Food, via: string)` helper with no caller anywhere below
  // the line it was written on. Every way food reaches the log on this screen
  // goes through `LogFoodSheet.onLog` or `logNL` now, and both call
@@ -379,8 +463,14 @@ export default function FoodLog() {
     // manual is what it is; the reader in rowToEntry already coerces to that.
     let queued = 0;
     let refused = 0;
+    // ONE instant for the whole description, read once before the loop. Four
+    // foods typed in one box were eaten at one sitting, and stamping each with
+    // its own `new Date()` would spread them across a second or two for no
+    // reason — and, at four seconds to midnight, across two different days.
+    const stamp = stampFor();
+    if (!stamp) { setNlBusy(false); return; }
     for (const it of items ?? []) {
-     const out = await fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' });
+     const out = await fl.logFood({ name: it.name, kcal: it.kcal, protein: it.protein, carbs: it.carbs, fat: it.fat, via: 'manual' }, stamp.at);
      if (out === 'unsent') queued++;
      else if (out === 'refused') refused++;
     }
@@ -400,9 +490,9 @@ export default function FoodLog() {
     // Refusal is reported ahead of the queue, because it is the one the client
     // has to do something about: those foods are not logged anywhere.
     const n = (items ?? []).length;
-    if (refused) warnUnsaved(refused === n ? 'What you described' : `${refused} of the ${n} foods`, 'refused');
-    else if (queued) warnUnsaved(queued === n ? 'What you described' : `${queued} of the ${n} foods`, 'unsent');
-    else if (n) notifySuccess();
+    if (refused) sayLogged(refused === n ? 'What you described' : `${refused} of the ${n} foods`, 'refused', stamp.backdated, logDay);
+    else if (queued) sayLogged(queued === n ? 'What you described' : `${queued} of the ${n} foods`, 'unsent', stamp.backdated, logDay);
+    else if (n) sayLogged(n === 1 ? 'What you described' : `All ${n} foods`, 'stored', stamp.backdated, logDay);
     return;
    }
    setNlBusy(false);
@@ -896,7 +986,51 @@ export default function FoodLog() {
 
  {/* ── log a meal ─────────────────────────────────────────────────── */}
  <Section>
- <SectionHead title="Log a Meal" />
+ <SectionHead title="Log a Meal" note={backdating ? dayLabel(logDay, today) : undefined} />
+
+ {/* ── the day it goes to ───────────────────────────────────────────
+     Everything this screen logged was stamped with the instant of the tap
+     and there was no way to say otherwise, so a member who forgot to log
+     dinner had no way to add it in the morning. The day chosen here governs
+     every route below it — photo, upload, barcode, quick add, describe and
+     search all go through the same two calls.
+
+     A row of days rather than a calendar: the choice is almost always
+     today or yesterday, and a date picker for that is three taps to answer
+     a one-tap question. It scrolls to a fortnight, which is as far back as
+     Recent Days can show — a member can only file a meal into a day they
+     can still open and check. */}
+ <ScrollView horizontal showsHorizontalScrollIndicator={false}
+  accessibilityLabel="Which day to log to"
+  contentContainerStyle={{ gap: sp.sm, paddingBottom: sp.sm, paddingRight: sp.md }}>
+ {dayChoices.map((d) => {
+  const on = d === logDay;
+  return (
+  <Pressable key={d}
+   // Tapping Today clears the choice rather than pinning today's date, so
+   // the screen goes on tracking the clock across midnight. See `pickedDay`.
+   onPress={() => setPickedDay(d === today ? null : d)}
+   accessibilityRole="button"
+   accessibilityState={{ selected: on }}
+   accessibilityLabel={`Log to ${dayLongLabel(d, today)}`}
+   accessibilityHint={d === today ? undefined : 'Meals logged go into that day, not today'}
+   style={{
+    backgroundColor: on ? t.brand : t.surface2, borderRadius: radius.sm,
+    paddingHorizontal: sp.md, paddingVertical: sp.sm, minHeight: 44, justifyContent: 'center',
+   }}>
+  <Text style={{ ...ty.caption, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>
+   {dayLabel(d, today)}
+  </Text>
+  </Pressable>
+  );
+ })}
+ </ScrollView>
+ {/* Nothing at all on the ordinary case. On a back-date it is the one thing
+     the member cannot see for themselves: the hero figure above this section
+     will not move, and a successful log that changes no number on screen
+     reads as a button that did not work. */}
+ {dayWarning ? <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{dayWarning}</Flag> : null}
+
  <View style={{ flexDirection: 'row', gap: sp.sm }}>
  <Pressable accessibilityLabel="Take a meal photo" accessibilityRole="button" onPress={() => takeMealPhoto(true)}
  style={{ flex: 1, backgroundColor: t.brand, borderRadius: radius.sm, paddingVertical: sp.md, alignItems: 'center', gap: 5 }}>
@@ -1378,9 +1512,16 @@ export default function FoodLog() {
      if (!next) { setPendingPhoto(null); setPendingNote(null); setPendingTitle(undefined); }
    }}
    onLog={async (f) => {
-     const out = await fl.logFood({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, via: pendingVia });
-     if (out === 'refused') { warnUnsaved(f.name, out); return false; }
-     if (out === 'unsent') warnUnsaved(f.name, out); else notifySuccess();
+     // Read here rather than when the sheet opened. A member can sit on this
+     // sheet for a while — it is where they type a portion — and the day is
+     // whatever it is when they press Log.
+     const stamp = stampFor();
+     if (!stamp) return false;
+     const out = await fl.logFood({ name: f.name, kcal: f.kcal, protein: f.protein, carbs: f.carbs, fat: f.fat, via: pendingVia }, stamp.at);
+     // Refusal keeps the sheet open, because the figures in it are the member's
+     // work and closing it would throw them away along with the meal.
+     if (out === 'refused') { sayLogged(f.name, out, stamp.backdated, logDay); return false; }
+     sayLogged(f.name, out, stamp.backdated, logDay);
      return true;
    }} />
  </SafeAreaView>

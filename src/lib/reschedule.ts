@@ -400,12 +400,23 @@ export interface CoachMoveReport {
   clientId: string | null;
   /** Somebody was waiting for the hour that was freed, and now has it. */
   promoted: boolean;
-  /** How many are still in line for it afterwards. */
-  waiting: number;
+  /**
+   * How many are still in line for it afterwards, and NULL when nobody counted
+   * them.
+   *
+   * Matches `MoveAtReport.waiting` in src/lib/moveTimes.ts, which was widened
+   * for the same reason and by the same lane: `coachMovedLine` below turns a 0
+   * into "nobody was waiting for it", and an unreported count is not a counted
+   * empty queue. Callers building this report must pass the unknown through
+   * rather than settling it — see app/(trainer)/calendar.tsx, which reads
+   * `waitingKnown` off the server's answer to decide between a figure and null.
+   */
+  waiting: number | null;
 }
 
 export const COACH_NOT_MOVED: CoachMoveReport = {
-  moved: false, reason: 'unreachable', clientId: null, promoted: false, waiting: 0,
+  // Null and not 0: a move that did not reach the server counted nobody.
+  moved: false, reason: 'unreachable', clientId: null, promoted: false, waiting: null,
 };
 
 /**
@@ -445,6 +456,16 @@ export function coachMoveRefusalLine(r: CoachMoveReport, who: string | null, at:
  *
  * Names the hour that was handed on, because a coach who does not know their
  * old slot went to somebody else will offer it to a second person.
+ *
+ * ── the three things the last sentence can say, and why there are three ────
+ *
+ * The freed hour has THREE states and not two. It went to somebody; it is open
+ * and a counted number of people are still in line for it; or nobody counted.
+ * That third one used to be folded into "nobody was waiting for it" by a
+ * `waiting` of 0, which is the single claim on this screen that a coach acts on
+ * immediately and irreversibly: they offer the hour to the next person who
+ * asks. `r.waiting == null` is checked FIRST of the two, because `null > 0` is
+ * false and would fall straight back into the sentence this exists to prevent.
  */
 export function coachMovedLine(
   r: CoachMoveReport, who: string, from: string, to: string, toldClient: boolean,
@@ -455,8 +476,12 @@ export function coachMovedLine(
     : ` ${who} could NOT be notified, so tell them yourself — they are expecting ${from}.`;
   const hour = r.promoted
     ? ` ${from} went straight to the next client on its waitlist.`
-    : r.waiting > 0
-      ? ` ${from} is open again on your calendar.`
-      : ` ${from} is open again on your calendar and nobody was waiting for it.`;
+    : r.waiting == null
+      // Neither of the other two sentences. Nobody was counted, so nobody can
+      // say the queue was empty and nobody can say it was not.
+      ? ` ${from} is open again on your calendar. No waitlist count came back with the move, so this app cannot say whether anybody is still in line for it — check the waitlist before you offer that hour to somebody else.`
+      : r.waiting > 0
+        ? ` ${from} is open again on your calendar.`
+        : ` ${from} is open again on your calendar and nobody was waiting for it.`;
   return `${head}${told}${hour}`;
 }

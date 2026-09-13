@@ -611,8 +611,23 @@ export default function ClientTraining() {
   // seven rules that ran and passed.
   const showChecks = !!program && assigned.status !== 'loading';
 
-  /* ── what they were on before ──────────────────────────────────────────── */
-  const history = useProgramHistory(picked);
+  /* ── what they were on before ────────────────────────────────────────────
+   *
+   * `askable`, not `picked`. This was the one read on the screen the guard did
+   * not reach: `load` above refuses a hand-added client, and this hook carries
+   * its own gate — but that gate is `isQueryableId`, the test
+   * src/lib/clientRecord.ts exists because it stopped working.
+   * `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`, so it passed, the
+   * read ran, `assigned_program_history` answered with zero rows and no error
+   * (its policy resolves `is_my_client()`, an EXISTS over `clients`), and
+   * `historyLine` printed the 'none' branch: "No earlier programme on record."
+   *
+   * Said about somebody who has never had an account, on a page whose every
+   * other section had already been withheld from them. Passing null instead
+   * asks for nothing, and the `!askable` branch in the render says which of the
+   * three answers this is rather than letting a 'ready' empty stand.
+   */
+  const history = useProgramHistory(askable ? picked : null);
 
   /* ── and what they made of what they were given ────────────────────────
    *
@@ -1329,14 +1344,32 @@ export default function ClientTraining() {
                 ) : null}
 
 
-                {/* The three states, kept apart. Each is a different fact about
-                    this person and each starts a different conversation. */}
-                {status === 'loading' ? (
+                {/* The FOUR states, kept apart. Each is a different fact about
+                    this person and each starts a different conversation.
+
+                    "No account" used to be a sentence tacked onto the end of
+                    the Unreadable notice — "If they were added to your book by
+                    hand they have no account for workouts to belong to, which
+                    reads the same way from here." It does not read the same way
+                    from here any more, because `askable` knows: the roster says
+                    which of its two tables the row came from. So the guess is
+                    gone from the failed-read notice, where it was shown to every
+                    coach whose connection had simply dropped, and the case it
+                    was guessing at has its own branch above it.
+
+                    The same distinction `wellnessPanel`'s `not-asked` kind
+                    keeps apart from `unreadable` in src/lib/coachWellness.ts. */}
+                {!askable ? (
+                  <Section>
+                    <Notice kicker="No account" title={`${fullName || 'This client'} has no Repple account`}
+                      note={`You added ${who} to your book by hand, so there is no account for workouts to belong to and nothing of theirs was asked for. That is not an empty training record and not a failed read — a workout row has to hang off an account, and there is not one yet. Invite them from your client list and everything on this page starts filling in from the day they join.`} />
+                  </Section>
+                ) : status === 'loading' ? (
                   <Section><Text style={{ ...ty.body, color: t.ink3 }}>Reading their logged sessions&hellip;</Text></Section>
                 ) : board.state === 'unreadable' ? (
                   <Section>
                     <Notice tone={t.warn} kicker="Unreadable" title="Their training could not be read"
-                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has logged nothing — that is a different fact and a different conversation. If they were added to your book by hand they have no account for workouts to belong to, which reads the same way from here.`} />
+                      note={`Nothing is shown below because nothing came back. It does not mean ${who} has logged nothing — that is a different fact and a different conversation.`} />
                   </Section>
                 ) : board.state === 'none' ? (
                   <Section>

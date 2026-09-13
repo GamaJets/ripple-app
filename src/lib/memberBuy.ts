@@ -375,7 +375,7 @@ export function switchLabel(held: GymPlan | { priceCents: number | null; currenc
   // `next.priceCents > null` coerces to `next.priceCents > 0`, so EVERY plan
   // with a price on it would have read "Upgrade to This Plan" to a member whose
   // own plan has no price. A word that claims a comparison nobody could make.
-  if (held && a && b && a === b && next.priceCents > held.priceCents) {
+  if (held && held.priceCents != null && a && b && a === b && next.priceCents > held.priceCents) {
     return 'Upgrade to This Plan';
   }
   return 'Switch to This Plan';

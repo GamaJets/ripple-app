@@ -34,9 +34,22 @@ import { fetchGymTrainers, type GymTrainer } from '../../src/lib/gymTrainers';
 import {
   fetchShifts, fetchDemand, addShift, setShiftStatus, shiftFromHours,
   weekStartOf, weekDays, weekWindow, shiftWeek, coverage, shiftsByDay,
-  rosterByTrainer, summariseRota, hourLabel,
+  rosterByTrainer, summariseRota, hourLabel, rotaCost,
   type Shift, type ShiftRole, type DemandBlock, type RotaGap,
 } from '../../src/lib/gymRota';
+// What the published week costs, and what share of the till it eats.
+//
+// The screen had no money on it at all — coverage, uncovered hours and idle
+// hours over shifts that each carry a price, and nothing saying what any of it
+// costs. `rotaCost` is the cost half and has always been here; it pots by
+// currency and withholds a mixed total. `labourShare` is the half that did not
+// exist anywhere: dividing a wage bill by a till when the two may be in
+// different moneys, which is the one arithmetic on this screen that has no
+// honest answer and must say so rather than produce a clean-looking percentage.
+import { labourShare, type ReadState } from '../../src/lib/labourShare';
+// The till side. Read over the SAME week window the shifts are, so the share is
+// a week's wages over that week's takings and not over a month of them.
+import { fetchPayments, sharedCurrency, money, type GymPayment } from '../../src/lib/gymRecord';
 // Whose clock this whole screen is on. The gym's where `tenants.timezone` is
 // set, the reader's where it is not — and `note` is the sentence that says which,
 // printed rather than implied. See src/lib/rotaClock.ts.
@@ -44,7 +57,7 @@ import { rotaClock, rotaTimeLabel } from '../../src/lib/rotaClock';
 import { fetchGymZone } from '../../src/lib/gymZone';
 import { calendarDateText } from '../../src/lib/gymWhen';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
-import { numUpTo } from '../../src/lib/format';
+import { num, numUpTo } from '../../src/lib/format';
 
 const ROLES: { key: ShiftRole; label: string }[] = [
   { key: 'floor', label: 'Floor' },
@@ -162,6 +175,23 @@ export default function OwnerRota() {
    *  the names at whatever the first read returned. */
   const [trainersAt, setTrainersAt] = useState<number | null>(null);
   const [trainersTick, setTrainersTick] = useState(0);
+  /**
+   * What the gym was paid during THIS week, for the labour-share figure.
+   *
+   * Three states and the same convention app/(owner)/revenue.tsx uses:
+   * `undefined` is "not read yet", `null` is "the read failed", and an array is
+   * the answer. An empty array is a real and different fact — a week in which
+   * nobody recorded a payment — and it is the one this screen must never
+   * manufacture out of a refusal, because a zero till turns the labour share
+   * into a division by zero and, before that, into a claim that the gym earned
+   * nothing while paying its coaches.
+   *
+   * A read of its own rather than a third leg of `load`, because a refused
+   * payments read must not blank the rota: coverage and uncovered hours are
+   * this screen's reason for existing and they owe nothing to the till.
+   */
+  const [takings, setTakings] = useState<GymPayment[] | null | undefined>(undefined);
+  const [takingsAt, setTakingsAt] = useState<number | null>(null);
 
   const [addOpen, setAddOpen] = useState(false);
   const [who, setWho] = useState<string | null>(null);
@@ -237,6 +267,36 @@ export default function OwnerRota() {
 
   useEffect(() => { void load(); }, [load]);
 
+  /**
+   * The same week's takings, on the same window bounds the shifts were read on.
+   *
+   * `weekWindow` is asked for again rather than reused from `load` for the
+   * reason that function waits on `zoneRead`: the bounds ARE the gym's midnight,
+   * and a till read on the reader's midnight against a wage bill on the gym's
+   * would compare a week to a week-and-an-evening. Neither figure would look
+   * wrong and the share between them would be.
+   */
+  const loadTill = useCallback(async () => {
+    if (!tenant?.id || !zoneRead) return;
+    const win = weekWindow(week, zone);
+    if (!win) return;
+    setTakings(undefined);
+    try {
+      const rows = await fetchPayments(supabase, tenant.id, win.fromISO, win.toISO);
+      setTakings(rows);
+      setTakingsAt(Date.now());
+    } catch (e) {
+      reportError('rota.takings', e);
+      // Null, never []. `fetchPayments` throws on a refusal and on a truncated
+      // read, and both of those are "we do not know what came in this week" —
+      // which is not "nothing came in this week", and the labour share below
+      // prints the difference rather than dividing by it.
+      setTakings(null);
+    }
+  }, [tenant?.id, week, zone, zoneRead]);
+
+  useEffect(() => { void loadTill(); }, [loadTill]);
+
   useEffect(() => {
     if (!tenant?.id) return;
     let cancelled = false;
@@ -254,16 +314,57 @@ export default function OwnerRota() {
     return () => { cancelled = true; };
   }, [tenant?.id, trainersTick]);
 
-  /** One line over both reads, and it is the age of the older. */
-  const fetchedAt = oldestFetch(shiftsAt, trainersAt);
-  /** Both reads. The Refresh button ran only the shifts one, so an owner could
+  /** One line over all three reads, and it is the age of the oldest. */
+  const fetchedAt = oldestFetch(oldestFetch(shiftsAt, trainersAt), takingsAt);
+  /** Every read. The Refresh button ran only the shifts one, so an owner could
    *  press it all morning and still be looking at yesterday's staff list. */
-  const refreshAll = useCallback(() => { void load(); setTrainersTick((n) => n + 1); }, [load]);
+  const refreshAll = useCallback(() => {
+    void load();
+    void loadTill();
+    setTrainersTick((n) => n + 1);
+  }, [load, loadTill]);
   const pull = usePullToRefresh(refreshAll);
 
   const loaded = shifts !== null && demand !== null;
   const cov = loaded ? coverage(days, shifts!, demand!, zone) : null;
   const sum = loaded ? summariseRota(shifts!) : null;
+
+  /* ── what the week costs ──────────────────────────────────────────────────
+   *
+   * `rotaCost` over the live shifts — pulled ones excluded, unpriced ones
+   * counted rather than summed, two currencies refused rather than added. None
+   * of that is decided here; this screen holds no money arithmetic at all, the
+   * same way it holds no hour arithmetic.
+   */
+  const cost = loaded ? rotaCost(shifts!) : null;
+  /**
+   * The till for this week, and the currency it is honestly in.
+   *
+   * `sharedCurrency` is the same rule /revenue and /money apply: a set whose
+   * rows disagree has NO currency, and a row stating none does not agree with
+   * one that does. An empty week is a real zero and keeps the gym's own code,
+   * because nothing has contradicted it.
+   */
+  const till = useMemo(() => {
+    if (!takings) return null;
+    if (!takings.length) return { cents: 0, currency: tenant?.currency ?? null };
+    return {
+      cents: takings.reduce((a, p) => a + p.amountCents, 0),
+      currency: sharedCurrency(takings),
+    };
+  }, [takings, tenant?.currency]);
+  /**
+   * How complete each side is, in the four words `LoadStatus` uses.
+   *
+   * Neither read emits 'partial' today — `fetchShifts` calls `assertWhole` and
+   * `fetchPayments` pages through `readAll`, so both throw rather than degrade
+   * — which is why 'error' is the only refusal mapped here. `labourShare`
+   * handles 'partial' regardless, so a reader that ever starts degrading finds
+   * the figure already withheld rather than already wrong.
+   */
+  const costState: ReadState = failed ? 'error' : loaded ? 'ready' : 'loading';
+  const tillState: ReadState = takings === null ? 'error' : takings === undefined ? 'loading' : 'ready';
+  const share = labourShare(cost, costState, till, tillState);
   const byDay = loaded ? shiftsByDay(days, shifts!, zone) : [];
   const roster = loaded ? rosterByTrainer(shifts!) : [];
 
@@ -412,6 +513,69 @@ export default function OwnerRota() {
                 ? 'An empty rota is not an uncovered gym. These stay blank until shifts are entered, rather than reporting a confident zero.'
                 : `${cov!.demandHours} hour${cov!.demandHours === 1 ? '' : 's'} this week ${cov!.demandHours === 1 ? 'has' : 'have'} a class or a one-to-one booked in ${cov!.demandHours === 1 ? 'it' : 'them'}.`}
           </Text>
+        </Section>
+
+        <Rule />
+
+        {/* ── what the published week costs ───────────────────────────────
+            The screen's second question, and it had no answer at all. Every
+            shift on this rota carries a price and nothing here ever said what
+            the week adds up to, or what share of the till the floor eats —
+            which is the figure an owner actually rosters against. */}
+        <Section>
+          <SectionHead title="What the Week Costs" note="Live shifts only" />
+          <KpiRow items={[
+            {
+              label: 'Wage Bill',
+              // Through `money`, which takes its decimal places from the
+              // currency the SHIFTS state — never from the gym's setting, and
+              // never from a hundred. A yen rota has no minor unit and a dinar
+              // rota has three, and this figure is drawn in both.
+              value: fig(cost && !cost.mixedCurrency ? money(cost.cents, cost.currency) : null),
+              delta: !loaded ? 'not read yet'
+                : failed ? 'this week could not be read'
+                : cost!.mixedCurrency ? 'priced in more than one currency'
+                : cost!.cents == null ? 'no shift on this rota carries a rate'
+                : cost!.unpriced > 0
+                  ? `${num(cost!.priced)} of ${num(cost!.priced + cost!.unpriced)} shifts priced`
+                  : 'every live shift is priced',
+            },
+            {
+              label: 'Labour · Share of Takings',
+              // "at least" is not decoration. `atLeast` is true exactly when a
+              // live shift carries no rate, and the figure is then a FLOOR —
+              // printing it bare would report unpriced work as free, which is
+              // the one direction this whole section could flatter the gym in.
+              value: fig(share.share == null ? null
+                : `${share.atLeast ? 'at least ' : ''}${pct(share.share)}`),
+              delta: share.gap === 'ok'
+                ? 'this week’s wage bill over this week’s takings'
+                : share.gap === 'loading' ? 'not read yet'
+                : 'no single percentage — see below',
+            },
+            {
+              label: 'Unpriced Shifts',
+              value: fig(loaded ? num(cost!.unpriced) : null),
+              // Said in as many words on the tile, because the number 0 beside
+              // a wage bill is read as "and nothing else to count" while a 7 is
+              // read as "seven free shifts" unless somebody writes this down.
+              delta: !loaded ? 'not read yet'
+                : cost!.unpriced === 0 ? 'nothing unaccounted for'
+                : 'rostered, and costing an unknown amount — not nothing',
+            },
+          ]} />
+          {/* The sentence the figure could not be. `labourShare` returns one
+              for every refusal it makes and for the floor case, and there are
+              eleven of them — a screen writing its own would be a second copy
+              of that judgement and would drift from it. */}
+          {share.note ? (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{share.note}</Text>
+          ) : (
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+              A pulled shift is not a cost and is left out of both figures. Takings are what somebody
+              recorded receiving in this same week, on this same clock.
+            </Text>
+          )}
         </Section>
 
         <Rule />

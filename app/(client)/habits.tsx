@@ -32,6 +32,7 @@ import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { unsentNote } from '../../src/lib/offlineQueue';
 import { hydrationNote } from '../../src/lib/hydrationHero';
 import { donePercent } from '../../src/lib/checklist';
+import { streakFor, habitStreakFigure, habitStreakNote, habitStreakCaveat } from '../../src/lib/habitStreaks';
 import { useClientData } from '../../src/ui/clientData';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { isWhole } from '../../src/ui/loadStatus';
@@ -97,6 +98,26 @@ export default function Habits() {
   // its own box, so it is where the difference belongs.
   const goalsRead = c.profileStatus === 'ready' || c.profileStatus === 'partial';
   const unsetHint = c.profileStatus === 'loading' ? 'reading' : goalsRead ? 'not set' : 'not read';
+  // ── the member's own runs ────────────────────────────────────────────────
+  //
+  // Null is not an empty list. `h.streaks` is null when the history was not
+  // read at all — signed out, no backend, or a refused read — and `[]` under a
+  // 'ready' status is a window that genuinely holds no tick. The first must not
+  // be drawn as "no runs going", which is the claim src/ui/habits.tsx's header
+  // is entirely about.
+  const runs = h.streaks;
+  const runsRead = runs !== null;
+  // Deliberately NOT `h.status`. The history is truncated by a member having
+  // used the app for a long time, and today's checklist beside it is complete
+  // — see the note on `historyStatus` in src/ui/habits.tsx. Rolling them
+  // together would put "some of today's list is missing" over a whole list for
+  // every member with a long record.
+  //
+  // 'partial' is not hidden and is not counted either. Every run carries its
+  // own `bounded`, so a run that reaches the bottom of a truncated read prints
+  // as "12 days or more" rather than as a smaller number stated as a fact.
+  const historyPartial = h.historyStatus === 'partial';
+  const historyUnread = h.historyStatus === 'error';
   const [stepDraft, setStepDraft] = useState('');
   const [sleepDraft, setSleepDraft] = useState('');
   const [waterDraft, setWaterDraft] = useState('');
@@ -266,6 +287,22 @@ export default function Habits() {
               note="There is more on your record than we can read at once, so a line may be missing below and an empty circle here doesn’t mean you skipped it." />
           ) : null}
 
+          {/* Why the runs beside each line are missing, or qualified.
+              Separate from the notice above, and that is the whole point of the
+              split in src/ui/habits.tsx: one is about TODAY's list and the
+              other is about the quarter behind it. They fail independently and
+              a member reading "some of today's list is missing" because their
+              record is long would be reading a false sentence.
+              'partial' is said rather than hidden, and it is not counted: each
+              run below carries its own floor and prints "or more". */}
+          {historyUnread ? (
+            <Notice tone={t.warn} kicker="Your runs" title="We couldn’t read your history"
+              note="The runs beside each line need your record from the last few weeks, and we could not fetch it just now. Nothing has been lost — we simply cannot count them from here." />
+          ) : historyPartial ? (
+            <Notice tone={t.warn} kicker="Your runs" title="Your record is longer than we can read at once"
+              note={`We read back ${h.historyDays} days and there is more on your record than fits in one go. A run that reaches the bottom of what we read is shown as "or more" — it has not been cut short, we just cannot see where it started.`} />
+          ) : null}
+
           {/* A target the app does not have is not a row. Where the client can
               go and supply it, the list says so instead of quietly shrinking. */}
           {h.gaps.map((g) => (
@@ -285,7 +322,35 @@ export default function Habits() {
             </Text>
           ) : null}
 
-          {h.habits.map((hb, hi) => (
+          {h.habits.map((hb, hi) => {
+            // The run for THIS line, or null. Three different nulls meet here
+            // and none of them is a zero:
+            //   · the history was not read     → `runsRead` false;
+            //   · it was read and holds no row for this habit — a line they
+            //     have never ticked, or one whose ticks are all older than the
+            //     window — → `streakFor` null;
+            //   · it was read and this habit has no CURRENT run → `days: 0`,
+            //     which is the one case with something to say.
+            const run = runsRead ? streakFor(runs!, hb.id) : null;
+            const runFig = run ? habitStreakFigure(run) : null;
+            // A run of nought is not printed as "0 days". There is no run, and
+            // a zero beside a habit reads as a score.
+            const runText = runFig && run && run.days > 0 ? `${runFig.figure} ${runFig.unit}` : null;
+            // Only when the number cannot stand on its own: a run with silence
+            // in it, or one that reaches the bottom of what we read.
+            const caveat = run ? habitStreakCaveat(run) : null;
+            const runNote = run && caveat ? habitStreakNote(run) : null;
+            // The label on a Pressable REPLACES its children for a screen
+            // reader, so anything drawn inside it that is not in here is silent.
+            // The run is the new thing on this row and it would have been the
+            // one part a screen-reader user never heard.
+            const a11y = [
+              hb.label,
+              hb.source === 'coach' ? 'Set by your coach' : null,
+              runText ? `Ticked ${runText} running` : null,
+              runNote,
+            ].filter(Boolean).join('. ');
+            return (
             <View key={hb.id}>
               {hi > 0 || h.gaps.length ? <Rule /> : null}
               <Pressable
@@ -295,7 +360,7 @@ export default function Habits() {
                 // The attribution is a second line on the row, and a label on
                 // a Pressable replaces it. "Your coach asked for this" is the
                 // reason the line exists.
-                accessibilityLabel={hb.source === 'coach' ? `${hb.label}. Set by your coach` : hb.label}
+                accessibilityLabel={a11y}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}
               >
                 <View style={{ width: 24, height: 24, borderRadius: radius.pill, borderWidth: hb.done ? 0 : hairline, borderColor: t.ring, backgroundColor: hb.done ? t.brand : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
@@ -310,10 +375,26 @@ export default function Habits() {
                   {hb.source === 'coach' ? (
                     <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>Set by your coach</Text>
                   ) : null}
+                  {/* Why the figure beside it is not a plain number. Only drawn
+                      when there IS something to say — a clean run needs no
+                      apology, and a sentence under every line would train the
+                      member to stop reading them. */}
+                  {runNote ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{runNote}</Text>
+                  ) : null}
                 </View>
+                {/* The run. Right-aligned and quiet: it is the second thing on
+                    the row, not the first, and the tick is what the member came
+                    to do. Nothing is drawn when the history was not read —
+                    `runsRead` false — because a blank is honest and a "0" or a
+                    "—" both read as a figure about them. */}
+                {runText ? (
+                  <Text style={{ ...ty.caption, ...numeric, color: hb.done ? t.ink2 : t.ink3 }}>{runText}</Text>
+                ) : null}
               </Pressable>
             </View>
-          ))}
+            );
+          })}
         </Section>
 
         <Rule />

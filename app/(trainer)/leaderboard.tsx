@@ -137,7 +137,30 @@ export default function Leaderboard() {
 
   // Everyone the board cannot place. Not a failure state and not a ranking —
   // a list of people nothing has been recorded about yet.
-  const unplaced = roster.filter((c) => c.adherence == null);
+  //
+  // ── And the third answer, which used to be folded into this one ──────────
+  //
+  // A client the coach typed into Add Client is a `coach_clients` row with no
+  // account behind it. `useRoster` cannot give such a row an `adherence` — there
+  // is no `clients` row for the check-in read to reach, and every policy that
+  // read passes through resolves `is_my_client()`, an EXISTS over `clients` — so
+  // it arrives here as null for a reason that has nothing to do with the person.
+  //
+  // They then landed in `unplaced`, under the heading "Not enough recorded to
+  // rank" and the sentence "These clients have never submitted a check-in", with
+  // "no check-ins · no scans yet" on the row and "Message {name}, who has not
+  // checked in" spoken to a screen reader. Every one of those is a statement
+  // about somebody's diligence, manufactured out of the absence of an account.
+  //
+  // `handAdded` is the only thing that can tell the two apart — the id cannot,
+  // because `coach_clients.id` is `uuid DEFAULT gen_random_uuid()`. Only an
+  // explicit `true` moves a row, which is the rule `clientIsQueryable` states:
+  // `undefined` is "the roster has not said yet" and stays where it was rather
+  // than accusing a real client of not having an account. No read is withheld
+  // here and none was ever made — this screen reads nothing but the roster. What
+  // changes is which of three sentences a row is listed under.
+  const unplaced = roster.filter((c) => c.adherence == null && c.handAdded !== true);
+  const noAccount = roster.filter((c) => c.handAdded === true);
 
   /** That client's own thread. The same destination the unranked rows below
    *  have always used, and the one thing a coach who has just spotted somebody
@@ -211,7 +234,10 @@ export default function Leaderboard() {
               'partial' it would have said the same about a book that came back
               short. analytics.tsx gates the identical sentence on the identical
               provider with `rosterWhole`; this is that. */}
-          {scored.length === 0 && unplaced.length === 0 && isWhole(status) ? (
+          {/* `noAccount` counts here too. A coach whose whole book is people
+              they typed in has clients — they are listed further down — and
+              "No clients yet" over them is the roster's own rows being denied. */}
+          {scored.length === 0 && unplaced.length === 0 && noAccount.length === 0 && isWhole(status) ? (
             <View>
               <Text style={{ ...ty.label, color: t.ink3 }}>
                 No clients yet — your leaderboard fills in as clients join and log their workouts.
@@ -228,10 +254,19 @@ export default function Leaderboard() {
             </View>
           ) : null}
 
+          {/* Said only of people who COULD have checked in. With `noAccount` in
+              the count this sentence told a coach whose book is two typed-in
+              names that nobody had checked in, which is true of nobody: not one
+              of them has an app to check in from. */}
           {scored.length === 0 && unplaced.length > 0 ? (
             <Text style={{ ...ty.label, color: t.ink3 }}>
               Nobody has checked in yet, so there is nothing to rank on. Everyone on your book is
               listed below.
+            </Text>
+          ) : scored.length === 0 && noAccount.length > 0 ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>
+              There is nothing to rank on yet. Everyone on your book was added by hand, so none of
+              them has an app to check in from — they are listed below.
             </Text>
           ) : null}
 
@@ -377,6 +412,56 @@ export default function Leaderboard() {
                 </Pressable>
                 );
               })}
+            </Section>
+          </View>
+        ) : null}
+
+        {/* ── the third answer ──────────────────────────────────────────────
+            Not "they are ranked" and not "they have never checked in". These
+            are names the coach typed into their own book: a `coach_clients`
+            row, no account, no app, and therefore no check-in that could ever
+            have been submitted and no scan that could ever have been taken.
+
+            They are listed rather than dropped, because a coach's book is who
+            is in it — but under their own heading, with their own sentence, and
+            with no per-row "no check-ins · no scans yet" underneath. The row
+            opens their client screen rather than a message thread: there is
+            nobody on the other end of the thread, and the one useful action is
+            to invite them, which is on that screen.
+
+            The same distinction `wellnessPanel`'s `not-asked` kind keeps apart
+            from `unreadable` in src/lib/coachWellness.ts. */}
+        {noAccount.length > 0 ? (
+          <View>
+            <Rule />
+            <Section>
+              <SectionHead title="Added by hand — no account yet"
+                note={isWhole(status) ? `${noAccount.length}` : undefined} />
+              <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                You added these clients to your book yourself, so they have no Repple account and
+                nothing of theirs reaches this board. That is not a missing check-in and not a low
+                score — there is no app for them to check in from yet. Send them your coaching code
+                and they start appearing above from the day they join.
+              </Text>
+              {noAccount.map((c, i) => (
+                <Pressable key={c.id}
+                  onPress={() => router.push({ pathname: '/(trainer)/client', params: { clientId: c.id, name: c.name } })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${c.name}, added by hand and has no Repple account yet. Opens their client screen.`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+                  <View style={{ width: 38, height: 38, borderRadius: radius.pill, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ ...ty.label, fontWeight: '600', color: t.ink3 }}>{c.name.split(' ').map((x) => x[0]).join('')}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink2, textTransform: 'capitalize' }}>{c.name}</Text>
+                    {/* The goal is the one thing on this row that IS known: the
+                        coach typed it in themselves. Nothing else is said,
+                        because nothing else was ever read. */}
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{c.goal}</Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3 }}>—</Text>
+                </Pressable>
+              ))}
             </Section>
           </View>
         ) : null}

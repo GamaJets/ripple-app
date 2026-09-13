@@ -190,6 +190,29 @@ export interface HabitStreakOptions {
 const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**
+ * How far back the member's own app reads its ticks.
+ *
+ * Thirteen weeks. Three decisions, and the middle one is the reason this number
+ * is here rather than 28:
+ *
+ *   · LONGER THAN THE COACH'S WINDOW. src/lib/adherence.ts reads 28 days and
+ *     argues for it: four weeks contains four of every weekday, and ninety days
+ *     "averages a fortnight of slipping into eleven weeks of doing fine". That
+ *     is the right window for a RATE, which is what the coach is shown. A run
+ *     is not a rate. A member on a sixty-day run whose screen could only see 28
+ *     of them would be shown "28 days or more" for ever, and the floor would
+ *     never lift.
+ *   · SHORT ENOUGH THAT THE CAP IS USUALLY NOT REACHED, AND LONG ENOUGH THAT
+ *     IT SOMETIMES IS. A derived list plus a coach's lines is commonly six to
+ *     twelve ticks a day; twelve times ninety is 1,080, past PostgREST's 1,000.
+ *     So the truncated case is not hypothetical and is not allowed to be
+ *     handled by hope — `coverFrom` and `bounded` are the whole answer to it.
+ *   · A ROUND SEASON. Thirteen weeks is a training block, which is the unit
+ *     this product already counts in.
+ */
+export const STREAK_WINDOW_DAYS = 91;
+
+/**
  * A hard stop on the walk below.
  *
  * Every bound the walk has comes from data — `coverFrom`, and the oldest day
@@ -263,6 +286,47 @@ export function previousDay(day: string): string | null {
   }
   if (year < 1) return null;
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}`;
+}
+
+/**
+ * The calendar day after `day`, or null when `day` is not a real date.
+ *
+ * The mirror of `previousDay`, and integers for the same reason. The provider
+ * needs it for one thing: on a TRUNCATED read the oldest day that came back is
+ * itself a partial day — the thousand-row ceiling fell somewhere inside it — so
+ * the oldest day the read can speak for is the one above it.
+ */
+export function nextDay(day: string): string | null {
+  const m = DAY_RE.exec(String(day ?? '').trim());
+  if (!m) return null;
+  let year = Number(m[1]);
+  let month = Number(m[2]);
+  let date = Number(m[3]);
+  if (month < 1 || month > 12) return null;
+  if (date < 1 || date > daysInMonth(year, month)) return null;
+  date += 1;
+  if (date > daysInMonth(year, month)) {
+    date = 1;
+    month += 1;
+    if (month === 13) { month = 1; year += 1; }
+  }
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}`;
+}
+
+/**
+ * The day `n` calendar days before `day`, or null when either is unusable.
+ *
+ * Stepped rather than computed, because a step is the only operation this file
+ * has that is known to be right — and `n` is 89, once, at the top of a read.
+ * Refuses a negative or unreasonable `n` rather than walking for it.
+ */
+export function daysBefore(day: string, n: number): string | null {
+  if (!Number.isFinite(n)) return null;
+  const steps = Math.trunc(n);
+  if (steps < 0 || steps > MAX_WALK_DAYS) return null;
+  let cursor: string | null = DAY_RE.test(String(day ?? '').trim()) ? String(day).trim() : null;
+  for (let i = 0; i < steps && cursor; i++) cursor = previousDay(cursor);
+  return cursor;
 }
 
 /** Rows folded into the two facts the walk needs: which days each habit was

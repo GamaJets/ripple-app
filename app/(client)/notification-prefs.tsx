@@ -74,12 +74,12 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Ghost, Field, Cta, Flag } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
-import { useNotifyPrefs } from '../../src/ui/notifyPrefs';
+import { useNotifyPrefs, type PrefWrite } from '../../src/ui/notifyPrefs';
 import {
   CATEGORIES, allows,
   MEMBER_CHANNELS, MEMBER_CHANNELS_ACCOUNT, MEMBER_CHANNELS_NOT_COVERED,
   MEMBER_CHANNELS_REACH, MEMBER_CHANNELS_STILL_RECORDED,
-  type MemberChannel,
+  type MemberChannel, type NotifyCategory,
 } from '../../src/lib/notifyPrefs';
 // The member's switches are stored in the same table the coach's are, so they
 // are read and written by the same two functions rather than by a second copy
@@ -124,9 +124,21 @@ const QUIET_PHONE_ONLY_SAVED =
   'Saved on this phone. Reminders this app sets will wait for the morning; anything sent to you is unaffected, '
   + 'because this server does not apply quiet hours to what it sends.';
 
+/** The same server, and a store that refused the write. "Saved on this phone"
+ *  was printed over this: the one sentence that was not true, from the one
+ *  thing that was never checked. */
+const QUIET_PHONE_ONLY_UNSTORED =
+  'Applied for now, and not stored. Reminders this app sets will wait for the morning until the app next starts, and '
+  + 'then these hours will be gone \u2014 this phone refused to keep them. Anything sent to you is unaffected either way.';
+
 /** Turned off on such a server. */
 const QUIET_PHONE_ONLY_OFF =
   'Quiet hours are off on this phone. Reminders this app sets arrive whenever they are due.';
+
+/** Turned off on this phone for this session only, because the store refused. */
+const QUIET_PHONE_ONLY_OFF_UNSTORED =
+  'Quiet hours are off on this phone for now, and that was not stored \u2014 they will be back on the next time the app '
+  + 'starts, because this phone refused to keep the change.';
 
 /** Turned off, both halves. Says what now arrives rather than "done". */
 const QUIET_OFF_SAVED =
@@ -140,10 +152,56 @@ const QUIET_OFF_HALF =
   'Only half of this turned off. Reminders this app sets now arrive whenever they are due, but your account still '
   + 'has quiet hours on it, so anything sent to you stays silent inside them. Try again once you have signal.';
 
+/** Turned off on the account and not kept by this phone — the other half of
+ *  the same pair, and unreachable until the device write started reporting
+ *  what it did. */
+const QUIET_OFF_HALF_DEVICE =
+  'Only half of this turned off. Anything sent to you now arrives whenever it is sent, but this phone would not store '
+  + 'the change, so the reminders it sets will be held again the next time the app starts. Try again.';
+
+/** Neither half took it. */
+const QUIET_OFF_NEITHER =
+  'Nothing was turned off. Your quiet hours are unchanged on this phone and on your account. Try again once you have '
+  + 'signal.';
+
+/** Which of the four turning quiet hours OFF actually managed. The wording is
+ *  its own rather than `quietSaveNote`'s, because that function's sentences are
+ *  about hours that were SET, and a member turning them off is owed a sentence
+ *  about what now arrives. */
+const quietOffNote = (device: boolean, server: boolean): string =>
+  (device && server ? QUIET_OFF_SAVED
+    : device ? QUIET_OFF_HALF
+      : server ? QUIET_OFF_HALF_DEVICE
+        : QUIET_OFF_NEITHER);
+
 /** A typed window is not a set one. Shown while the boxes disagree with what is
  *  actually in force, because two hours on a screen read as two hours applied. */
 const QUIET_UNSAVED =
   'These hours are not in force yet. Save them.';
+
+/** This phone's own preferences could not be read off it. The same shape as
+ *  `QUIET_READ_FAILED` and the reminders screen's warn Notice, because it is
+ *  the same fact: the controls below are showing this screen's starting point
+ *  rather than the member's answers, so changing one would store those
+ *  defaults over everything they actually chose. */
+const PHONE_READ_FAILED_TITLE = 'Your choices could not be read off this phone';
+const PHONE_READ_FAILED =
+  'What is switched on below is this screen\u2019s starting point rather than yours, so these switches and Quiet Hours '
+  + 'are off \u2014 changing one would store this starting point over every answer you have given, including your quiet '
+  + 'hours. What you set before is still saved and still being applied. Close this screen and open it again.';
+
+/** A switch was touched while that was true. Nothing moved — said, rather than
+ *  left as a control that appears to do nothing. */
+const PHONE_WRITE_REFUSED_TITLE = 'Your choices could not be read';
+const PHONE_WRITE_REFUSED =
+  'Nothing has been changed. This phone did not hand over the choices you have already made, so what is on screen is '
+  + 'not them \u2014 saving now would replace them. Close this screen and open it again.';
+
+/** The store refused the write. The switch stands for this session and is
+ *  honoured, and it will not survive the next launch. Never "Saved". */
+const PHONE_NOT_STORED =
+  'That is applied for now, but this phone would not store it \u2014 so it will be back as it was the next time the app '
+  + 'starts. Nothing else you have set has changed.';
 
 /** Tapped while the account read has not landed or has failed. Not a save and
  *  not a refusal by the server — nothing was sent, and saying so is the
@@ -191,7 +249,15 @@ function TriSwitch({ t, label, state, onPress }: {
 export default function NotificationPrefs() {
   const t = useTheme();
   const router = useRouter();
-  const { prefs, loaded, setCategory, setQuiet, setQuietHours } = useNotifyPrefs();
+  // `read`, not `loaded` alone. 'loading' is over in a moment and 'error' is
+  // not, and a member owed a sentence about their own settings should not be
+  // handed "could not be read" while we are still reading. The reminders screen
+  // keeps exactly these three and this follows it rather than inventing a
+  // second pattern.
+  const { prefs, read: phoneRead, canWrite, setCategory, setQuiet, setQuietHours } = useNotifyPrefs();
+  const loaded = phoneRead === 'ready';
+  /** What the last category switch did, when it did not simply work. */
+  const [catNote, setCatNote] = useState<{ note: string; ok: boolean } | null>(null);
 
   const switches = CATEGORIES.filter((c) => c.local);
   const G = layout.gutter;
@@ -308,6 +374,26 @@ export default function NotificationPrefs() {
    * is most of what the member asked for, missing. `quietSaveNote` is what says
    * so; "Saved" over that is the one thing a settings screen must never say.
    */
+  /**
+   * Flip one category, and say what became of it.
+   *
+   * Three outcomes and three sentences, because there are three things that
+   * can happen and "it worked" was being printed over all of them. 'refused'
+   * is the one that matters most: the provider did not touch the store,
+   * because a write built on preferences this phone never handed over replaces
+   * every OTHER answer the member has given with this screen's defaults.
+   */
+  const toggleCategory = async (key: NotifyCategory, on: boolean) => {
+    setCatNote(null);
+    const out = await setCategory(key, on);
+    if (out === 'refused') {
+      setCatNote({ note: PHONE_WRITE_REFUSED, ok: false });
+      Alert.alert(PHONE_WRITE_REFUSED_TITLE, PHONE_WRITE_REFUSED);
+      return;
+    }
+    if (out === 'not-stored') { setCatNote({ note: PHONE_NOT_STORED, ok: false }); return; }
+  };
+
   const putQuiet = async () => {
     if (quietBusy || quietEmpty) return;
     const z = zone;
@@ -321,21 +407,47 @@ export default function NotificationPrefs() {
         'This phone did not report which timezone it is in, and the hours that stop anything sent to you are applied by a server that has no other way to know. Without it they would be applied in the wrong ones, so nothing has been changed.');
       return;
     }
+    // Nothing is written over preferences this screen never managed to read.
+    // The device half of this save is the WHOLE blob — categories included —
+    // so saving a window on top of a failed read would take every category
+    // switch back to its default as well.
+    if (!canWrite) {
+      setQuietNote({ note: PHONE_WRITE_REFUSED, ok: false });
+      Alert.alert(PHONE_WRITE_REFUSED_TITLE, PHONE_WRITE_REFUSED);
+      return;
+    }
     setQuietBusy(true);
     setQuietNote(null);
     try {
-      if (quietOn) { setQuietHours(draftFrom, draftTo); setQuiet(true); } else { setQuiet(false); }
+      // `device` is what the write ACTUALLY did, not `true`. It was hardcoded,
+      // and `quietSaveNote` was being asked to describe a save it had been
+      // told had happened — so a store that refused still read as "Saved on
+      // this phone", and `{ device: false, server: true }` (a sentence that
+      // has always existed here) could never be reached. Both halves of the
+      // window go through one `setQuietHours`+`setQuiet` pair, and the weaker
+      // of the two answers is the one that stands.
+      let device: PrefWrite;
+      if (quietOn) {
+        const a = await setQuietHours(draftFrom, draftTo);
+        const b = await setQuiet(true);
+        device = a === 'stored' && b === 'stored' ? 'stored' : (a === 'refused' || b === 'refused' ? 'refused' : 'not-stored');
+      } else {
+        device = await setQuiet(false);
+      }
+      const deviceStored = device === 'stored';
       if (!remoteHalf) {
-        setQuietNote({ note: quietOn ? QUIET_PHONE_ONLY_SAVED : QUIET_PHONE_ONLY_OFF, ok: true });
+        setQuietNote(quietOn
+          ? { note: deviceStored ? QUIET_PHONE_ONLY_SAVED : QUIET_PHONE_ONLY_UNSTORED, ok: deviceStored }
+          : { note: deviceStored ? QUIET_PHONE_ONLY_OFF : QUIET_PHONE_ONLY_OFF_UNSTORED, ok: deviceStored });
         return;
       }
       const server = await saveQuietHours(
         quietOn && z ? { fromHour: draftFrom, toHour: draftTo, tz: z } : null,
       );
-      const said = quietSaveNote({ device: true, server });
+      const said = quietSaveNote({ device: deviceStored, server });
       setQuietNote(quietOn
         ? { note: said.note, ok: said.saved }
-        : { note: server ? QUIET_OFF_SAVED : QUIET_OFF_HALF, ok: server });
+        : { note: quietOffNote(deviceStored, server), ok: deviceStored && server });
       // Re-read rather than assume. What the boxes show next comes from the
       // row, which is the discipline the coach's screen keeps for the same
       // control.
@@ -369,6 +481,20 @@ export default function NotificationPrefs() {
           </Section>
         ) : null}
 
+        {/* Before any control, because every control below it is showing a
+            starting value that may not be the member's. The reminders screen's
+            Notice, in this screen's words. */}
+        {phoneRead === 'error' ? (
+          <Section>
+            <Notice
+              tone={t.warn}
+              kicker="Not read"
+              title={PHONE_READ_FAILED_TITLE}
+              note={PHONE_READ_FAILED}
+            />
+          </Section>
+        ) : null}
+
         <Rule />
 
         <Section>
@@ -384,12 +510,18 @@ export default function NotificationPrefs() {
                 {/* A switch, announced as one, and 48 x 28 with hit slop to
                     clear the 44pt minimum. The pattern from the reminders
                     screen, which had to fix exactly this. */}
-                <Pressable onPress={() => setCategory(c.key, !on)}
+                {/* Disabled from the same one fact the notice above is drawn
+                    from, rather than from a second test that could come to
+                    disagree with it. `toggleCategory` refuses as well, and the
+                    provider refuses under that: a disabled switch is a
+                    courtesy and the refusal is the guarantee. */}
+                <Pressable onPress={() => { void toggleCategory(c.key, !on); }}
+                  disabled={!canWrite}
                   accessibilityRole="switch"
                   accessibilityLabel={c.title}
-                  accessibilityState={{ checked: on }}
+                  accessibilityState={{ checked: on, disabled: !canWrite }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 0 }}
-                  style={{ width: 48, height: 28, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
+                  style={{ opacity: canWrite ? 1 : 0.4, width: 48, height: 28, borderRadius: radius.pill, backgroundColor: on ? t.brand : t.surface3, justifyContent: 'center', paddingHorizontal: 3 }}>
                   <View style={{ width: 22, height: 22, borderRadius: radius.pill, backgroundColor: '#fff', alignSelf: on ? 'flex-end' : 'flex-start' }} />
                 </Pressable>
               </View>
@@ -398,9 +530,14 @@ export default function NotificationPrefs() {
           {/* Until the store answers, these switches show the defaults rather
               than the member's own answers, and they may differ. Said out loud
               for the fraction of a second it lasts, because a switch showing
-              somebody else's answer is exactly the thing this screen is for. */}
-          {!loaded ? (
+              somebody else's answer is exactly the thing this screen is for.
+              A read that FAILED is not that fraction of a second and does not
+              get that sentence — it gets the warn Notice above. */}
+          {phoneRead === 'loading' ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>Reading your choices…</Text>
+          ) : null}
+          {catNote ? (
+            <Flag tone={catNote.ok ? t.good : t.warn} style={{ marginTop: sp.md }}>{catNote.note}</Flag>
           ) : null}
         </Section>
 
@@ -416,9 +553,15 @@ export default function NotificationPrefs() {
               they have, "None set" would be this screen telling somebody they
               have no quiet hours while it was still finding out — and a failed
               read is not the same as a member who has set none. */}
-          {!loaded || !quietRead ? (
+          {/* `phoneRead` is separated out rather than folded into `loaded`,
+              which was the bug: with `loaded` false for a read that FAILED as
+              well as one still running, this said "Reading your quiet hours…"
+              for the rest of the session. A failed read is not a slow one. */}
+          {phoneRead !== 'ready' || !quietRead ? (
             <Text style={{ ...ty.caption, color: t.ink3 }}>
-              {!loaded || quiet.status === 'loading' ? 'Reading your quiet hours…' : QUIET_READ_FAILED}
+              {phoneRead === 'error' ? PHONE_READ_FAILED
+                : phoneRead === 'loading' || quiet.status === 'loading' ? 'Reading your quiet hours…'
+                  : QUIET_READ_FAILED}
             </Text>
           ) : (<>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
@@ -503,7 +646,7 @@ export default function NotificationPrefs() {
                 label={quietOn ? 'Save Quiet Hours' : 'Turn Quiet Hours Off'}
                 a11yLabel={quietOn ? 'Save quiet hours' : 'Turn quiet hours off'}
                 wide
-                disabled={quietBusy || quietEmpty || !(quietUnsaved || quietSplit)}
+                disabled={!canWrite || quietBusy || quietEmpty || !(quietUnsaved || quietSplit)}
                 onPress={() => { void putQuiet(); }} />
               {quietUnsaved && !quietEmpty ? (
                 <Text style={{ ...ty.caption, color: t.ink2, marginTop: sp.sm }}>{QUIET_UNSAVED}</Text>

@@ -87,6 +87,10 @@ import { buildProgram } from '../lib/programs';
 import { buildChecklist, scheduledFocus, type ChecklistGap, type ChecklistSource, type CoachChecklistItem } from '../lib/checklist';
 import { worstStatus, type LoadStatus } from './loadStatus';
 import { capLimit, capped } from '../lib/rowCap';
+import {
+  habitStreaks, daysBefore, nextDay, STREAK_WINDOW_DAYS,
+  type HabitStreak, type HabitTickRow,
+} from '../lib/habitStreaks';
 import { WATER_CAP, clampGlasses, mergeCount, type CountAt } from '../lib/wellnessSync';
 import { classifyWrite, registerFlush, serverRows, type WriteOutcome } from '../lib/offlineQueue';
 import { useAuthRevision } from './authRevision';
@@ -147,6 +151,50 @@ interface HabitsValue {
   waterStatus: LoadStatus;
   addWater: () => void;
   removeWater: () => void;
+  /**
+   * The member's own run on each habit, longest first, or null when the
+   * history was not read.
+   *
+   * NULL IS NOT AN EMPTY LIST. `[]` under `historyStatus === 'ready'` means the
+   * window genuinely holds no tick of anything, which a screen may say. Null
+   * means we did not find out — signed out, no backend, or a refused read — and
+   * a screen that prints "no runs going" over it is making the claim this
+   * provider's header is entirely about.
+   *
+   * A habit with rows in the window but no current run is PRESENT, with
+   * `days: 0` and a `lastTicked`. A habit with no row in the window at all is
+   * absent, which is also not a zero: the window holds nothing about it either
+   * way. See src/lib/habitStreaks.ts.
+   */
+  streaks: HabitStreak[] | null;
+  /**
+   * Whether the ninety-one day tick history was read, and read whole.
+   *
+   * ── DELIBERATELY NOT PART OF `status` ────────────────────────────────────
+   *
+   * `status` is the answer to "is what is on today's checklist what the server
+   * holds", and three screens plus this one gate today's figures on it:
+   * app/(client)/habits.tsx dashes its hero and prints "Some of today's list is
+   * missing", app/(client)/dashboard.tsx and app/(client)/recovery.tsx read the
+   * water half through it.
+   *
+   * The history is read in the SAME query as today's ticks, and it is the part
+   * that can be truncated: ninety-one days of a dozen lines is past PostgREST's
+   * thousand rows, and today's ticks never are. Rolling the two together would
+   * mean a member with a long record opening this screen to "Some of today's
+   * list is missing" over a list that is complete, every single day, because
+   * their history is long. That is a false sentence produced by a true one, and
+   * it is the exact shape of harm `partial` exists to prevent.
+   *
+   * So the two are separate flags over one read. `status` says whether TODAY is
+   * whole; this says whether the HISTORY is. A PARTIAL WINDOW IS NOT A SHORT
+   * HISTORY, and nothing downstream is allowed to count it as one — the runs
+   * themselves carry `bounded` for precisely that.
+   */
+  historyStatus: LoadStatus;
+  /** How many days back the history read reaches, for a screen that has to say
+   *  so. The window, not the number of days that came back. */
+  historyDays: number;
   /** How many of today's ticks (and un-ticks) the server has not accepted.
    *  Under 'error' this is the difference between what the client did and what
    *  their coach's adherence figures are counting, and it is not zero just
@@ -333,6 +381,22 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // re-renders nothing. Only ever written beside `pendingRef`.
   const [pendingCount, setPendingCount] = useState(0);
   const [ticksStatus, setTicksStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  /**
+   * The window of ticks behind today, and how far it can be trusted.
+   *
+   * Null rather than `[]` on every path that did not read it, because this
+   * file's whole header is about the difference. `rows` null and status 'error'
+   * is "we did not find out"; `rows` `[]` and status 'ready' is "the window is
+   * genuinely empty", which is a thing a screen may say.
+   *
+   * `coverFrom` is the oldest calendar day this read can SPEAK FOR, which is
+   * not the oldest day that came back. On a truncated read the oldest day
+   * present is itself a partial day — the ceiling fell somewhere inside it — so
+   * the line is the day ABOVE it. `habitStreaks` turns a run that reaches this
+   * line into a floor rather than a fact.
+   */
+  const [history, setHistory] = useState<{ rows: HabitTickRow[]; coverFrom: string | null } | null>(null);
+  const [historyStatus, setHistoryStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'error');
   // Separate from the ticks on purpose: a coach's items failing to load and
   // today's ticks failing to load are two different holes, and folding them
   // into one flag meant a working read could be reported as broken (and the
@@ -449,12 +513,32 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
         // set on every one of these branches rather than left at 'loading' —
         // a status stuck on 'loading' forever is a screen that never renders
         // its figure.
-        if (!sess?.session) { setTicksStatus('ready'); setCoachStatus('ready'); setWaterStatus('ready'); return; }
+        //
+        // The history is the exception on this branch, and 'error' is the
+        // honest answer rather than a pessimistic one: `habit_logs` is the only
+        // place a tick from a previous day exists. This device caches TODAY
+        // (see `ticksKey`) and nothing else, so with no session there is
+        // nowhere for a run to be read from — which is "we cannot find out",
+        // not "you have no runs". Null rows carry the same thing to the screen.
+        if (!sess?.session) {
+          setTicksStatus('ready'); setCoachStatus('ready'); setWaterStatus('ready');
+          setHistory(null); setHistoryStatus('error');
+          return;
+        }
         const { data: auth, error: authErr } = await supabase.auth.getUser();
         if (cancelled) return;
-        if (authErr) { setTicksStatus('error'); setCoachStatus('error'); setWaterStatus('error'); return; }
+        if (authErr) {
+          setTicksStatus('error'); setCoachStatus('error'); setWaterStatus('error');
+          setHistory(null); setHistoryStatus('error');
+          return;
+        }
         const id = auth?.user?.id;
-        if (!id) { setTicksStatus('ready'); setCoachStatus('ready'); setWaterStatus('ready'); return; }
+        if (!id) {
+          setTicksStatus('ready'); setCoachStatus('ready'); setWaterStatus('ready');
+          // As above: no account, so no history to read. Not an empty one.
+          setHistory(null); setHistoryStatus('error');
+          return;
+        }
         setUid(id);
         uidRef.current = id;
 
@@ -481,6 +565,12 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
           setPendingCount(0);
           waterRef.current = 0;
           setWater(0);
+          // The history belongs to yesterday's window too. Its oldest day has
+          // moved and, more to the point, the ANCHOR every run is counted back
+          // from has: a run that reached yesterday is a run that reaches
+          // today's yesterday, and re-reading is what settles it. Cleared to
+          // null and not to [], so nothing reads the gap as "no runs".
+          setHistory(null); setHistoryStatus('loading');
         }
         stateDayRef.current = day;
 
@@ -531,21 +621,90 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
           if (cancelled) return;
         }
 
-        // One row per habit ticked today by one person: a handful, and it cannot
-        // grow with the business the way the roster reads do. Capped because the
-        // ceiling is free and `capped()` turns "it cannot be long" from an
-        // assumption into something the code checks.
-        const { data, error } = await supabase.from('habit_logs').select('habit')
-          .eq('user_id', id).eq('done_on', day)
-          .order('habit', { ascending: true }).limit(capLimit());
+        // ── today's ticks AND the window behind them, in one read ──────────
+        //
+        // This was `.eq('done_on', day)` — one day — and the note above it said
+        // the set "cannot grow with the business the way the roster reads do".
+        // That was true of one day and is the reason the member's own app could
+        // not see its own history at all, while their COACH has read four weeks
+        // of the same rows since src/lib/adherence.ts was written. The member
+        // could not be shown a run on their own habits.
+        //
+        // ── why the cap is not a formality here ────────────────────────────
+        //
+        // One row per habit per day. A derived list plus a coach's lines is
+        // commonly six to twelve ticks a day, and twelve times ninety-one is
+        // 1,092 — past PostgREST's silent thousand-row ceiling (src/lib/
+        // rowCap.ts). So this read genuinely truncates for the members with the
+        // longest records, which is exactly the population a streak matters to.
+        //
+        // ── the ordering is load-bearing, twice ────────────────────────────
+        //
+        // `done_on` DESCENDING, so the rows that fall off a truncated read are
+        // the OLDEST ones. Today's ticks — which drive every checkbox on the
+        // screen and every figure `status` gates — are at the top and survive.
+        // Ascending would have thrown today's ticks away to keep a quarter-old
+        // Tuesday, and the checklist would have come up blank for the same
+        // members.
+        //
+        // Then `habit` ascending, to make the order TOTAL. (user_id, habit,
+        // done_on) is unique, so within one member these two clauses cannot
+        // tie, and a read whose last page is decided by a tie is a read whose
+        // boundary moves between two identical requests.
+        const windowFrom = daysBefore(day, STREAK_WINDOW_DAYS - 1);
+        const { data, error } = await supabase.from('habit_logs').select('habit, done_on')
+          .eq('user_id', id)
+          // `windowFrom` is null only if `day` were unreadable, which `useToday`
+          // does not produce. Falling back to `day` reads today alone — the
+          // behaviour this provider had before — rather than dropping the lower
+          // bound and asking for the member's entire history.
+          .gte('done_on', windowFrom ?? day)
+          // Bounded at the top as well. A row dated tomorrow is not evidence
+          // about a day nobody has lived; `habitStreaks` drops one anyway, and
+          // asking for it in the first place would let it consume a row of the
+          // cap at the end that matters.
+          .lte('done_on', day)
+          .order('done_on', { ascending: false })
+          .order('habit', { ascending: true })
+          .limit(capLimit());
         if (cancelled) return;
         // null when the read failed, [] when the client genuinely has not
         // ticked anything today. The cached ticks stay on screen either way;
         // only the second is allowed to take them off it.
         const tickRows = serverRows<any>(error, data);
-        if (tickRows === null) { setTicksStatus('error'); }
+        if (tickRows === null) { setTicksStatus('error'); setHistory(null); setHistoryStatus('error'); }
         else {
           const page = capped(tickRows);
+          // ── splitting one read into two answers ──────────────────────────
+          //
+          // The rows are one set; the CLAIMS over them are two, and they fail
+          // independently. Today's ticks are complete whenever the read came
+          // back, because they sort first. The history behind them is complete
+          // only if nothing fell off the bottom.
+          //
+          // Folding those into one status is the mistake this split exists to
+          // avoid: `status` (below) is what app/(client)/habits.tsx dashes its
+          // hero on and what prints "Some of today's list is missing". A member
+          // whose history is long would have read that sentence every day, over
+          // a checklist that was complete.
+          const windowRows: HabitTickRow[] = page.rows.map((r: any) => ({
+            habit: String(r.habit),
+            done_on: String(r.done_on ?? '').slice(0, 10),
+          }));
+          // Ordered `done_on` descending, so the last row carries the oldest
+          // day that came back.
+          const oldestRead = windowRows.length ? windowRows[windowRows.length - 1].done_on : null;
+          // THE OLDEST DAY THIS READ CAN SPEAK FOR, which is not the oldest day
+          // it contains. On a truncated read the ceiling fell somewhere inside
+          // that oldest day — some of its rows are here and some are not — so
+          // the oldest day that is WHOLE is the one above it. Getting this
+          // wrong by one is how a run gets stated as a fact off a day that was
+          // only half read.
+          const coverFrom = page.truncated
+            ? (oldestRead ? nextDay(oldestRead) : day)
+            : (windowFrom ?? day);
+          setHistory({ rows: windowRows, coverFrom });
+          setHistoryStatus(page.truncated ? 'partial' : 'ready');
           // Replaces rather than merges — and then re-applies the toggles the
           // server has not been TOLD about. Those are two different things and
           // the distinction is the whole of this change.
@@ -559,10 +718,26 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
           // server's silence about is not evidence of anything — and wiping it
           // here is precisely how a morning's work in a basement gym was
           // deleted by the first launch that got signal.
-          const server = new Set(page.rows.map((r: any) => String(r.habit)));
+          //
+          // TODAY's rows only. The read now spans a quarter, and every row in
+          // it is a habit the member ticked on SOME day — feeding the lot into
+          // the tick set would light up the checklist with anything they had
+          // ever kept.
+          const server = new Set(windowRows.filter((r) => r.done_on === day).map((r) => r.habit));
           for (const [habit, on] of pendingRef.current) { if (on) server.add(habit); else server.delete(habit); }
           applyDone(server);
-          setTicksStatus(page.truncated ? 'partial' : 'ready');
+          // Today is whole unless the truncation reached today itself — which
+          // it only can if a thousand rows were all stamped today. That should
+          // be impossible: the checklist is a dozen lines and the unique
+          // constraint allows one row each. "Should be impossible" is what this
+          // codebase's rowCap.ts exists because of, so it is CHECKED rather
+          // than assumed, and the check is one string comparison.
+          //
+          // Note the asymmetry with `historyStatus` above, and that it is the
+          // point: a truncated read leaves today's ticks whole and the history
+          // short, and those are two different sentences to a member.
+          const todayWhole = !page.truncated || (oldestRead !== null && oldestRead < day);
+          setTicksStatus(todayWhole ? 'ready' : 'partial');
 
           // And now they go up. A failure is neither fatal nor silent: the
           // toggle stays queued, stays counted in `unsent`, and is tried again
@@ -600,7 +775,15 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
         // cached water count and the optimistic ticks stay on screen; all three
         // statuses say they are unconfirmed. `waterStatus` is included because
         // leaving it at 'loading' here is how a figure never renders at all.
-        if (!cancelled) { setTicksStatus('error'); setCoachStatus('error'); setWaterStatus('error'); }
+        if (!cancelled) {
+          setTicksStatus('error'); setCoachStatus('error'); setWaterStatus('error');
+          // The history is dropped rather than left standing. Unlike the ticks
+          // and the water count, there is no local copy of it to keep on
+          // screen — what is in state came from a read that has now failed, and
+          // showing a run from a previous read under a status saying the read
+          // failed is a figure nobody can date.
+          setHistory(null); setHistoryStatus('error');
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -693,6 +876,28 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
     [items, doneIds],
   );
 
+  /**
+   * The member's run on each habit.
+   *
+   * Derived, not stored, for the reason `freezeBudget` is derived in
+   * src/lib/streaks.ts rather than persisted: two places computing the same run
+   * is how two answers happen. The arithmetic lives in src/lib/habitStreaks.ts
+   * and is pure, so it is asserted under five timezones rather than reasoned
+   * about here.
+   *
+   * `day` is the member's own day from `useToday()` — never a clock read at the
+   * moment this runs, and never `new Date().toISOString()`. It is in the
+   * dependency list, so a phone left open across midnight re-counts every run
+   * against the day the member is actually in.
+   *
+   * Null when the history was not read. Not `[]`: see `streaks` on
+   * `HabitsValue`.
+   */
+  const streaks = useMemo<HabitStreak[] | null>(
+    () => (history ? habitStreaks(history.rows, day, { coverFrom: history.coverFrom }) : null),
+    [history, day],
+  );
+
   // Every way the list on screen can be short of, or ahead of, what the server
   // holds. The macro and plan cases are new with the derived list: a row that
   // is missing because a read failed is not a row the client left unticked.
@@ -704,6 +909,13 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   // not built. The screen then drew a filled arc and "100% · 2 of 2 done" over
   // a list missing three lines, and told a member with a 10,000-step goal on
   // record that they had no daily goal. A shorter list read as a finished day.
+  //
+  // `historyStatus` is deliberately NOT in this roll-up. It is the one read
+  // here that can be truncated by a member simply having used the app for a
+  // long time, and `status` is what three screens gate TODAY's figures on —
+  // see the note on `historyStatus` in `HabitsValue`. Adding it would put
+  // "Some of today's list is missing" over a complete list, permanently, for
+  // the members with the longest records.
   const status = worst(
     ticksStatus,
     coachStatus,
@@ -946,7 +1158,7 @@ export function HabitsProvider({ children }: { children: ReactNode }) {
   const toggleHabitStable = useCallback((...a: Parameters<typeof toggleHabit>) => impl.current.toggleHabit(...a), []);
   const addWaterStable = useCallback((...a: Parameters<typeof addWater>) => impl.current.addWater(...a), []);
   const removeWaterStable = useCallback((...a: Parameters<typeof removeWater>) => impl.current.removeWater(...a), []);
-  const value = useMemo<HabitsValue>(() => ({ habits, toggleHabit: toggleHabitStable, status, gaps, doneCount, water, waterGoal, waterStatus, addWater: addWaterStable, removeWater: removeWaterStable, unsent: pendingCount, reload }), [habits, toggleHabitStable, status, gaps, doneCount, water, waterGoal, waterStatus, addWaterStable, removeWaterStable, pendingCount, reload]);
+  const value = useMemo<HabitsValue>(() => ({ habits, toggleHabit: toggleHabitStable, status, gaps, doneCount, water, waterGoal, waterStatus, addWater: addWaterStable, removeWater: removeWaterStable, unsent: pendingCount, reload, streaks, historyStatus, historyDays: STREAK_WINDOW_DAYS }), [habits, toggleHabitStable, status, gaps, doneCount, water, waterGoal, waterStatus, addWaterStable, removeWaterStable, pendingCount, reload, streaks, historyStatus]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

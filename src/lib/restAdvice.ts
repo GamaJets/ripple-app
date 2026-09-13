@@ -132,12 +132,28 @@ export interface RestReadinessInput {
   logStatus: LoadStatus;
 }
 
-/** "over 2 of the last 3 nights" / "over the last 3 nights". */
+/**
+ * "over 2 of the last 3 nights" / "over the last 3 nights".
+ *
+ * `n > w` is its own arm, and that is the fix rather than a flourish. The two
+ * numbers arrive from the screen separately — `rv.sleep.nights.length` and
+ * `READINESS_NIGHTS` — so nothing here can check that the average really was
+ * taken over that window, and the old `n >= w` folded a disagreement into the
+ * flattering direction: five nights averaged against a window of three printed
+ * "over the last 3 nights", naming a span shorter than the one measured.
+ *
+ * That is the same false statement `readinessSleep` was making one library
+ * away, where a window did not exist at all and three nights from six weeks
+ * back were described as "the last 3 nights". Whatever the numbers are, the
+ * span named here is now a span the average was actually taken over.
+ */
 function nightSpan(nights: number, windowNights: number): string {
   const w = Math.max(1, Math.round(windowNights));
   const n = Math.max(0, Math.round(nights));
-  if (n >= w) return `over the last ${w} night${w === 1 ? '' : 's'}`;
-  return `over ${n} of the last ${w} night${w === 1 ? '' : 's'}`;
+  const nightWord = (k: number) => `${k} night${k === 1 ? '' : 's'}`;
+  if (n > w) return `over the last ${nightWord(n)}`;
+  if (n === w) return `over the last ${nightWord(w)}`;
+  return `over ${n} of the last ${nightWord(w)}`;
 }
 
 /**
@@ -352,6 +368,12 @@ export function restAdvice(i: RestAdviceInput): RestAdvice {
     ? ' Your readiness score is still being read, so this is your training log and nothing else so far.'
     : r.state === 'awaiting'
     ? ' Your devices have not recorded a night for this yet, so this is your training log and nothing else.'
-    : ' This is your training log and nothing else: no night is logged and no watch is connected, so nothing here has looked at your sleep.';
+    // "no night is logged" was an assertion about the member's whole history,
+    // and `readinessSleep` now distinguishes a member who has never logged from
+    // one whose last night is older than the window — both of whom land here,
+    // with no watch connected and no score. The second has logged plenty. What
+    // is true of both is that nothing RECENT is on record, which is also the
+    // only thing this screen needed to say.
+    : ' This is your training log and nothing else: nothing recent is on record and no watch is connected, so nothing here has looked at your sleep.';
   return { call: 'room', because: null, headline: 'You have room to train', body: `${light}${tail}` };
 }

@@ -74,6 +74,45 @@ eq(minorMoney(null, 'aed'), null, 'no amount is not zero');
 eq(minorMoney(0, 'aed'), 'AED 0.00', 'a real zero is a real zero and is still printed');
 eq(moneyIn(Number.NaN, 'aed', true), null, 'NaN is not a figure');
 
+/* ── a currency that is not a currency ─────────────────────────────────────
+ *
+ * The rule above rejected only the EMPTY string, so everything else non-empty
+ * was upper-cased and printed as though it were a code: `minorMoney(6000,
+ * 'pounds')` rendered "POUNDS 60.00", a figure with a made-up unit in front of
+ * it, reading exactly as considered as "GBP 60.00" does.
+ *
+ * It is reachable from a real row — `gym_passes`, `gym_pass_types`,
+ * `membership_plans`, `gym_invoices`, `gym_orders` and `gym_payments` all hold
+ * `currency` with no format check of any kind, so 'pounds' satisfies `not null`
+ * — and `money()` in src/lib/gymRecord.ts delegates straight here, so every gym
+ * screen in the product inherited it.
+ *
+ * `/^[A-Z]{3}$/`: the same test ./priceBook, ./coachCosts, ./coachInvoice,
+ * ./costBudgets, ./coachReceipts and ./csvImport already apply, and the same
+ * one ./gymRecord's `normaliseCurrency` now applies.
+ */
+eq(minorMoney(6000, 'pounds'), null, 'THE DEFECT: `pounds` is not a currency, so there is no amount to print');
+eq(minorMoney(6000, 'POUNDS'), null, 'and shouting it does not make it one');
+eq(minorMoney(6000, 'GB'), null, 'two letters is not ISO 4217');
+eq(minorMoney(6000, 'GBPX'), null, 'and neither is four');
+eq(minorMoney(6000, '£'), null, 'a symbol is not a code');
+eq(minorMoney(6000, 'GB1'), null, 'nor is a code with a digit in it');
+eq(wholeMoney(60, 'pounds'), null, 'the whole-unit door is the same door and refuses the same value');
+
+// The refusal is narrow. It withholds exactly the amounts nobody can spell and
+// nothing else — including the two currencies whose minor unit is not a
+// hundredth, which is where a clumsy fix would do its damage.
+eq(minorMoney(6000, 'gbp'), 'GBP 60.00', 'a real code in lower case still prints, upper-cased');
+eq(minorMoney(6000, ' gbp '), 'GBP 60.00', 'and a padded one is trimmed rather than refused');
+eq(minorMoney(6000, 'jpy'), 'JPY 6,000', 'a zero-decimal currency is untouched by the check');
+eq(minorMoney(12340, 'KWD'), 'KWD 12.340', 'and so is a three-decimal one');
+
+// Null is never a zero and never the gym's own money. The amount still exists;
+// it is the caller's row and the caller still holds it — see `unspellablePaid`
+// in ./gymOrders, which counts exactly these rather than dropping them.
+ok(minorMoney(6000, 'pounds') !== 'GBP 60.00', 'a withheld figure is never quietly relabelled');
+ok(minorMoney(6000, 'pounds') !== 'POUNDS 0.00', 'and never quietly zeroed');
+
 /* ── how many decimal places this money has ───────────────────────────────── */
 
 eq(currencyDecimals('gbp'), 2, 'most of the world has two');

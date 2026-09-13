@@ -256,6 +256,54 @@ const openAgain = coachMovedLine(moveRep({ moved: true, waiting: 2 }), 'Ana', '7
 ok(/open again/.test(openAgain), 'an unpromoted hour is reported as open');
 ok(!/nobody was waiting/.test(openAgain), 'and is not called empty while two people are in line');
 
+/* ── the third arm: a freed hour whose queue nobody counted ─────────────── */
+//
+// `waiting` used to be a plain `number`, and every way of not being told one —
+// an absent key, a null, an empty string, a NaN — arrived here as 0 and came
+// out of this function as "nobody was waiting for it". That is the one sentence
+// on this screen a coach acts on irreversibly: they offer the hour to the next
+// person who asks. It is now `number | null`, and null has its own sentence.
+
+const uncounted = coachMovedLine(moveRep({ moved: true, waiting: null }), 'Ana', '7am', '8am', true);
+ok(/Ana moved from 7am to 8am/.test(uncounted), 'the move itself is still stated plainly');
+ok(!/nobody was waiting/.test(uncounted),
+  'an uncounted queue is never called empty — the whole point of the arm');
+ok(!/somebody was waiting|straight to/i.test(uncounted),
+  'and it does not invent a queue either; nobody knows which way it goes');
+ok(/cannot say whether anybody is still in line/.test(uncounted),
+  'it says the app could not find out');
+ok(/check the waitlist before you offer that hour to somebody else/i.test(uncounted),
+  'and tells the coach what to do before giving the hour away');
+ok(!/null|undefined|NaN/.test(uncounted), 'without rendering the gap as a word');
+
+// Three states of the freed hour, three sentences, no two alike.
+const hours = new Set([
+  coachMovedLine(moveRep({ moved: true, promoted: true, waiting: 1 }), 'Ana', '7am', '8am', true),
+  coachMovedLine(moveRep({ moved: true, waiting: 2 }), 'Ana', '7am', '8am', true),
+  coachMovedLine(moveRep({ moved: true, waiting: 0 }), 'Ana', '7am', '8am', true),
+  uncounted,
+]);
+eq(hours.size, 4, 'promoted, queued, counted-empty and uncounted each read differently');
+
+// The ordering trap, pinned on its own: `null > 0` is false in JavaScript, so a
+// null falls through a `waiting > 0` test into the counted-empty arm. If the
+// null check is ever moved below it, or the null coalesced to 0 at any call
+// site on the way here, this is the assertion that fails.
+ok(uncounted !== coachMovedLine(moveRep({ moved: true, waiting: 0 }), 'Ana', '7am', '8am', true),
+  'an uncounted queue does not collapse into the counted-empty sentence');
+
+// A promoted hour is answered by the promotion, whatever the count did or did
+// not say: somebody has it, and that is the fact the coach needs.
+const promotedUncounted = coachMovedLine(
+  moveRep({ moved: true, promoted: true, waiting: null }), 'Ana', '7am', '8am', true);
+ok(/waitlist/.test(promotedUncounted), 'a promotion is stated even with no count beside it');
+ok(!/cannot say whether/.test(promotedUncounted),
+  'and does not also admit to not knowing something it was not asked');
+
+// The sentinel says it too. An unreachable move counted nobody; it did not
+// count nobody waiting.
+eq(COACH_NOT_MOVED.waiting, null, 'the fallback report carries no count rather than a zero');
+
 /* ── a pause previewed off a calendar that was not read whole ──────────── */
 //
 // `inRange` in app/(client)/standing.tsx is counted out of THIS DEVICE'S

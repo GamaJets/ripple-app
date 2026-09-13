@@ -53,6 +53,83 @@
 // summary says how many tables were only spot-checked, rather than claiming a
 // coverage it does not have.
 //
+// ── And the FUNCTIONS, since 13 Sep 2026 ──────────────────────────────────
+//
+// This file compared tables and columns and nothing else, and that left a hole
+// the exact size of a part that adds no column.
+// `supabase/parts/2790-a-review-you-wrote-and-could-never-look-at-again.sql`
+// creates one function — `my_coach_reviews()` — and touches no table. It had
+// never been run. Nothing here noticed, because nothing here looked: the part
+// declares no column, so the column comparison had nothing to compare, and the
+// gate printed "schema ok" over a database missing the only thing that part
+// exists to add. It was found by querying the live database by hand.
+//
+// That is the same failure as `workouts.session_mins` on 27 Aug — written,
+// committed, bundled, never run — with the one difference that the column
+// version of it was catchable here and this version was not.
+//
+// So the live half now also asks which functions `public` holds, and compares
+// that against the functions supabase/setup.sql declares, in both directions
+// and in the same words the column comparison uses.
+//
+// ── NAMES, not bodies ─────────────────────────────────────────────────────
+//
+// "Declared in the repo" means the NAME. Many parts use `create or replace
+// function`, deliberately — the convention in supabase/parts is that an early
+// part keeps describing the schema it created and a later one supersedes it —
+// so a function's text in this repo is the last of several definitions and the
+// text in the database is whichever of them was last applied. This check does
+// not diff bodies and does not claim to: a function whose body in production is
+// two revisions behind the repo passes here, silently, and there is nothing in
+// what PostgREST exposes that would let it be otherwise. What it catches is the
+// cliff-edge case — the function that is in the repo and is NOT THERE — which is
+// the one that takes a screen down.
+//
+// ── how the live list is got, and why only with a secret key ──────────────
+//
+// From the same OpenAPI description `listLive` already reads: PostgREST
+// publishes one `/rpc/<name>` path per callable function, so the paths ARE the
+// list. That document is refused to a publishable key, so without
+// SUPABASE_SECRET_KEY the function halves of both directions are not run and
+// the summary says so rather than implying a coverage it does not have.
+//
+// There is no publishable-key fallback here, and that is a decision rather than
+// an omission. The column check can confirm-or-deny any name it is given
+// because asking for a column is a SELECT that RLS refuses after planning.
+// Asking whether a function exists means calling it: a POST to
+// `/rest/v1/rpc/<name>` EXECUTES it, and a schema check that fires
+// `run_invoice_ageing_notices()` to find out whether it is there is a schema
+// check that mails a gym's members. A GET is refused for anything VOLATILE, and
+// for the rest PostgREST answers 404/PGRST202 both when the function is absent
+// and when the argument NAMES do not match an overload — so the one probe that
+// is safe cannot tell "missing" from "called wrongly". Either answer would be a
+// guess, and the file's rule is that it does not guess.
+//
+// ── what the function comparison therefore cannot see ─────────────────────
+//
+//   · A TRIGGER FUNCTION. PostgREST cannot call one, so it appears in no path
+//     and a listing that omitted it would read as 127 missing functions. Every
+//     `returns trigger` declaration is excluded here and counted in the
+//     summary. They are not unchecked entirely — scripts/check-grants.mjs and
+//     scripts/check-definer.mjs both read them out of the parts — but whether
+//     one was APPLIED is not visible from outside the database.
+//
+//   · A FUNCTION THE SECRET KEY MAY NOT EXECUTE. The listing is generated per
+//     role. Supabase's ALTER DEFAULT PRIVILEGES grant EXECUTE on each new
+//     function to anon, authenticated and service_role separately, and the
+//     house `revoke … from public, anon` does not touch service_role's own
+//     grant, so in this project a function that exists should be listed. If a
+//     part ever revokes from service_role, this gate will call that function
+//     missing and be wrong — check the grants before believing it, exactly as
+//     the note on a table absent from the listing already says.
+//
+//   · WHICH OVERLOAD. `class_roster(uuid)` and `class_roster(uuid, date)` are
+//     one path and one name. A signature change that drops the old form is
+//     invisible here.
+//
+//   · A FUNCTION IN ANOTHER SCHEMA. Only `public` is exposed and only `public`
+//     is compared.
+//
 // ── What a row is allowed to look like ────────────────────────────────────
 //
 // Almost nothing writes an object literal straight into .insert(). Thirty
@@ -916,6 +993,8 @@ function blankSql(src) {
 }
 
 const declared = new Map();     // table -> Map(column -> part file)
+const declaredFns = new Map();  // function name -> { part, trigger }
+const droppedFns = new Map();   // function name -> the part that dropped it and did not put it back
 const dropped = new Map();      // table -> the part that dropped it
 const opaque = new Map();       // table -> why its columns cannot be listed
 const unparsed = [];            // SQL this file admits it does not understand
@@ -1038,6 +1117,48 @@ function parseSetup(raw) {
     }
   }
 
+  // ── The FUNCTIONS the bundle declares ───────────────────────────────────
+  //
+  // The name only, for the reason the header gives: `create or replace` is the
+  // house convention and a function's body here is the last of several.
+  //
+  // `returns trigger` is recorded because PostgREST cannot call a trigger
+  // function and so never lists one — comparing those against the live listing
+  // would report every one of the 127 in this bundle as missing.
+  //
+  // The head is read from the signature to the `as $tag$` that opens the body,
+  // which is the only place the return type can be, and it is read out of
+  // `code` so that a commented-out example is not a declaration. The same
+  // technique, for the same reason, as scripts/check-grants.mjs.
+  const fnName = (n) => {
+    const b = bare(n).toLowerCase();
+    if (!b.includes('.')) return b;
+    const [schema, rest] = b.split('.');
+    return schema === 'public' ? rest : null;
+  };
+  const fnCreatedAt = new Map();
+  for (const m of code.matchAll(/\bcreate\s+(?:or\s+replace\s+)?function\s+([\w".]+)\s*\(/gi)) {
+    const name = fnName(m[1]);
+    if (!name) continue;
+    const after = raw.slice(m.index);
+    const body = /\bas\s+\$[A-Za-z_]*\$/i.exec(after);
+    const head = code.slice(m.index, m.index + (body ? body.index : 2000));
+    fnCreatedAt.set(name, m.index);
+    declaredFns.set(name, { part: partAt(m.index), trigger: /\breturns\s+trigger\b/i.test(head) });
+  }
+  // A part may retire a function outright, and several parts drop one only to
+  // create it again a line later — the house way of changing a signature, since
+  // `create or replace` cannot. The last DDL wins, exactly as it does for a
+  // table above.
+  for (const m of code.matchAll(/\bdrop\s+function\s+(?:if\s+exists\s+)?([\w".]+)/gi)) {
+    const name = fnName(m[1]);
+    if (!name) continue;
+    if (m.index > (fnCreatedAt.get(name) ?? -1)) {
+      declaredFns.delete(name);
+      droppedFns.set(name, partAt(m.index));
+    }
+  }
+
   // A view's columns come out of a select list this parser does not read. Its
   // name is recorded so that reading one is not mistaken for reading a table
   // the repo never declared.
@@ -1077,6 +1198,10 @@ if (LIST) {
   }
   console.log(`\n${[...used.values()].reduce((n, m) => n + m.size, 0)} columns named by ${files.length} source files across ${used.size} tables;`);
   console.log(`${[...declared.values()].reduce((n, m) => n + m.size, 0)} columns declared by ${SETUP_SQL} across ${declared.size} tables.`);
+  const callable = [...declaredFns].filter(([, f]) => !f.trigger);
+  console.log(`${declaredFns.size} functions declared, ${callable.length} of them callable through PostgREST and compared against the live listing:`);
+  for (const [name] of callable.sort((a, b) => a[0].localeCompare(b[0]))) console.log(`  ${name}()`);
+  console.log(`  (${declaredFns.size - callable.length} trigger functions are declared and are NOT compared — PostgREST cannot call one, so none appears in the listing.)`);
   for (const u of [...new Set(unreadable)].sort()) console.log(`  could not read: ${u}`);
   for (const u of [...new Set(unparsed)].sort()) console.log(`  did not understand: ${u}`);
   process.exit(0);
@@ -1132,6 +1257,7 @@ const secret = env('SUPABASE_SECRET_KEY') || env('SUPABASE_SERVICE_ROLE_KEY');
 const notes = [];
 let liveChecked = 0;
 let liveListed = null;          // table -> Set(column), only with a secret key
+let liveFns = null;             // Set(function name), only with a secret key
 
 async function ask(path, apiKey) {
   const res = await fetch(`${url}${path}`, {
@@ -1187,7 +1313,20 @@ async function listLive() {
     if (!props || typeof props !== 'object') return { failed: `the listing gave no columns for ${table}` };
     map.set(table, new Set(Object.keys(props)));
   }
-  return { map };
+  // The same document carries one path per callable function. `paths` holds the
+  // tables too (`/gym_invoices` and so on), so the `/rpc/` prefix is what picks
+  // the functions out — and a document with no `/rpc/` path at all in a project
+  // that declares three hundred of them is a listing that did not work, not a
+  // database with no functions, so it is reported as unanswered rather than as
+  // three hundred missing ones.
+  const paths = doc && doc.paths;
+  let fns = null;
+  if (paths && typeof paths === 'object') {
+    const found = new Set();
+    for (const p of Object.keys(paths)) if (p.startsWith('/rpc/')) found.add(p.slice(5).toLowerCase());
+    if (found.size) fns = found;
+  }
+  return { map, fns };
 }
 
 if (!OFFLINE) {
@@ -1197,7 +1336,11 @@ if (!OFFLINE) {
     if (secret) {
       const listed = await listLive().catch((e) => ({ failed: e.message }));
       if (listed.failed) notes.push(`SUPABASE_SECRET_KEY is set but ${listed.failed} — the live schema was not listed.`);
-      else liveListed = listed.map;
+      else {
+        liveListed = listed.map;
+        liveFns = listed.fns;
+        if (!liveFns) notes.push('the live schema listing carried no /rpc/ paths, so the FUNCTIONS were not compared — that is a listing that did not answer, not a database with no functions.');
+      }
     }
 
     const tables = [...new Set([...declared.keys(), ...used.keys()])].sort();
@@ -1278,6 +1421,27 @@ if (!OFFLINE) {
         }
       }
     }
+
+    // ── The functions, both directions ─────────────────────────────────────
+    //
+    // Part 2790 creates a function and nothing else, and was never run. The
+    // column comparison above had nothing to compare and said "ok".
+    if (liveFns) {
+      for (const [name, f] of declaredFns) {
+        if (f.trigger) continue;              // PostgREST never lists one; see the header
+        if (!liveFns.has(name)) {
+          report(`${name}()`, 'declared in the repo, missing from the live database — a migration has not been run', f.part);
+        }
+      }
+      for (const name of liveFns) {
+        if (declaredFns.has(name)) continue;
+        const wasDropped = droppedFns.get(name);
+        report(`${name}()`, wasDropped
+          ? `dropped by ${wasDropped} and still live — that part has not been run`
+          : `live, declared nowhere in ${SETUP_SQL} — a hand change nobody wrote down`,
+        wasDropped ?? 'the live schema listing');
+      }
+    }
   }
 }
 
@@ -1295,6 +1459,22 @@ for (const [what, , , where] of undeclared.values()) {
 
 const tableCount = new Set([...declared.keys(), ...used.keys()]).size;
 const columnCount = [...used.values()].reduce((n, m) => n + m.size, 0);
+const callableFns = [...declaredFns.values()].filter((f) => !f.trigger).length;
+const triggerFns = declaredFns.size - callableFns;
+
+// What the function half did not get to do, said out loud. A part that adds
+// only a function is invisible to every other comparison in this file, so
+// "these were not compared" is a sentence somebody has to be able to read.
+if (!declaredFns.size) {
+  console.error(`read ${SETUP_SQL} and found no function declared, which cannot be right — the bundle creates hundreds.`);
+  process.exit(1);
+}
+if (!OFFLINE && url && key && !secret) {
+  notes.push(`the ${callableFns} callable functions declared in ${SETUP_SQL} were NOT compared against the live database: that needs SUPABASE_SECRET_KEY. A publishable key is refused the schema document, and the only way to ask it about a function by name is to CALL the function.`);
+}
+if (triggerFns) {
+  notes.push(`${triggerFns} trigger functions are declared and are not compared either way — PostgREST cannot call one, so none appears in the live listing. Whether they were APPLIED is not visible from outside the database.`);
+}
 
 if (unreadable.length) {
   console.error(`${unreadable.length} place${unreadable.length === 1 ? '' : 's'} name${unreadable.length === 1 ? 's' : ''} columns this check cannot read from the source:\n`);
@@ -1341,7 +1521,7 @@ const caveat = unreadable.length
   : '';
 
 if (OFFLINE) {
-  console.log(`schema ok, offline — ${columnCount} columns across ${used.size} tables named by ${files.length} source files, every one of them declared in ${SETUP_SQL}${caveat}. The live database was not asked.`);
+  console.log(`schema ok, offline — ${columnCount} columns across ${used.size} tables named by ${files.length} source files, every one of them declared in ${SETUP_SQL}${caveat}. ${SETUP_SQL} also declares ${declaredFns.size} functions, ${callableFns} of them callable. The live database was not asked, so neither the columns nor the functions were compared against it.`);
   process.exit(0);
 }
 if (!url || !key) {
@@ -1354,4 +1534,7 @@ if (!url || !key) {
 const coverage = liveListed
   ? 'the whole live schema was listed and compared'
   : `${tableCount} tables were asked about by name — a live column that neither the repo nor the app mentions is invisible without SUPABASE_SECRET_KEY`;
-console.log(`schema ok — ${liveChecked} columns checked against the live database, ${coverage}${caveat}.`);
+const fnCoverage = liveFns
+  ? `, and ${callableFns} callable functions were compared against ${liveFns.size} the database exposes`
+  : ', and the functions were not compared';
+console.log(`schema ok — ${liveChecked} columns checked against the live database, ${coverage}${fnCoverage}${caveat}.`);

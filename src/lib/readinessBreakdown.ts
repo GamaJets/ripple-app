@@ -107,7 +107,15 @@ export interface ReadinessBreakdownInput {
   readiness: Readiness | null;
   /** Exactly what was handed to `readinessScore` as sleep. */
   sleep: ReadinessSleep;
-  /** How many nights back that window was allowed to reach. */
+  /**
+   * How many nights back that window was allowed to reach.
+   *
+   * A FALLBACK now, not the source of truth. `sleep.windowNights` is the window
+   * the average was actually taken over, and every sentence below about a span
+   * of nights is built from that — see `sleepWindow`. This field stays because
+   * three callers pass it and because it is still the right answer when there
+   * is no window on the sleep read at all.
+   */
   windowNights: number;
   /** The device walk as a whole: 'error' means it never completed. */
   deviceStatus: LoadStatus;
@@ -237,26 +245,63 @@ function sleepProvenance(s: ReadinessSleep): string {
   return s.fromTyped === 1 ? 'from a night you logged' : 'all from the nights you logged';
 }
 
+/**
+ * How many nights the span sentences may name.
+ *
+ * `sleep.windowNights` and not `i.windowNights`, because the first is the
+ * window the average was actually taken over and the second is a number the
+ * caller passed alongside it. They agree today. They are still two copies of
+ * one fact, and the defect this precedence exists for is exactly what a
+ * disagreement between them looks like on screen: `readinessSleep` had no
+ * window at all, so it averaged three nights from six weeks ago, and this
+ * function — holding a `windowNights` of 3 from the caller — printed "8h a
+ * night over the last 3 nights" about them. The sentence was built from a span
+ * nothing had measured.
+ *
+ * The fallback is for a hand-built `ReadinessSleep` with no window on it; a
+ * zero or NaN is treated the same way, since neither can be named in a span.
+ */
+function sleepWindow(i: ReadinessBreakdownInput): number {
+  const w = i.sleep?.windowNights;
+  return typeof w === 'number' && Number.isFinite(w) && w > 0 ? Math.round(w) : i.windowNights;
+}
+
 function sleepLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessInputLine {
   const title = 'Sleep';
   const avg = i.sleep.avgHours;
   const used = i.sleep.nights.length;
+  const w = sleepWindow(i);
   if (avg != null && Number.isFinite(avg) && avg > 0 && used > 0) {
     // "across 2 of the last 3 nights" rather than a bare average. A mean over
     // one night and a mean over three are different claims and the figure
     // cannot tell them apart, which is the whole reason this line exists.
-    const span = used >= i.windowNights
-      ? `over the last ${i.windowNights} nights`
-      : `over ${used} of the last ${i.windowNights} nights`;
+    //
+    // `used > w` can no longer happen — readinessSleep slices to its own window
+    // — but it is stated rather than folded into the `>=`, because the shape it
+    // would print is the shape this whole change exists to stop: a span naming
+    // fewer nights than were averaged.
+    const span = used > w
+      ? `over the last ${used} nights`
+      : used === w
+      ? `over the last ${w} nights`
+      : `over ${used} of the last ${w} nights`;
     return {
       key: 'sleep', title, state: 'scored',
       detail: `${formatSleepHours(avg * 60)} a night ${span}, ${sleepProvenance(i.sleep)}`,
     };
   }
-  // No hours. Which of the four absences it is decides what the member does
-  // next, so they are never collapsed into one sentence.
+  // No hours. Which of the absences it is decides what the member does next, so
+  // they are never collapsed into one sentence.
   if (trust === 'loading' || i.typedStatus === 'loading') {
     return { key: 'sleep', title, state: 'unread', detail: 'still being read' };
+  }
+  if (i.sleep.state === 'unknown') {
+    // Ours. We could not work out which nights count as recent, so we do not
+    // know what is in them — which is an unread signal and not an empty one.
+    return {
+      key: 'sleep', title, state: 'unread',
+      detail: 'we could not work out which nights to read, so we cannot say what you have recorded',
+    };
   }
   if (trust === 'error') {
     return {
@@ -270,9 +315,19 @@ function sleepLine(i: ReadinessBreakdownInput, trust: LoadStatus): ReadinessInpu
       detail: 'we could not read your sleep log, so we do not know what you have logged',
     };
   }
+  if (i.sleep.state === 'stale') {
+    // Read fine, nights on record, none of them recent. 'no-record' is right —
+    // there is no record IN THE WINDOW, which is the only span this row speaks
+    // about — but the sentence must not read as "you have never logged a
+    // night", which is what the line below says and would be false here.
+    return {
+      key: 'sleep', title, state: 'no-record',
+      detail: `nothing recorded for the last ${w} nights — the most recent night you have is older than that`,
+    };
+  }
   return {
     key: 'sleep', title, state: 'no-record',
-    detail: `nothing recorded for the last ${i.windowNights} nights`,
+    detail: `nothing recorded for the last ${w} nights`,
   };
 }
 
@@ -403,11 +458,15 @@ function loadLine(i: ReadinessBreakdownInput): ReadinessInputLine {
  * read sends them to do work that will not help.
  */
 function absenceFor(i: ReadinessBreakdownInput, trust: LoadStatus): string {
+  const w = sleepWindow(i);
   if (i.workoutsLast2Days == null || !Number.isFinite(i.workoutsLast2Days)) {
     return 'We could not read your training log, so there is no readiness to show — it does not mean you are rested.';
   }
   if (trust === 'loading') return 'Reading last night from your devices…';
   if (i.typedStatus === 'loading') return 'Reading the nights you have logged…';
+  if (i.sleep.state === 'unknown') {
+    return 'We could not work out which nights to read just now, so there is no readiness to show — it does not mean you slept badly.';
+  }
   if (trust === 'error') {
     return 'We could not read your devices just now, so there is no readiness to show — it does not mean you slept badly.';
   }
@@ -417,8 +476,18 @@ function absenceFor(i: ReadinessBreakdownInput, trust: LoadStatus): string {
     // the member has done, made out of a read that failed.
     return 'We could not read your sleep log just now, so there is no readiness to show — it does not mean you have not logged a night.';
   }
+  // Nights on record, all of them older than the window. Neither of the two
+  // sentences below can be said to this member: "no sleep on record" is false
+  // of their log, and "log a night of sleep" reads as a claim that they never
+  // have. Until now they got the second one, under a score of 100 built from
+  // the very nights it was telling them did not exist.
+  if (i.sleep.state === 'stale') {
+    return i.sources.some((s) => s.status !== 'unsupported')
+      ? `Nothing on record for the last ${w} nights — the most recent night you have is older than that.`
+      : `The most recent night you logged is older than the last ${w} nights, so there is no readiness to show yet.`;
+  }
   if (i.sources.some((s) => s.status !== 'unsupported')) {
-    return `No sleep on record for the last ${i.windowNights} nights yet.`;
+    return `No sleep on record for the last ${w} nights yet.`;
   }
   return 'Log a night of sleep, or connect a watch, to see your readiness.';
 }
@@ -465,6 +534,11 @@ export function readinessBreakdown(i: ReadinessBreakdownInput): ReadinessBreakdo
       trust === 'partial' ? 'ready' : trust,
       i.typedStatus === 'partial' ? 'ready' : i.typedStatus,
       i.workoutsLast2Days == null || !Number.isFinite(i.workoutsLast2Days) ? 'error' : 'ready',
+      // A window we could not draw is our failure, exactly like an unreadable
+      // log, and it must not report as 'ready'. 'stale' deliberately does NOT
+      // join it: nights older than the window are a complete answer about a
+      // member who has not logged recently, not a broken one.
+      i.sleep.state === 'unknown' ? 'error' : 'ready',
     );
     return { lines, status: stalled, caveats, absence: absenceFor(i, trust) };
   }

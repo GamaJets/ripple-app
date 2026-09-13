@@ -67,7 +67,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { ensureMediaPermission } from '../../src/ui/permissions';
 import { useTheme } from '../../src/ui/components';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Rule, Section, SectionHead, Hero, ListRow, Cta, Ghost, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, elevation, type as ty } from '../../src/theme/scale';
 import { useExerciseVideos, uploadExerciseVideo, videoUploadAvailable, type VideoItem, type Visibility } from '../../src/ui/exerciseVideos';
@@ -91,6 +91,19 @@ import { videoForExercise } from '../../src/lib/exerciseId';
 // nothing in particular — so the take they meant to replace kept playing and
 // the screen agreed with them that it had been replaced.
 import { clipsPerMovement, movementSlug, duplicateClipNote } from '../../src/lib/clipSources';
+// ── arriving here to film ONE movement ─────────────────────────────────────
+//
+// app/(trainer)/exercise.tsx ends on "Record a clip for this movement" and used
+// to push a bare route, so the coach landed on a screen that did not know which
+// movement. They filmed, and the "Name This Clip" sheet handed them an empty
+// box — so the name was retyped from memory, and a clip is matched to a
+// catalogue row by the slug of that name with exact equality and no fuzzy
+// fallback (src/lib/exerciseId.ts). "Bent Over Row" typed for "Bent-Over Row"
+// is a clip that resolves to nothing: it sits in the library below looking
+// filmed, is counted as filmed, and the client it was filmed for is served the
+// catalogue animation for ever. Every other coaching app of this kind records
+// against the exercise you were looking at; this is that, built out of the
+// prefill `upload()` has taken since the row-tap path was written.
 import { supabase } from '../../src/lib/supabase';
 import { chunkIds, uniqueIds } from '../../src/lib/idLookup';
 import { USE_SUPABASE } from '../../src/lib/config';
@@ -469,6 +482,40 @@ export default function TrainerVideos() {
     myId,
     illustratedSlugs,
   );
+  /* ── the movement this screen was opened to film ────────────────────────
+   *
+   * `record` is the catalogue's own spelling of the name, passed by
+   * app/(trainer)/exercise.tsx so the clip slugs to the row the coach was
+   * looking at rather than to whatever they retype. `group` rides with it only
+   * to fill the second box; it is cosmetic and an empty one is harmless.
+   */
+  const params = useLocalSearchParams<{ record?: string; group?: string }>();
+  const askedToFilm = (params.record || '').trim();
+  // Dismissed by hand, this sitting. The param stays on the route — going back
+  // and forward would bring it back, which is right — but a coach who has said
+  // "not now" is not asked twice on the same visit.
+  const [filmDismissed, setFilmDismissed] = useState(false);
+  /**
+   * Whether the ask has already been answered.
+   *
+   * Asked of `vids` rather than remembered, so the prompt disappears the moment
+   * the upload lands and never needs clearing. `isWhole(status)` is the gate a
+   * NEGATIVE needs: under a truncated or failed read, "you have not filmed this"
+   * is a claim about a library we do not hold, and the prompt would be inviting
+   * a coach to film a second copy of something they already have. So an unread
+   * library means no prompt at all.
+   *
+   * `clipOwner(...) === 'mine'` and not merely "a clip exists": an Academy clip
+   * is not theirs, and one saved on this phone reached nobody — in both cases
+   * filming their own is still the thing they came here to do.
+   */
+  const alreadyFilmed = useMemo(() => {
+    if (!askedToFilm) return false;
+    const hit = videoForExercise(askedToFilm, vids, myId);
+    return !!hit && clipOwner(hit, myId) === 'mine';
+  }, [askedToFilm, vids, myId]);
+  const filmPrompt = !!askedToFilm && !filmDismissed && !alreadyFilmed && isWhole(status);
+
   const [linkOpen, setLinkOpen] = useState(false);
   const [lName, setLName] = useState('');
   const [lGroup, setLGroup] = useState('');
@@ -814,6 +861,37 @@ export default function TrainerVideos() {
               ) : null}
             </Section>
 
+            <Rule />
+          </>
+        ) : null}
+
+        {/* ── the one movement this screen was opened to film ─────────────
+            Above "Add a Clip", because it IS the add the coach came for and a
+            generic Record button below it is the one they would otherwise
+            press — landing on an empty name box, which is the whole defect.
+            Both controls pass the catalogue's own spelling through `upload`'s
+            prefill, so the clip cannot slug to a near miss. */}
+        {filmPrompt ? (
+          <>
+            <Section>
+              <SectionHead title="Film This Movement" />
+              <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{movement(askedToFilm)}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4, marginBottom: sp.md }}>
+                You have not filmed this one. Whatever you record here is filed against it by name, so your
+                clients see it on this exercise and nowhere else — and you choose who before it goes.
+              </Text>
+              <Cta label="Record This" wide
+                onPress={() => upload(true, { name: askedToFilm, group: params.group || '' })} />
+              <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+                <View style={{ flex: 1 }}>
+                  <Ghost label="Upload for This" icon="plus"
+                    onPress={() => upload(false, { name: askedToFilm, group: params.group || '' })} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Ghost label="Not Now" onPress={() => setFilmDismissed(true)} />
+                </View>
+              </View>
+            </Section>
             <Rule />
           </>
         ) : null}

@@ -400,9 +400,42 @@ export default function TrainerExercise() {
               imperative form — it tells the coach there is nothing there. With
               the library unread it is the library's own screen they want, not a
               camera, so the button says so instead of sending them to film a
-              second copy of something they may already have. */}
+              second copy of something they may already have.
+
+              ── and it now carries the movement with it ───────────────────
+              The button said "Record a clip for this movement" and then pushed
+              a bare route. The coach arrived at a screen that did not know which
+              movement, filmed, and was handed an empty "Name This Clip" box —
+              so the name was retyped from memory, and a clip is matched to a
+              catalogue row by the slug of that name (src/lib/exerciseId.ts,
+              exact equality, no fuzzy fallback). "Bent Over Row" for
+              "Bent-Over Row" is a clip that resolves to nothing: it sits in the
+              library looking filmed, and the client it was filmed for never
+              sees it. The name is passed instead, verbatim as the catalogue
+              spells it, so the slug cannot be a near miss.
+
+              `name` and not `display.name.text`: the identity is the English
+              catalogue name everywhere in this app, and the translated label is
+              only ever what a row says out loud.
+
+              Carried whenever this coach has no clip of their OWN that reached
+              the server — `sources.mine`, not `clip`. A clip saved on this
+              phone plays here and reaches nobody, and an Academy clip is
+              somebody else's; in both cases filming their own is still the
+              thing they came to do. It is an OFFER and not a claim: the Videos
+              screen checks for itself whether the movement is already covered
+              and drops the prompt when it is. */}
           <Ghost label={clip || !clipsKnown ? 'Your Clip Library' : 'Record a clip for this movement'} icon="video"
-            onPress={() => router.push('/(trainer)/videos')} />
+            onPress={() => {
+              if (clipsKnown && sources.mine === 0) {
+                router.push({
+                  pathname: '/(trainer)/videos',
+                  params: { record: detail?.name || name, group: detail?.group || '' },
+                });
+                return;
+              }
+              router.push('/(trainer)/videos');
+            }} />
         </Section>
       </ScrollView>
     </SafeAreaView>

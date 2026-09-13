@@ -46,7 +46,24 @@ import { gymRollup, type TrainerLike } from '../../src/lib/ownerAnalytics';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { useSessionsHistory } from '../../src/ui/useMrrHistory';
 import { supabase } from '../../src/lib/supabase';
-import { fetchPayments, sharedCurrency, money, type GymPayment } from '../../src/lib/gymRecord';
+import {
+  fetchPayments, sharedCurrency, money, fetchOnlineOrders,
+  type GymPayment, type OnlineOrder,
+} from '../../src/lib/gymRecord';
+// Money Stripe took that the ledger does not hold.
+//
+// `fetchOnlineOrders` has existed since part 480 and had exactly one caller in
+// the product — studio-web/app/accounting, a desktop console. Nothing in app/
+// read it, so an owner holding a phone had no figure anywhere for a sale that
+// charged a member and produced neither a membership nor a payment row.
+//
+// The counting rule is in src/lib/onlineMoneyGap.ts with its own suite, and the
+// part of it that matters most is what `status = 'failed'` actually means:
+// supabase/parts/281 defines it as "Stripe took the money and the entitlement
+// could not be written", and the webhook gates the `gym_payments` insert on the
+// same condition. It is not a declined card. It is money that arrived, that the
+// member has nothing to show for, and that the hero above does not count.
+import { onlineMoneyGap, NOT_TAKINGS_NOTE } from '../../src/lib/onlineMoneyGap';
 import { reportError } from '../../src/lib/reportError';
 // When these figures were read, whether the phone can reach us, and a way to
 // ask again. This screen's own comment used to end "this screen has no
@@ -215,6 +232,16 @@ export default function OwnerRevenue() {
    */
   const tenantId = tenant?.id ?? null;
   const [takings, setTakings] = useState<GymPayment[] | null | undefined>(undefined);
+  /**
+   * The window's online orders — paid and failed, which are the two statuses
+   * that mean money moved.
+   *
+   * Same three states as `takings` and for the same reason, with one extra
+   * sentence on the empty case: `[]` here means "no online sale in this window
+   * went wrong", and that is a clean bill of health a refused read must never
+   * be allowed to print. `null` says we could not ask.
+   */
+  const [orders, setOrders] = useState<OnlineOrder[] | null | undefined>(undefined);
   // Bumped by the Refresh control. A counter and not a boolean, because two
   // taps in a row have to be two reads.
   const [again, setAgain] = useState(0);
@@ -240,16 +267,32 @@ export default function OwnerRevenue() {
     // control re-entering this effect and returning at the same line. The
     // failure is reported as what it is, in the sentence the `null` branch of
     // the hero already carries.
-    if (tenantStatus === 'error') { setTakings(null); return; }
-    if (!tenantId) { setTakings(undefined); return; }
+    if (tenantStatus === 'error') { setTakings(null); setOrders(null); return; }
+    if (!tenantId) { setTakings(undefined); setOrders(undefined); return; }
     setBusy(true);
-    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const now = Date.now();
+    const since = new Date(now - 30 * 86400000).toISOString();
     fetchPayments(supabase, tenantId, since)
       .then((r) => { if (on) { setTakings(r); setTillAt(Date.now()); } })
       // fetchPayments throws on a PostgREST error and on a truncated read. Both
       // become null, which renders a dash and a sentence — never a zero.
       .catch((e) => { reportError('ownerRevenue.payments', e); if (on) setTakings(null); })
       .finally(() => { if (on) setBusy(false); });
+    /*
+     * The same window, asked of `gym_orders`.
+     *
+     * A read of its own and not chained onto the one above, because the two
+     * answer different questions and either may fail alone: a refused ORDER
+     * read must not blank the takings hero, and a refused PAYMENT read must not
+     * silence a shortfall that is sitting right there in Stripe. The upper
+     * bound is `now` — `fetchOnlineOrders` requires one, and the reason its
+     * header gives is the reason /accounting and /close both learned: an
+     * open-ended window grows without limit and the figures then filter it back
+     * down.
+     */
+    fetchOnlineOrders(supabase, tenantId, since, new Date(now).toISOString())
+      .then((r) => { if (on) setOrders(r); })
+      .catch((e) => { reportError('ownerRevenue.onlineOrders', e); if (on) setOrders(null); });
     return () => { on = false; };
   }, [tenantId, tenantStatus, again]);
 
@@ -280,6 +323,15 @@ export default function OwnerRevenue() {
       empty: false,
     };
   }, [takings, cur]);
+
+  /**
+   * What Stripe took that the till above does not have.
+   *
+   * Computed only over a read that LANDED. `onlineMoneyGap` over `[]` says
+   * "nothing went wrong", and handing it the empty array a failed read leaves
+   * behind would print that sentence over a question nobody managed to ask.
+   */
+  const gap = useMemo(() => (orders ? onlineMoneyGap(orders, cur) : null), [orders, cur]);
   // `roll.payroll30` is delivered × fee over an empty roster, which is a real 0
   // when the gym delivered nothing and an unknown when we could not ask.
   const revenue30 = trainersUnknown ? null : roll.payroll30;
@@ -372,6 +424,55 @@ export default function OwnerRevenue() {
             ? `${till.count} payments, in more than one currency — so there is no one total to state.`
             : `${till?.count} payment${till?.count === 1 ? '' : 's'} recorded — memberships, classes, packs and the desk, whatever somebody entered`}
         />
+
+        {/* ── money Stripe took that this ledger does not hold ────────────
+            Deliberately directly under the hero and deliberately OUTSIDE it.
+            The figure above is what somebody recorded receiving; these are
+            sales that charged a member and produced no payment row, so they are
+            absent from it. They are not added to it and not taken off it —
+            `NOT_TAKINGS_NOTE` says so in the one place that sentence lives. */}
+        {orders === null ? (
+          <Notice tone={t.warn} kicker="Not ruled out"
+            title="Your online sales could not be read"
+            note="So whether any member was charged online without getting what they bought is unknown for this window. That is not the same as nothing having gone wrong." />
+        ) : gap?.any ? (
+          <Notice tone={gap.unfulfilled.count > 0 ? t.crit : t.warn}
+            kicker="Taken by Stripe, missing from your ledger"
+            title="Money that did not reach your payment record"
+            note={NOT_TAKINGS_NOTE}>
+            <View style={{ marginTop: sp.lg }}>
+              <KpiRow items={[
+                {
+                  label: 'Charged · Nothing Delivered',
+                  value: fig(money(gap.unfulfilled.cents, gap.unfulfilled.currency)),
+                  delta: gap.unfulfilled.count === 0
+                    ? 'none this window'
+                    : gap.unfulfilled.gap === 'unstated'
+                    ? `${num(gap.unfulfilled.count)} orders, in more than one currency — so there is no one total`
+                    : `${num(gap.unfulfilled.count)} order${gap.unfulfilled.count === 1 ? '' : 's'} — the member paid and holds nothing`,
+                },
+                {
+                  label: 'Delivered · Not Recorded',
+                  value: fig(money(gap.unledgered.cents, gap.unledgered.currency)),
+                  delta: gap.unledgered.count === 0
+                    ? 'none this window'
+                    : gap.unledgered.gap === 'unstated'
+                    ? `${num(gap.unledgered.count)} orders, in more than one currency — so there is no one total`
+                    : `${num(gap.unledgered.count)} sale${gap.unledgered.count === 1 ? '' : 's'} — usually a month closed as it landed`,
+                },
+              ]} />
+              {/* An order counted and not summed is the one way this block
+                  could under-report itself, so it is said rather than left to
+                  the difference between two numbers. */}
+              {gap.unfulfilled.unstated + gap.unledgered.unstated > 0 ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {num(gap.unfulfilled.unstated + gap.unledgered.unstated)} of these state no readable
+                  amount or currency, so they are counted above and not included in either figure.
+                </Text>
+              ) : null}
+            </View>
+          </Notice>
+        ) : null}
 
         {/* Said once, at the top, rather than left for an owner to infer from a
             screen of dashes: the dashes are unknowns, not a quiet month. The

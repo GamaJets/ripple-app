@@ -2547,8 +2547,20 @@ export default function TrainerSchedule() {
       // open-slot path so one act is never described two ways. It reads
       // `promoted` and `waiting`, which part 1830 reports exactly as part 461
       // does.
+      //
+      // `waitingKnown` and not `waiting` alone. `readMoveAtReport`
+      // (src/ui/coachMoveAt.ts) cannot put "nobody counted" in a figure, so it
+      // carries the fact beside it: the report's `waiting` is 0 both when the
+      // server counted an empty queue and when it reported no count at all, and
+      // `waitingKnown` is the only thing that tells those apart. Handing the 0
+      // straight on would end this alert with "nobody was waiting for it" over
+      // an unknown, and the coach would offer the hour to somebody else. Null is
+      // the honest value and `coachMovedLine` now has an arm for it.
       Alert.alert('Session moved', coachMovedLine(
-        { moved: true, reason: null, clientId: r.clientId, promoted: r.promoted, waiting: r.waiting },
+        {
+          moved: true, reason: null, clientId: r.clientId, promoted: r.promoted,
+          waiting: r.waitingKnown ? r.waiting : null,
+        },
         who, fromLabel, toLabel, told.ok), [{ text: 'Done' }]);
     } finally { setMoveBusy(false); }
   }

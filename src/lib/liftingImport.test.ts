@@ -13,6 +13,29 @@ const eq = (got: unknown, want: unknown, msg: string) => {
   if (got !== want) errors.push(`${msg} — got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
 };
 
+/* ── reading a session's day the way the LIFTER counts it ─────────────────
+ *
+ * An entry's `t` is an INSTANT — `new Date(ms).toISOString()`, which is UTC.
+ * "Which entry is the squat session of the 10th" is therefore not a question
+ * about the first ten characters of that string: at UTC−7 an 18:00 session on
+ * the 10th is `2026-09-11T01:00:00Z`, and `t.startsWith('2026-09-10')` finds
+ * nothing. That assertion was the fixture asking a UTC question of a local
+ * fact, and it passed only because it was never run west of Greenwich.
+ *
+ * So the day is read back off the instant LOCALLY, which is the day the lifter
+ * trained on. Deliberately spelled out here rather than imported from the
+ * module's own `dayKeyOfDate`: a test that borrows the helper under test cannot
+ * catch that helper changing its mind.
+ */
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const localDay = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+/** A local wall-clock moment in the `YYYY-MM-DD HH:MM:SS` both exports write.
+ *  Built through `new Date(y, m, d, h)` so each zone decides which instant that
+ *  is, rather than pinning a UTC one that means a different day in half of
+ *  them. */
+const stamp = (d: Date) => `${localDay(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+const dayOfEntry = (t: string) => localDay(new Date(t));
+
 const STRONG = [
   'Date,Workout Name,Exercise Name,Set Order,Weight,Reps,Distance,Seconds,Notes,Workout Notes,RPE',
   '2026-09-10 18:00:00,Evening,Squat (Barbell),1,100,5,,,,,',
@@ -42,7 +65,7 @@ eq(detectSource('a,b,c'), null, 'anything else is not');
   eq(p.setsRead, 4, 'and all four sets were read');
   // Newest first, matching how the log itself is ordered.
   ok(p.entries[0].t > p.entries[2].t, 'newest session first');
-  const squat = p.entries.find((e) => e.exercise.startsWith('Squat') && e.t.startsWith('2026-09-10'));
+  const squat = p.entries.find((e) => e.exercise.startsWith('Squat') && dayOfEntry(e.t) === '2026-09-10');
   eq(JSON.stringify(squat?.sets), '[[5,100],[5,100]]', 'both squat sets are on ONE entry, as [reps, kg]');
 }
 
@@ -125,6 +148,47 @@ eq(previewLiftingImport('   ').blocker != null, true, 'and so is whitespace');
     '2026-09-14 18:00:00,E,Squat (Barbell),1,100,5',
   ].join('\n'));
   eq(p.entries.length, 2, 'the same lift on two days is two entries');
+}
+
+/* ── 8. the day a session is filed under is the LIFTER's, not UTC's ─────── */
+//
+// Both exports write the session time as a local wall clock with no offset, so
+// the fold has to happen on the reader's own calendar day. Keying on the UTC
+// day — `at.slice(0, 10)` — is wrong in both directions, and each half below
+// fails in a different set of zones, which is why both are here.
+//
+// The rows are built from `new Date(y, m, d, h)` rather than from pinned UTC
+// strings: the question is which LOCAL day each set belongs to, and a fixture
+// that names an instant has already answered it for one zone only.
+{
+  // Morning and evening of the same local day. West of Greenwich these straddle
+  // UTC midnight, and a UTC key makes two sessions out of one day's training.
+  const morning = new Date(2026, 8, 10, 9, 0, 0, 0);
+  const evening = new Date(2026, 8, 10, 21, 0, 0, 0);
+  const p = previewLiftingImport([
+    'Date,Workout Name,Exercise Name,Set Order,Weight,Reps',
+    `${stamp(morning)},AM,Squat (Barbell),1,100,5`,
+    `${stamp(evening)},PM,Squat (Barbell),1,100,3`,
+  ].join('\n'));
+  eq(p.setsRead, 2, 'both sets of the day are read');
+  eq(p.entries.length, 1, 'two sessions on ONE local day are one entry, wherever the reader is');
+  eq(JSON.stringify(p.entries[0].sets), '[[5,100],[3,100]]', 'with both sets folded onto it');
+  eq(dayOfEntry(p.entries[0].t), localDay(morning), 'filed under the day it was lifted on');
+}
+{
+  // Either side of local midnight. East of Greenwich these share a UTC day, and
+  // a UTC key merges two separate training days into one.
+  const lateNight = new Date(2026, 8, 9, 23, 0, 0, 0);
+  const nextMorning = new Date(2026, 8, 10, 1, 0, 0, 0);
+  const p = previewLiftingImport([
+    'Date,Workout Name,Exercise Name,Set Order,Weight,Reps',
+    `${stamp(lateNight)},Late,Squat (Barbell),1,100,5`,
+    `${stamp(nextMorning)},Early,Squat (Barbell),1,100,5`,
+  ].join('\n'));
+  eq(p.entries.length, 2, 'two local days are two entries, and are not merged by a shared UTC day');
+  const days = p.entries.map((e) => dayOfEntry(e.t)).sort();
+  eq(days.join(','), [localDay(lateNight), localDay(nextMorning)].sort().join(','),
+    'and each is filed under the day it was lifted on');
 }
 
 if (errors.length) {

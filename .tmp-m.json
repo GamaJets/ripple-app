@@ -1,0 +1,2 @@
+{ "extends": "./tsconfig.test.json", "compilerOptions": { "outDir": ".tmp" },
+  "files": ["src/lib/gymRecord.ts", "src/lib/gymRecord.test.ts"] }

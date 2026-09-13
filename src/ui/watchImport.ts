@@ -249,7 +249,7 @@ export function failedNames(r: RecentRead): string {
  * Returns null when there is nothing to say — workouts were found and every
  * device answered. A caller that gets a string must show it.
  */
-export function importNote(r: RecentRead, windowLabel: string, sourceLabel: string): string | null {
+export function readNote(r: RecentRead, windowLabel: string, sourceLabel: string): string | null {
   if (r.reach === 'partial') {
     const who = failedNames(r);
     return r.samples.length
@@ -280,7 +280,7 @@ export function importNote(r: RecentRead, windowLabel: string, sourceLabel: stri
  * omission — so a caller on this function is still capable of printing "no
  * workouts found" over a WHOOP that refused. Both call sites
  * (app/(client)/devices.tsx and app/(client)/workouts.tsx) are owned by other
- * lanes tonight and are to move to `readRecent` + `importNote`; this wrapper
+ * lanes tonight and are to move to `readRecent` + `readNote`; this wrapper
  * exists for the hours in between and should go with the second of them.
  *
  * Until then it does the one thing it can do honestly: when every provider that
@@ -290,7 +290,7 @@ export function importNote(r: RecentRead, windowLabel: string, sourceLabel: stri
 export async function fetchRecent(states: Record<string, string>, sinceDays: number): Promise<WorkoutSample[]> {
   const r = await readRecent(states, sinceDays);
   if (r.reach === 'none' && r.failed.length) {
-    throw new Error(importNote(r, `${sinceDays} days`, 'your devices') ?? 'Your workouts could not be read.');
+    throw new Error(readNote(r, `${sinceDays} days`, 'your devices') ?? 'Your workouts could not be read.');
   }
   return r.samples;
 }

@@ -382,15 +382,32 @@ export interface MoveAtReport {
   sessionId: string | null;
   /** Somebody was waiting for the hour that was freed, and now has it. */
   promoted: boolean;
-  /** How many are still in line for the freed hour afterwards. */
-  waiting: number;
+  /**
+   * How many are still in line for the freed hour afterwards, and NULL when
+   * nobody counted them.
+   *
+   * Widened from a plain `number` on purpose, and the reason is the sentence at
+   * the end of `coachMovedLine` (src/lib/reschedule.ts): with a zero and no
+   * promotion it says "nobody was waiting for it", which is exactly the claim
+   * that cannot be made from an unknown. A coach who reads it offers the hour
+   * to somebody else.
+   *
+   * `readMoveAtReport` in src/ui/coachMoveAt.ts is strict about what counts as
+   * a queue length — an absent key, a null, an empty string, a NaN, a negative
+   * and a fraction are all "nobody counted", not zero — and this field is the
+   * only place that distinction can survive. Do not coalesce it on the way to a
+   * sentence: `waiting ?? 0` here is the defect, written out.
+   */
+  waiting: number | null;
   /** The class the coach is down to teach, on 'clash-class' only. */
   className: string | null;
 }
 
 export const MOVE_AT_NOT_MOVED: MoveAtReport = {
   moved: false, reason: 'unreachable', clientId: null, sessionId: null,
-  promoted: false, waiting: 0, className: null,
+  // Null and not 0. A move that did not reach the server knows nothing about
+  // who is in line for the hour, least of all that nobody is.
+  promoted: false, waiting: null, className: null,
 };
 
 /**

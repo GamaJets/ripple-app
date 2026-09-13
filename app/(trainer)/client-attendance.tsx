@@ -33,6 +33,21 @@
 // been recorded. `staffScopeNote` is what is said instead, and it is a rule in
 // the module rather than a sentence in this file so that the next reader of
 // this record inherits it.
+//
+// ── And a THIRD empty, which is neither of those two ──────────────────────
+//
+// A client the coach typed into Add Client has a `coach_clients` row and no
+// account. They have never been a member of anything, so there is no register
+// to be on and no door to be logged at — and the read for them came back empty
+// with no error, exactly like the tenant case above and exactly like a real
+// member whose gym does not scan. The screen printed the third one as the
+// second: "Your gym has nothing on record for them", over a rhythm strip of
+// empty weeks and a "Days on record" of zero, about somebody who has never had
+// the app.
+//
+// `clientIsQueryable` is the only thing that can tell them apart. The id cannot
+// — `coach_clients.id` is `uuid DEFAULT gen_random_uuid()` — and the whole
+// argument is in src/lib/clientRecord.ts.
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,6 +66,7 @@ import { useRoster } from '../../src/ui/roster';
 import { useTenant } from '../../src/ui/tenant';
 import { RHYTHM_WEEKS } from '../../src/ui/attendance';
 import { useClientAttendance } from '../../src/ui/clientAttendance';
+import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import {
   dwellMinutes, staffScopeNote, STAFF_RECORD_NOTE,
@@ -140,9 +156,40 @@ export default function ClientAttendanceScreen() {
   const [seenParam, setSeenParam] = useState<RouteParam>(clientId);
   const moved = subjectChange(seenParam, clientId);
   if (moved) { setSeenParam(clientId); setPicked(moved.subject); }
-  const a = useClientAttendance(picked);
-
   const client = useMemo(() => r.roster.find((c) => c.id === picked) ?? null, [r.roster, picked]);
+
+  /**
+   * Whether the server may be asked about this person at all.
+   *
+   * ── The hole this closes ────────────────────────────────────────────────
+   *
+   * A client the coach typed into Add Client is a `coach_clients` row. There is
+   * no account behind it, no `clients` row, and `class_bookings.client_id` and
+   * `gym_visits.client_id` both reference tables such a row is not in — so this
+   * screen's read could never return anything for them, whatever gym the coach
+   * belongs to. It ran anyway: `coach_clients.id` is `uuid DEFAULT
+   * gen_random_uuid()`, so every shape test the id could be put to passes, and
+   * both reads came back with zero rows and NO error.
+   *
+   * The screen then rendered that as a record about the person — "Days on
+   * record 0", a rhythm strip of empty weeks, and the sentence "Your gym has
+   * nothing on record for them", which goes on to explain that this is not a
+   * reason to ring them. It is not a reason to ring them, because there is
+   * nobody to have the conversation with: they have never had the app.
+   *
+   * Computed at render rather than inside the hook call, so a roster that
+   * arrives AFTER the read and says this row was typed in by hand withdraws the
+   * answer instead of leaving an empty record standing as a fact. `handAdded`
+   * undefined is "the roster has not said", which goes on asking — only an
+   * explicit true withholds. See src/lib/clientRecord.ts.
+   */
+  const askable = clientIsQueryable(picked, client?.handAdded);
+
+  // Null, not `picked`, when there is nothing to ask about: the hook's own
+  // no-client branch clears its state and asks for nothing, which is exactly
+  // right here. Nothing below reads that as an answer — the `!askable` branch
+  // takes the whole page before any of it is drawn.
+  const a = useClientAttendance(askable ? picked : null);
 
   // Three reads: the attendance itself, the roster the picker and the header
   // name come from, and the gym whose week-start decides which days fall in
@@ -288,6 +335,35 @@ export default function ClientAttendanceScreen() {
                 Pick somebody to see what the gym has on them.
               </Text>
             </Section>
+          </>
+        ) : !askable ? (
+          /* ── the third answer ────────────────────────────────────────────
+             Not "the gym has nothing on them" and not "the read failed". This
+             person is a name the coach typed into their own book: a
+             `coach_clients` row with no account behind it, so there is no
+             register they could be on and no door log they could be in — and
+             nothing was refused, because nothing was ever entitled to be asked.
+
+             The whole record takes this branch rather than one section of it.
+             The rhythm strip, the two figures and the visit list are all the
+             same claim said three ways, and a page of them with one notice on
+             top is still a page that says a person stopped coming in.
+
+             The same distinction `wellnessPanel`'s `not-asked` kind keeps apart
+             from `unreadable` in src/lib/coachWellness.ts. */
+          <>
+            <Rule />
+            <Section>
+              <Notice kicker="No account" title={`${client?.name ?? 'This client'} has no Repple account`}
+                note={`You added ${client?.name?.trim().split(/\s+/)[0] || 'them'} to your book by hand, so they have never been a member your gym could record. There is no register with their name on it and no door log to fold together — that is not an empty attendance record and not a failed read. Invite them from your client list and this screen starts from the day they join.`} />
+            </Section>
+            {client ? (
+              <Section>
+                <Ghost label="Open Their Client Screen"
+                  a11yLabel={`Open the client screen for ${client.name}, where you can invite them`}
+                  onPress={() => router.push({ pathname: '/(trainer)/client', params: { clientId: client.id, name: client.name } })} />
+              </Section>
+            ) : null}
           </>
         ) : (
           <>

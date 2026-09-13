@@ -107,6 +107,8 @@ import { deltaLabel } from '../../src/lib/deltaLabel';
 import {
   ALL_KIT, UNRECORDED_KIT, equipmentChips, matchesEquipment, unplacedByEquipment, equipmentGapNote,
 } from '../../src/lib/equipmentFacet';
+import { useProgramTemplates } from '../../src/ui/programTemplates';
+import { isStarterId } from '../../src/lib/templateLibrary';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
 
@@ -315,6 +317,60 @@ export default function TrainerLibrary() {
     return { mine: m, academy: a, local: l };
   }, [videos, coachId]);
 
+  /* ── the forty movements a coach actually uses ──────────────────────────
+   *
+   * Six hundred rows, two facets, and neither of them is the cut every other
+   * coaching product of this kind offers: the coach's OWN working set. TrueCoach
+   * and Trainerize both put "my exercises" / recently used in front of the
+   * catalogue, because a coach writes the same thirty or forty movements over
+   * and over and the other five hundred and seventy are noise they scroll past
+   * on the way.
+   *
+   * Built from what the coach has already written rather than from a starred
+   * list they would have to maintain — the same argument src/lib/segments.ts
+   * makes about a computed segment against a tag, and it costs no new table,
+   * no new column and no new read: `useProgramTemplates` is mounted at the root
+   * layout and app/(trainer)/videos.tsx already counts across exactly these
+   * rows for its coverage figure.
+   *
+   * NULL under anything but a whole read, for the reason that screen states at
+   * length: the provider seeds three built-in starter programmes, so the list is
+   * never empty and a coach who has saved nothing would be shown the movements
+   * of three demonstrations as their own work — and `readLibrary` answers
+   * 'partial' at the row ceiling, under which this set is a PREFIX and the
+   * filter would hide movements the coach does programme. Null means the control
+   * is not offered at all.
+   */
+  const { templates, status: tplStatus } = useProgramTemplates();
+  const programmed = useMemo(() => {
+    if (!isWhole(tplStatus)) return null;
+    const s = new Set<string>();
+    for (const tpl of templates) {
+      if (isStarterId(tpl.id)) continue;
+      for (const d of tpl.program.days) {
+        for (const e of d.exercises) {
+          const slug = exerciseSlug(e.name);
+          if (slug) s.add(slug);
+        }
+      }
+    }
+    return s;
+  }, [tplStatus, templates]);
+  const [mineOnly, setMineOnly] = useState(false);
+  /** How many rows of the catalogue the coach's own programmes name. Only a
+   *  count under a whole catalogue read, like every other figure here. */
+  const programmedHere = useMemo(
+    () => (programmed == null ? 0 : rows.filter((r) => programmed.has(exerciseSlug(r.name))).length),
+    [programmed, rows],
+  );
+  const canScopeToMine = programmed != null && programmedHere > 0;
+  // The control can vanish underneath the selection — a refresh whose template
+  // read comes back short, or a coach who has just deleted their last
+  // programme. Left alone the filter would keep excluding rows with nothing on
+  // screen saying it was on, which is the shorter-list-as-a-complete-one shape
+  // the kit gap note exists for.
+  useEffect(() => { if (!canScopeToMine && mineOnly) setMineOnly(false); }, [canScopeToMine, mineOnly]);
+
   // Signed in one request rather than one per row — see useCatalogueThumbs.
   const term = q.trim().toLowerCase();
   // The search and the muscle group alone. Held apart from the kit filter so
@@ -328,8 +384,13 @@ export default function TrainerLibrary() {
     // and a coach reading the German library must find the same row from the
     // same box; so must a coach who has only ever called it "butt kicks", which
     // is what the synonym list is for.
-    () => rows.filter((r) => inGroup(r.group, group) && matchesSearch(term, r.name, r.display, r.synonyms)),
-    [rows, group, term],
+    () => rows.filter((r) => inGroup(r.group, group)
+      && matchesSearch(term, r.name, r.display, r.synonyms)
+      // The working-set cut. `programmed` is null under anything but a whole
+      // read of the coach's template library, and the toggle above cannot be
+      // on while it is — see the effect below.
+      && (!mineOnly || !!programmed?.has(exerciseSlug(r.name)))),
+    [rows, group, term, mineOnly, programmed],
   );
   const list = useMemo(() => scoped.filter((r) => matchesEquipment(r.equipment, kit)), [scoped, kit]);
   // Rows the search and the group DID select and the kit chip could not judge:
@@ -339,7 +400,7 @@ export default function TrainerLibrary() {
   // shorter list presented as a complete one.
   const unplacedByKit = unplacedByEquipment(scoped.map((r) => r.equipment), kit);
   const kitGap = equipmentGapNote(unplacedByKit, kit, isWhole(status));
-  useEffect(() => { setShown(PAGE); }, [term, group, kit]);
+  useEffect(() => { setShown(PAGE); }, [term, group, kit, mineOnly]);
   const page = list.slice(0, shown);
   const thumbFor = useCatalogueThumbs(page);
 
@@ -414,8 +475,8 @@ export default function TrainerLibrary() {
   // the movements, and a clip-library prefix undercounts the matches.
   const clipCountable = countable && clipsKnown && ownershipKnown;
 
-  const filtering = term !== '' || group !== ALL || kit !== ALL_KIT;
-  const clearFilters = () => { setQ(''); setGroup(ALL); setKit(ALL_KIT); };
+  const filtering = term !== '' || group !== ALL || kit !== ALL_KIT || mineOnly;
+  const clearFilters = () => { setQ(''); setGroup(ALL); setKit(ALL_KIT); setMineOnly(false); };
   const emptyLine = () => {
     if (!filtering) return 'The catalogue is empty.';
     const bits: string[] = [];
@@ -424,6 +485,9 @@ export default function TrainerLibrary() {
     // Named as the state it is, not as the chip's label: "No movement matches
     // Chest · Not recorded" reads as a kit called Not Recorded.
     if (kit !== ALL_KIT) bits.push(kit === UNRECORDED_KIT ? 'no recorded equipment' : kit);
+    // Named as the cut it is. "No movement matches Chest · In your programmes"
+    // would read as a muscle group somebody had invented.
+    if (mineOnly) bits.push('movements you have programmed');
     return `No movement matches ${bits.join(' · ')}.`;
   };
 
@@ -499,6 +563,46 @@ export default function TrainerLibrary() {
             </Pressable>
           ) : null}
         </View>
+
+        {/* ── the coach's own working set ──────────────────────────────────
+            Above the two facets because it is the coarsest cut and the one a
+            coach reaches for first: thirty or forty movements they actually
+            write, out of six hundred. Offered only when there are some — an
+            unread template library, or a coach who has saved no programmes,
+            gets no control rather than one that selects nothing.
+
+            The count is on the control, and it is only a count because both
+            reads behind it are whole: `programmed` is null under anything but a
+            whole template read, and `countable` guards the catalogue half. */}
+        {canScopeToMine ? (
+          <Pressable onPress={() => setMineOnly((v) => !v)} accessibilityRole="button"
+            accessibilityState={{ selected: mineOnly }}
+            accessibilityLabel={mineOnly
+              ? 'Showing only movements you have programmed. Show the whole catalogue'
+              : 'Show only the movements you have programmed'}
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: sp.sm, alignSelf: 'flex-start',
+              marginTop: sp.md, paddingHorizontal: sp.md, paddingVertical: sp.sm,
+              borderRadius: radius.pill, backgroundColor: mineOnly ? t.brand : t.surface2,
+            }}>
+            <Icon name={mineOnly ? 'check' : 'grid'} size={13} color={mineOnly ? t.brandInk : t.ink3} />
+            <Text style={{ ...ty.label, fontWeight: mineOnly ? '600' : '500', color: mineOnly ? t.brandInk : t.ink2 }}>
+              {countable ? `In your programmes · ${num(programmedHere)}` : 'In your programmes'}
+            </Text>
+          </Pressable>
+        ) : null}
+
+        {/* Directly under the control, and only while it is on. A coach looking
+            at thirty rows has to be able to tell "this is your working set"
+            from "the catalogue is small", and the sentence names where the set
+            came from so a movement they expected and cannot find has an
+            explanation they can act on. */}
+        {mineOnly ? (
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+            Every movement you have written into one of your saved programmes. Built from your own programmes,
+            not from a list you keep up to date — the three starters Repple ships with are not counted.
+          </Text>
+        ) : null}
 
         <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.md }}>Muscle group</Text>
         <Chips options={groups} value={group} onChange={setGroup}

@@ -271,6 +271,19 @@ ok(/outside the working hours/.test(moveAtConfirmBody('Ana', '7am', '5am', false
 eq(MOVE_AT_NOT_MOVED.reason, 'unreachable',
   'the fallback report is the one that says nobody knows');
 eq(MOVE_AT_NOT_MOVED.moved, false, 'and it never reads as moved');
+// `waiting` is `number | null` and this is the null. A move that did not reach
+// the server did not count an empty queue; it counted nothing. The zero that
+// used to sit here is the value `coachMovedLine` turns into "nobody was waiting
+// for it" — see src/lib/reschedule.ts and src/ui/coachMoveAt.ts.
+eq(MOVE_AT_NOT_MOVED.waiting, null, 'and it counted nobody rather than counting nobody waiting');
+
+// The refusals never look at `waiting`, and must not start to: null is a
+// legitimate value of it now, and a refusal sentence that interpolated one
+// would render the gap as a word.
+for (const reason of reasons) {
+  const line = moveAtRefusalLine(rep({ reason, waiting: null }), 'Ana', '7am', '8am');
+  ok(!/null|undefined|NaN/.test(line), `'${reason}' survives an uncounted queue`);
+}
 
 if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
 console.log('moveTimes: ok');
