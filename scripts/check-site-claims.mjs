@@ -96,6 +96,10 @@
 //                             src/lib/gymExport.ts
 //   M · The coach setup list  the nine steps on coach-setup.html  vs
 //                             COACH_SETUP_STEPS in src/lib/coachFirstRun.ts
+//   N · Store badges          every `<a class="store">` cluster  vs  a release
+//                             caveat in the same <section>. The six store
+//                             addresses do not resolve yet; the caveat is what
+//                             stops a Download button being a false claim.
 //
 // ── what this deliberately does NOT check ─────────────────────────────────
 //
@@ -1293,9 +1297,107 @@ function checkCoachSteps(titles, seen) {
   }
 }
 
+/* ── N · a store badge is never shown without the caveat beside it ───────── */
+//
+// Every "Download on the App Store" and "Get it on Google Play" badge under
+// web/ links to an address that DOES NOT RESOLVE. Checked again on 13 Sep 2026
+// and nothing has moved since 26 Aug: `itunes.apple.com/lookup` answers
+// `resultCount 0` for 6790096518, 6804358275 and 6804417240, and all three
+// Play pages answer 404. The apps exist on App Store Connect and are on
+// TestFlight; no listing is public. The hrefs stay because they are the
+// permanent addresses and switch on by themselves the day each listing
+// publishes — that decision is docs/LAUNCH-CHECKLIST.md section 2.
+//
+// A badge whose whole content is the word "Download" is a claim. What keeps it
+// honest is the sentence beside it saying the listing may not open yet, and
+// that sentence is exactly the thing that gets forgotten: the 3 Sep 2026 sweep
+// added it under the badges in the HERO of client.html, trainer.html and
+// studio.html and missed the CLOSING CALL TO ACTION on all three, so the last
+// thing a reader saw on each page was a download button for a 404 with nothing
+// beside it. One page, two badge clusters, one of them caveated — which is the
+// shape no human sweep catches twice.
+//
+// So the rule is per CLUSTER, not per page: the caveat must be inside the same
+// <section> as the badges it is caveating, because a caveat in the hero is not
+// visible from the footer. Pages with no <section> at all (download.html,
+// join.html) are one region and their page-level callout covers them.
+//
+// WHEN THE LISTINGS GO LIVE this check is what to delete, together with the
+// caveats themselves — see section 2 of the checklist. It is not a permanent
+// invariant; it is a gate on a temporary untruth, and leaving it in place after
+// the listings publish would force the site to keep saying something that had
+// stopped being true, which is the same failure pointing the other way.
+
+/** The badge itself: an `<a class="store">` pointing at a store we do not own. */
+const STORE_BADGE = /<a[^>]*class="store"[^>]*href="(https?:\/\/[^"]+)"/i;
+
+/**
+ * The sentence that makes a badge honest.
+ *
+ * Keyed on the clause every one of the five existing caveats ends with, rather
+ * than on the whole paragraph: the copy around it differs per page ("Being
+ * released now", "The listings are going live now") and only this part carries
+ * the actual disclosure — that a button which does not open means the app is
+ * not out. Reword that clause and this gate fails loudly, which is correct: it
+ * is the load-bearing half of the sentence.
+ */
+const RELEASE_CAVEAT = /not finished going out/i;
+
+/** The <section> a line sits in, as [startLine, endLine] 1-based and inclusive.
+ *  A page with no sections is one region, which is what download.html and
+ *  join.html are. */
+function enclosingSection(lines, line) {
+  let start = 1;
+  let end = lines.length;
+  for (let i = line - 1; i >= 0; i--) {
+    if (/<section\b/i.test(lines[i])) { start = i + 1; break; }
+  }
+  for (let i = line - 1; i < lines.length; i++) {
+    if (/<\/section>/i.test(lines[i])) { end = i + 1; break; }
+  }
+  return [start, end];
+}
+
+function checkStoreBadges(seen) {
+  for (const page of PAGES) {
+    const raw = read(page);
+    const lines = raw.split('\n');
+    // Badge lines, grouped into clusters. Two badges three lines apart are one
+    // button row and want one caveat, not two.
+    const hits = [];
+    lines.forEach((l, i) => {
+      if (COMMENT.test(l)) return;            // a comment quoting a badge is not a badge
+      if (STORE_BADGE.test(l)) hits.push(i + 1);
+    });
+    if (!hits.length) continue;
+    const clusters = [];
+    for (const line of hits) {
+      const last = clusters[clusters.length - 1];
+      if (last && line - last[last.length - 1] <= 4) last.push(line);
+      else clusters.push([line]);
+    }
+    for (const cluster of clusters) {
+      seen.storeBadges++;
+      if (excused(lines, cluster[0] - 1)) continue;
+      const [start, end] = enclosingSection(lines, cluster[0]);
+      const region = pageText(lines.slice(start - 1, end).join('\n'));
+      if (RELEASE_CAVEAT.test(region)) continue;
+      note(page, cluster[0],
+        `${cluster.length} store badge${cluster.length === 1 ? '' : 's'} with nothing in the same section saying the listing may not open`,
+        `None of the six store addresses resolves — itunes lookup answers resultCount 0 for all three Apple ids and all three Play pages answer 404, re-checked 13 Sep 2026. A badge reading "Download on the App Store" over a link that 404s is a claim the product cannot support. Put the caveat the other clusters use in this section — the clause that matters is "…that app has not finished going out" — or, if the listings are now live, delete every caveat AND check N together, per docs/LAUNCH-CHECKLIST.md section 2.`);
+    }
+  }
+  // The empty-set guard, in the same spirit as B, D and G. Six pages carry
+  // store badges today; a run that finds none has stopped reading, and a blind
+  // detector prints the same "ok" as a clean site.
+  if (seen.storeBadges === 0) {
+    fatal.push('check N found no `<a class="store">` badge anywhere under web/. Six pages carry them — index, download, join, client, trainer and studio. Either the badges were removed (in which case delete check N with them) or STORE_BADGE no longer matches the markup.');
+  }
+}
+
 /* ── run ─────────────────────────────────────────────────────────────────── */
 
-const seen = { count: 0, markers: 0, siteHosts: 0, csp: 0, catalogue: 0, links: 0, rail: 0, exportParts: 0, coachSteps: 0 };
+const seen = { count: 0, markers: 0, siteHosts: 0, csp: 0, catalogue: 0, links: 0, rail: 0, exportParts: 0, coachSteps: 0, storeBadges: 0 };
 if (PASSWORD_MIN !== null && FEE_PCT !== null && TRIAL_DAYS !== null) {
   for (const page of PAGES) {
     const raw = read(page);
@@ -1320,6 +1422,7 @@ if (PASSWORD_MIN !== null && FEE_PCT !== null && TRIAL_DAYS !== null) {
   checkConsoleRail(consoleRail(), seen);
   checkExportParts(exportParts(), seen);
   checkCoachSteps(coachSetupSteps(), seen);
+  checkStoreBadges(seen);
 }
 
 if (fatal.length) {
@@ -1375,4 +1478,5 @@ console.log(`check-site-claims — ok, ${PAGES.length} public pages; password mi
   + `${seen.catalogue} catalogue-figure claim${seen.catalogue === 1 ? '' : 's'} agreeing with each other and stamped, `
   + `${seen.links} internal links each resolving to a file and an id, `
   + `${seen.rail} console-rail claim and ${seen.exportParts} export-parts table matching studio-web, `
-  + `${seen.coachSteps} coach setup list matching the app's own.`);
+  + `${seen.coachSteps} coach setup list matching the app's own, `
+  + `${seen.storeBadges} store-badge cluster${seen.storeBadges === 1 ? '' : 's'} each caveated in its own section.`);

@@ -1467,7 +1467,8 @@ export default function TrainerAnalytics() {
       {/* ── goal editor ──────────────────────────────────────────────────── */}
       <Modal visible={goalOpen} transparent animationType="slide" onRequestClose={() => setGoalOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setGoalOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setGoalOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Set Your Goals</Text>
           {/* The parenthetical names the unit the coach is typing in, so with

@@ -52,7 +52,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, ListRow, Ghost, Cta, Flag } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
 // 44pt, and the one place the number lives. See the rating row below.
 import { MIN_TARGET } from '../../src/lib/a11y';
 import { supabase } from '../../src/lib/supabase';
@@ -412,8 +412,12 @@ export default function MyCoach() {
               <Flag tone={applied.color ?? t.ink3} style={{ marginTop: sp.lg }}>{brandNote}</Flag>
             ) : null}
 
+            {/* A paragraph of somebody's own words, set a point looser than body's
+                21. `grown` keeps that choice and still tracks the reader: pinned, a
+                bio is the longest run of text on this screen and so the first thing
+                to overlap itself. */}
             {coach.bio ? (
-              <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg, lineHeight: 22 }}>{coach.bio}</Text>
+              <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.lg, lineHeight: grown(22) }}>{coach.bio}</Text>
             ) : null}
 
             {coach.specialties.length ? (

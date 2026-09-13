@@ -906,7 +906,8 @@ export default function TrainerClasses() {
           instead of running off the top. */}
       <Modal visible={!!manage} animationType="slide" transparent onRequestClose={() => setManage(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setManage(null)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setManage(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, paddingHorizontal: G, paddingTop: sp.lg, paddingBottom: sp.xl, maxHeight: '86%' }}>
             {manage ? (
               <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">

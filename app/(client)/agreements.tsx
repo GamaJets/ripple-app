@@ -44,7 +44,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
 import { Rule, Section, SectionHead, Notice, Cta, Ghost, Flag } from '../../src/ui/kit';
 import { Icon } from '../../src/ui/Icon';
-import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, grown, type as ty } from '../../src/theme/scale';
 import { supabase } from '../../src/lib/supabase';
 import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
@@ -272,7 +272,14 @@ export default function ClientGymAgreementsScreen() {
                             backgroundColor: t.surface2, borderRadius: radius.sm,
                             borderWidth: hairline, borderColor: t.ring, padding: sp.lg,
                           }}>
-                            <Text style={{ ...ty.caption, color: t.ink2, lineHeight: 20 }}>{a.body}</Text>
+                            {/* 20 rather than caption's own 16: this is the whole body of a legal
+                                agreement in a box, and prose reads better with the extra
+                                leading. `grown` because the looser line still has to follow
+                                the reader's text size — a pinned 20 is the clipped paragraph
+                                Rule 2 of scripts/check-a11y.mjs exists for, and this is the
+                                one screen where not being able to read the terms means
+                                signing something unread. */}
+                            <Text style={{ ...ty.caption, color: t.ink2, lineHeight: grown(20) }}>{a.body}</Text>
                           </View>
 
                           {a.refusal ? (

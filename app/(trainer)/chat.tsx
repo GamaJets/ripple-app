@@ -561,7 +561,8 @@ export default function CoachChat() {
           message, and an editor inside a chat is where somebody edits a
           template by accident while meaning to edit the message. */}
       <Modal visible={tplOpen} transparent animationType="slide" onRequestClose={() => setTplOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setTplOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setTplOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 30, maxHeight: '70%' }}>
           <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.sm }}>Saved Messages</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
@@ -592,7 +593,8 @@ export default function CoachChat() {
           is optional: requiring an explanation puts a writing task in front of
           the person least able to do one at that moment. */}
       <Modal visible={!!reportFor} transparent animationType="slide" onRequestClose={() => setReportFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReportFor(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setReportFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: G, paddingBottom: sp.xxl, maxHeight: '88%', ...elevation.e2 }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
             <Text style={{ ...ty.title, color: t.ink }}>

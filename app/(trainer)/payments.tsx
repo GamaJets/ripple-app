@@ -2560,7 +2560,8 @@ export default function TrainerPayments() {
           instead of running off the top. */}
       <Modal visible={!!refunding} animationType="slide" transparent onRequestClose={() => setRefunding(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRefunding(null)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setRefunding(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
             {/* The heading names WHICH KIND of charge, because the two are
                 adjacent acts on the same screen and a coach who meant to give
@@ -2696,7 +2697,8 @@ export default function TrainerPayments() {
           instead of running off the top. */}
       <Modal visible={!!editing} animationType="slide" transparent onRequestClose={() => setEditing(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
             <Text style={{ ...ty.head, color: t.ink }}>Edit This Package</Text>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">

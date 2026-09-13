@@ -742,7 +742,8 @@ export default function OwnerMembers() {
       {/* ── open a membership ─────────────────────────────────────────────── */}
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, maxHeight: '90%' }}>
             {/* The state this sheet is in while it is being used — search field
                 focused, keyboard up, the 190pt results list showing — is taller than
@@ -956,7 +957,8 @@ export default function OwnerMembers() {
       {/* ── take a payment ────────────────────────────────────────────────── */}
       <Modal visible={!!payFor} transparent animationType="slide" onRequestClose={() => setPayFor(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPayFor(null)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPayFor(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter }}>
             <Text style={{ ...ty.head, color: t.ink }}>Take a payment</Text>
             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>

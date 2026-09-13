@@ -448,7 +448,8 @@ export default function Templates() {
           covered by the keyboard exactly as the last one was. */}
       <Modal visible={!!assignTpl} transparent animationType="slide" onRequestClose={() => setAssignTpl(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAssignTpl(null)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAssignTpl(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '80%', ...elevation.e2 }}>
             {assignTpl && (
               <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>

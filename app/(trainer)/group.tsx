@@ -580,7 +580,8 @@ export default function Groups() {
 
       {/* ── pick the group's programme ──────────────────────────────────── */}
       <Modal visible={pickTpl} transparent animationType="slide" onRequestClose={() => setPickTpl(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPickTpl(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPickTpl(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '80%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
             <Text style={{ ...ty.title, color: t.ink }}>Choose a programme</Text>
@@ -617,7 +618,8 @@ export default function Groups() {
 
       {/* ── add clients to the group ────────────────────────────────────── */}
       <Modal visible={addOpen} transparent animationType="slide" onRequestClose={() => setAddOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAddOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, maxHeight: '80%', ...elevation.e2 }}>
           <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 30 }}>
             <Text style={{ ...ty.title, color: t.ink }}>Add to “{open?.name ?? ''}”</Text>

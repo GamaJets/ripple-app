@@ -1164,7 +1164,8 @@ export default function TrainerSettings() {
           `FILE_KINDS` in src/lib/gdpr.ts, because "photo_1724.jpg" tells nobody
           which of these is their physiotherapy report. */}
       <Modal visible={filesOpen} transparent animationType="slide" onRequestClose={() => setFilesOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setFilesOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, borderTopWidth: hairline, borderColor: t.ring, padding: layout.gutter, paddingBottom: sp.xxl, maxHeight: '86%', ...elevation.e2 }}>
           <Text style={{ ...ty.title, color: t.ink }}>Your files</Text>
           <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm, marginBottom: sp.lg }}>

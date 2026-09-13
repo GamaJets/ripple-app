@@ -576,7 +576,8 @@ export default function OwnerOverview() {
 
       {/* Trainer drill-down */}
       <Modal visible={!!sel} transparent animationType="slide" onRequestClose={() => setSel(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSel(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30 }}>
           {sel && selHealth && (
             <>

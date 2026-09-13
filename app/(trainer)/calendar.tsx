@@ -3629,7 +3629,8 @@ export default function TrainerSchedule() {
 
       {/* ── weekly availability sheet ─────────────────────────────────────── */}
       <Modal visible={availOpen} animationType="slide" transparent onRequestClose={() => setAvailOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAvailOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAvailOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Weekly Availability</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>Set the times you offer every week, then generate open slots.</Text>
@@ -3894,7 +3895,8 @@ export default function TrainerSchedule() {
 
       {/* ── block-out sheet ───────────────────────────────────────────────── */}
       <Modal visible={blockOpen} animationType="slide" transparent onRequestClose={() => setBlockOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBlockOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBlockOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Block Out Time</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
@@ -3994,7 +3996,8 @@ export default function TrainerSchedule() {
           coach looking at three real periods will otherwise take them for the
           whole week. */}
       <Modal visible={busyOpen} animationType="slide" transparent onRequestClose={() => setBusyOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBusyOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setBusyOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '82%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Block Time From Your Calendar</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
@@ -4138,7 +4141,8 @@ export default function TrainerSchedule() {
           every touch on the screen behind it. Not left lying in the tree. */}
       {CALENDAR_SYNC_CONFIGURED ? (
             <Modal visible={syncOpen} animationType="slide" transparent onRequestClose={() => setSyncOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSyncOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSyncOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Google Calendar</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.md }}>
@@ -4304,7 +4308,8 @@ export default function TrainerSchedule() {
           in it — checked against the same three obstacles the server checks.
           See src/lib/moveTimes.ts. */}
       <Modal visible={!!moveFrom} animationType="slide" transparent onRequestClose={closeMove}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={closeMove} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={closeMove}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.bg, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 34, maxHeight: '85%', ...elevation.e2 }}>
           {moveFrom && moveDay ? (
             <>
@@ -4514,7 +4519,8 @@ export default function TrainerSchedule() {
 
       {/* ── standing-appointment sheet ────────────────────────────────────── */}
       <Modal visible={seriesOpen} animationType="slide" transparent onRequestClose={() => setSeriesOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSeriesOpen(false)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setSeriesOpen(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
           <Text style={{ ...ty.head, color: t.ink }}>Standing appointment</Text>
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
@@ -4619,7 +4625,8 @@ export default function TrainerSchedule() {
           sheet exists to prevent — so each option carries what confirming it
           actually does, in words, above its own button. */}
       <Modal visible={!!endFor} animationType="slide" transparent onRequestClose={() => setEndFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEndFor(null)} />
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEndFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
         <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
           {endFor ? (<>
             <Text style={{ ...ty.head, color: t.ink }}>One session, or the arrangement?</Text>

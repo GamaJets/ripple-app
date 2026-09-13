@@ -1909,7 +1909,8 @@ export default function LogSession() {
 
       <Modal visible={picker} transparent animationType="slide" onRequestClose={() => setPicker(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPicker(false)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setPicker(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={[sheet, { maxHeight: '82%' }]}>
             <Text style={{ ...ty.title, color: t.ink, marginBottom: sp.lg }}>Add Exercise</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, marginBottom: sp.lg }}>

@@ -171,7 +171,8 @@ export default function SavedMessages() {
       {/* ── the editor ────────────────────────────────────────────────────── */}
       <Modal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)} />
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEditing(null)}
+            accessibilityRole="button" accessibilityLabel="Close" />
           <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 30, maxHeight: '90%' }}>
             {/* The message box alone is 120pt, and Save sits under it. Writing into
                 that box is exactly when the keyboard is up, and that is exactly when

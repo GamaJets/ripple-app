@@ -155,7 +155,46 @@ addEventListener('DOMContentLoaded', function () {
 
   <p><strong>If you are a coach and somebody has accepted one of your documents.</strong> A coach can publish a document in Repple Coach &mdash; a waiver, a PAR-Q, a studio policy &mdash; and clients accept it or are sent it. An acceptance is deliberately locked to the document it is an acceptance of, so that neither can be altered afterwards without the other. That lock still refuses every ordinary route to removing an acceptance &mdash; no admin screen, no cleanup, no policy. There is now exactly one thing that can release one, and it is the erasure of the coach who owns the document. So the deletion runs to completion on its own; you do not have to ask us for anything. It used to be the other way round: until that route was built the attempt raised a database error and rolled back, taking even the record that it had been attempted with it. The consequence is stated here rather than discovered afterwards &mdash; when your account is erased, the record that your clients accepted your document goes with it. The alternative was keeping your name, your file and your paperwork indefinitely because somebody once ticked a box, and that is not retention.</p>
 
-  <p><strong>How that 30 days actually runs.</strong> Nothing deletes you on a timer. Tapping the button records the request; a person then has to carry it out, and the database only lets your gym's owner do it. The Repple Studio screen that shows an owner the requests waiting on them is new and is not in every gym&rsquo;s build yet, so an in-app request can sit unseen — and if you are not a member of any gym, there is no owner to see it at all. So: <strong>email us as well as tapping the button</strong>. That request reaches us directly, does not depend on anyone else looking, and is the route we can hold to 30 days. If 30 days pass and you are still able to sign in, tell us and we will finish it.</p>
+  <!--
+    WHAT THIS PARAGRAPH USED TO SAY, AND WHY IT WAS CHANGED — 13 Sep 2026.
+
+    It read: "The Repple Studio screen that shows an owner the requests waiting
+    on them is new and is not in every gym's build yet, so an in-app request can
+    sit unseen."
+
+    That was a claim about WHICH BINARY A GYM IS HOLDING, and nothing in this
+    repository knows that — no build is on a store (checked again on 13 Sep:
+    resultCount 0 on all three Apple ids, 404 on all three Play pages), owners
+    are on TestFlight, and no table records which install anybody has. So the
+    page was resting a disclosure about a statutory deadline on a fact it could
+    not establish, and it carried a second cost: it was written to go stale the
+    day the listings publish, which is precisely the kind of sentence that stops
+    being true without anything failing. It was on the launch checklist as a
+    thing to remember to reword.
+
+    What replaces it is the same warning resting on something that CAN be shown
+    from the code, and that will still be true after the listings publish:
+
+      · No cron job actions a deletion. `cron.schedule` appears in supabase/
+        parts sixteen times and not once for this — the queue that IS scheduled
+        (48-photo-purge-schedule.sql, 1120) drains FILES after an erasure, it
+        does not perform one. Nothing deletes anybody on a timer.
+      · action_account_deletion() in supabase/parts/41-account-deletion.sql,
+        restated in 2370-a-permanent-record-of-deleting-nobody.sql, raises
+        42501 unless is_owner_of(subject's tenant_id). One person per gym, and
+        no other in-app route exists: grep finds the RPC called from exactly one
+        screen.
+      · is_owner_of() (28-fix-profiles-recursion.sql) compares
+        `p.tenant_id = t`, so a subject with a NULL tenant_id can satisfy it for
+        nobody. An account attached to no gym cannot be actioned in the app by
+        any signed-in user at all — which is the sentence below, and it is a
+        property of the SQL rather than of anybody's release schedule.
+
+    The advice is unchanged and deliberately errs the same way it always did:
+    email as well, because the email route does not depend on somebody else
+    opening a screen.
+  -->
+  <p><strong>How that 30 days actually runs.</strong> Nothing deletes you on a timer &mdash; no scheduled job carries out deletions, and nothing happens unattended. Tapping the button records the request and flags the account; a person then has to carry it out. From inside the apps the database allows exactly one person to do that, the owner of the gym your account belongs to, so an in-app request waits on that one person opening the deletion queue in Repple Studio and working through it. If your account is not attached to a gym there is no such person, and the in-app route cannot finish it at all. So: <strong>email us as well as tapping the button</strong>. That request reaches us directly, does not depend on anyone else looking, and is the route we can hold to 30 days. If 30 days pass and you are still able to sign in, tell us and we will finish it.</p>
 
   <h2>What is deleted</h2>
   <p>Deleting the account removes it from authentication. Every table holding your records hangs off it — sixty-six directly, and a hundred and six once the chain is followed all the way down, as the database stands today — and they go with it:</p>

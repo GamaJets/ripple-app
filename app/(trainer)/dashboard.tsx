@@ -55,7 +55,7 @@ import { useTheme } from '../../src/ui/components';
 import type { Theme } from '../../src/theme/tokens';
 import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Card, Cta, Ghost, Notice, PartialRead, ChipGrid, Field, fig, Flag as KitFlag } from '../../src/ui/kit';
 import { NotificationBell } from '../../src/ui/notifications';
-import { sp, layout, radius, hairline, elevation, type as ty, numeric, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, grown, type as ty, numeric, value } from '../../src/theme/scale';
 import { useMyTrainerProfile } from '../../src/ui/coachProfile';
 import { CoachRequests } from '../../src/ui/CoachRequests';
 import { METRIC_DEFS, METRIC_GROUPS } from '../../src/lib/inbodyMetrics';
@@ -2549,7 +2549,12 @@ export default function TrainerClients() {
                 accessibilityLabel={`Close ${sel.name}`} hitSlop={12}
                 style={{ marginStart: sp.md, width: 32, height: 32, borderRadius: 16, alignItems: 'center',
                          justifyContent: 'center', backgroundColor: t.surface2 }}>
-                <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
+                {/* grown(24) and not head's own grown(22): the extra two points centre
+                    the × in its 32pt circle. The circle is pinned, so at a large
+                    text size the glyph spills past the ring instead of being cut
+                    off by a 24pt line — and this is the dismissal for a sheet
+                    drawn over the whole client record. */}
+                <Text style={{ ...ty.head, color: t.ink2, lineHeight: grown(24) }}>×</Text>
               </Pressable>
             </View>
             <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 4, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>

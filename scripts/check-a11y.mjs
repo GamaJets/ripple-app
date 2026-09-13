@@ -219,29 +219,8 @@ const WEB_ROOTS = ['studio-web'];
  * red because a comment was added two hundred lines up is noise.
  */
 const KNOWN = new Set([
-  'app/(client)/agreements.tsx|lineHeight',
-  'app/(client)/consistency.tsx|lineHeight',
-  'app/(client)/my-coach.tsx|lineHeight',
-  'app/(owner)/dashboard.tsx|scrim',
-  'app/(owner)/equipment.tsx|scrim',
-  'app/(owner)/members.tsx|scrim',
-  'app/(owner)/rota.tsx|scrim',
-  'app/(trainer)/analytics.tsx|scrim',
-  'app/(trainer)/builder.tsx|lineHeight',
   'app/(trainer)/builder.tsx|scrim',
-  'app/(trainer)/calendar.tsx|scrim',
-  'app/(trainer)/chat.tsx|scrim',
-  'app/(trainer)/classes.tsx|scrim',
-  'app/(trainer)/client.tsx|scrim',
-  'app/(trainer)/credentials.tsx|scrim',
-  'app/(trainer)/dashboard.tsx|lineHeight',
   'app/(trainer)/dashboard.tsx|scrim',
-  'app/(trainer)/group.tsx|scrim',
-  'app/(trainer)/log-session.tsx|scrim',
-  'app/(trainer)/payments.tsx|scrim',
-  'app/(trainer)/settings.tsx|scrim',
-  'app/(trainer)/templates-messages.tsx|scrim',
-  'app/(trainer)/templates.tsx|scrim',
 ]);
 
 /* ── walking ──────────────────────────────────────────────────────────────── */

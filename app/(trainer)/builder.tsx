@@ -51,7 +51,7 @@ import { readRestSeconds, restClock, DEFAULT_REST_SEC } from '../../src/lib/rest
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { liftIn, liftLabel, readLift, volumeIn, type WeightUnit } from '../../src/lib/units';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
+import { sp, layout, radius, hairline, elevation, grown, type as ty, value } from '../../src/theme/scale';
 import { useRoster } from '../../src/ui/roster';
 import { useAssignedPrograms } from '../../src/ui/assignedPrograms';
 import { useProgramTemplates } from '../../src/ui/programTemplates';
@@ -2636,7 +2636,7 @@ export default function Builder() {
                         style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
                                  marginEnd: 6, backgroundColor: isDragging ? t.brand : t.surface2,
                                  borderWidth: hairline, borderColor: t.ring }}>
-                        <Text style={{ ...ty.label, color: isDragging ? t.brandInk : t.ink3, lineHeight: 18 }}>≡</Text>
+                        <Text style={{ ...ty.label, color: isDragging ? t.brandInk : t.ink3 }}>≡</Text>
                       </View>
                     ) : null}
 
@@ -2686,7 +2686,12 @@ export default function Builder() {
                           ring carries the warning, the × stays readable, and
                           the accessibility label says "Remove" in words, so
                           colour is never the only channel saying so. */}
-                      <Text style={{ ...ty.head, color: t.ink2, lineHeight: 24 }}>×</Text>
+                      {/* grown(24) and not head's own grown(22): the extra two points
+                          sit the × on the centre of its circle. The circle stays
+                          pinned, so at a large text size the glyph spills past it
+                          rather than being cut in half by a 24pt line — a ring is
+                          decoration and the character is the control. */}
+                      <Text style={{ ...ty.head, color: t.ink2, lineHeight: grown(24) }}>×</Text>
                     </Pressable>
                   </View>
                   {/* ── the sets, one at a time or all at once ─────────────
