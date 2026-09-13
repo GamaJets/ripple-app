@@ -1334,14 +1334,27 @@ const STORE_BADGE = /<a[^>]*class="store"[^>]*href="(https?:\/\/[^"]+)"/i;
 /**
  * The sentence that makes a badge honest.
  *
- * Keyed on the clause every one of the five existing caveats ends with, rather
- * than on the whole paragraph: the copy around it differs per page ("Being
- * released now", "The listings are going live now") and only this part carries
- * the actual disclosure — that a button which does not open means the app is
- * not out. Reword that clause and this gate fails loudly, which is correct: it
- * is the load-bearing half of the sentence.
+ * Keyed on the one clause every caveat on the site now contains, rather than on
+ * the whole paragraph, because the copy around it differs per page. Reword that
+ * clause and this gate fails loudly, which is correct: it is the load-bearing
+ * half of the sentence and the only part that is a disclosure.
+ *
+ * IT USED TO BE "not finished going out", and the wording was changed on
+ * 13 Sep 2026 because that phrase asserted something nobody had checked. It
+ * says a release is IN PROGRESS. App Store Connect says otherwise: asked
+ * directly that day, `GET /v1/apps/<id>?include=appStoreVersions` returns
+ * `appStoreState: PREPARE_FOR_SUBMISSION` for the only version (iOS 1.0) of all
+ * three apps — 6790096518, 6804358275 and 6804417240. Not IN_REVIEW, not
+ * WAITING_FOR_REVIEW, not REJECTED. No version of any of the three is in
+ * review or approved, so "still going live" was a claim about motion that did
+ * not exist, on the page whose job is telling people where to get the app.
+ *
+ * What replaced it is the fact instead of the forecast: the listing is not
+ * public, and the button is the permanent address that opens when it is. That
+ * is true today, stays true tomorrow, and needs no knowledge of anybody's
+ * intentions.
  */
-const RELEASE_CAVEAT = /not finished going out/i;
+const RELEASE_CAVEAT = /not on the stores yet|no public App Store or\s+Google Play listing|None of the three listings is public/i;
 
 /** The <section> a line sits in, as [startLine, endLine] 1-based and inclusive.
  *  A page with no sections is one region, which is what download.html and
@@ -1384,7 +1397,7 @@ function checkStoreBadges(seen) {
       if (RELEASE_CAVEAT.test(region)) continue;
       note(page, cluster[0],
         `${cluster.length} store badge${cluster.length === 1 ? '' : 's'} with nothing in the same section saying the listing may not open`,
-        `None of the six store addresses resolves — itunes lookup answers resultCount 0 for all three Apple ids and all three Play pages answer 404, re-checked 13 Sep 2026. A badge reading "Download on the App Store" over a link that 404s is a claim the product cannot support. Put the caveat the other clusters use in this section — the clause that matters is "…that app has not finished going out" — or, if the listings are now live, delete every caveat AND check N together, per docs/LAUNCH-CHECKLIST.md section 2.`);
+        `None of the six store addresses resolves — itunes lookup answers resultCount 0 for all three Apple ids and all three Play pages answer 404, re-checked 13 Sep 2026. A badge reading "Download on the App Store" over a link that 404s is a claim the product cannot support. Put the caveat the other clusters use in this section — the clause that matters is "not on the stores yet" — or, if the listings are now live, delete every caveat AND check N together, per docs/LAUNCH-CHECKLIST.md section 2.`);
     }
   }
   // The empty-set guard, in the same spirit as B, D and G. Six pages carry

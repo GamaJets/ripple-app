@@ -96,7 +96,7 @@ addEventListener('DOMContentLoaded', function () {
   Checked 26 Aug 2026: all six returned 404, and itunes lookup returned
   resultCount 0 across the us, ae, gb and sa storefronts, so none of the three
   was public yet. The owner asked for the links to go up regardless. When the
-  listings are confirmed live, delete the "Being released now" callout below.
+  listings are confirmed live, delete the "Not on the stores yet" callout below.
 
   Re-checked 1 Sep 2026 and NOTHING HAS MOVED. All three `itunes.apple.com/
   lookup` calls still answer `resultCount 0`, and all three Play pages still
@@ -105,10 +105,30 @@ addEventListener('DOMContentLoaded', function () {
   the day rather than inherited.
   Re-checked again 3 Sep 2026 during the sweep that audited every claim on this
   site against the code: STILL NOTHING. resultCount 0 on all three ids, 404 on
-  all three Play pages. The same "being released now" caveat was added under the
-  store badges on client.html, trainer.html and studio.html, which carried the
-  buttons with no caveat at all — three pages were showing a member a download
-  button for a listing that 404s. Re-run it before deleting anything:
+  all three Play pages. A caveat was added under the store badges on
+  client.html, trainer.html and studio.html, which carried the buttons with no
+  caveat at all — three pages were showing a member a download button for a
+  listing that 404s.
+
+  Re-checked 13 Sep 2026: resultCount 0 and 404 again, eighteen days on. Two
+  things changed that day.
+
+  · The 3 Sep sweep had caveated the HERO of those three pages and missed the
+    CLOSING CALL TO ACTION on all three, so the last thing a reader saw on each
+    was a download button for a 404 with nothing beside it. Fixed, and gated —
+    check N in scripts/check-site-claims.mjs now refuses a store-badge cluster
+    that has no caveat inside its own <section>.
+
+  · The caveat itself said "being released now" and "the store listings are
+    still going live", which asserts a release is IN PROGRESS. App Store
+    Connect, asked directly rather than reasoned about, says the only version of
+    each of the three apps is iOS 1.0 in appStoreState PREPARE_FOR_SUBMISSION —
+    nothing is in review, nothing has been approved, nothing has been submitted
+    and rejected. So the caveat stated a fact about the store AND a forecast
+    nobody had checked. It now states only the fact: not on the stores yet, and
+    the button is the permanent address that opens when the listing publishes.
+
+  Re-run it before deleting anything:
 
       for id in 6790096518 6804358275 6804417240; do
         curl -s "https://itunes.apple.com/lookup?id=$id" | head -c 120; echo
@@ -157,10 +177,10 @@ addEventListener('DOMContentLoaded', function () {
        all three if your role changes.</p>
 
     <div class="callout">
-      <p><strong>Being released now.</strong> Repple is in its first release and the store
-         listings are still going live. The buttons below are the real App Store and Google Play
-         addresses for each app and will open the listing the moment it is published &mdash; if one
-         does not open yet, that app has not finished going out. Nothing else changes when it does.</p>
+      <p><strong>Not on the stores yet.</strong> None of the three listings is public. The buttons
+         below are the real App Store and Google Play addresses for each app and each one opens the
+         moment that listing publishes &mdash; until then it does not open at all. Nothing else
+         changes when it does.</p>
       <p>You do not have to wait for it. Create an account on the web and start using it today;
          it is the same account the apps sign in with, so nothing you record now is lost.</p>
     </div>

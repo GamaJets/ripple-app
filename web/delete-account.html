@@ -175,10 +175,14 @@ addEventListener('DOMContentLoaded', function () {
     What replaces it is the same warning resting on something that CAN be shown
     from the code, and that will still be true after the listings publish:
 
-      · No cron job actions a deletion. `cron.schedule` appears in supabase/
-        parts sixteen times and not once for this — the queue that IS scheduled
-        (48-photo-purge-schedule.sql, 1120) drains FILES after an erasure, it
-        does not perform one. Nothing deletes anybody on a timer.
+      · No cron job actions a deletion. `delete from auth.users` — the whole of
+        what erasing an account is here — appears in exactly two places in
+        supabase/parts, and they are the same function: 41-account-deletion.sql
+        and its restatement in 2370-a-permanent-record-of-deleting-nobody.sql.
+        None of the fifteen `cron.schedule` call sites reaches it; the purge
+        that IS scheduled (48-photo-purge-schedule.sql, and 1120 for the files an
+        erasure leaves behind) drains FILES after an erasure rather than
+        performing one. Nothing runs on a timer.
       · action_account_deletion() in supabase/parts/41-account-deletion.sql,
         restated in 2370-a-permanent-record-of-deleting-nobody.sql, raises
         42501 unless is_owner_of(subject's tenant_id). One person per gym, and
