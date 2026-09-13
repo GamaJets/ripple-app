@@ -238,6 +238,51 @@ export function playlistLine(p: PlaylistRef): string {
   return p.ownerName ? `${count} · ${p.ownerName}` : count;
 }
 
+/**
+ * What to say under an opened playlist, given what Spotify returned.
+ *
+ * ── The gap this exists to name ───────────────────────────────────────────
+ *
+ * `spotifyPlaylistTracks` drops two kinds of row, because Spotify sends them
+ * as a null `track`: LOCAL FILES the member added from their own machine, and
+ * tracks that have since been REMOVED from the catalogue. Both are real
+ * entries in the playlist and both are invisible to the API.
+ *
+ * `PlaylistRef.trackCount` comes from a different field — Spotify's own
+ * `tracks.total` — and counts them. So a playlist whose row says "12 tracks"
+ * can open to nine, and the reader is looking at a heading and a list that
+ * disagree with no explanation. That reads as the app having failed to load
+ * three of them, which is worse than the truth: they are there, we cannot see
+ * what they are.
+ *
+ * So the shortfall is stated. It is the difference between two numbers that
+ * both came from Spotify, not a guess, and where either number is missing this
+ * says nothing rather than inventing a comparison.
+ *
+ * @param shown how many tracks came back and can be listed.
+ * @param total what the playlist itself claims to hold, or null when Spotify
+ *   did not say.
+ */
+export function playlistTracksNote(shown: number, total: number | null): string | null {
+  // Nothing to reconcile. The caller is already drawing the rows.
+  if (total == null || total <= shown) return null;
+  const missing = total - shown;
+  return missing === 1
+    ? 'One more track is in this playlist and cannot be shown — it is either a file from your own machine or a track Spotify has since removed.'
+    : `${missing} more tracks are in this playlist and cannot be shown — they are files from your own machine, or tracks Spotify has since removed.`;
+}
+
+/**
+ * The one line under a track in an opened playlist.
+ *
+ * An empty artist is a real answer from Spotify rather than a missing read —
+ * podcast episodes and some local files carry none — so it is left blank
+ * instead of being filled with a dash the reader would take for a failure.
+ */
+export function playlistTrackLine(t: { artist: string }): string | null {
+  return t.artist.trim() ? t.artist : null;
+}
+
 /* ── what actually landed in the account ─────────────────────────────────── */
 
 /** How a save to Spotify went. `added` is the number of tracks that are really

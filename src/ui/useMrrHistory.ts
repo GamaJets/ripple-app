@@ -60,7 +60,7 @@ import { useAuthRevision } from './authRevision';
 import type { LoadStatus } from './loadStatus';
 import {
   monthKey, monthWindow, seriesFor, recordedCount, historyDelta,
-  sanitiseSnapshots, mergeSnapshots, missingOnServer, type Snapshots,
+  sanitiseSnapshots, mergeSnapshots, missingOnServer, moneyHistoryKey, type Snapshots,
 } from '../lib/monthlyHistory';
 import { fetchMetricHistory, saveMetricHistory } from '../lib/metricHistoryStore';
 
@@ -212,10 +212,59 @@ export function useMonthlyHistory(storageKey: string, currentValue: number | nul
   };
 }
 
-/** Owner MRR trend (kept for the owner overview). */
-export function useMrrHistory(currentMrr: number): MonthlyHistory {
-  return useMonthlyHistory('repple.owner.mrrHistory', currentMrr);
+/**
+ * The gym's recurring membership revenue, month by month.
+ *
+ * ── Two things were wrong with this hook while nothing called it ──────────
+ *
+ * **It took a `number`, not a `number | null`.** The generic above states its
+ * own contract in bold: a null `currentValue` is not recorded, and "the caller
+ * must pass null rather than a zero it is not sure of". A signature that
+ * cannot express null forces every caller with an unread figure to pass 0 —
+ * and since this hook now writes to the ACCOUNT rather than to one phone, that
+ * zero becomes a permanent month of "this gym took nothing", visible on every
+ * device, indistinguishable from a month that really was that quiet. The
+ * sibling `useSessionsHistory` has always taken `number | null`. This is that
+ * same signature, and it is the reason this could not safely be wired up as it
+ * stood.
+ *
+ * **It had no currency.** Every month stored here is a bare number, and Repple
+ * is white-label: `tenants.currency` is a setting an owner can change. Under
+ * one key a gym that billed in GBP until March and EUR after it gets a single
+ * continuous line of two different moneys, with a month-on-month delta
+ * computed across the change. `moneyHistoryKey` scopes the key to the currency
+ * so a change starts a fresh, honestly short series instead, and the old
+ * months survive under their own key if the gym switches back.
+ *
+ * With no currency there is no key, and with no key nothing is read or
+ * written: the hook returns an empty history under 'ready', because "this gym
+ * has not set a currency" is a known answer and not a failed read. The screen
+ * has its own sentence for that case and must not be handed an 'error' that
+ * would make it say the months could not be read.
+ *
+ * @param currentMrr whole units of `currency` — null when it is not known,
+ *   which includes the case where the gym's memberships name more than one
+ *   currency and there is therefore no single figure to record.
+ * @param currency the gym's ISO code, or null when it has not set one.
+ */
+export function useMrrHistory(currentMrr: number | null, currency: string | null): MonthlyHistory {
+  const key = moneyHistoryKey('repple.owner.mrrHistory', currency);
+  // Hooks cannot be called conditionally, so the no-currency case goes THROUGH
+  // the generic with a key that reads and writes nothing rather than around it.
+  const hist = useMonthlyHistory(key ?? NO_CURRENCY_KEY, key ? currentMrr : null);
+  return key ? hist : { series: [], labels: [], delta: 0, months: 0, status: 'ready', snapshots: {} };
 }
+
+/**
+ * The key used when there is no currency to scope by.
+ *
+ * It is a real key so the generic hook's rules are unchanged, and nothing is
+ * ever written under it because the value passed alongside it is always null.
+ * Named rather than inlined so that a row appearing under it in
+ * `metric_history` is immediately legible as this case rather than as a gym
+ * whose currency code is missing.
+ */
+const NO_CURRENCY_KEY = 'repple.owner.mrrHistory.no-currency';
 
 /**
  * Sessions delivered per month for the gym owner. Deliberately a different key

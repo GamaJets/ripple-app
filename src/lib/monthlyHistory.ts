@@ -166,3 +166,44 @@ export function missingOnServer(local: Snapshots, server: Snapshots): Snapshots 
   }
   return out;
 }
+
+/**
+ * The storage key for a history of MONEY, which is not the same thing as a
+ * history of a count.
+ *
+ * ── Why a money series needs the currency in its key ──────────────────────
+ *
+ * Everything this module stores is a bare number per month. That is fine for
+ * sessions delivered, and it is not fine for revenue: Repple is white-label
+ * and `tenants.currency` is a setting the owner can change. A gym that billed
+ * in GBP until March and in EUR after it would, under one key, have a single
+ * line whose first three points are pounds and whose last three are euros —
+ * drawn continuously, with a delta computed ACROSS the change, and nothing on
+ * screen saying so. That is the house rule this codebase repeats more than any
+ * other: never add two currencies together, and never let one be mistaken for
+ * the other.
+ *
+ * Scoping the key means a currency change starts a fresh series instead. The
+ * old months are not destroyed — they stay under their own key and come back
+ * if the gym switches back — and the new line is short and honestly short,
+ * which the screen reports as "tracking started" rather than as a collapse in
+ * revenue.
+ *
+ * A null currency gets no key at all. A figure whose unit is unknown must not
+ * be written down, because nothing later can recover what it meant: see
+ * `wholeFromMinor` in src/lib/wholeUnits.ts for the same argument about the
+ * decimal point.
+ *
+ * @param base the unscoped key, e.g. 'repple.owner.mrrHistory'.
+ * @param currency an ISO code, or null when the gym has not set one.
+ * @returns the key to store under, or null when there is nothing safe to store.
+ */
+export function moneyHistoryKey(base: string, currency: string | null | undefined): string | null {
+  if (!base) return null;
+  const code = (currency ?? '').trim().toUpperCase();
+  // Exactly three letters. A currency column holding '' or 'gbp ' or a stray
+  // symbol must not quietly become part of a key, because two spellings of one
+  // currency are two separate histories and the split is invisible.
+  if (!/^[A-Z]{3}$/.test(code)) return null;
+  return `${base}.${code}`;
+}

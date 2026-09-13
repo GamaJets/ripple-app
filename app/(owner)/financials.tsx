@@ -44,7 +44,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Hero, KpiRow, ListRow, Cta, Ghost, Notice, Spark, fig } from '../../src/ui/kit';
+import { useMrrHistory } from '../../src/ui/useMrrHistory';
+import { isWhole } from '../../src/ui/loadStatus';
 import { sp, layout, radius, hairline, type as ty } from '../../src/theme/scale';
 import { emptyFinances, hasFigures, anyEntered, reviewFinances, reviewBasis, storageNote, type FinInputs, type FinFlag } from '../../src/lib/finReview';
 import { reconcile, reconcileNote, unreadable } from '../../src/lib/finReconcile';
@@ -52,7 +54,7 @@ import { fetchPlans, fetchMemberships, fetchPayments, summarise, sharedCurrency 
 import { useTenant, gymMoney } from '../../src/ui/tenant';
 import { supabase } from '../../src/lib/supabase';
 import { reportError } from '../../src/lib/reportError';
-import { deltaLabel } from '../../src/lib/deltaLabel';
+import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { readNumber } from '../../src/lib/units';
 // A minor-unit integer from the register, as the whole-unit number the owner
 // typed into the form beside it — scaled by the currency, never by a hundred.
@@ -493,6 +495,22 @@ export default function Financials() {
   // query threw, and it is the one piece of information that separates "your
   // register is empty" from "we could not read your register".
   const mrrCheck = derivedFailed ? unreadable(fin.mrr) : reconcile(fin.mrr, derivedMrr);
+
+  // ── Recurring revenue, month by month ────────────────────────────────────
+  //
+  // `derivedMrr` and not `fin.mrr`: the register's own figure rather than the
+  // one the owner typed into the form above. A trend assembled from typed
+  // figures records how often somebody updated a form, and the reconcile notice
+  // ten lines down exists precisely because those two numbers drift apart.
+  //
+  // It is already null in every case where there is no single honest figure —
+  // the currency is unset, or the memberships name more than one and there is
+  // no sum to take (see `mrrCcy.gap` where it is computed). Null is what stops
+  // the month being recorded at all, which matters more here than anywhere
+  // else in the app: this hook writes to the ACCOUNT, so a fabricated zero
+  // becomes a permanent month of "this gym took nothing" on every device.
+  const mrrHist = useMrrHistory(derivedMrr, cur);
+  const mrrHistWhole = isWhole(mrrHist.status);
   const memberCheck = derivedFailed ? unreadable(fin.members) : reconcile(fin.members, derivedMembers);
   const revenueCheck = derivedFailed ? unreadable(fin.revenue) : reconcile(fin.revenue, derivedRevenue);
   const newCheck = derivedFailed ? unreadable(fin.newMembers) : reconcile(fin.newMembers, derivedNew);
@@ -812,6 +830,52 @@ export default function Financials() {
                 ].filter(Boolean).join(' ') + ' This score is worked out from what you entered, not from the register.'}
               />
             ) : null}
+
+            <Rule />
+
+            {/* ── recurring revenue, month by month ───────────────────────
+                Built from the REGISTER, not from the form above, and keyed by
+                the gym's currency so a gym that changes currency starts a new
+                line instead of drawing two moneys as one. See useMrrHistory. */}
+            <Section>
+              <SectionHead title="Recurring Revenue Trend"
+                note={!mrrHistWhole ? 'your months could not be read'
+                  : cur == null ? 'set a currency to record it'
+                  /* `money`, not `num`: this delta is CURRENCY, and the gym's
+                     own. The Sessions Trend beside it was shipped printing a
+                     count with a dollar sign in front of it for exactly the
+                     want of this distinction. */
+                  : mrrHist.delta !== 0 ? `${deltaSign(mrrHist.delta, 0)}${money(Math.abs(mrrHist.delta))} vs last mo`
+                  : mrrHist.months >= 2 ? 'level with last month'
+                  : 'Tracking started'} />
+              {!mrrHistWhole ? (
+                /* Not "no history yet" — that is a claim about this gym, and
+                   under a failed read the only months in hand are whatever
+                   this handset happened to keep. */
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  Your recorded months could not be read, so the trend is held back. Pull down to try again.
+                </Text>
+              ) : cur == null ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>{NO_CURRENCY_CHECK_NOTE}</Text>
+              ) : derivedMrr == null ? (
+                /* The register could not produce ONE figure this month. Said
+                   rather than drawn as a gap, because a reader looking at a
+                   line that stops needs to know it stopped for a reason. */
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  {mrrCcy && mrrCcy.gap !== 'ok' ? MIXED_CURRENCY_NOTE
+                    : 'No recurring revenue could be worked out from your register this month, so this month is not recorded. Months already recorded are kept.'}
+                </Text>
+              ) : mrrHist.months >= 2 ? (
+                /* The series goes in WITH its holes and the labels with it, so
+                   a month nobody recorded breaks the line rather than being
+                   closed over. Same discipline as the Sessions Trend. */
+                <Spark data={mrrHist.series} labels={mrrHist.labels} />
+              ) : (
+                <Text style={{ ...ty.label, color: t.ink3 }}>
+                  This month is recorded. A trend needs a second month — come back after your next billing month and this becomes a line.
+                </Text>
+              )}
+            </Section>
 
             <Rule />
 

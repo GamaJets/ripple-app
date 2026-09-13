@@ -32,9 +32,10 @@ import { generatePlaylist, spotifyQuerySeeds, CURATED_POOL_SIZE, type Service, t
 import {
   connectSpotify, spotifyStatus, spotifyDisconnect, createSpotifyPlaylist, spotifySearchTracks,
   spotifyMyPlaylists, spotifyPlay, spotifyDevices, spotifyTransfer, SpotifyError,
+  spotifyPlaylistTracks,
   type PlaylistRef, type SpotifyDevice,
 } from '../../src/lib/spotify';
-import { playlistLine, playlistSavedLine } from '../../src/lib/spotifyPlayback';
+import { playlistLine, playlistSavedLine, playlistTracksNote, playlistTrackLine } from '../../src/lib/spotifyPlayback';
 import { reportError } from '../../src/lib/reportError';
 import { SessionMusicBar } from '../../src/ui/SessionMusicBar';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
@@ -117,6 +118,45 @@ export default function Music() {
    catch (e) { setMine(null); setMineProblem(spotifyMessage(e, 'Could not read your playlists.')); }
    finally { setMineBusy(false); }
  }, []);
+
+ // ── What is actually IN one of these playlists ───────────────────────────
+ //
+ // The row used to do one thing: tap it and it starts playing. That is the
+ // right default and it stays — but it means the only way to find out what is
+ // on a playlist is to put it on, which is a poor trade when you are about to
+ // start a set and the playlist was made eight months ago.
+ //
+ // One open at a time, on purpose. These lists run to a hundred tracks and two
+ // expanded at once turns a short screen into a scroll with no landmarks; and
+ // holding one list rather than a map of them means closing a playlist frees
+ // what it was holding.
+ //
+ // `null` here is NOT an empty playlist. `openTracks === null` is "not read, or
+ // the read failed" and `[]` is "Spotify answered and this playlist is empty" —
+ // two different sentences, and the rendering below keeps them apart. Same rule
+ // as `mine` above.
+ const [openPl, setOpenPl] = useState<string | null>(null);
+ const [openTracks, setOpenTracks] = useState<{ title: string; artist: string; uri: string | null }[] | null>(null);
+ const [openBusy, setOpenBusy] = useState(false);
+ const [openProblem, setOpenProblem] = useState<string | null>(null);
+
+ const toggleTracks = useCallback(async (p: PlaylistRef) => {
+   if (openPl === p.id) { setOpenPl(null); setOpenTracks(null); setOpenProblem(null); return; }
+   setOpenPl(p.id); setOpenTracks(null); setOpenProblem(null); setOpenBusy(true);
+   try {
+     const rows = await spotifyPlaylistTracks(p.id);
+     // Guarded against the member opening a second playlist while the first is
+     // still in flight: without it the slower read lands last and fills the
+     // wrong list. Read off the state setter so this does not need `openPl` in
+     // its dependencies, which would rebuild the callback on every open.
+     setOpenPl((cur) => { if (cur === p.id) { setOpenTracks(rows); } return cur; });
+   } catch (e) {
+     setOpenPl((cur) => {
+       if (cur === p.id) setOpenProblem(spotifyMessage(e, 'Could not read what is in that playlist.'));
+       return cur;
+     });
+   } finally { setOpenBusy(false); }
+ }, [openPl]);
 
  // The connection itself is a read, and so is the account's playlist list
  // behind it. Split out of the effect so the gesture and the mount run the
@@ -514,9 +554,21 @@ export default function Music() {
  <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.md }}>
  This Spotify account has no playlists yet. Build one above and save it.
  </Text>
- ) : (mine ?? []).map((p, i) => (
- <Pressable key={p.id} onPress={() => playPlaylist(p)} accessibilityRole="button" accessibilityLabel={'Play ' + p.name}
- style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+ ) : (mine ?? []).map((p, i) => {
+ const open = openPl === p.id;
+ return (
+ <View key={p.id} style={{ borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
+ {/* The ROW opens the playlist; the button on the right plays it.
+     Two actions on one row, and the split is deliberate: tapping the
+     name of a thing to see what is in it is the ordinary gesture, and
+     starting audio is the one that should take a deliberate press.
+     Play was the row's only action before this, so it keeps the
+     control that looks like a play button. */}
+ <Pressable onPress={() => { void toggleTracks(p); }} accessibilityRole="button"
+ accessibilityState={{ expanded: open }}
+ accessibilityLabel={(open ? 'Hide' : 'Show') + ' the tracks in ' + p.name}
+ style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md }}>
  {p.artUrl
  ? <Image source={{ uri: p.artUrl }} style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2 }} />
  : <View style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
@@ -526,9 +578,59 @@ export default function Music() {
  <Text numberOfLines={1} style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{p.name}</Text>
  <Text numberOfLines={1} style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 2 }}>{playlistLine(p)}</Text>
  </View>
+ </Pressable>
+ {/* 15pt of icon is not a target. The slop takes it to the 44 the rest
+     of this app is held to, and it is vertical-and-horizontal here
+     because this control sits at the screen edge. */}
+ <Pressable onPress={() => { void playPlaylist(p); }} accessibilityRole="button" accessibilityLabel={'Play ' + p.name}
+ hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }} style={{ paddingVertical: sp.md, paddingStart: sp.sm }}>
  <Icon name="play" size={15} color={t.ink3} />
  </Pressable>
+ </View>
+
+ {/* Indented to clear the artwork, so the tracks read as belonging to the
+     playlist above them. `paddingStart`, because for an Arabic reader the
+     artwork is on the right and so is the indent. */}
+ {open ? (
+ <View style={{ paddingBottom: sp.md, paddingStart: 40 + sp.md }}>
+ {openBusy ? (
+ <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.sm, paddingVertical: sp.sm }}>
+ <ActivityIndicator size="small" color={t.ink3} />
+ <Text style={{ ...ty.label, color: t.ink3 }}>Reading this playlist…</Text>
+ </View>
+ ) : openProblem ? (
+ <View style={{ paddingVertical: sp.sm }}>
+ <Text style={{ ...ty.label, color: t.ink2 }}>{openProblem}</Text>
+ <Pressable onPress={() => { void toggleTracks(p); }} accessibilityRole="button" style={{ marginTop: sp.sm }}>
+ <Text style={{ ...ty.label, fontWeight: '500', color: t.brand }}>Try Again</Text>
+ </Pressable>
+ </View>
+ ) : openTracks == null ? (
+ /* Neither reading nor failed nor answered. Unreachable through the
+    handler above, and said plainly rather than rendered as an empty
+    list — an empty list here is a CLAIM that the playlist is empty. */
+ <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.sm }}>This playlist has not been read.</Text>
+ ) : openTracks.length === 0 ? (
+ <Text style={{ ...ty.label, color: t.ink3, paddingVertical: sp.sm }}>Spotify says this playlist is empty.</Text>
+ ) : (<>
+ {openTracks.map((tr, j) => (
+ <View key={String(j) + tr.title} style={{ paddingVertical: sp.sm }}>
+ <Text numberOfLines={1} style={{ ...ty.label, color: t.ink2 }}>{tr.title}</Text>
+ {playlistTrackLine(tr) ? (
+ <Text numberOfLines={1} style={{ ...ty.caption, color: t.ink3, marginTop: 1 }}>{playlistTrackLine(tr)}</Text>
+ ) : null}
+ </View>
  ))}
+ {/* Why the list can be shorter than the count beside the name. */}
+ {playlistTracksNote(openTracks.length, p.trackCount) ? (
+ <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{playlistTracksNote(openTracks.length, p.trackCount)}</Text>
+ ) : null}
+ </>)}
+ </View>
+ ) : null}
+ </View>
+ );
+ })}
  </Section>
  </>
  ) : null}

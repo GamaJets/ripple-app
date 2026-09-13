@@ -25,7 +25,7 @@
 // LOCAL boundary, so expectations are built with the same helper the code uses.
 import {
   monthKey, isMonthKey, monthWindow, seriesFor, recordedCount, historyDelta,
-  sanitiseSnapshots, mergeSnapshots, missingOnServer, MONTH_LABELS,
+  sanitiseSnapshots, mergeSnapshots, missingOnServer, MONTH_LABELS, moneyHistoryKey,
   type Snapshots,
 } from './monthlyHistory';
 
@@ -203,6 +203,31 @@ eqMap(missingOnServer({}, server), {}, 'nothing cached is nothing to upload');
 eqMap(missingOnServer(local, {}), local, 'an empty account takes the whole cache');
 eqMap(missingOnServer({ '2026-05': 0 }, {}), { '2026-05': 0 },
   'a cached zero is uploaded — it is a month that really was zero');
+
+/* ── a money history is keyed by its currency ─────────────────────────────── */
+
+// The failure: one key for a gym that changes currency draws pounds and euros
+// as one line and computes a delta across the change.
+{
+  const gbp = moneyHistoryKey('repple.owner.mrrHistory', 'GBP');
+  const eur = moneyHistoryKey('repple.owner.mrrHistory', 'EUR');
+  if (gbp === eur) errors.push('two currencies must not share a money history key');
+  if (gbp !== 'repple.owner.mrrHistory.GBP') errors.push(`GBP key is ${gbp}`);
+  // NOT the bare base key, which is what the owner console wrote when it was a
+  // SaaS product and holds dollars of a different thing entirely.
+  if (gbp === 'repple.owner.mrrHistory') errors.push('the scoped key must differ from the legacy unscoped one');
+}
+
+// Case and padding are spellings of one currency, not two histories.
+if (moneyHistoryKey('k', 'gbp') !== moneyHistoryKey('k', ' GBP ')) errors.push('a currency must normalise to one key');
+if (moneyHistoryKey('k', 'gbp') !== 'k.GBP') errors.push('a lowercase code is upper-cased');
+
+// No currency, no key: a number whose unit is unknown must not be written down,
+// because nothing later can recover what it meant.
+for (const bad of [null, undefined, '', '  ', 'GB', 'GBPP', '£', 'G8P']) {
+  if (moneyHistoryKey('k', bad as string | null) !== null) errors.push(`currency ${JSON.stringify(bad)} must produce no key`);
+}
+if (moneyHistoryKey('', 'GBP') !== null) errors.push('no base, no key');
 
 if (errors.length) {
   console.error(`monthlyHistory.test.ts — ${errors.length} failure(s):`);

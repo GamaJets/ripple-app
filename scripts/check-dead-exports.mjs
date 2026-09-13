@@ -167,15 +167,16 @@ const CONSUMER_ROOTS = ['app', 'src', 'scripts', 'studio-web', 'supabase/functio
  * CORRECT as it stands and will stay.
  */
 const KNOWN = new Map([
-  // ── the phone app's own unwired features ────────────────────────────────
-  ['src/lib/spotify.ts', { count: 1, fix: 'spotifyPlaylistTracks — the track list of a playlist the member already owns. The screen builds its own list from a search; nothing reads back what is in a saved playlist. (spotifyDevices and spotifyTransfer came off this list when app/(client)/music.tsx grew the device picker.)' }],
+  // The phone app's own unwired features are all wired now: spotifyDevices and
+  // spotifyTransfer came off when app/(client)/music.tsx grew the device
+  // picker, and spotifyPlaylistTracks came off when the same screen learned to
+  // open a playlist and show what is in it.
 
   // ── the console and the shared UI kit ───────────────────────────────────
   ['src/ui/ExerciseVideo.tsx', { count: 1, fix: 'ExerciseVideoBlock. The screens render ExerciseVideo directly; this is the block wrapper nobody adopted. Adopt it or delete it.' }],
   ['src/ui/ZoneBoard.tsx', { count: 1, fix: 'ZoneStrip — the compact HR-zone strip beside ZoneBoard, which IS rendered. Nothing renders the strip.' }],
   ['src/ui/charts.tsx', { count: 2, fix: 'Sparkline and DeltaBadge. HrZoneChart and src/lib/chartAxis.ts are what the screens actually draw with.' }],
   ['src/ui/fetched.tsx', { count: 1, fix: 'useFetchedAt — the "last updated" timestamp hook. Screens print freshness through src/lib/freshness.ts instead.' }],
-  ['src/ui/useMrrHistory.ts', { count: 1, fix: 'useMrrHistory. The three screens in that module\'s import list take useMonthlyHistory and useSessionsHistory from it; the MRR hook itself is drawn by nothing.' }],
 ]);
 
 /** A test file. Its imports never count as a use — that is the entire point:
