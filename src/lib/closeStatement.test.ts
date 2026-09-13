@@ -8,7 +8,7 @@
 // to catch — an unknown currency printing an amount anyway, or a failed read
 // printing a subtotal over whatever came back.
 import {
-  closeStatementSections, STATEMENT_BASIS,
+  closeStatementSections, receiptsByCurrency, STATEMENT_BASIS,
   type StatementInput, type StatementSection,
 } from './closeStatement';
 
@@ -219,9 +219,35 @@ const said = (s: StatementSection): string => [...s.prose, ...s.rows.map((r) => 
   eq(b.prose, STATEMENT_BASIS, 'the basis section is the constant, so it cannot drift per caller');
   const all = STATEMENT_BASIS.join(' ');
   ok(/not a profit figure/i.test(all), 'it says the month is not a profit figure');
-  ok(/not netted/i.test(all), 'that nothing is netted');
-  ok(/not been reconciled against a bank/i.test(all), 'that nothing here has seen a bank');
+  ok(/is netted against anything else/i.test(all), 'that nothing is netted');
+  ok(/has been reconciled against a bank/i.test(all), 'that nothing here has seen a bank');
   ok(/not a record that anybody has been paid/i.test(all), 'and that payroll is not a payment');
+}
+
+/* ── regrouping one line per method into one line per currency ─────────────── */
+{
+  const r = receiptsByCurrency([
+    { currency: 'GBP', cents: 300000, count: 9 },
+    { currency: 'EUR', cents: 60000, count: 4 },
+    { currency: ' gbp ', cents: 60000, count: 5 },
+  ]);
+  eq(r.length, 2, '“ gbp ” and “GBP” are one currency, not two lines');
+  eq(r[0].currency, 'EUR', 'and the lines are sorted by code');
+  eq(r[1].cents, 360000, 'the two pound methods add up inside the pound line');
+  eq(r[1].count, 14, 'and so do their payment counts');
+
+  const mixed = receiptsByCurrency([
+    { currency: 'GBP', cents: 300000, count: 9 },
+    { currency: null, cents: 9900, count: 2 },
+    { currency: '', cents: 500, count: 1 },
+  ]);
+  eq(mixed.length, 2, 'rows stating no currency are one bucket, not one each');
+  eq(mixed[1].currency, null, 'and they come last — a reader works down from the codes they hold statements for');
+  eq(mixed[1].count, 3, 'their payments are counted');
+  eq(mixed[0].cents, 300000,
+    'and NOTHING of theirs is folded into the pound line, which is the substitution this all exists to refuse');
+
+  eq(receiptsByCurrency([]).length, 0, 'no payments produce no lines rather than an empty currency');
 }
 
 if (errors.length) {

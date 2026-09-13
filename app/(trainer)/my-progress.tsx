@@ -83,6 +83,14 @@ import {
   readNumber,
 } from '../../src/lib/units';
 import { agoLabel, dayLabel, shortDayLabel, daysBetween, STALE_AFTER_DAYS } from '../../src/lib/bodyFigures';
+// How a reading was taken, and how often readings are being taken at all. Both
+// are facts about `scans` rows that this screen has always held and never
+// shown: `ScanRec.source` arrives on every row (src/ui/clientData.tsx:702) and
+// the section below printed the figures without it, so the scan this screen
+// writes as 'Entered by me' looked exactly like one lifted off an InBody sheet.
+import { SourceChip, SourceLine, SourceCaveat } from '../../src/ui/ScanSource';
+import { readSource, mixedSourcesNote } from '../../src/lib/scanProvenance';
+import { ScanCadencePanel } from '../../src/ui/ScanCadencePanel';
 import { useToday } from '../../src/ui/today';
 import { deltaLabel, deltaSign } from '../../src/lib/deltaLabel';
 import { num1 } from '../../src/lib/format';
@@ -696,6 +704,20 @@ export default function MyProgress() {
           {/* ── body composition scans ───────────────────────────────────── */}
           <Section>
             <SectionHead title="Body Composition" note={isWhole(cd.scansStatus) && cd.scans.length ? `${cd.scans.length} scans` : undefined} />
+            {/* How often, before what. A trend through three readings taken in
+                one week and a trend through three taken in three years are the
+                same list of rows and nothing like the same evidence — and the
+                panel is drawn under every status, because "your scans could not
+                be read" and "you have not been scanned since March" are two
+                different things for it to say and it knows which is which. */}
+            <View style={{ marginBottom: sp.md }}>
+              <ScanCadencePanel
+                days={cd.scans.map((s) => s.takenAt)}
+                status={cd.scansStatus}
+                today={today}
+                subject={{ they: 'you', have: 'have' }}
+              />
+            </View>
             {cd.scans.length ? (
               [...cd.scans].reverse().map((s, i) => (
                 <View key={s.id} style={{ paddingVertical: sp.md, borderTopWidth: i === 0 ? 0 : hairline, borderTopColor: t.ring }}>
@@ -706,6 +728,14 @@ export default function MyProgress() {
                     {fig(weightLabel(s.weightKg, wu))} · {num1(s.bodyFatPct)}% body fat
                     {s.skeletalMuscleKg != null ? ` · ${fig(weightLabel(s.skeletalMuscleKg, wu))} muscle` : ''}
                   </Text>
+                  {/* The newest reading gets the chip AND the sentence; the ones
+                      under it get the chip alone. The same explanation repeated
+                      beside nine rows is one nobody reads by the third, and the
+                      top of the list is where somebody is actually looking when
+                      they decide what a figure is worth. */}
+                  {i === 0
+                    ? <SourceLine source={s.source} />
+                    : <View style={{ marginTop: sp.sm }}><SourceChip source={s.source} /></View>}
                 </View>
               ))
             ) : (
@@ -719,6 +749,14 @@ export default function MyProgress() {
                     : 'No scan of your own yet. Add the first below and your weight, body fat and muscle build from it.'}
               </Text>
             )}
+            {/* Gated on a whole read, because this sentence COUNTS rows by
+                source — "2 off a machine, 1 typed in" — and a count over a
+                truncated list is a count over an unknown fraction of it. The
+                chips on the rows above need no such gate: each one is a fact
+                about the row it sits on. */}
+            {isWhole(cd.scansStatus)
+              ? <SourceCaveat note={mixedSourcesNote(cd.scans.map((s) => readSource(s.source)))} />
+              : null}
             {cd.scansStatus === 'partial' ? (
               <View style={{ marginTop: sp.md }}>
                 <PartialRead what="scans of your own" shown={cd.scans.length} />

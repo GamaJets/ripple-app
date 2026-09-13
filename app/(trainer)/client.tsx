@@ -119,6 +119,9 @@ import { releaseLine, releaseVerdict, releaseOutstanding, RELEASE_PRIVACY_NOTE }
 import { WAIVER_VERSION } from '../../src/lib/waiver';
 import { fmtDay, num1 } from '../../src/lib/format';
 import { worstStatus, isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { useInvites } from '../../src/ui/invites';
+import { useScrollPad } from '../../src/ui/keyboardPad';
+import { inviteOffer, inviteSendBlocker, inviteMode, invitedLine, notRecordedLine } from '../../src/lib/clientInvite';
 import { useAuthRevision } from '../../src/ui/authRevision';
 import { useAuth } from '../../src/ui/auth';
 import {
@@ -360,6 +363,35 @@ export default function ClientScreen() {
   // the only thing that knows which table the row came from, so it is asked.
   // See src/lib/clientRecord.ts.
   const queryable = clientIsQueryable(id, client?.handAdded);
+  // ── getting a hand-added client onto the app, from the screen about them ──
+  //
+  // A coach adds somebody by hand from the Add Client sheet, which is the ONLY
+  // place in this app that offers either an invite or the coaching code about a
+  // named person. Afterwards this screen said "Send them your coaching code and
+  // everything below starts filling in" and offered no control that did it — so
+  // the coach's only route was to go back and add the person again.
+  //
+  // `inviteOffer` takes `handAdded` three-valued and offers only on an explicit
+  // true. That is the OPPOSITE default from `clientIsQueryable` above, and the
+  // asymmetry is deliberate: a wrong guess there wastes a read, a wrong guess
+  // here puts an invitation in front of somebody who already has an account.
+  const invites = useInvites();
+  // The page grew a TextInput — the invite address — and this ScrollView's
+  // bottom padding was a bare 40. `useScrollPad` is the HOOK, not the constant:
+  // the constant alone pads the page permanently and is what made screens read
+  // as blank at the bottom when it was first tried. This one only adds the
+  // typing headroom while a keyboard is actually up.
+  const scrollPad = useScrollPad();
+  const invite = inviteOffer(client?.handAdded, who);
+  const [inviteTo, setInviteTo] = useState('');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteSent, setInviteSent] = useState<string | null>(null);
+  // `invites.sent` is null-ish under a failed read, and an empty list under
+  // 'error' is indistinguishable from a coach who has sent fifty. The blocker
+  // is handed null in that case and refuses, rather than letting a send rewrite
+  // a row it could not see.
+  const invitePrior = isWhole(invites.status) ? invites.sent : null;
+  const inviteBlocker = inviteSendBlocker(inviteTo, invitePrior);
   const canRead = USE_SUPABASE && queryable && !!id;
 
   /* ── has this person signed it ──────────────────────────────────────────
@@ -1506,7 +1538,7 @@ export default function ClientScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.bg }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: 40 }} showsVerticalScrollIndicator={false} refreshControl={pull}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: G, paddingBottom: scrollPad }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets refreshControl={pull}>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingTop: sp.md }}>
           <Ghost icon={BACK_ICON} a11yLabel="Back" onPress={() => router.back()} />
@@ -1563,6 +1595,57 @@ export default function ClientScreen() {
         ) : noAccount ? (
           <Section>
             <Notice tone={t.s5} kicker="Added by hand" title={`${who} has no Repple account yet`} note={noAccount} />
+            {/* The control the notice above has always described and never
+                offered. Until this, a coach who wanted to invite the person
+                they were looking at had to go back to Add Client and add them
+                a second time. */}
+            {invite.offer ? (
+              <View style={{ marginTop: sp.lg }}>
+                <SectionHead title={invite.head} />
+                <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>{invite.note}</Text>
+                <TextInput
+                  value={inviteTo}
+                  onChangeText={(v) => { setInviteTo(v); setInviteSent(null); }}
+                  placeholder="Their email address"
+                  placeholderTextColor={t.ink3}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  accessibilityLabel={`Email address to invite ${who} with`}
+                  style={{ ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md }}
+                />
+                {inviteBlocker ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{inviteBlocker}</Text>
+                ) : null}
+                <View style={{ marginTop: sp.md }}>
+                  <Cta wide
+                    disabled={inviteBusy || !!inviteBlocker}
+                    label={inviteBusy ? 'Sending…' : 'Send an Invitation'}
+                    a11yLabel={`Send ${who} an invitation to join`}
+                    onPress={async () => {
+                      const to = inviteTo.trim();
+                      setInviteBusy(true);
+                      try {
+                        // `sendInvite` resolves true ONLY once the row is on the
+                        // server. A false is not a silent failure to swallow:
+                        // the coach is about to tell somebody to expect an
+                        // invitation that does not exist.
+                        const ok = await invites.sendInvite(to, inviteMode(client?.mode));
+                        setInviteSent(ok ? invitedLine(who, to) : notRecordedLine(who, to));
+                        if (ok) setInviteTo('');
+                      } finally { setInviteBusy(false); }
+                    }} />
+                </View>
+                {inviteSent ? (
+                  <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>{inviteSent}</Text>
+                ) : null}
+                {/* The code works whoever they are and whatever address they
+                    sign up with, which is the half an emailed invite cannot do. */}
+                <View style={{ marginTop: sp.md }}>
+                  <Ghost label="Show Your Coaching Code" onPress={go('/(trainer)/join-code')} />
+                </View>
+              </View>
+            ) : null}
           </Section>
         ) : null}
 

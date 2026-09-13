@@ -55,6 +55,14 @@
 // different from each other because one of them ends on its own.
 import { assessCadence, type Cadence } from './cadence';
 import { DEFAULT_WINDOWS, type ActivityEvent } from './clientDrift';
+// `usualGapDays` is a ONE-DECIMAL median — `Math.round(n * 10) / 10` in
+// cadence.ts — so a member who alternates two and three days has a gap of 2.5.
+// A bare `${2.5}` writes a FULL STOP in every locale there has ever been, and
+// app/(client)/attendance.tsx already carries the note about what that does to
+// a reader whose language makes the full stop a thousands separator. The
+// coach's `cadenceLine` interpolates raw and is not this module's to change;
+// the member's copy asks. See the header of src/lib/format.ts.
+import { numUpTo } from './format';
 import type { LoadStatus } from '../ui/loadStatus';
 
 /** The one field this needs off a logged workout: when it was performed, ISO.
@@ -126,11 +134,11 @@ export interface OwnCadence {
 export const OWN_CADENCE_SOURCE =
   'Counted from the sessions you have logged in the app. Training you did not log is not in it, and a gap here is a gap in the log rather than a fact about your week.';
 
-/** Days, pluralised, with the one-decimal gap left as it comes off
- *  `assessCadence` — `usualGapDays` is `Math.round(n * 10) / 10`, so a client
- *  who alternates two and three days has a usual gap of 2.5 and rounding it to
- *  "3" here would print a different number from the one the coach reads. */
-const days = (n: number): string => `${n} day${n === 1 ? '' : 's'}`;
+/** Days, pluralised, in the reader's own number spelling, and with the tenth
+ *  KEPT: `usualGapDays` is `Math.round(n * 10) / 10`, so somebody who alternates
+ *  two and three days has a usual gap of 2.5, and rounding it to "3" here would
+ *  print a different number from the one their coach is reading. */
+const days = (n: number): string => `${numUpTo(n, 1)} day${n === 1 ? '' : 's'}`;
 
 /**
  * The member's reading of their own cadence.
@@ -152,6 +160,16 @@ export function readOwnCadence(
   now: number = Date.now(),
   windowDays: number = DEFAULT_WINDOWS.historyDays,
 ): OwnCadence {
+  // whole-ok: 'partial' falls through this guard on purpose, and the paragraph
+  // directly above is the argument in full. A truncated read here is the NEWEST
+  // rows — src/ui/workoutLog.tsx orders `performed_at` descending before the
+  // cap — so every interval computed from it is a real interval between two
+  // real logged days. Nothing below counts, sums, averages or calls anything
+  // empty over the set: `assessCadence` measures gaps BETWEEN rows and refuses
+  // outright below `MIN_ACTIVE_DAYS` and `MIN_SPAN_DAYS`, so a prefix can only
+  // shorten the record and push this toward a refusal. The all-time figures a
+  // prefix would falsify are the ones under "Totals" on
+  // app/(client)/consistency.tsx, and those are gated on `isWhole`.
   if (status === 'loading' || status === 'error') {
     return {
       reading: 'unread',
@@ -202,13 +220,32 @@ export function readOwnCadence(
  * configurable number is the shape of every caption in this app that has ever
  * come to contradict the figure above it.
  */
-function windowPhrase(windowDays: number): string {
+function windowSpan(windowDays: number): string {
   if (windowDays % 7 === 0) {
     const w = windowDays / 7;
-    return `the last ${w} week${w === 1 ? '' : 's'}`;
+    return `${numUpTo(w, 1)} week${w === 1 ? '' : 's'}`;
   }
-  return `the last ${days(windowDays)}`;
+  return days(windowDays);
 }
+
+const windowPhrase = (windowDays: number): string => `the last ${windowSpan(windowDays)}`;
+
+/**
+ * The window this reading is taken over, the same figure `buildNudgeBoard`
+ * passes in src/ui/nudges.ts.
+ *
+ * Exported because the SCREEN has to say it. `app/(client)/consistency.tsx` is
+ * headed "Last 12 weeks" and draws a twelve-week grid; this figure is over
+ * eight. Two spans on one screen with only one of them labelled is how a member
+ * comes to read the gap as a statement about the picture underneath it.
+ */
+export const OWN_CADENCE_WINDOW_DAYS = DEFAULT_WINDOWS.historyDays;
+
+/** "Last 8 weeks", for a section note. Derived from the same number the reading
+ *  is taken over, so the label cannot drift from the window. */
+export const ownCadenceWindowLabel = (
+  windowDays: number = OWN_CADENCE_WINDOW_DAYS,
+): string => `Last ${windowSpan(windowDays)}`;
 
 /**
  * Why there is no usual gap, in the second person.

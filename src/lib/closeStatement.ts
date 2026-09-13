@@ -168,6 +168,52 @@ export const STATEMENT_BASIS: string[] = [
 ];
 
 /**
+ * One line per currency, out of one line per method per currency.
+ *
+ * `Income.byMethod` is already split both ways — `Line.key` is the method and
+ * the code joined, because "two currencies are two rows because they are two
+ * sums" — so this is a REGROUP of rows that were already summed correctly, not
+ * a second sum over a wider set. That distinction is the one /close's own
+ * currency comments make repeatedly: deriving a figure again from a different
+ * set is how the figure and its label came to disagree.
+ *
+ * Sorted by code, with the rows that state no currency last. They are last
+ * rather than absent because they are real money the register holds and cannot
+ * place, and rather than first because a reconciliation is read top-down and
+ * the codes are what somebody has statements for.
+ */
+export function receiptsByCurrency(
+  lines: readonly { currency: string | null; cents: number; count: number }[],
+): StatementReceipt[] {
+  const byCode = new Map<string, StatementReceipt>();
+  let unstated: StatementReceipt | null = null;
+  for (const l of lines) {
+    // The same normalisation `normaliseCurrency` performs, repeated here for
+    // the reason `code()` in src/lib/sumCurrency.ts gives: that module pulls in
+    // the supabase read helpers, and this one is a rule about rows that a
+    // screen with no database in front of it should be able to ask. ' gbp ' and
+    // 'GBP' are one currency; '' is not a currency at all.
+    const c = (l.currency ?? '').trim().toUpperCase() || null;
+    if (!c) {
+      // One bucket, and the AMOUNTS are still added — they are all in the
+      // register and all unplaceable, and the caller prints the count beside a
+      // blank amount cell. `minorToDecimal` withholds the figure because there
+      // is no currency to scale it by, which is the refusal doing its job.
+      unstated = unstated
+        ? { currency: null, cents: unstated.cents + l.cents, count: unstated.count + l.count }
+        : { currency: null, cents: l.cents, count: l.count };
+      continue;
+    }
+    const had = byCode.get(c);
+    byCode.set(c, had
+      ? { currency: c, cents: had.cents + l.cents, count: had.count + l.count }
+      : { currency: c, cents: l.cents, count: l.count });
+  }
+  const out = [...byCode.values()].sort((a, b) => String(a.currency).localeCompare(String(b.currency)));
+  return unstated ? [...out, unstated] : out;
+}
+
+/**
  * The statement, in order.
  *
  * The order is the argument. Provenance first — what this is, whose it is, and

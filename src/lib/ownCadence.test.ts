@@ -19,7 +19,8 @@
 // this suite under Los Angeles, Auckland and Dubai, and a UTC day key here
 // would fail in two of the three.
 import {
-  readOwnCadence, loggedEvents, OWN_CADENCE_SOURCE, type LoggedAt,
+  readOwnCadence, loggedEvents, ownCadenceWindowLabel,
+  OWN_CADENCE_SOURCE, OWN_CADENCE_WINDOW_DAYS, type LoggedAt,
 } from './ownCadence';
 import { assessCadence } from './cadence';
 import { DEFAULT_WINDOWS } from './clientDrift';
@@ -183,6 +184,15 @@ eq(mine.cadence?.overdueDays, theirs.overdueDays, 'and the same lateness');
 
 ok(/logged/.test(OWN_CADENCE_SOURCE),
   'the caveat names the log as the source, because the coach reads door visits and sessions too');
+
+/* ── 11 · the window label cannot drift from the window ──────────────────── */
+
+eq(OWN_CADENCE_WINDOW_DAYS, DEFAULT_WINDOWS.historyDays,
+  'the member is read over the same span the coach is');
+eq(ownCadenceWindowLabel(), 'Last 8 weeks', 'and the label says that span');
+eq(ownCadenceWindowLabel(30), 'Last 30 days', 'a span that is not whole weeks is said in days');
+ok(readOwnCadence([], 'ready', NOW).line.includes(ownCadenceWindowLabel().slice(5)),
+  'the sentence and the label name the same span');
 
 if (errors.length) {
   console.error(`ownCadence: ${errors.length} failure(s)`);

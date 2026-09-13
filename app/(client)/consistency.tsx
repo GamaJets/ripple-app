@@ -5,7 +5,7 @@
 // Every provider, computation and route is preserved — the five bordered stat
 // tiles became one hero figure plus a hairline-divided KPI row, and the heatmap
 // lost its box.
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -19,7 +19,16 @@ import { isWhole } from '../../src/ui/loadStatus';
 import { shownStreak, longestStreak, freezeBudget } from '../../src/lib/streaks';
 import { heatmapDayLabel, heatmapColumnLabel, heatmapSummary } from '../../src/lib/heatmap';
 import { readBoundary, rangeCoverage } from '../../src/lib/sessionHistory';
-import { fmtFullDay } from '../../src/lib/format';
+// The member's own median gap, in the member's own words — and computed by the
+// SAME `assessCadence` the coach's nudge board reads, so the two screens cannot
+// come to state different intervals about one person. See src/lib/ownCadence.ts.
+import {
+  readOwnCadence, ownCadenceWindowLabel, OWN_CADENCE_SOURCE,
+} from '../../src/lib/ownCadence';
+// `numUpTo` for the gap, because it is a one-decimal median and a bare
+// `${2.5}` writes a full stop in every locale — the note at the top of
+// app/(client)/attendance.tsx is about this exact failure.
+import { fmtFullDay, num, numUpTo } from '../../src/lib/format';
 import { WEEK_DAYS, startOfWeek } from '../../src/lib/weekStart';
 import { Icon } from '../../src/ui/Icon';
 import { BACK_ICON, FORWARD_ICON } from '../../src/ui/direction';
@@ -154,6 +163,28 @@ export default function Consistency() {
   const streak = shownStreak(log);
   const best = longestStreak(log);
 
+  // ── the member's own cadence ────────────────────────────────────────────
+  //
+  // The gap this closes is the one src/lib/ownCadence.ts opens with: the coach
+  // has been told since cadence.ts was written that a named client is days past
+  // their own usual interval, and the client got the grid below and was left to
+  // notice. A heatmap shows the record; it does not READ it, and the one number
+  // that makes a thin column mean anything — what this person's usual gap
+  // actually is — was stated nowhere in the client app.
+  //
+  // `logStatus` goes in rather than being pre-checked with `known &&` here.
+  // Over an unread log `assessCadence` answers `no-events`, whose sentence is
+  // about a read that LANDED — printed to somebody whose wifi dropped it is the
+  // app telling them their training did not happen. The gate is inside the
+  // tested module so the next edit to this file cannot drop it.
+  //
+  // Keyed on `now` as well as the log: this screen is `href: null` and mounts
+  // once, so "5 days since your last session" would otherwise be frozen at
+  // whenever the log last changed — the same defect the grid's own `useNow()`
+  // note above records, on the figure a member is most likely to act on.
+  const cadence = useMemo(() => readOwnCadence(log, logStatus, now.getTime()), [log, logStatus, now]);
+  const paced = cadence.reading === 'paced' ? cadence.cadence : null;
+
   // Which square the reader tapped, so the date under the grid is the one they
   // asked about. Null is the ordinary state — the grid says what it is in its
   // own summary and does not need a readout until somebody wants one.
@@ -221,6 +252,55 @@ export default function Consistency() {
             ? `Best ${best} day${best === 1 ? '' : 's'} · ${freezes} freeze${freezes === 1 ? '' : 's'} in reserve`
             : `Best ${best} day${best === 1 ? '' : 's'} · no freezes yet`}
         />
+
+        <Rule />
+
+        {/* ── your own rhythm ──────────────────────────────────────────────
+            The reading of the grid, above the grid. Two figures and one
+            sentence: how often this member logs a session, how long it has
+            been, and the arithmetic between them — which is exactly what
+            app/(trainer)/nudges.tsx prints about them to their coach.
+
+            The note is the WINDOW, and it is not decoration. This screen is
+            headed "Last 12 weeks" and the grid below is twelve weeks; the gap
+            is measured over eight, because that is the span src/ui/nudges.ts
+            reads and the whole value of the figure is that it is the same
+            figure. Two spans on one screen with one of them unlabelled is how
+            a member reads the gap as a statement about the picture below it.
+
+            No tone, no flag, no colour: see the header of src/lib/ownCadence.ts.
+            "Nine days past your usual gap" is a fact about the log. A holiday,
+            an injury, a house move and a chest infection all produce it, and
+            the member is the one person who knows which. */}
+        <Section>
+          <SectionHead title="Your Own Rhythm" note={ownCadenceWindowLabel()} />
+          <KpiRow items={[
+            {
+              label: 'Usual Gap',
+              // `paced` is null for every state except a settled one, so a
+              // member with four logged days gets a dash rather than a median
+              // taken over three intervals. The refusal and its reason are in
+              // the sentence underneath.
+              value: paced?.usualGapDays != null ? numUpTo(paced.usualGapDays, 1) : fig(null),
+              unit: paced?.usualGapDays != null ? (paced.usualGapDays === 1 ? 'day' : 'days') : undefined,
+            },
+            {
+              label: 'Since Last Logged',
+              // Shown even when there is no settled gap — "it has been six days"
+              // is a true, checkable fact about the log on its own. Null under
+              // 'error' and 'loading', where it would be a count from nothing.
+              value: cadence.cadence?.sinceLastDays != null ? num(cadence.cadence.sinceLastDays) : fig(null),
+              unit: cadence.cadence?.sinceLastDays != null
+                ? (cadence.cadence.sinceLastDays === 1 ? 'day' : 'days') : undefined,
+            },
+          ]} />
+          <Text style={{ ...ty.body, color: t.ink2, marginTop: sp.md }}>{cadence.line}</Text>
+          {/* Which record this is counted from. The coach's version of this
+              number also sees door visits and delivered sessions; this one sees
+              the workout log and nothing else, so a member who trains and does
+              not log would otherwise read the app claiming they had not been. */}
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>{OWN_CADENCE_SOURCE}</Text>
+        </Section>
 
         <Rule />
 

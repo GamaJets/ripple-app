@@ -59,12 +59,31 @@
 //     empties this list for a reason that is nothing to do with the client.
 //
 // 3 · SAYING SOMETHING ABOUT THE BODY IN THE PICTURE. There is none of that
-//     here, deliberately: no before/after pairing the client did not ask for,
-//     no derived body-composition reading off an image, no commentary, no
-//     progress verdict. What was sent, when it was taken, when it was sent.
-//     The coach is a person who can look at a photograph and think for
-//     themselves; the app's job is to not put words in their mouth about
+//     here, deliberately: no derived body-composition reading off an image, no
+//     commentary, no progress verdict. What was sent, when it was taken, when
+//     it was sent. The coach is a person who can look at a photograph and think
+//     for themselves; the app's job is to not put words in their mouth about
 //     somebody else's body.
+//
+//     THE SIDE-BY-SIDE IS NOT AN EXCEPTION TO THAT, and the distinction is
+//     worth stating because this paragraph used to rule out pairing outright.
+//     What it ruled out was the APP choosing a before and an after — picking
+//     two photographs out of somebody's record and captioning them as a
+//     transformation is a claim about a body, and it is still refused: nothing
+//     here pairs anything on its own, there is no "first and latest" default,
+//     and no pair is ever suggested. What a coach can now do is tap two
+//     pictures they can already open one at a time and see them next to each
+//     other, captioned with the number of days between the two dates and
+//     nothing else. That adds no access — both rows are already on this screen
+//     under the same grant — and it derives nothing: src/lib/photoTimeline.ts
+//     contains no code path that turns a photograph into a number, which is
+//     the same guarantee src/lib/photoCompare.ts makes on the member's side.
+//     The one thing the ordering does assert is which of the two came first,
+//     and it takes that from the day each was TAKEN rather than from the order
+//     the coach tapped or the order they were sent — a client who sends
+//     January's photo after March's would otherwise get a pair captioned
+//     backwards, which is the only way a side-by-side can lie without saying
+//     anything at all.
 //
 // ── TWO DATES, NEVER ONE ───────────────────────────────────────────────────
 //
@@ -96,6 +115,13 @@ import {
   withdrawnNote, emptyReason, inboxNote, checkedNote, gapNote, stamp,
   type Inbox, type InboxPhoto,
 } from '../../src/lib/photoInbox';
+// Ordering and pairing, on rows that are already here. Nothing in this module
+// reaches a photograph or widens a grant — see its header — and the two things
+// the screen's own header refuses stay refused: the app pairs nothing on its
+// own, and nothing anywhere derives a reading off an image.
+import {
+  timeline, spanNote, undatedCount, pairOf, pairNote,
+} from '../../src/lib/photoTimeline';
 import { BACK_ICON } from '../../src/ui/direction';
 
 /** How often the screen wakes up. It re-renders the tiles (so a link that has
@@ -126,6 +152,20 @@ export default function ClientPhotos() {
   const [open, setOpen] = useState<string | null>(null);
   const [withdrawn, setWithdrawn] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Two views of one set of rows, and never two sets of rows. 'sent' is the
+  // inbox order this screen has always drawn — newest send first, because the
+  // send is the act addressed to the coach. 'timeline' is the same photographs
+  // ordered by the day the picture is OF, which is a different order whenever
+  // somebody empties a camera roll in one go, and the case `gapNote` already
+  // exists for.
+  const [view, setView] = useState<'sent' | 'timeline'>('sent');
+  // The two photographs a coach has asked to see beside each other. A LIST the
+  // coach builds by tapping, never a pair this screen chooses: the app picking
+  // somebody's before and after is the thing the header above refuses, and a
+  // coach putting two pictures they can already open side by side is not that.
+  // Ids only — the rows themselves are re-looked-up on every render, so a photo
+  // withdrawn between two reads leaves the comparison by itself.
+  const [pair, setPair] = useState<string[]>([]);
 
   // Read inside the loader and inside the timer, neither of which may be
   // rebuilt when these change: a new loader identity restarts the refresh
@@ -209,6 +249,11 @@ export default function ClientPhotos() {
     setErr(null);
     setOpen(null);
     setWithdrawn(null);
+    // A comparison is two photographs of one person. Carrying the selection
+    // across a change of client would hold one body's picture open while the
+    // other side of the pair filled in from somebody else's record — the exact
+    // failure `subjectChange` exists for two screens away.
+    setPair([]);
     if (picked) void load(picked, askable);
   }, [picked, askable, load]);
 
@@ -258,6 +303,36 @@ export default function ClientPhotos() {
   );
   const reason = emptyReason(inbox);
   const stale = unusableCount(inbox, now);
+
+  /* ── the timeline, and the pair ────────────────────────────────────────────
+   *
+   * Both derived from `inbox.photos` on every render rather than held in state,
+   * which is what makes the revocation guard cover them for free: a photograph
+   * that leaves the list between two reads leaves the timeline and leaves the
+   * comparison in the same frame, without a second mechanism that could be
+   * forgotten. The selection is filtered the same way — an id whose row has
+   * gone is not a selection, it is a photograph the client took back. */
+  const rows = useMemo(() => timeline(inbox?.photos ?? []), [inbox]);
+  const span = useMemo(() => spanNote(inbox?.photos ?? []), [inbox]);
+  const undated = useMemo(() => undatedCount(inbox?.photos ?? []), [inbox]);
+  const chosen = useMemo(
+    () => pair.filter((id) => (inbox?.photos ?? []).some((p) => p.id === id)),
+    [pair, inbox],
+  );
+  const compare = useMemo(
+    () => (chosen.length === 2 ? pairOf(inbox?.photos ?? [], chosen[0], chosen[1]) : null),
+    [chosen, inbox],
+  );
+
+  /** Tapping a photograph's compare control. Two at a time: a third selection
+   *  replaces the OLDER of the two choices, so the gesture is "and now this
+   *  one" rather than "clear everything and start again". */
+  const toggleCompare = (id: string) => {
+    setPair((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      return prev.length < 2 ? [...prev, id] : [prev[1], id];
+    });
+  };
 
   /** One tile's two dates and, when there is one, the gap between them. */
   const dates = (p: InboxPhoto) => ({
@@ -376,6 +451,127 @@ export default function ClientPhotos() {
                 </Text>
               ) : inbox ? (
                 <View>
+                  {/* ── two orders, one set ────────────────────────────────
+                      Only offered when there is more than one photograph: a
+                      switch between two orderings of a single row is a control
+                      that does nothing, and this screen has enough to read
+                      already. */}
+                  {inbox.photos.length > 1 ? (
+                    <View style={{ flexDirection: 'row', gap: sp.sm, marginBottom: sp.md }}>
+                      {([['sent', 'As Sent'], ['timeline', 'Timeline']] as const).map(([key, label]) => (
+                        <Pressable key={key} onPress={() => setView(key)}
+                          accessibilityRole="button" accessibilityState={{ selected: view === key }}
+                          accessibilityLabel={key === 'sent'
+                            ? 'Order by when each photo was sent to you'
+                            : 'Order by when each photo was taken'}
+                          style={chip(view === key)}>
+                          <Text style={{ ...ty.micro, color: view === key ? t.brandInk : t.ink2 }}>{label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  {view === 'timeline' && span ? (
+                    <Text style={{ ...ty.label, color: t.ink3, marginBottom: sp.md }}>
+                      {span} Ordered by the day each was taken, which is not the order they arrived in.
+                    </Text>
+                  ) : null}
+
+                  {/* ── the pair, when a coach has chosen one ──────────────
+                      Above the list, because it is the thing they just asked
+                      for. Both pictures are already open to them one at a time
+                      on this screen; putting them beside each other adds no
+                      access and says nothing about either body — the caption is
+                      the number of days between two dates and that is the whole
+                      of it. */}
+                  {compare ? (
+                    <View style={{ marginBottom: sp.lg }}>
+                      <Text style={{ ...ty.micro, color: t.ink3 }}>Side by side</Text>
+                      <View style={{ flexDirection: 'row', gap: sp.md, marginTop: sp.sm }}>
+                        {[compare.earlier, compare.later].map((p) => (
+                          <View key={p.id} style={{ flex: 1 }}>
+                            {frame(p)}
+                            <Text style={{ ...ty.caption, color: t.ink2, marginTop: 5 }}>Taken {dates(p).taken}</Text>
+                            <Text style={{ ...ty.caption, color: t.ink3 }}>Sent {dates(p).sent}</Text>
+                          </View>
+                        ))}
+                      </View>
+                      <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.sm }}>{pairNote(compare)}</Text>
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                        The earlier photograph is on the left, decided by the day each was taken rather
+                        than by the order you picked them. Nothing here is a reading of either picture.
+                      </Text>
+                      <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                        <Ghost label="Clear Comparison" onPress={() => setPair([])} />
+                      </View>
+                    </View>
+                  ) : chosen.length === 1 ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                      One chosen. Pick a second to see them beside each other.
+                    </Text>
+                  ) : null}
+
+                  {view === 'timeline' ? (
+                    <View>
+                      {rows.map(({ photo: p, dayKey, sincePrevDays }) => {
+                        const d = dates(p);
+                        const on = chosen.includes(p.id);
+                        return (
+                          <View key={p.id} style={{ flexDirection: 'row', gap: sp.md, marginBottom: sp.lg }}>
+                            <Pressable onPress={() => { setWithdrawn(null); setOpen(p.id); }}
+                              accessibilityRole="button" accessibilityLabel={`Open larger. ${spoken(p)}`}
+                              style={{ flexBasis: '38%', maxWidth: '38%' }}>
+                              {frame(p)}
+                            </Pressable>
+                            <View style={{ flex: 1 }}>
+                              {/* The interval is the whole reason this is a
+                                  timeline and not a grid: four photographs over
+                                  three years and four over three weeks are the
+                                  same tiles otherwise. Null is not zero — a
+                                  photograph whose date will not read says so
+                                  rather than sitting in the sequence as though
+                                  it belonged where it was drawn. */}
+                              <Text style={{ ...ty.micro, color: t.ink3 }}>
+                                {dayKey == null
+                                  ? 'Undated'
+                                  : sincePrevDays == null
+                                    ? 'First on record'
+                                    : sincePrevDays === 0
+                                      ? 'Same day as the one before'
+                                      : sincePrevDays === 1
+                                        ? 'One day later'
+                                        : sincePrevDays < 21
+                                          ? `${sincePrevDays} days later`
+                                          : `${Math.round(sincePrevDays / 7)} weeks later`}
+                              </Text>
+                              <Text style={{ ...ty.body, color: t.ink, marginTop: 3 }}>Taken {d.taken}</Text>
+                              <Text style={{ ...ty.caption, color: t.ink3 }}>Sent {d.sent}</Text>
+                              {d.gap ? <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{d.gap}</Text> : null}
+                              <View style={{ flexDirection: 'row', marginTop: sp.sm }}>
+                                <Pressable onPress={() => toggleCompare(p.id)}
+                                  accessibilityRole="button" accessibilityState={{ selected: on }}
+                                  accessibilityLabel={on
+                                    ? `Remove the photo taken ${d.taken} from the comparison`
+                                    : `Compare the photo taken ${d.taken} with another`}
+                                  style={chip(on)}>
+                                  <Text style={{ ...ty.micro, color: on ? t.brandInk : t.ink2 }}>
+                                    {on ? 'Chosen' : 'Compare'}
+                                  </Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          </View>
+                        );
+                      })}
+                      {undated ? (
+                        <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                          {undated === 1
+                            ? 'One of these carries a date this screen cannot read, so it sits at the end rather than in the sequence.'
+                            : `${undated} of these carry dates this screen cannot read, so they sit at the end rather than in the sequence.`}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.md }}>
                     {inbox.photos.map((p) => {
                       const d = dates(p);
@@ -394,6 +590,7 @@ export default function ClientPhotos() {
                       );
                     })}
                   </View>
+                  )}
 
                   <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
                     {checkedNote(inbox, now)}{loading ? ' · checking again' : ''}. Links stop working after{' '}

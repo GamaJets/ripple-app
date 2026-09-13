@@ -62,6 +62,15 @@ import {
   amount, fetchMyMemberships, isCurrent, planStateOf, primaryMembership, renewalNote,
   standingLabel, standingOf, type MemberMembership,
 } from '../../src/lib/memberRecord';
+// The purchase behind the membership above. `gym_orders_own_r` has admitted the
+// member to their own orders since supabase/parts/281 and part 800's header
+// says the table "is read by the member's own purchase history" — which did not
+// exist. This is it. `memberships.note` is deliberately NOT here: see the
+// header of src/lib/membershipOrder.ts and supabase/parts/125.
+import {
+  fetchMyOrders, orderForMembership, intentLabel, orderAmount, orderStatusLine,
+  orderAbsence, type MemberOrder,
+} from '../../src/lib/membershipOrder';
 import { useToday } from '../../src/ui/today';
 import { localDate } from '../../src/lib/localDate';
 import { appLocale } from '../../src/lib/locale';
@@ -223,12 +232,47 @@ export default function Membership() {
   }, [uid, auth.loading]);
   useEffect(() => { void loadMembership(); }, [loadMembership]);
 
-  // The three reads this screen shows: the gym's membership record (which has
+  /* ── and how it was bought ───────────────────────────────────────────── */
+  //
+  // A separate read from a separate table with its own policy, kept in its own
+  // state for the reason the membership read above is: the two fail
+  // independently. `gym_orders` refusing must leave the plan, the standing and
+  // the dates exactly where they are — the purchase is a footnote to the
+  // membership and must never be able to take it off the screen.
+  //
+  // Not cached to the device. The membership is, because a member standing in
+  // the building needs to see that they are a member; an order is a historical
+  // receipt nobody is refused entry over, and caching money means a figure that
+  // can be read as current while being a week old.
+  const [orders, setOrders] = useState<MemberOrder[]>([]);
+  const [oStatus, setOStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+
+  const loadOrders = useCallback(async () => {
+    if (!USE_SUPABASE) { setOStatus('ready'); return; }
+    if (!uid) { if (!auth.loading) setOStatus('error'); return; }
+    const res = await fetchMyOrders(supabase, uid);
+    if (!res.ok) {
+      reportError('membership.orders', new Error(res.reason));
+      // NOT cleared, and NOT an empty list. `orderAbsence(false)` is the
+      // sentence for this: "we couldn't read your purchases" is a different
+      // fact from "your gym recorded this at the desk", and printing the second
+      // one over a failed read tells a member who paid by card that they did
+      // not.
+      setOStatus('error');
+      return;
+    }
+    setOrders(res.value);
+    setOStatus('ready');
+  }, [uid, auth.loading]);
+  useEffect(() => { void loadOrders(); }, [loadOrders]);
+
+  // The four reads this screen shows: the gym's membership record (which has
   // its own "Try Again" beside the failure, and this is the same read), the
-  // profile, and the training log the visit count is derived from.
+  // order behind it, the profile, and the training log the visit count is
+  // derived from.
   const pull = usePullToRefresh(useCallback(() => {
-    void loadMembership(); c.reload(); reloadLog();
-  }, [loadMembership, c.reload, reloadLog]));
+    void loadMembership(); void loadOrders(); c.reload(); reloadLog();
+  }, [loadMembership, loadOrders, c.reload, reloadLog]));
 
   // The screen can be open across midnight, and a membership that expired at
   // 00:00 must not still read "Active".
@@ -249,6 +293,15 @@ export default function Membership() {
   const primary = primaryMembership(mships, today);
   const standing = primary ? standingOf(primary, today) : null;
   const planState = primary ? planStateOf(primary) : null;
+
+  // The order that produced the membership on screen, matched on
+  // `membership_id` alone — see `orderForMembership`, which refuses the
+  // "…or the newest one" fallback and says why. Only over a read that landed:
+  // under 'error' and 'loading' the list is unknown, and `orderForMembership`
+  // over an unknown list returns null, which the screen would otherwise draw as
+  // "your gym recorded this at the desk".
+  const ordersRead = oStatus === 'ready';
+  const order = ordersRead && primary ? orderForMembership(orders, primary.id) : null;
 
   const actions: { label: string; note: string; icon: IconName; route: string; hero?: boolean }[] = [
     { label: 'Entry Barcode', note: `Your ${appName} ID — link it at reception`, icon: 'grid', route: '/(client)/access', hero: true },
@@ -417,6 +470,68 @@ export default function Membership() {
                   <Ghost label="Renew or Change Plan" onPress={() => router.push('/(client)/gym-plans')} />
                 </View>
               ) : null}
+
+              {/* ── how this membership was bought ──────────────────────────
+                  `gym_orders` has admitted the member to their own rows since
+                  supabase/parts/281 — `for select using (member_id =
+                  auth.uid())` — and part 800's header describes the table as
+                  "read by the member's own purchase history". There was no such
+                  history: the only readers in the product were the owner
+                  console, the gym export and the Stripe webhook. So a member
+                  who bought a membership on this phone could read the plan and
+                  the dates their payment produced and find nothing anywhere
+                  saying they had bought it.
+
+                  `memberships.note` is the other half of the same request and
+                  is deliberately absent. Part 125 wrote the reason into the
+                  schema: it is free text the OWNER console writes, "an owner who
+                  types a private remark about a member into one is typing it
+                  somewhere that member can read", and the standing answer is
+                  that the client app does not select it. That answer is kept —
+                  see the header of src/lib/membershipOrder.ts. */}
+              <View style={{ marginTop: sp.lg }}>
+                <Text style={{ ...ty.micro, color: t.ink3 }}>How this was bought</Text>
+                {oStatus === 'loading' ? (
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>Reading your purchases…</Text>
+                ) : order ? (
+                  <>
+                    <Line t={t} first label="Purchase" value={intentLabel(order)} />
+                    {/* The order's OWN currency, never the plan's and never a
+                        default — this product is white-label and the two rows
+                        are separate records of money. `orderAmount` prints the
+                        stored integer rather than inventing a decimal point
+                        when the currency was not recorded. */}
+                    <Line t={t} label="Amount" value={orderAmount(order)} />
+                    {order.paidAt ? <Line t={t} label="Paid on" value={fmtFullDay(order.paidAt)} /> : null}
+                    {/* The term the ORDER bought, which is not necessarily the
+                        membership's dates above: a gym may have edited those
+                        since, and showing the two is how a member notices. */}
+                    {order.termStartsOn ? (
+                      <Line t={t} label="Term bought"
+                        value={order.termEndsOn
+                          ? `${day(order.termStartsOn)} – ${day(order.termEndsOn)}`
+                          : `${day(order.termStartsOn)} onwards`} />
+                    ) : null}
+                    {/* 'failed' is Stripe having taken the money while the
+                        entitlement could not be written, and the member is the
+                        one person guaranteed to notice. It gets a mark; the
+                        other three states are statements, not warnings. A dot
+                        rather than crit-coloured text, which fails the contrast
+                        gate — see src/ui/kit.tsx `Flag`. */}
+                    {order.status === 'failed' ? (
+                      <Flag tone={t.crit} style={{ marginTop: sp.md }}>{orderStatusLine(order)}</Flag>
+                    ) : (
+                      <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.md }}>{orderStatusLine(order)}</Text>
+                    )}
+                  </>
+                ) : (
+                  // Two sentences behind one call, and the argument for them is
+                  // the whole of src/ui/loadStatus.ts: a membership with no
+                  // order is the ordinary case at a gym that sells at the desk,
+                  // and an order list that did not load is not that.
+                  <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.sm }}>{orderAbsence(ordersRead)}</Text>
+                )}
+              </View>
             </>
           )}
           </>)}

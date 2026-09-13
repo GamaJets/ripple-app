@@ -235,6 +235,7 @@
     "src/lib/pushSender.test.ts",
     "src/lib/memberChurn.test.ts",
     "src/lib/memberRecord.test.ts",
+    "src/lib/membershipOrder.test.ts",
     "src/lib/memberBuy.test.ts",
     "src/lib/accountSecurity.test.ts",
     "src/lib/messageAttachments.test.ts",
@@ -661,6 +662,12 @@
     "src/lib/sessionPairing.ts",
     "src/lib/sessionPairing.test.ts",
     "src/lib/clientInvite.ts",
-    "src/lib/clientInvite.test.ts"
+    "src/lib/clientInvite.test.ts",
+    "src/lib/scanProvenance.ts",
+    "src/lib/scanProvenance.test.ts",
+    "src/lib/scanCadence.ts",
+    "src/lib/scanCadence.test.ts",
+    "src/lib/photoTimeline.ts",
+    "src/lib/photoTimeline.test.ts"
   ]
 }

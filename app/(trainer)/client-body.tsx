@@ -120,6 +120,8 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import { capLimit, capped } from '../../src/lib/rowCap';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+import { ScanCadencePanel } from '../../src/ui/ScanCadencePanel';
+import { SourceChip } from '../../src/ui/ScanSource';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { isoToday } from '../../src/lib/dayPlan';
@@ -261,6 +263,11 @@ export default function ClientBody() {
   // answer to one question — the shape that lets a screen say "no breakdown"
   // about a read that never landed.
   const [comp, setComp] = useState<ScanLike[] | null>(null);
+  // The day and the evidence of every scan row that came back, kept beside
+  // `comp` rather than folded into `ScanLike` — that shape is shared with the
+  // member's own screens, and widening it there to serve one coach panel would
+  // be the wrong trade. Null is a failed read and never an empty book.
+  const [scanRows, setScanRows] = useState<{ day: string | null; source: string | null }[] | null>(null);
   // The tape. Its own read and its own status, because it is a different table
   // written on a different day: a refused `scans` read says nothing about the
   // measurements, and a refused `measurements` read must not empty the scans.
@@ -339,6 +346,7 @@ export default function ClientBody() {
       // fact about the connection, and the screen must be able to tell them
       // apart from the value alone.
       setComp(null);
+      setScanRows(null);
       setScanStatus('error');
     } else {
       const page = capped((scanRes.data ?? []) as unknown as CompositionScanRow[]);
@@ -347,6 +355,7 @@ export default function ClientBody() {
       // point to any composition metric — the same rule as the missing muscle
       // figure above it, and for the same reason: absence is not zero.
       setComp(page.rows.map((r) => ({ takenAt: r.taken_at, metrics: r.metrics ?? undefined })));
+      setScanRows(page.rows.map((r) => ({ day: r.taken_at ?? null, source: r.source ?? null })));
       setScanStatus(page.truncated ? 'partial' : 'ready');
     }
 
@@ -734,6 +743,22 @@ export default function ClientBody() {
             {picked ? (
               <View>
                 <Rule />
+
+                {/* How often this person is actually being scanned, above the
+                    readings themselves — because the cadence decides what the
+                    latest figure is worth. A single scan in March is not a
+                    trend, and a gap since January is the fact that starts the
+                    conversation rather than the number at the top of it.
+
+                    Drawn under every status: the panel distinguishes a failed
+                    read, a truncated one and genuinely-too-few itself, and a
+                    coach seeing nothing here would read it as "scanned often
+                    enough", which is the one thing it must never imply. */}
+                <ScanCadencePanel
+                  days={(scanRows ?? []).map((r) => r.day)}
+                  status={scanRows === null ? 'error' : scanStatus}
+                  today={todayISO}
+                  subject={{ they: voice.they, have: voice.have }} />
 
                 {/* The states, kept apart. Each is a different fact about this
                     person and each starts a different conversation. */}
