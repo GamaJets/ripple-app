@@ -64346,3 +64346,736 @@ create policy formclip_obj_delete on storage.objects for delete to authenticated
 -- policy lets the bytes behind an already-signed key be replaced, and nobody
 -- downstream can see that it happened. The app uploads with a fresh key every
 -- time and deletes the old object when a set's clip is replaced.
+
+-- ▶ say-when-this-app-last-heard-from-stripe.sql
+
+-- When this app last heard from Stripe.
+--
+-- ── The two empty screens that look identical ─────────────────────────────
+--
+-- Every figure under "Taken Through Stripe" in app/(trainer)/payments.tsx is
+-- read from `client_purchases` and `client_subscription_payments`. Both tables
+-- are written by one thing: supabase/functions/stripe-webhook. Nothing else in
+-- this repository inserts into either.
+--
+-- So when a coach opens Payments and sees nothing, there are two completely
+-- different worlds behind that screen and the app draws them the same way:
+--
+--   · nobody has bought anything yet — a real, ordinary answer, and the one
+--     every one of the seven live coaches starts in;
+--   · the webhook has never been reached — a wrong endpoint in the Stripe
+--     dashboard, a signing secret that does not match, a function deployed
+--     WITH jwt verification so Stripe's unsigned POST is refused at the door.
+--     Money HAS moved, the client was charged, and this app was never told.
+--
+-- The second is a production incident that presents as a quiet week. There is
+-- no alert for it anywhere in this product and no screen a coach could look at
+-- to tell the two apart, because the only evidence either way is in a table no
+-- build has ever read.
+--
+-- `stripe_webhook_events` is that evidence. supabase/parts/97 created it as a
+-- replay ledger — the event id is written AFTER its handler succeeds, so a
+-- retry of something already done is skipped — and the side effect of that
+-- design is a dated record of every webhook this project has ever completed.
+-- Three rows are live today. Nothing in `app/` or `src/` reads it.
+--
+-- ── Why this is a function and not a grant ────────────────────────────────
+--
+-- Part 147 revoked SELECT on the table from `anon` and `authenticated` and
+-- gave it a `using (false)` policy, deliberately, and its header explains what
+-- it found: the table had been answering `0 rows` to strangers rather than
+-- refusing, because it still carried stock grants and RLS alone was holding
+-- it. None of that is being undone here. The rows carry Stripe event ids and
+-- event types — `evt_…`, `checkout.session.completed` — which are keys into
+-- another company's API and are nobody's business but the webhook's.
+--
+-- What a coach needs is not a row. It is two scalars: the instant of the most
+-- recent handled event, and how many have ever been handled. This function
+-- answers exactly those and nothing else, so the ledger stays unreadable and
+-- the question stops being unanswerable.
+--
+-- ── Why every signed-in caller, and not only coaches ──────────────────────
+--
+-- Because this fact is not tenant-scoped and cannot be made so. The table has
+-- three columns — id, type, handled_at — and no tenant, no coach and no
+-- customer. There is no per-coach heartbeat to return, and the screen that
+-- shows this says so in the coach's own words rather than letting them read it
+-- as a fact about their own sales.
+--
+-- A role gate was written and taken out again. It would have had to read
+-- `trainers` or `profiles` to decide, and that read can fail — at which point
+-- a diagnostic built to tell two silences apart answers with a third one. The
+-- thing being disclosed is "this deployment completed a Stripe webhook at
+-- 09:14", to somebody already signed in to the deployment. That is operational
+-- weather, it names no person, no amount and no event id, and paying for it
+-- with a failure mode inside the diagnostic itself is the wrong trade.
+--
+-- `anon` is a different question and the answer there is no: an unauthenticated
+-- caller holding the publishable key compiled into the shipped app learns
+-- nothing from this. Revoked from `public` AND from `anon` by name — Postgres
+-- grants EXECUTE to PUBLIC on every new function and Supabase's own default
+-- privileges grant it to `anon` separately, so revoking one is not revoking the
+-- other. Part 141 measured that and part 940 states it again.
+
+create or replace function public.stripe_last_heard()
+returns table (last_at timestamptz, events bigint)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $fn$
+  -- Aggregates over an empty table give exactly one row: `null` and `0`. That
+  -- is the whole point — a caller that got no row back could not tell "never
+  -- heard" from "the call failed", which is the pair of silences this function
+  -- exists to separate.
+  select max(e.handled_at) as last_at, count(*)::bigint as events
+  from public.stripe_webhook_events e;
+$fn$;
+
+revoke all on function public.stripe_last_heard() from public;
+revoke all on function public.stripe_last_heard() from anon;
+grant execute on function public.stripe_last_heard() to authenticated;
+
+-- ▶ a-cost-with-nothing-behind-it.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A cost with nothing behind it.
+--
+-- ── What was missing ───────────────────────────────────────────────────────
+--
+-- `gym_documents` (part 185) is the index in front of the `gym-docs` bucket and
+-- it can say what a file is ABOUT in exactly two ways: `member_id` and
+-- `equipment_id`. So a gym could file the engineer's report on a rower and the
+-- member's signed contract, and could not file the invoice the engineer sent —
+-- the one piece of paper the money record is actually made of.
+--
+-- Part 700's own header says so, twice, and says it as a limitation rather than
+-- a decision:
+--
+--     "nothing here has been checked against a bank, a card, a receipt or a
+--      supplier's invoice, and Repple holds no document behind any of it"
+--
+-- and src/lib/gymTax.ts prints it to the owner, at a filing deadline, as one of
+-- the six things this product does not know:
+--
+--     "Nothing here is evidenced. Repple holds no supplier invoice, no receipt
+--      and no till roll. Every cost on the record is somebody's typed word
+--      about a document that lives somewhere else, and that document is what a
+--      tax authority asks for."
+--
+-- The bucket existed. The cost table existed. The one column joining them did
+-- not, so the two halves of every expense sat in one database unable to point
+-- at each other, and a gym answering a query about September's rent had the
+-- amount here and the PDF in an inbox.
+--
+-- ── This does not make a cost "evidenced" ──────────────────────────────────
+--
+-- It makes it EVIDENCEABLE, which is a smaller claim and the only one the
+-- schema can support. Nothing checks that the attached file is a receipt,
+-- nothing reads the amount off it, nothing compares it to `amount_cents`, and
+-- nothing anywhere is allowed to say a cost is verified because a file hangs
+-- off it. Somebody attached a document and said it was about this cost; that is
+-- the whole fact, and src/lib/costReceipts.ts is written to say only that.
+--
+-- The sentence in TAX_UNKNOWNS above therefore STAYS true of any cost with no
+-- document on it, which is most of them, and the console reports the two states
+-- apart rather than reporting a proportion as reassurance.
+--
+-- ── Why no new `kind`, and why that is the safe answer here ────────────────
+--
+-- `gym_documents.kind` is a closed set of seven, and `gym_doc_readable()` in
+-- part 390 admits a TRAINER to four of them — `service_report`, `photo`,
+-- `certificate`, `insurance` — whenever the document is not about a person.
+-- Adding a 'receipt' kind would mean adding it in three places that must not
+-- drift: the CHECK here, `DOCUMENT_KINDS` in src/lib/gymDocs.ts (whose reader
+-- maps an unrecognised kind to 'other', so a database-only addition would show
+-- a gym's supplier invoices on the compliance screen labelled "Other"), and the
+-- test that reads part 390 back.
+--
+-- It is not needed. A receipt is filed under one of the three kinds a trainer
+-- may NOT read — 'other' for a till receipt or a supplier invoice, 'contract'
+-- for a supply agreement — so the existing predicate already gives the right
+-- answer without being touched: what the gym pays in rent, and to whom, is not
+-- the floor's business, which is the same line part 700 drew when it refused
+-- `gym_costs` to every role but the owner. src/lib/costReceipts.ts holds that
+-- list and a test asserts every kind on it is owner-only.
+--
+-- ── Applying this ──────────────────────────────────────────────────────────
+--
+-- Additive. One nullable column, one partial index, one policy narrowed. No
+-- backfill: a document filed before today is about a member, a machine or the
+-- building, and inventing a cost for it would be a claim nobody made.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. the column ───────────────────────────────────────────────────────────
+
+alter table public.gym_documents
+  add column if not exists cost_id uuid references public.gym_costs(id) on delete set null;
+
+comment on column public.gym_documents.cost_id is
+  'The gym_costs row this document is evidence for, or NULL because it is about a member, a machine, the building, or nothing in particular. Attaching one does not verify the cost: nothing reads the file, nothing compares it to amount_cents, and no screen may say a cost is checked because a document hangs off it.';
+
+-- `on delete set null`, matching `member_id` and `equipment_id`, and it is the
+-- only correct answer here rather than a copied one. Part 700 grants the owner
+-- INSERT and DELETE on `gym_costs` and refuses UPDATE on purpose — "correcting
+-- a cost is deleting the wrong line and writing the right one" — so a cost
+-- being deleted is the ORDINARY way a cost is corrected, not an unusual event.
+-- `cascade` would then take the supplier's invoice out of the filing cabinet
+-- every time somebody fixed a typo in a description, and the file is the part
+-- the gym cannot reproduce. The document survives, detached, and the owner
+-- re-attaches it to the replacement line.
+--
+-- Unlike `member_id` this needs NO `..._attached` latch. Part 390 added one for
+-- members because detaching WIDENED the audience: an incident report whose
+-- member was erased would have become gym-wide paperwork the moment the id went
+-- null. Here the audience is decided by `kind` alone and a detached receipt is
+-- still 'other' or 'contract', so nothing widens and there is nothing to latch.
+
+-- The read is always "the documents attached to these costs", so the index is
+-- on the column and only where it is set. Partial, because the overwhelming
+-- majority of rows in this table are about a member or a machine and have no
+-- business in an index of receipts.
+create index if not exists idx_gym_documents_cost
+  on public.gym_documents (cost_id)
+  where cost_id is not null;
+
+-- ── 2. who may file one ─────────────────────────────────────────────────────
+--
+-- Part 185 lets a TRAINER insert into `gym_documents`, deliberately and
+-- correctly: photographing a broken rower is the case that policy was written
+-- for, and part 390 kept the asymmetry ("a trainer who can file an incident
+-- report but not read one back is the correct asymmetry, not a bug").
+--
+-- A receipt against a cost is a different act. `gym_costs` is the owner's alone
+-- in all three directions — part 700 grants select, insert and delete to
+-- `is_owner_of(tenant_id)` and nothing else, on the stated reasoning that a
+-- 'staff' cost line with a description on it is a personnel disclosure the gym
+-- did not make. A foreign key is checked by the system rather than through row
+-- level security, so without this a trainer holding a cost id could attach a
+-- document to a line they may not read, and then not be able to read back the
+-- row they had just written. Narrowing the insert is what keeps the two tables
+-- saying the same thing about who the gym's spending belongs to.
+--
+-- Dropped by name as well as replaced: a policy left standing is OR'd with the
+-- new one and the old width simply survives. Part 390's header makes the same
+-- point about `gym_documents_staff_r`.
+drop policy if exists gym_documents_staff_i on public.gym_documents;
+create policy gym_documents_staff_i on public.gym_documents
+  for insert with check (
+    tenant_id = my_tenant()
+    and my_role() in ('trainer', 'owner')
+    -- The owner has `gym_documents_owner` (for all, `is_owner_of(tenant_id)`)
+    -- and reaches a receipt through that policy, so this clause costs them
+    -- nothing. What it removes is the trainer's route to a cost row.
+    and cost_id is null
+  );
+
+comment on policy gym_documents_staff_i on public.gym_documents is
+  'A trainer may file the building''s paperwork and may not attach anything to a cost: gym_costs is the owner''s alone in part 700, and a foreign key is checked outside row-level security. The owner writes receipts through gym_documents_owner.';
+
+-- ▶ one-boolean-applied-to-a-quarter-it-was-not-true-in.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- One boolean, applied to a quarter it was not true in.
+--
+-- ── The defect ─────────────────────────────────────────────────────────────
+--
+-- `tenants.tax_registered` (boolean) and `tenants.tax_registration` (text) came
+-- in with part 701 and are CURRENT-STATE SINGLETONS. /tax reads them through
+-- `readGymTaxProfile`, renders `taxProfileLine`, and prints the answer above
+-- the figures for whichever period the picker is on — including periods that
+-- ended before the gym ever registered.
+--
+-- So a gym that registered in April shows, over its Q1 figures:
+--
+--     "This gym says it is registered, under the number below."
+--
+-- and the number is one that did not exist in January. Go the other way — a gym
+-- that deregistered in June — and every quarter it WAS registered in now reads
+-- "This gym says it is not registered for a tax on its sales", on the screen
+-- somebody is working from at a filing deadline. Neither sentence is a figure,
+-- which is the only reason this is not worse; both are statements about a
+-- business's legal standing, made about a period the stored fact says nothing
+-- about, on a document an accountant is being handed.
+--
+-- The rest of /tax already understands that a period is a period. `taxPeriod`
+-- builds a quarter out of three of this app's own months, `cutAtGym` puts its
+-- bounds on the gym's clock, `openMonthsIn` names the months of it that are
+-- still moving. Every figure on that page is scoped. The one fact that is not a
+-- figure was the one fact with no time on it at all.
+--
+-- ── What a row here is ─────────────────────────────────────────────────────
+--
+-- A STATEMENT somebody at this gym made about a stretch of time: from this day,
+-- until this day or still now, this business was registered under this number —
+-- or was not registered at all. Nothing is checked against any register; there
+-- is none this product could check, which is what part 701 and src/lib/gymTax.ts
+-- both say at length and neither this table nor the screens over it soften.
+--
+-- ── Absence is UNKNOWN, and stays unknown ──────────────────────────────────
+--
+-- A gym with no rows here has said nothing, and a period no row covers is a
+-- period nobody has answered for. That is deliberately NOT "not registered":
+-- `tenants.tax_registered` is nullable for exactly this reason ("Collapsing
+-- null into false would tell a registered gym's owner, in the confident voice,
+-- that their business is not registered"), and a table of dated statements has
+-- the same three answers per period rather than two.
+--
+-- It is also why there is NO BACKFILL. Every existing `tax_registered = true`
+-- is a fact with no date on it, and a backfilled row would have to invent one:
+-- `created_at` on the tenant is when the gym joined Repple, which is not when
+-- it registered for tax, and using it would manufacture exactly the false
+-- statement about Q1 this part exists to remove. The two columns stay where
+-- they are and stay readable — see §3.
+--
+-- ── Why the periods cannot overlap ─────────────────────────────────────────
+--
+-- Because a period covered by two statements has two answers, and a screen
+-- holding two answers either picks one (silently wrong half the time) or
+-- refuses (correct, and useless). The database refuses instead, at write time,
+-- when somebody can still fix it. btree_gist is already in this schema —
+-- part 86 brought it in for `sessions_no_double_booking` — so this costs
+-- nothing new.
+--
+-- ── Applying this ──────────────────────────────────────────────────────────
+--
+-- Additive. One new table, its policies, its grants. Nothing is dropped and
+-- nothing on `tenants` is touched, so /tax keeps working exactly as it does
+-- today until a screen starts reading this.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create extension if not exists btree_gist;
+
+-- ── 1. the statements ───────────────────────────────────────────────────────
+
+create table if not exists public.gym_tax_registrations (
+  id          uuid        primary key default gen_random_uuid(),
+  tenant_id   uuid        not null references public.tenants(id) on delete cascade,
+
+  -- Two values and not a boolean, for the reason `tenants.tax_registered` is
+  -- nullable: the third state is "nobody has said", and it is represented by
+  -- there being no row covering that day rather than by a null in a column.
+  -- A null here would be a statement that says nothing, which is not a
+  -- statement.
+  status      text        not null check (status in ('registered', 'not_registered')),
+
+  -- The number as somebody typed it. Held verbatim, never validated, never
+  -- matched against anything — part 701's own comment, and it is not softened
+  -- by being dated. 60 characters is the same ceiling `taxProfileBlockers`
+  -- already refuses past.
+  --
+  -- Optional even when registered: a gym that has registered and not yet been
+  -- given its number has said something true, and refusing to record it until
+  -- the certificate arrives would leave the period unstated — which is the
+  -- worse of the two.
+  registration text       check (registration is null or (btrim(registration) <> '' and length(registration) <= 60)),
+
+  -- The first day this was true, and the last. Both DATEs, both bare
+  -- `YYYY-MM-DD`, for part 700's reason and one more: a tax period boundary is
+  -- a calendar day in a jurisdiction, not an instant, and storing an instant
+  -- would put a registration that started on 1 April into 31 March for every
+  -- gym east of Greenwich.
+  --
+  -- `to_on` NULL means "and still", which is the ordinary case for the current
+  -- registration. It is not "unknown" — a caller that needs to say the end is
+  -- unknown records the period that IS known and leaves the rest uncovered,
+  -- which is the shape this table gives to every unanswered stretch.
+  from_on     date        not null,
+  to_on       date,
+
+  note        text        check (note is null or length(note) <= 500),
+  created_at  timestamptz not null default now(),
+  created_by  uuid        references public.profiles(id) on delete set null
+);
+
+alter table public.gym_tax_registrations drop constraint if exists gym_tax_registrations_dates;
+alter table public.gym_tax_registrations add constraint gym_tax_registrations_dates
+  check (to_on is null or to_on >= from_on);
+
+-- A period that says the gym was NOT registered cannot carry a number. Part
+-- 701 has the identical CHECK on the tenant columns and the reasoning carries
+-- over unchanged: "A record that says both 'not registered' and 'registered as
+-- GB123456789' is one nobody can act on, and it is the state a half-finished
+-- edit produces."
+alter table public.gym_tax_registrations drop constraint if exists gym_tax_registrations_number_shape;
+alter table public.gym_tax_registrations add constraint gym_tax_registrations_number_shape
+  check (status = 'registered' or registration is null);
+
+-- Two statements about one day are two answers, and a screen holding two
+-- answers about a tax period either picks one or refuses. Refused here instead,
+-- while whoever typed it is still looking at it.
+--
+-- `'[]'` — both ends inclusive. `to_on` is the LAST day the statement was true,
+-- not the day after, so a registration ending 2026-03-31 and one starting
+-- 2026-04-01 do not touch. An exclusive upper bound would have let a gym record
+-- two overlapping statements about 31 March and called them adjacent.
+alter table public.gym_tax_registrations drop constraint if exists gym_tax_registrations_no_overlap;
+alter table public.gym_tax_registrations add constraint gym_tax_registrations_no_overlap
+  exclude using gist (
+    tenant_id with =,
+    daterange(from_on, to_on, '[]') with &&
+  );
+
+-- The read is always "this gym's statements, oldest first" — the whole history
+-- is a handful of rows and is scanned in order to answer a period, so the index
+-- is the order rather than a filter.
+create index if not exists gym_tax_registrations_tenant_idx
+  on public.gym_tax_registrations (tenant_id, from_on, id);
+
+comment on table public.gym_tax_registrations is
+  'What this gym says about its own tax registration, as dated statements rather than one current flag. A period no row covers is one NOBODY HAS ANSWERED FOR — never "not registered". Nothing here is checked against any register, nothing is inferred from a country or a currency, and no tax figure is computed from any of it anywhere in this product.';
+comment on column public.gym_tax_registrations.status is
+  'registered | not_registered. There is no third value: "nobody has said" is the ABSENCE of a row covering that day, which is what lets a quarter before the gym registered read as unstated instead of as a denial.';
+comment on column public.gym_tax_registrations.to_on is
+  'The LAST day this statement was true, inclusive, or NULL for "and still". Not the day after — the no-overlap constraint is built on an inclusive range, so 31 March and 1 April are adjacent rather than overlapping.';
+comment on column public.gym_tax_registrations.registration is
+  'The number as somebody typed it. Never validated, never matched, never inferred. NULL on a not_registered period by CHECK, and allowed to be NULL on a registered one: a gym that has registered and not yet been given a number has still said something true.';
+
+-- ── 2. who may read and write it ────────────────────────────────────────────
+--
+-- The owner, and nobody else in the building — the same line part 700 draws
+-- around `gym_costs` and for a closely related reason: a registration number is
+-- what a business prints on its own invoices, and whether it is registered at
+-- all is a fact about the company rather than about the gym floor. No trainer
+-- needs it, no receptionist needs it, and a member reads nothing here.
+--
+-- UPDATE is granted, unlike `gym_costs`, and the difference is real rather than
+-- an oversight. A cost is an event that happened once; a registration period is
+-- an assertion with an open end, and CLOSING it — setting `to_on` the day a gym
+-- deregisters — is an ordinary edit to a row that stays true of the days before
+-- it. Forcing a delete-and-rewrite there would destroy `created_at` and
+-- `created_by` on a statement that never stopped being the same statement.
+alter table public.gym_tax_registrations enable row level security;
+
+drop policy if exists gym_tax_registrations_owner on public.gym_tax_registrations;
+create policy gym_tax_registrations_owner on public.gym_tax_registrations
+  for all
+  to authenticated
+  using (is_owner_of(tenant_id))
+  with check (is_owner_of(tenant_id));
+
+-- Named and dropped rather than merely never written, so a policy added by
+-- somebody who wanted the desk to see this cannot survive a rebuild.
+drop policy if exists gym_tax_registrations_staff_r on public.gym_tax_registrations;
+drop policy if exists gym_tax_registrations_member_r on public.gym_tax_registrations;
+
+-- RLS narrows a GRANT; it does not create one.
+grant select, insert, update, delete on public.gym_tax_registrations to authenticated;
+revoke all on public.gym_tax_registrations from anon;
+grant all on public.gym_tax_registrations to service_role;
+
+-- ── 3. the two columns on `tenants`, left exactly where they are ────────────
+--
+-- `tax_registered` and `tax_registration` are NOT dropped, NOT deprecated in
+-- the schema, and NOT backfilled from or into this table.
+--
+-- Dropping them would break /tax the moment this is applied, for every gym,
+-- and replace a sentence that is wrong about old quarters with no sentence at
+-- all. Backfilling them FROM here would mean choosing which statement is "the
+-- current one" in a column that cannot say as at when — the same singleton
+-- problem in a new place. Writing them INTO here would mean inventing a start
+-- date, which is the fabrication this part exists to prevent.
+--
+-- So they remain what they have always been: what this gym says about itself
+-- TODAY. A screen that has read this table answers a period from it; a screen
+-- that finds no statement covering the period says nobody has answered for it,
+-- and may still show the current flag as what the gym says NOW, labelled as
+-- that. src/lib/gymTaxHistory.ts holds both sentences and the test asserts they
+-- cannot be swapped.
+comment on column public.tenants.tax_registered is
+  'What this gym says about its registration TODAY. Current state, with no date on it — it says nothing about any past period, and a screen showing it above a quarter''s figures is making a claim the column cannot support. Dated statements live in gym_tax_registrations (part 2641).';
+
+-- ▶ money-the-gym-decided-not-to-collect-and-never-said-why.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Money the gym decided not to collect, and nothing recording why.
+--
+-- ── The defect ─────────────────────────────────────────────────────────────
+--
+-- `gym_invoices.status` has allowed 'void' and 'written_off' since part 29, and
+-- `owedOf` in src/lib/monthEnd.ts folds both into a bucket it calls `dropped`,
+-- under a comment that gets it exactly right:
+--
+--     "Money the gym has decided it will not collect is not money it is owed,
+--      and it is not money it took either"
+--
+-- So the amount leaves the receivables, leaves the takings, appears in a figure
+-- on the close as `droppedCents`, and the table carries NOTHING saying who
+-- decided that, when, or on what grounds. The only column that could hold it is
+-- `note`, which is the invoice's own description of what was billed — an owner
+-- who typed the reason there would be overwriting what the bill was for.
+--
+-- Every other decision of this size in this schema is already a recorded fact:
+--
+--   · `payroll_settlements.reversed_at` / `reversed_by` / `reverse_reason`
+--     (part 183), under a CHECK that refuses a reversal with no reason on it,
+--     and the column comment states the principle — "The row is NEVER deleted —
+--     a settlement that was recorded and then withdrawn is two facts, and
+--     deleting it leaves neither";
+--   · `payroll_adjustments.note`, `not null check (btrim(note) <> '')`,
+--     because "an adjustment with no reason on it is the line a coach queries
+--     and nobody can answer";
+--   · `gym_month_closes` refuses a reopen with no reason (part 182);
+--   · `gym_reconcile_marks` refuses an accepted exception with no reason
+--     (part 181), on the argument that "an exception silently taken off a
+--     reconciliation with nothing recorded is exactly the row somebody asks
+--     about later".
+--
+-- A bad debt is the same shape and a larger number. This part gives it the same
+-- three columns, named for the bucket the close already calls it.
+--
+-- ── Why this is a SECOND FACT and not an erasure ───────────────────────────
+--
+-- The house rule: a money amount that is written off, reversed or corrected is
+-- a second recorded fact, never an erasure. Part 183 is the established shape
+-- and this follows it, with one deliberate difference in the CHECK — see §2.
+--
+-- ── Why there is no `not null` on the forward direction ────────────────────
+--
+-- The obvious constraint is "every void or written-off invoice carries a
+-- reason". It is not written, because every gym running Repple today has such
+-- invoices with no reason on them — the column did not exist — and an
+-- `ALTER TABLE ADD CONSTRAINT` validates the rows that are already there. That
+-- statement would fail on the first gym it was applied to, and a schema part
+-- that cannot be applied protects nothing.
+--
+-- So the constraint runs the other way: a reason may not exist without a
+-- decision behind it, and a decision may not exist without a reason. Rows
+-- dropped before today carry neither, the screen reports them as
+-- "no reason recorded" rather than inventing one, and the writer in
+-- src/lib/invoiceWriteOff.ts is what makes new ones impossible.
+--
+-- ── Applying this ──────────────────────────────────────────────────────────
+--
+-- Additive. Three nullable columns, one CHECK that no existing row can fail,
+-- one partial index. No backfill — there is nothing to backfill FROM.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+alter table public.gym_invoices
+  add column if not exists dropped_at timestamptz;
+alter table public.gym_invoices
+  add column if not exists dropped_by uuid references public.profiles(id) on delete set null;
+alter table public.gym_invoices
+  add column if not exists drop_reason text;
+
+-- Part 183's CHECK, in the same words: a decision with no reason on it is the
+-- line somebody queries and nobody can answer.
+alter table public.gym_invoices drop constraint if exists gym_invoices_drop_has_why;
+alter table public.gym_invoices add constraint gym_invoices_drop_has_why
+  check (dropped_at is null or (drop_reason is not null and btrim(drop_reason) <> ''));
+
+-- And the mirror: a reason cannot stand on an invoice nobody dropped.
+alter table public.gym_invoices drop constraint if exists gym_invoices_why_has_drop;
+alter table public.gym_invoices add constraint gym_invoices_why_has_drop
+  check (drop_reason is null or dropped_at is not null);
+
+-- ── §2. what this deliberately does NOT constrain ───────────────────────────
+--
+-- There is no CHECK tying `dropped_at` to `status in ('void','written_off')`,
+-- and that is the one place this differs from part 183's shape on purpose.
+--
+-- An invoice that was written off and is later reopened — the member turns up
+-- and pays, the write-off was a mistake, the debt is sold on — moves its status
+-- back to 'open' or 'paid'. If the drop columns had to be cleared for that to
+-- be legal, reopening would ERASE the record that the gym once decided not to
+-- collect this money and why. That is precisely the erasure the house rule
+-- forbids and precisely what `reversed_at` exists to prevent on the payroll
+-- side.
+--
+-- So the three columns stay where they are and become history: "written off on
+-- 12 September because the member emigrated; reopened and paid on 4 October" is
+-- two facts about one invoice, both true, both on the row. The screen renders
+-- them as a sequence rather than as a contradiction, and
+-- src/lib/invoiceWriteOff.ts holds the rule that decides which sentence to
+-- print.
+--
+-- The forward direction — every dropped invoice has a reason — is held by the
+-- writer, not by the database, for the applicability reason in the header. It
+-- is the weaker half of the pair and it is the half that costs nothing when it
+-- is missing: an invoice with no reason recorded is REPORTED as one.
+
+comment on column public.gym_invoices.dropped_at is
+  'When the gym decided not to collect this. Set alongside a void or written-off status and NEVER cleared: an invoice that is written off and later reopened is two facts, and clearing this would leave neither. A row with this null and a dropped status was dropped before supabase/parts/2642 existed, and the screen says so rather than inventing a reason.';
+comment on column public.gym_invoices.drop_reason is
+  'Why the gym decided not to collect it, in the gym''s own words. Required by CHECK whenever dropped_at is set. This is NOT gym_invoices.note — that says what was billed, and an owner typing the reason there would overwrite it.';
+comment on column public.gym_invoices.dropped_by is
+  'The account that made the decision. NULL where that account has since been deleted — the decision stays, because a filed month must not lose its explanation when a person leaves.';
+
+-- The read is "which invoices did this gym decide not to collect, and when",
+-- newest decision first, which is what an accountant asks a year of the
+-- register. Partial, because the overwhelming majority of invoices are not
+-- dropped and have no business in it.
+create index if not exists idx_gym_invoices_dropped
+  on public.gym_invoices (tenant_id, dropped_at desc)
+  where dropped_at is not null;
+
+-- ── §3. the closed-month lock already covers this ───────────────────────────
+--
+-- Part 182 put `trg_gym_invoices_closed_month` on `insert or update of
+-- issued_on, amount_cents, status`, so writing an invoice off inside a month
+-- that has been signed off is ALREADY refused — the status is one of the three
+-- columns it watches, and this writer always moves the status. It is stated
+-- here rather than left to be rediscovered, and the trigger is deliberately not
+-- widened to name the new columns: doing so would refuse an owner correcting a
+-- typed reason on a closed month's invoice, which changes no figure anybody
+-- filed and is exactly the kind of repair that should stay possible.
+
+-- ▶ a-watch-you-unplug-does-not-erase-the-nights-it-measured.sql
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- A watch you unplug does not erase the nights it measured.
+--
+-- 154-a-night-a-watch-measured-outlives-the-read.sql exists because "the
+-- biggest number on the home screen changes for reasons the member cannot
+-- see". It keeps the nights a device measured so that a failed read, an expired
+-- token or a new handset cannot take somebody's sleep history away.
+--
+-- Then `disconnect()` in src/ui/wearables.tsx runs
+--
+--     delete from device_sleep_nights where user_id = … and provider = …
+--
+-- and every night that watch ever measured is gone, permanently, from one tap
+-- on the Devices screen. app/(client)/devices.tsx:357 says so out loud — "the
+-- connection ends AND the nights are removed" — and adds that an Alert is used
+-- rather than a toast because "reconnecting the watch does not bring the nights
+-- back". The warning is honest. The behaviour it is warning about is the exact
+-- disappearance part 154 was written to stop, reintroduced on the one path a
+-- member can take deliberately.
+--
+-- ── the argument for deleting, and what is actually load bearing in it ─────
+--
+-- The comment on the delete makes a real point: without it, "'disconnect' means
+-- the readings keep feeding the home screen from a device the client believes
+-- they have unplugged."
+--
+-- That is true of FUTURE readings and only of future readings. A disconnected
+-- provider is not synced, so it contributes no new nights; what the delete
+-- actually removes is the PAST — nights already measured, already shown, and
+-- already part of the record the member is looking at. Deleting history is not
+-- what stops a device reporting. It is what stops the member ever seeing what
+-- it reported.
+--
+-- So the two requirements are not in conflict once they are separated:
+--
+--   · the live table, which readiness and the Recovery week read, must empty
+--     for that provider the moment the member disconnects it;
+--   · what it held must still exist, so reconnecting restores it.
+--
+-- This is the shelf that makes both true. The rows move here on disconnect and
+-- move back on reconnect. Nothing about the live read changes, `disconnect()`
+-- keeps its delete and keeps its comment, and no night is destroyed by a tap.
+--
+-- ── what a row here is ───────────────────────────────────────────────────
+--
+-- Exactly a `device_sleep_nights` row, with the same constraints, plus the
+-- moment it was shelved. Same shape deliberately: a retired night that could
+-- hold something the live table would refuse — a zero duration, a basis nobody
+-- has a word for — is a night that cannot be restored, which makes the shelf a
+-- slower way of losing it.
+--
+-- It is NOT an audit log and NOT a second history. One row per member, per
+-- provider, per night, replaced if the same night is shelved twice. The live
+-- table is still the only place a night is read from.
+--
+-- ── why the primary key carries the provider and 154's does not ───────────
+--
+-- `device_sleep_nights` is keyed (user_id, night) because the merge has already
+-- chosen ONE figure for that night and "this is not a log". Here the choosing
+-- has already happened and what is being kept is whose it was: a member who
+-- disconnects a WHOOP and, a month later, an Oura must get each of them back on
+-- its own, and a shared (user_id, night) key would have the second disconnect
+-- overwrite the first one's night. The provider is part of the identity of a
+-- shelved row in a way it is not part of the identity of a live one.
+--
+-- ── restoring never overwrites a measurement ─────────────────────────────
+--
+-- Enforced in src/lib/retiredSleep.ts rather than here, because it is a rule
+-- about which rows to send and not about which rows are legal: a night the live
+-- table already holds is a night some device measured more recently than this
+-- shelf was written, and a restore that upserted over it would replace a
+-- current reading with an older one. The restore therefore fills only the
+-- nights that are ABSENT, and the test file asserts it.
+--
+-- ── the same three refusals part 154 proved ───────────────────────────────
+--
+-- Not re-proved against the live database here: this file is not applied by an
+-- agent (see the lane rules) and a claim of a rolled-back exploit transcript
+-- that nobody ran is worse than none. What IS claimed is that the policy,
+-- grants and constraints below are character-for-character the shape part 154
+-- proved, on a table with the same owner column and the same cascade — so the
+-- properties it demonstrated are properties of this one for the same reasons.
+-- Anything weaker than that would be asserting a result rather than reporting
+-- one. Before this reaches production it wants the same transcript part 154
+-- carries, run the same way.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists public.retired_device_sleep_nights (
+  -- Cascade, exactly as the live table does: a deleted account's sleep is
+  -- nobody's record, and a shelf that outlived the account would be the one
+  -- copy of it left standing.
+  user_id uuid not null references public.profiles(id) on delete cascade,
+
+  -- The local calendar night, as it was stored live. Copied, never re-derived:
+  -- re-computing a night from an instant here would move it across the date
+  -- line for every member west of Greenwich, which is the note part 154 puts on
+  -- this column.
+  night date not null,
+
+  -- The same bounds as the live column. See the header: a shelved night that
+  -- the live table would refuse cannot be restored.
+  minutes_asleep int not null check (minutes_asleep > 0 and minutes_asleep <= 1440),
+
+  -- Who said so. All three, all NOT NULL, for the reason part 154 gives: a
+  -- figure without its source cannot be checked by the person it is about.
+  provider text not null,
+  source_id text not null,
+  source_name text not null,
+
+  -- Which KIND of device, so a restored night still cannot look like
+  -- corroboration of a reading that is really itself seen twice.
+  family text not null,
+
+  basis text not null check (basis in ('asleep', 'in-bed')),
+
+  -- When Repple first stored the night. Carried across rather than re-stamped,
+  -- because it is a fact about the measurement's age and the member reads it
+  -- as one.
+  recorded_at timestamptz not null,
+
+  -- When it was shelved. A fact about our write, so it may have a default.
+  -- Kept because "disconnected in March" is the difference between a history
+  -- worth offering back and one nobody wants.
+  retired_at timestamptz not null default now(),
+
+  -- One answer per night per device. See the header for why the provider is in
+  -- the key here and not in the live table's.
+  primary key (user_id, provider, night)
+);
+
+-- The only read there is: this member's shelf for one provider. The primary key
+-- already indexes (user_id, provider, night), which serves that lookup and the
+-- ORDER BY night it is read with — so there is no second index here, and
+-- 145-an-index-twice-and-fifteen-policies-that-asked-per-row.sql is the reason
+-- that is stated rather than left for somebody to add one.
+
+comment on table public.retired_device_sleep_nights is
+  'Nights measured by a device the member has since disconnected, kept so that unlinking a watch ends the connection without destroying the history. Moved here on disconnect and moved back on reconnect; never read as sleep while it sits here. Private to the client, exactly as device_sleep_nights is — see 154.';
+
+comment on column public.retired_device_sleep_nights.retired_at is
+  'When the device was disconnected and this night was shelved. Not when it was measured — that is recorded_at, which is carried across unchanged.';
+
+alter table public.retired_device_sleep_nights enable row level security;
+
+-- `for all`, matching device_sleep_nights_own: the member is the only party to
+-- this table. They shelve their own nights on disconnect, read them back on
+-- reconnect and clear them once restored, and no coach, owner or staff role has
+-- any business in it — part 153's rule that a coach reads device sleep through
+-- the sharing switch and never through this table applies unchanged to a
+-- disconnected device's nights.
+drop policy if exists retired_device_sleep_nights_own on public.retired_device_sleep_nights;
+create policy retired_device_sleep_nights_own on public.retired_device_sleep_nights for all
+  using      (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+grant select, insert, update, delete on public.retired_device_sleep_nights to authenticated;
+revoke all on public.retired_device_sleep_nights from anon;

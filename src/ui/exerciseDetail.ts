@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { exerciseSlug } from '../lib/exerciseId';
 import { reportError } from '../lib/reportError';
 import { capLimit, capped } from '../lib/rowCap';
+import { catalogueMet } from '../lib/exerciseMet';
 import { useAuthRevision } from './authRevision';
 import { useCatalogueTranslations, useExerciseTranslation } from './catalogueTranslations';
 import { displayName, displayDescription, fallbackNote, type DisplayString } from '../lib/catalogueLocale';
@@ -46,6 +47,19 @@ export interface ExerciseDetail {
    *  there is no animation. An evaluation asset must never reach a release. */
   demoLicence: string | null;
   source: string | null;
+  /**
+   * How hard the catalogue rates the movement in multiples of rest — the input
+   * a calorie estimate for THIS movement needs, rather than for the session
+   * kind it happens to resemble.
+   *
+   * Populated on 601 of 608 rows and read by nothing until now: the select
+   * below did not name the column. Null on the rest, and null is a GAP —
+   * `src/lib/exerciseMet.ts` turns it into no figure at all rather than into
+   * the nearest literal from Train's picker, which is a MET about a different
+   * question. Read through `catalogueMet` rather than cast, because the column
+   * is `numeric(4,1)` and a Postgres numeric can arrive as a string.
+   */
+  met: number | null;
 }
 
 const strs = (v: unknown): string[] =>
@@ -106,7 +120,7 @@ export function useExerciseDetail(name: string | null | undefined) {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force, primary_muscles, secondary_muscles, instructions, tips, goals, tags, image_paths, animation_path, equipment_icon_path, demo_licence, source')
+        .select('id, name, muscle_group, is_cardio, description, category, equipment, level, mechanic, force, met, primary_muscles, secondary_muscles, instructions, tips, goals, tags, image_paths, animation_path, equipment_icon_path, demo_licence, source')
         .eq('id', id)
         .maybeSingle();
       if (error) { reportError('exerciseDetail.read', error, { id }); setDetail(null); setStatus('error'); return; }
@@ -140,6 +154,11 @@ export function useExerciseDetail(name: string | null | undefined) {
         equipmentIconPath: typeof data.equipment_icon_path === 'string' && data.equipment_icon_path ? data.equipment_icon_path : null,
         demoLicence: typeof data.demo_licence === 'string' && data.demo_licence ? data.demo_licence : null,
         source: data.source ?? null,
+        // Validated, not cast. `numeric(4,1)` reaches some deployments as a
+        // string, holds 0.0 quite happily, and an import that lost a decimal
+        // point would put 75 in it — all three of which `catalogueMet` turns
+        // into null rather than into a calorie figure.
+        met: catalogueMet(data.met),
       });
       setStatus('ready');
     } catch (e) {
@@ -250,6 +269,27 @@ export interface CatalogueRow {
    */
   synonyms: string[];
   /**
+   * The catalogue's own MET for this movement — see the note on
+   * `ExerciseDetail.met` above, and src/lib/exerciseMet.ts for what may and may
+   * not be done with it.
+   *
+   * On the LIST read and not only on the detail read, for the reason
+   * `primaryMuscles` is: a screen that has to answer "what did that movement
+   * cost" for every movement in somebody's history can either hold the column
+   * or make one detail read per distinct movement, and a member with forty
+   * movements in their log would make forty round trips to price one week.
+   *
+   * The cheapest column on the row by a distance, and the arithmetic is worth
+   * writing down because every other addition here had to justify itself the
+   * same way: `numeric(4,1)` is at most five characters, so with its key it is
+   * about eleven bytes a row and under seven kilobytes across the catalogue —
+   * against the 23 kB `tags` costs and the 199 kB `instructions` would.
+   *
+   * Null on 7 of 608 rows (the figure in the header of src/lib/exerciseMet.ts),
+   * and null is a gap rather than a movement that costs nothing.
+   */
+  met: number | null;
+  /**
    * The name to PUT ON SCREEN, in the reader's language where we have it.
    *
    * `name` above is untouched and stays the identity: it is what the id is the
@@ -339,7 +379,7 @@ export function useExerciseCatalogue() {
     try {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, muscle_group, equipment, level, mechanic, force, goals, tags, primary_muscles, secondary_muscles, synonyms, image_paths, equipment_icon_path, source')
+        .select('id, name, muscle_group, equipment, level, mechanic, force, goals, tags, met, primary_muscles, secondary_muscles, synonyms, image_paths, equipment_icon_path, source')
         .order('name', { ascending: true })
         .limit(capLimit());
       if (error) { reportError('exerciseCatalogue.read', error); setStatus('error'); return; }
@@ -380,6 +420,10 @@ export function useExerciseCatalogue() {
         // `strs` drops blanks, so a row whose array holds an empty string does
         // not acquire a synonym that matches every search term ever typed.
         synonyms: strs(r.synonyms),
+        // Through `catalogueMet` for the same reason the detail read is: 0.0,
+        // an out-of-range import and the string form of a numeric all have to
+        // become null here, or they become a calorie figure downstream.
+        met: catalogueMet(r.met),
       })));
       // 'partial' rather than 'ready': the catalogue is 608 rows against a cap
       // of 1000 (checked live, 6 Sep 2026), so this is quiet today and will not

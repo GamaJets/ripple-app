@@ -53,6 +53,9 @@ import { useTheme } from '../../src/ui/components';
 import { Icon } from '../../src/ui/Icon';
 import { Rule, Section, SectionHead, Cta, Ghost, Notice, PartialRead, Flag } from '../../src/ui/kit';
 import { capLimit, capped } from '../../src/lib/rowCap';
+// The reader's locale, resolved once with a fallback — never a literal tag.
+// See scripts/check-locale.mjs for the 2,860 kcal day that read as 2.86.
+import { appLocale } from '../../src/lib/locale';
 import { sp, layout, radius, hairline, elevation, type as ty, value } from '../../src/theme/scale';
 import { useClientData } from '../../src/ui/clientData';
 import { useInvites } from '../../src/ui/invites';
@@ -77,7 +80,25 @@ import { COACHED_MODES, COACHED_MODE_SHORT, COACHING_MODE_NOTE, type CoachedMode
 // is your coach.
 import { fetchMyCoach, type CoachRef } from '../../src/lib/photoShare';
 import { endCoaching, leaveCoachPrompt, leaveOutcome, coachLabel, replaceCoachNote } from '../../src/lib/endCoaching';
-import type { LoadStatus } from '../../src/ui/loadStatus';
+import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
+// ── What became of the coaches this member asked ──────────────────────────
+//
+// `coach_requests` was read on this screen as `select('trainer_id')` filtered to
+// 'pending', for one purpose: greying out a button. `status`, `note`,
+// `responded_at` and `source` were never read by anything, so a request that was
+// declined left no trace anywhere in the client app — and the push about it
+// (COACH_DECLINED_ROUTE in src/lib/notifyCopy.ts) routes HERE, to a screen that
+// listed nothing about it. Miss the banner and the answer was gone.
+//
+// The narrow pending read below is kept and is not a duplicate of this one. It
+// feeds `sent`, which is also set optimistically the moment a request is made,
+// so it is local state about this session rather than a second copy of the
+// history.
+import { fetchMyCoachRequests, type MyCoachRequestRow } from '../../src/ui/myCoachRequests';
+import {
+  COACH_REQUEST_LABEL, coachRequestAnswerLine, coachRequestLine, coachRequestSourceNote,
+  coachRequestWaitingNote, coachRequestsUnreadNote, myCoachRequestsNewestFirst, openCoachRequests,
+} from '../../src/lib/coachRequestOutcome';
 import { fetchCredentials, fetchRatingSummaries, fetchReviews } from '../../src/ui/reviews';
 import {
   credentialBadge, credentialLine, credentialState, expiryLine, sortCredentials,
@@ -229,6 +250,17 @@ export default function FindTrainer() {
   // and an unreadable list of requests are different things: the first means
   // "ask this coach", the second means "we don't know whether you already did".
   const [pendingUnknown, setPendingUnknown] = useState(false);
+  // ── every request this member has made, and what became of it ────────────
+  //
+  // Its own read and its own status, deliberately not folded into the directory
+  // effect above: a directory that loads and a request history that does not is
+  // a real state, and the one that must never be inferred from the other is
+  // "you have asked nobody". The names come back separately again, because a
+  // coach who has left the directory cannot be named at all — see
+  // `MyCoachRequestRow.coachName`.
+  const [myReqs, setMyReqs] = useState<MyCoachRequestRow[]>([]);
+  const [myReqStatus, setMyReqStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
+  const [myReqNames, setMyReqNames] = useState(true);
   // The trust surface of a listing. Both are read for the whole page at once
   // and both carry their own status: a directory that loads and a set of
   // ratings that does not is a real, common state, and the coaches must still
@@ -283,6 +315,23 @@ export default function FindTrainer() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Keyed on `attempt`, which is the counter every "Try Again" on this screen
+  // bumps and which pull-to-refresh bumps too — so an answer that arrived while
+  // this screen was open is one pull away, rather than waiting for the app to
+  // be killed. `cancelled` because both awaits below can outlive the screen.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const out = await fetchMyCoachRequests();
+      if (cancelled) return;
+      setMyReqs(out.rows);
+      setMyReqStatus(out.status);
+      setMyReqNames(out.namesRead);
+    })();
+    return () => { cancelled = true; };
+  }, [attempt]);
+
   const [codeBusy, setCodeBusy] = useState(false);
   // ── The way out ────────────────────────────────────────────────────────────
   //
@@ -867,6 +916,28 @@ export default function FindTrainer() {
   const credsFor = (id: string): Credential[] | null =>
     credStatus === 'ready' && creds ? (creds[id] ?? []) : null;
 
+  /**
+   * A stored instant as a day the reader recognises, or null.
+   *
+   * Null and never a dash: every caller below draws the whole line or none of
+   * it, because a sentence built around a value that would not read is the
+   * defect scripts/check-prose.mjs exists for. The locale is the READER's —
+   * `appLocale()`, never a literal — and the parse is `Date.parse` on a
+   * timestamptz, which is a full instant rather than the bare `YYYY-MM-DD` this
+   * codebase compares as a string.
+   */
+  const stamp = (iso: string | null): string | null => {
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) return null;
+    return new Date(ms).toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' });
+  };
+
+  /** The member's own history, newest question first. Sorted here as well as in
+   *  the query because the cap takes a prefix of the query's order, and the
+   *  list has to be right once anything at all is done to it. */
+  const listedRequests = useMemo(() => myCoachRequestsNewestFirst(myReqs), [myReqs]);
+
   const G = layout.gutter;
 
   return (
@@ -996,6 +1067,103 @@ export default function FindTrainer() {
               </Notice>
             ))}
           </View>
+        ) : null}
+
+        {/* ── what became of the coaches you asked ─────────────────────────
+            The surface a refused request did not have. src/lib/notifyCopy.ts
+            says why it matters more than the accepted half: "an accepted client
+            eventually notices their Coach screen has filled in, while a
+            declined one sees exactly what they saw yesterday — a request they
+            believe is still pending". The push about that decline routes to
+            this screen, and until now this screen said nothing about it.
+
+            Above the code field and the directory because it is the fact the
+            rest of the screen is relative to: whether asking somebody else is
+            the thing to do next depends on what the last answer was.
+
+            Drawn whenever there is anything to say OR any doubt about whether
+            there is — `myReqStatus !== 'ready'` keeps the failed read visible.
+            A member with no history and a landed read sees nothing, which is
+            the one case where silence is a true answer. */}
+        {USE_SUPABASE && (myReqStatus !== 'ready' || myReqs.length > 0) ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Coaches You’ve Asked" />
+              {myReqStatus === 'error' ? (
+                /* Not "you have asked nobody". The read failed, and the member
+                   who most needs this section is the one waiting on an answer —
+                   telling them they have no requests is what sends them off to
+                   ask a second coach. */
+                <Flag tone={t.warn}>{coachRequestsUnreadNote('error')}</Flag>
+              ) : myReqStatus === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3 }}>{coachRequestsUnreadNote('loading')}</Text>
+              ) : (
+                <>
+                  {myReqStatus === 'partial' ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>{coachRequestsUnreadNote('partial')}</Flag>
+                  ) : null}
+                  {/* A name we could not ASK about is not the same as a coach
+                      RLS will not name, and the rows read differently for it:
+                      under this flag every "the coach you asked" is our end
+                      rather than theirs. */}
+                  {!myReqNames ? (
+                    <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>
+                      We couldn’t read the coaches’ names just now, so these say what happened without saying who.
+                    </Flag>
+                  ) : null}
+                  {listedRequests.map((r, i) => {
+                    const answered = coachRequestAnswerLine(r, r.coachName, stamp(r.respondedAt));
+                    const asked = stamp(r.createdAt);
+                    const how = coachRequestSourceNote(r.source);
+                    return (
+                      <View key={r.id}>
+                        {i ? <Rule /> : null}
+                        <View style={{ paddingVertical: sp.md }}>
+                          <Text style={{ ...ty.micro, color: t.ink3 }}>{COACH_REQUEST_LABEL[r.status]}</Text>
+                          {/* Never a dash as the subject of the row. A coach who
+                              has left the directory cannot be named here at all
+                              and this is still true of them. */}
+                          <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: 2 }}>
+                            {r.coachName ?? 'A coach you asked'}
+                          </Text>
+                          <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>{coachRequestLine(r, r.coachName)}</Text>
+                          {/* Who refused it and when. `responded_at` has been
+                              stamped since answering was written and read by
+                              nobody: "declined" with no date reads as this
+                              morning however old it is. */}
+                          {answered ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{answered}</Text>
+                          ) : null}
+                          {/* Only where there is a readable instant. A sentence
+                              assembled around a missing value is worse than one
+                              that is not drawn — see scripts/check-prose.mjs. */}
+                          {asked ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>You asked on {asked}.</Text>
+                          ) : null}
+                          {how ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{how}</Text>
+                          ) : null}
+                          {r.note ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>You said: {r.note}</Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {/* Only over a whole read. A count off a truncated one is a
+                      figure about an unknown fraction of the set — see isWhole
+                      in src/ui/loadStatus.ts. */}
+                  {isWhole(myReqStatus) && listedRequests.length ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                      {coachRequestWaitingNote(openCoachRequests(listedRequests).length)
+                        ?? 'No coach still has a request of yours outstanding.'}
+                    </Text>
+                  ) : null}
+                </>
+              )}
+            </Section>
+          </>
         ) : null}
 
         <Rule />

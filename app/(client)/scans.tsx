@@ -35,8 +35,15 @@
 // them in that unit, and every figure printed back — including the "your stats
 // updated" message — reads in it too. Body fat stays a percentage throughout.
 //
-// One table is deliberately NOT converted; see the note above the
-// metric-by-metric section further down.
+// The body-composition table used to be the exception — deliberately left in
+// kilograms whatever the member read in, on the argument that it is a
+// transcription of a printout and that whole pounds cannot carry a 0.01 kg
+// segmental reading. The second half of that was true and is now written down
+// as a rule: src/lib/compositionUnit.ts carries the finer grain those readings
+// need and agrees with `weightIn` everywhere the two could be compared, so
+// there is one answer per figure and not two. The masses convert; the litres,
+// the kcal, the level and the score do not, because they are not masses, and
+// each says which it is by its own declared unit rather than by its name.
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { View, Text, Pressable, Image, TextInput, ScrollView, Modal, Alert, Linking, KeyboardAvoidingView, Platform } from 'react-native';
@@ -106,7 +113,12 @@ import {
   SCAN_REFUSED_TITLE, SCAN_REFUSED_NOTE, SCAN_RECORD_FAILED_TITLE, SCAN_RECORD_FAILED_NOTE,
   type ScanSheetAnswer,
 } from '../../src/lib/scanSheetConsent';
-import { trendsByGroup, compositionInsights, type ScanMetrics } from '../../src/lib/inbodyMetrics';
+import { trendsByGroup, compositionInsights, metricIsProgress, type ScanMetrics } from '../../src/lib/inbodyMetrics';
+// The finer rule for pounds that let this screen's one unconverted table be
+// converted at all. See its header for the grain each metric is printed at.
+import {
+  isConvertibleMass, compositionUnitOf, compositionDecimals, compositionIn, compositionDeltaIn,
+} from '../../src/lib/compositionUnit';
 import { deltaLabel, movementIsProgress } from '../../src/lib/deltaLabel';
 import { focusToGroups, recommendedExercises } from '../../src/lib/focus';
 import { listProgressPhotos, uploadProgressPhoto, deleteProgressPhoto, comparePair, photosNote, missingFileCount, type ProgressPhoto } from '../../src/lib/progressPhotos';
@@ -145,6 +157,10 @@ import { MuscleBody } from '../../src/ui/MuscleBody';
 import { sessionsOf, trainingBoard } from '../../src/lib/clientTraining';
 import { areaLabel } from '../../src/lib/injuries';
 import { yearsAround } from '../../src/lib/scanYears';
+// Correcting the DATE on a scan: where the wheel has to sit to be showing a
+// stored date, what the wheel is pointing at, and what moving this scan to
+// that day would actually do to the figures the rest of the app reads.
+import { scanDay, wheelPosition, isoFromWheel, planDateMove, daysInMonth } from '../../src/lib/scanDateEdit';
 import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
 
 // The twelve month names, in the reader's own language, for the date WHEEL —
@@ -163,7 +179,10 @@ import { END_ALIGN, FORWARD_ICON } from '../../src/ui/direction';
 // runs, and this is read per cell of a scrolling wheel.
 const MONTHS = monthNamesShort();
 const ITEM_H = 42, VISIBLE = 5;
-const daysIn = (m: number, y: number) => new Date(y, m + 1, 0).getDate();
+// The calendar both date wheels ask how long a month is — the Add sheet's and
+// the correction sheet's. One rule, in src/lib/scanDateEdit.ts beside the
+// clamp that stops a wheel left on the 31st producing a 31st of February.
+const daysIn = daysInMonth;
 
 // The OCR key is NOT in the app. It used to be
 //   const OCR_KEY = process.env.EXPO_PUBLIC_OCR_API_KEY || 'helloworld';
@@ -731,6 +750,24 @@ export default function Scans() {
     return Math.max(0, ys.indexOf(now.getFullYear()));
   });
   const [showDate, setShowDate] = useState(false);
+
+  // ── the correction sheet's own date wheel ──────────────────────────────
+  //
+  // Its own state, not the Add sheet's. Sharing one wheel between the two would
+  // mean opening a scan from March to check a digit silently re-dated the scan
+  // you were about to add — and the Add sheet keeps its date across openings on
+  // purpose, so the two genuinely want different values at the same time.
+  //
+  // `eDate` is the scan's stored day, held so the sheet can tell a real move
+  // from the wheel simply being where it was left. Null means the stored value
+  // could not be read as a date at all, and the sheet then offers no date edit
+  // rather than offering today.
+  const [eDate, setEDate] = useState<string | null>(null);
+  const [eYears, setEYears] = useState<number[]>(() => yearsAround(new Date()));
+  const [eDY, setEDY] = useState(0);
+  const [eDM, setEDM] = useState(0);
+  const [eDD, setEDD] = useState(0);
+  const [eShowDate, setEShowDate] = useState(false);
 
   // Never `years[dY]` bare: a widen can move the index, and an undefined year
   // reaches `daysIn` as NaN and renders "NaN" where a date should be.
@@ -1428,7 +1465,12 @@ export default function Scans() {
   const chrono = [...scans].sort((a, b) => Date.parse(a.takenAt) - Date.parse(b.takenAt));
   const latest = chrono[chrono.length - 1];
   const wsv = cd.weightSeries.map((x) => x.v);
-  const mInsights = compositionInsights(cd.scans);
+  // In the member's own unit, like every other figure on this screen. The
+  // summary line and the table beneath it have to be told the same thing: a
+  // 0.2 kg drop in fat mass is not a pound, so to a pounds reader this line
+  // must not say "Fat Mass improving" over a row that reads "no change".
+  // src/lib/inbodyMetrics.ts buckets on the converted figure for that reason.
+  const mInsights = compositionInsights(cd.scans, wu);
   // The same four headings, in the same order, as app/(trainer)/client-body.tsx
   // now draws for the coach — assembled once in src/lib/inbodyMetrics.ts rather
   // than filtered into shape here and again there.
@@ -1445,7 +1487,7 @@ export default function Scans() {
   /** The scan being corrected, resolved fresh so a deleted row closes the sheet. */
   const editing = editId ? cd.scans.find((x) => x.id === editId) ?? null : null;
 
-  const openEdit = (sc: { id: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number | null }) => {
+  const openEdit = (sc: { id: string; takenAt: string; weightKg: number; bodyFatPct: number; skeletalMuscleKg: number | null }) => {
     // Pre-filled in the client's OWN unit, through the same converter the Add
     // sheet fills from a device reading. A pounds reader shown the stored
     // kilograms would "correct" a figure that was never wrong and store the
@@ -1454,8 +1496,33 @@ export default function Scans() {
     setEWt(fieldFromKg(sc.weightKg));
     setEBf(String(sc.bodyFatPct));
     setESm(sc.skeletalMuscleKg != null ? fieldFromKg(sc.skeletalMuscleKg) : '');
+    // The date wheel opens ON the scan's own date, which means the year list
+    // has to be widened to contain it BEFORE it is indexed into. A scan dated
+    // outside the ordinary window is otherwise a date the wheel cannot show —
+    // and a wheel that cannot show the date it was opened on saves whatever it
+    // happened to be showing instead. See src/lib/scanYears.ts, where that
+    // exact failure is written up.
+    //
+    // Null leaves `eDate` alone, and the sheet then says the date cannot be
+    // corrected rather than defaulting to today. An unreadable stored date is
+    // not a reason for the app to decide when something happened.
+    const stored = scanDay(sc.takenAt);
+    const ys = yearsAround(now, parseInt(stored.slice(0, 4), 10) || null);
+    const pos = wheelPosition(ys, stored);
+    setEDate(pos ? stored : null);
+    if (pos) { setEYears(pos.years); setEDY(pos.yearIndex); setEDM(pos.month); setEDD(pos.day); }
     setEditId(sc.id);
   };
+
+  // Never `eYears[eDY]` bare, for the reason the Add wheel gives: a widen can
+  // move the index, and an undefined year reaches the calendar as NaN and
+  // renders "NaN" where a date should be.
+  const eYear = eYears[eDY] ?? now.getFullYear();
+  const eWheelISO = () => isoFromWheel(eYear, eDM, eDD);
+  // What moving this scan there would actually do — named here so the sheet,
+  // the confirmation and the save all read the same answer rather than each
+  // working it out. Only meaningful under a whole read; see `eMove` at its use.
+  const eMove = editing ? planDateMove(cd.scans, editing.id, eWheelISO()) : null;
 
   const saveEdit = async () => {
     if (!editing || eBusy) return;
@@ -1471,8 +1538,50 @@ export default function Scans() {
     // leaving it in place forever.
     const mNum = weightToKg(eSm, wu);
     const m = eSm.trim() ? (mNum != null && mNum > 0 ? mNum : null) : null;
+    // ── the date, and the consequence said before it happens ──────────────
+    //
+    // Only sent when it actually moved, so an ordinary digit correction writes
+    // exactly the columns it always did. `eMove.changed` is a STRING comparison
+    // of two bare 'YYYY-MM-DD' values — `taken_at` is a postgres DATE, and
+    // parsing one is how this screen's captions came to be a day out west of
+    // Greenwich.
+    const move = eDate != null && eMove != null && eMove.changed ? eMove : null;
+    const toISO = move ? eWheelISO() : null;
+    if (move && scansWhole) {
+      // Two things only a whole read knows, and both change what the member is
+      // agreeing to. Under a partial or failed read `cd.scans` is a fragment
+      // and neither claim is available, so neither is made — the save simply
+      // goes ahead, exactly as it does for a weight.
+      const warn = move.handsOverNewest
+        ? 'This is your most recent scan, and moving it back makes an earlier one the most recent instead. Your weight, body fat and daily calorie and protein targets will come from that scan afterwards.'
+        : move.becomesNewest && !move.wasNewest
+          ? 'Moving this scan forward makes it your most recent one, so your weight, body fat and daily calorie and protein targets will come from it afterwards.'
+          : null;
+      const clash = move.collidesWith
+        ? 'You already have a scan on that date. Your history shows one reading per day, so only one of the two will be the one the app reads.'
+        : null;
+      if (warn || clash) {
+        const proceed = await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Move this scan?',
+            [`${fmt(editing.takenAt)} becomes ${fmt(toISO ?? '')}.`, warn, clash].filter(Boolean).join(' '),
+            [
+              { text: 'Keep the Date', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Move It', onPress: () => resolve(true) },
+            ],
+            // Dismissing the question is not a quiet yes, for the same reason
+            // the sheet-consent question on this screen says so about itself.
+            { onDismiss: () => resolve(false) },
+          );
+        });
+        if (!proceed) return;
+      }
+    }
     setEBusy(true);
-    const ok = await cd.updateScan(editing.id, { weightKg: w, bodyFatPct: f, skeletalMuscleKg: m });
+    const ok = await cd.updateScan(editing.id, {
+      ...(toISO ? { takenAt: toISO } : null),
+      weightKg: w, bodyFatPct: f, skeletalMuscleKg: m,
+    });
     setEBusy(false);
     if (!ok) {
       // The sheet stays open with the corrected numbers in it. Closing it would
@@ -1481,6 +1590,15 @@ export default function Scans() {
       Alert.alert('Not saved', 'That correction could not be saved, so the scan on your record is unchanged and so are your targets. Your numbers are still here — try again in a moment.');
       return;
     }
+    // A moved date changes the ORDER of the history, and the order is what
+    // every "most recent" figure in this app is read off — `cd.scans[length-1]`
+    // appears on this screen alone in six places. The provider applies the
+    // patch to the row it already holds, in place, so until the list is read
+    // again the scan sits where it used to sit with its new date on it: the
+    // screen would show the correction and go on treating the wrong scan as the
+    // newest. Re-read rather than re-sort here, because the server's ordering is
+    // the one the rest of the app will see on its next launch anyway.
+    if (toISO) cd.reload();
     setEditId(null);
   };
 
@@ -2038,28 +2156,39 @@ export default function Scans() {
         {mByGroup.length > 0 && (<>
           <Rule />
           <Section>
-            {/* Deliberately left in the units the InBody sheet itself printed.
-                This table is a transcription of a report the client is holding,
-                and it mixes kilograms with litres, kcal, points and a visceral
-                fat "level" — and its segmental lean masses are carried to two
-                decimals, a grain of 0.01 kg that whole pounds (the honest grain
-                for a body weight, see src/lib/units.ts) cannot represent at all.
-                Converting these would need a second, finer rule for pounds than
-                the rest of the app uses, and two rules for the same unit is how
-                a client ends up seeing the same reading two ways. */}
+            {/* ── the table that used to be the exception ──────────────────
+                This was left in the units the InBody sheet printed, on an
+                argument that was half right: the table mixes kilograms with
+                litres, kcal, points and a visceral fat "level", and its
+                segmental lean masses are carried to two decimals — a grain of
+                0.01 kg that whole pounds, the honest grain for a BODY weight
+                (src/lib/units.ts), cannot represent at all. Converting them
+                needed a second, finer rule for pounds, and two rules for one
+                unit is how a client ends up seeing the same reading two ways.
+
+                So the second rule was written down instead of avoided.
+                src/lib/compositionUnit.ts prints the finest decimal place whose
+                step is still no finer than the grain of the stored reading, and
+                that lands on exactly what `weightIn` already does wherever the
+                two could be compared — a one-decimal kilogram is whole pounds
+                under both. It is finer only where the record is finer. No
+                figure in this app is printed at two grains, which is the thing
+                the old argument was actually protecting.
+
+                What still does not convert: a litre of body water is a volume
+                the sheet reports as a volume, a BMR is energy, and a level and
+                a score are neither. Each metric says which it is through its own
+                declared unit rather than through the shape of its key name. */}
             <SectionHead title="Body Composition" note="Latest vs previous" />
-            {/* The units, said out loud.
-                The comment above argues why this table is not converted, and
-                that argument is sound — but it is a comment, and a member
-                reading 163 lb at the top of this screen and 11.8 kg here has
-                been given no way to know the difference is deliberate. It reads
-                as an app that cannot keep its own units straight, which is
-                exactly what it was reported as. So the screen says what the
-                comment says. */}
+            {/* The units, said out loud — because half of this table converts
+                and half of it cannot, and a member reading 26 lb of fat mass
+                above 41 L of body water has no way to know which of those is a
+                choice. The sentence changes with the member's own unit rather
+                than describing one of the two cases to everybody. */}
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
-              Copied from your InBody sheet in the units it printed — kilograms,
-              litres and its own scores — so these lines match the paper in your
-              hand. The weight and muscle figures above are in your own unit.
+              {wu === 'kg'
+                ? 'Read from your InBody sheet. The masses are in kilograms, as it printed them; the water is in litres and the level, score and BMR are its own.'
+                : 'The masses are converted to pounds, so they read the way the rest of your app does — your sheet prints them in kilograms. Body water stays in litres, and the level, score and BMR are the sheet’s own figures.'}
             </Text>
             {(mInsights.improving.length > 0 || mInsights.watch.length > 0 || mInsights.balance.length > 0) && (
               <View style={{ marginBottom: sp.lg }}>
@@ -2081,7 +2210,36 @@ export default function Scans() {
             {mByGroup.map((grp) => (
               <View key={grp.group} style={{ marginBottom: sp.lg }}>
                 <Text style={{ ...ty.micro, color: t.ink3, marginBottom: sp.sm }}>{grp.group}</Text>
-                {grp.items.map((it) => (
+                {grp.items.map((it) => {
+                  // ── this row, in the member's own unit ──────────────────
+                  //
+                  // `metricTrends` works in the unit the record STORES, which
+                  // is right: it is read by the coach's screen and by the
+                  // report builder as well as by this one, and a shared rule
+                  // that had already picked a reader's unit could not serve
+                  // all three. The conversion happens here, once per row, and
+                  // the metric's own declared unit decides whether it happens
+                  // at all — a litre of body water is not a mass.
+                  const kgDp = it.def.decimals ?? 0;
+                  const mass = isConvertibleMass(it.def.unit);
+                  const dp = mass ? compositionDecimals(kgDp, wu) : kgDp;
+                  const rowUnit = compositionUnitOf(it.def.unit, wu);
+                  const shown = mass ? (compositionIn(it.latest, wu, kgDp) ?? it.latest) : it.latest;
+                  // The SPAN converted once, never the two readings converted
+                  // and subtracted. A real 0.4 kg gain read off two separately
+                  // rounded pounds figures is "1 lb" at one point on the scale
+                  // and nothing at all two hundred grams further up, which is
+                  // the app reporting its own rounding as a result.
+                  const shownDelta = mass ? compositionDeltaIn(it.delta, wu, kgDp) : it.delta;
+                  // `it.good` is computed against the stored kilogram and is
+                  // the wrong verdict twice over here: it would mark a movement
+                  // this member cannot see, and it reads fat mass off the
+                  // metric's fixed direction — which paints the accent dot on
+                  // somebody deliberately building. Their own goal decides that
+                  // one; see MetricDef.goalMetric.
+                  const good = metricIsProgress(it.def, shownDelta, cd.goal, dp);
+                  const series = mass ? it.series.map((v) => compositionIn(v, wu, kgDp) ?? v) : it.series;
+                  return (
                   <View key={String(it.def.key)}>
                     <Pressable onPress={() => { if (it.series.length >= 2) setMxOpen(mxOpen === String(it.def.key) ? null : String(it.def.key)); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: sp.sm, borderBottomWidth: hairline, borderBottomColor: t.ring }}>
                       <Text style={{ ...ty.label, color: t.ink2 }}>{it.def.label}{it.series.length >= 2 ? (mxOpen === String(it.def.key) ? '  ▴' : '  ▾') : ''}</Text>
@@ -2094,12 +2252,14 @@ export default function Scans() {
                             separator in the reader's own language, which a bare
                             interpolation cannot: a German handset showed 3.42 kg
                             of left arm where 3,42 is what that reader parses.
-                            `decimals` is the metric's own grain, so a whole
-                            figure still looks whole. */}
-                        <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{numUpTo(it.latest, it.def.decimals ?? 0)} {it.def.unit}</Text>
-                        {it.delta != null && it.delta !== 0 ? (
+                            `dp` is the grain this figure is honest to in the
+                            unit it is being read in, so a whole figure still
+                            looks whole and a limb keeps the digit the record
+                            has for it. */}
+                        <Text style={{ ...ty.label, ...numeric, fontWeight: '500', color: t.ink }}>{numUpTo(shown, dp)} {rowUnit}</Text>
+                        {shownDelta != null && shownDelta !== 0 ? (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 52, justifyContent: 'flex-end' }}>
-                            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: it.good == null ? t.ink3 : it.good ? t.brand : t.warn }} />
+                            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: good == null ? t.ink3 : good ? t.brand : t.warn }} />
                             {/* Through `deltaLabel` rather than interpolating
                                 the number. A positive got a '+' written here
                                 and a negative got whatever JS renders, which is
@@ -2107,9 +2267,17 @@ export default function Scans() {
                                 while the summary line six rows above it, which
                                 already goes through the helper, showed "−1"
                                 with the real minus. Two different characters
-                                for the same idea, in one screenful. */}
+                                for the same idea, in one screenful.
+
+                                It carries its own unit now that it is a
+                                converted figure. The reading beside it says
+                                "lb" and this said "−3", which is a number the
+                                reader has to assume shares a unit with its
+                                neighbour — and on the one screen where half the
+                                rows convert and half do not, that assumption is
+                                exactly what must not be asked of them. */}
                             <Text style={{ ...ty.caption, ...numeric, color: t.ink2 }}>
-                              {deltaLabel(it.delta, { since: null, decimals: it.def.decimals ?? 0 })}
+                              {deltaLabel(shownDelta, { since: null, decimals: dp, unit: rowUnit })}
                             </Text>
                           </View>
                         ) : (
@@ -2118,10 +2286,11 @@ export default function Scans() {
                       </View>
                     </Pressable>
                     {mxOpen === String(it.def.key) && it.series.length >= 2 ? (
-                      <View style={{ paddingVertical: sp.sm }}><Spark data={it.series} h={54} /></View>
+                      <View style={{ paddingVertical: sp.sm }}><Spark data={series} h={54} /></View>
                     ) : null}
                   </View>
-                ))}
+                  );
+                })}
               </View>
             ))}
           </Section>
@@ -2361,7 +2530,7 @@ export default function Scans() {
                   `Scan from ${fmt(s.takenAt)}`,
                   weightLabel(s.weightKg, wu),
                   `${s.bodyFatPct} percent body fat`,
-                ].filter(Boolean).join(', ') + '. Correct or delete it.'}
+                ].filter(Boolean).join(', ') + '. Correct its figures or its date, or delete it.'}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md, paddingVertical: sp.md, borderBottomWidth: i < arr.length - 1 ? hairline : 0, borderBottomColor: t.ring }}>
                 {s.image ? <Image source={{ uri: s.image }} style={{ width: 40, height: 40, borderRadius: radius.sm }} /> : <View style={{ width: 40, height: 40, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}><Icon name="chart" size={16} color={t.ink3} /></View>}
                 <View style={{ flex: 1 }}>
@@ -2553,16 +2722,56 @@ export default function Scans() {
             </Field>
           </View>
 
-          {/* The date is deliberately not editable here. A scan's date is what
-              decides whether it is the one the meal plan follows, and moving it
-              is a different act from fixing a digit — one that can silently
-              hand the client's targets to a different reading. Deleting and
-              re-adding says out loud what changing the date would do quietly. */}
+          {/* ── the date, which used to be the one thing that could not be
+              corrected ───────────────────────────────────────────────────
+              The old note here said a scan's date "is what decides whether it
+              is the one the meal plan follows", that moving it "can silently
+              hand the client's targets to a different reading", and that
+              deleting and re-adding "says out loud what changing the date would
+              do quietly". The first two are true and are exactly why the wheel
+              is here. The third was not: deleting a scan does not say anything
+              out loud, it destroys the photograph of the printout and the
+              thirteen-key composition breakdown along with the row, and a
+              member cannot re-key those off a sheet they are no longer holding.
+              So a scan typed on the wrong day stayed on the wrong day forever.
+
+              The consequence is said instead of avoided, and it is said BEFORE
+              the write: `planDateMove` in src/lib/scanDateEdit.ts works out
+              whether this move takes the "most recent" title away from this
+              scan, gives it to it, or lands on a day another scan already
+              occupies, and `saveEdit` puts whichever of those is true in front
+              of the member as a question they can answer with "Keep the Date". */}
+          {eDate ? (
+            <View style={{ marginBottom: sp.lg }}>
+              <Text style={{ ...ty.caption, color: t.ink2, marginBottom: 6 }}>Scan date</Text>
+              <Pressable onPress={() => setEShowDate(true)}
+                accessibilityRole="button"
+                accessibilityLabel={`Scan date, ${fmt(eWheelISO())}`}
+                accessibilityHint="Opens the date wheel to correct the day this scan was taken"
+                style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.lg, paddingVertical: sp.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{fmt(eWheelISO())}</Text><Icon name="calendar" size={15} color={t.ink3} />
+              </Pressable>
+            </View>
+          ) : null}
+
           <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.lg }}>
-            {editing && cd.scans.length > 0 && cd.scans[cd.scans.length - 1].id === editing.id
-              ? 'This is your most recent scan, so correcting it moves your daily calorie and protein targets with it.'
-              : 'Correcting an older scan changes your charts and your total change since starting, not your daily targets.'}
-            {' '}To change the date, delete this scan and add it again.
+            {/* `scansWhole` first, for the reason this screen asks it in nine
+                other places: under a failed read `cd.scans` is empty, and
+                "this is your most recent scan" would then be said to
+                everybody — including to somebody correcting a scan from two
+                years ago. */}
+            {!scansWhole
+              ? 'Your scan history could not be read in full just now, so this cannot say whether this is your most recent scan. The correction still saves.'
+              : editing && cd.scans.length > 0 && cd.scans[cd.scans.length - 1].id === editing.id
+                ? 'This is your most recent scan, so correcting it moves your daily calorie and protein targets with it.'
+                : 'Correcting an older scan changes your charts and your total change since starting, not your daily targets.'}
+            {eDate
+              // Said here rather than only in the confirmation, because the
+              // confirmation appears after the member has decided. The date is
+              // the one field on this sheet whose cost is not obvious from
+              // looking at it.
+              ? ' Moving the date can change which scan the app treats as your current one; it says so before it saves.'
+              : ' This scan’s stored date could not be read, so it cannot be corrected here.'}
           </Text>
 
           <Cta label={eBusy ? 'Saving…' : 'Save Correction'} wide disabled={eBusy} onPress={saveEdit} />
@@ -2570,6 +2779,48 @@ export default function Scans() {
             <Ghost label="Delete This Scan" onPress={removeScan} />
           </View>
         </View>
+        {/* Nested INSIDE this sheet, for the reason written over the Add
+            sheet's own wheel four hundred lines up: a `<Modal>` that is a
+            sibling of the modal it is opened from is presented BENEATH it on
+            iOS, so the row above would do nothing anybody could see. The Add
+            sheet shipped that bug once; this is the same fix, applied on the
+            way in rather than after a report. */}
+        <Modal visible={eShowDate} transparent animationType="slide" onRequestClose={() => setEShowDate(false)}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setEShowDate(false)}
+            accessibilityRole="button" accessibilityLabel="Close" />
+          <View style={{ backgroundColor: t.surface, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sp.md }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}> </Text>
+              <Text style={{ ...ty.head, color: t.ink }}>Scan date</Text>
+              <Pressable onPress={() => setEShowDate(false)} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel="Done"><Text style={{ ...ty.label, fontWeight: '600', color: t.brand }}>Done</Text></Pressable>
+            </View>
+            <View style={{ position: 'relative' }}>
+              <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: ITEM_H * 2, height: ITEM_H, borderRadius: radius.sm, backgroundColor: t.surface2 }} />
+              <View style={{ flexDirection: 'row' }}>
+                <Wheel label="Day" items={Array.from({ length: daysIn(eDM, eYear) }, (_, i) => String(i + 1))} index={Math.min(eDD, daysIn(eDM, eYear) - 1)} onChange={setEDD} t={t} />
+                <Wheel label="Month" items={MONTHS} index={eDM} onChange={setEDM} t={t} />
+                <Wheel label="Year" items={eYears.map(String)} index={eDY} onChange={setEDY} t={t} />
+              </View>
+            </View>
+            {/* What this particular move would do, while the wheel is still
+                being turned. The confirmation on Save is the last word; this is
+                so the member can see the answer change as they scroll, rather
+                than only finding out once they have committed. Only under a
+                whole read — see the note in `saveEdit`. */}
+            {scansWhole && eMove && eMove.changed ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {eMove.collidesWith
+                  ? 'You already have a scan on this date.'
+                  : eMove.handsOverNewest
+                    ? 'This would no longer be your most recent scan, so your daily targets would come from a different one.'
+                    : eMove.becomesNewest && !eMove.wasNewest
+                      ? 'This would become your most recent scan, so your daily targets would come from it.'
+                      : 'Your charts move with it; your daily targets do not.'}
+              </Text>
+            ) : null}
+          </View>
+        </Modal>
         </KeyboardAvoidingView>
       </Modal>
 

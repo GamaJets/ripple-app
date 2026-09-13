@@ -51,6 +51,12 @@ import { chunkIds, uniqueIds } from './idLookup';
 // hold the forgetting — see the note on `amount` below.
 import { minorMoney } from './coachMoney';
 import { appLocale } from './locale';
+// Type only, and it has to stay type only. `memberInvoices.ts` imports
+// `daysBetween` from this file as a VALUE; a value import back the other way
+// would be a require() cycle at runtime. A `import type` is erased entirely, so
+// the two modules share one definition of an invoice row and neither loads the
+// other.
+import type { MemberInvoice } from './memberInvoices';
 
 type Queryable = { from: (table: string) => any };
 
@@ -359,6 +365,27 @@ const PAYMENT_COLUMNS = 'id, amount_cents, currency, method, taken_at, membershi
 // console as well. Not selecting it is the part this app controls.
 // `recorded_by` is left out for the same reason: which member of staff took the
 // cash is the gym's business, not the receipt's.
+//
+// `gym_payments.payer_name` is left out too, and for a third reason that is
+// worth writing down rather than leaving to look like an oversight. It is not a
+// field anybody types: supabase/parts/184 adds it so that ERASING a member does
+// not unbalance the books — the erasure copies the profile's `full_name` onto
+// every payment row on its way out, so the gym keeps a name against the money
+// after the account is gone. On a row belonging to a member who is still here
+// it is null, and on the one where it is not, it is that member's own former
+// name being read back to them. There is nothing in it for the person this
+// screen is for.
+//
+// `gym_invoices.note` IS selected, and it is the one exception. The console
+// writes it through a field labelled "What it is for"
+// (studio-web/app/accounting/page.tsx), so on an invoice it is not a private
+// remark ABOUT the member — it is the description OF the charge, and it is the
+// only description the row carries. An invoice showing an amount, a date and no
+// statement of what it covers is the complaint this screen exists to answer.
+// The residual risk is real and is stated here rather than hidden: a gym could
+// type something private into a field its own console calls the purpose of the
+// bill. `drop_reason` (part 2642) is NOT selected — that one is the gym's own
+// record of why it stopped chasing money, addressed to itself.
 
 const asStatus = (v: unknown): MembershipStatus =>
   (v === 'frozen' || v === 'cancelled' || v === 'expired') ? v : 'active';
@@ -468,6 +495,252 @@ export async function fetchMyPayments(sb: Queryable, uid: string): Promise<Read<
         method: asMethod(r.method),
         takenAt: r.taken_at,
         membershipId: r.membership_id ?? null,
+      })),
+    } };
+  } catch (e) {
+    return { ok: false, reason: (e as Error).message || 'The read failed.' };
+  }
+}
+
+/* ── the other three places a member's money is recorded ───────────────────
+ *
+ * Rule 3 again, and the reason these live here rather than being read inline by
+ * the screen: `gym_payments` is ONE of four sources, the member was being shown
+ * that one under a heading that says what they have paid, and src/lib/
+ * memberPaid.ts is the module that adds them up and refuses to when any of the
+ * four did not land. Each read below hands back its own truncation flag for
+ * exactly that arithmetic.
+ *
+ * There is a fifth and this app may not read it. `coach_receipts` — cash and
+ * bank transfers a coach was handed, for most self-employed coaches the larger
+ * half of their income — carries `coach_receipts_owner_read` and no client
+ * policy at all, deliberately: supabase/parts/190 argues it under the heading
+ * "Why there is no client read policy". No function here reads that table and
+ * `PAID_EXCLUDES_CASH` is what the screen says instead.
+ */
+
+/** One pass the member holds or has used up. */
+export interface MemberPass {
+  id: string;
+  /** What it cost. NULL means NOBODY RECORDED A PRICE — not that it was free.
+   *  The schema says so in as many words (supabase/parts/31) and
+   *  `passRevenueCents` in src/lib/gymPasses.ts returns null for it rather than
+   *  quietly counting a nought. */
+  paidCents: number | null;
+  currency: string | null;
+  /** A bare 'YYYY-MM-DD'. */
+  issuedOn: string;
+  /** Null is a pass that does not expire, which is a choice a gym makes. */
+  expiresOn: string | null;
+  usesTotal: number;
+  usesSpent: number;
+}
+
+/** One thing the member bought from a personal trainer through Repple. */
+export interface MemberCoachSale {
+  id: string;
+  amountCents: number | null;
+  currency: string | null;
+  /** Stripe's own word for the sale. Only 'paid' is money. */
+  status: string | null;
+  /** Minor units already refunded, a running total. A `bigint`, so PostgREST
+   *  may hand it over as a string; passed through untouched. */
+  refundedCents: number | string | null;
+  /** Null on a one-off; a number is a pack of that many sessions. */
+  sessionsTotal: number | null;
+  sessionsUsed: number;
+  createdAt: string;
+}
+
+/** One renewal of a coaching subscription. */
+export interface MemberCoachRenewal {
+  id: string;
+  amountCents: number | null;
+  currency: string | null;
+  refundedCents: number | string | null;
+  /** When Stripe says the money moved. Null when Stripe stated none — the
+   *  payment is real and belongs to no month anybody can name. */
+  paidAt: string | null;
+  createdAt: string;
+  /** Stripe's raw word for why the invoice existed — 'subscription_cycle' and
+   *  the rest. Untranslated here; the screen decides whether to say it. */
+  billingReason: string | null;
+}
+
+/** A page of rows and whether there were more of them than came back. The same
+ *  shape as `PaymentsPage` and for the same reason: a screen may LIST a
+ *  truncated page and may never total it. */
+export interface Page<T> {
+  rows: T[];
+  truncated: boolean;
+}
+
+const PASS_COLUMNS = 'id, paid_cents, currency, issued_on, expires_on, uses_total, uses_spent';
+const SALE_COLUMNS = 'id, amount_cents, currency, status, refunded_cents, sessions_total, sessions_used, created_at';
+const RENEWAL_COLUMNS = 'id, amount_cents, currency, refunded_cents, paid_at, created_at, billing_reason';
+const INVOICE_COLUMNS = 'id, number, amount_cents, currency, issued_on, due_on, status, membership_id, note';
+
+/** An integer column that may arrive as a string. `sessions_used` is an
+ *  ordinary integer and `paid_cents` is too, but both reach a phone through
+ *  JSON, and `Number(null)` is 0 — which is the one answer this file may never
+ *  produce for money. Null in, null out. */
+const intOrNull = (v: unknown): number | null => {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * Every pass issued to this member, newest first.
+ *
+ * Scoped by `holder_id` at the database — `gym_passes_own_r` is
+ * `using (holder_id = auth.uid())` — so a pass written at the desk against a
+ * name with no account attached is invisible here, correctly: there is no
+ * account for it to belong to. A member who bought a day pass before they had
+ * an app will not find it, and that is a fact about the sale rather than about
+ * this read.
+ */
+export async function fetchMyPasses(sb: Queryable, uid: string): Promise<Read<Page<MemberPass>>> {
+  if (!uid) return { ok: false, reason: 'Not signed in.' };
+  try {
+    const { data, error } = await sb.from('gym_passes')
+      .select(PASS_COLUMNS)
+      .eq('holder_id', uid)
+      .order('issued_on', { ascending: false })
+      .limit(capLimit());
+    if (error) return { ok: false, reason: error.message || 'The read was refused.' };
+    const page = capped((data as any[]) ?? []);
+    return { ok: true, value: {
+      truncated: page.truncated,
+      rows: page.rows.map((r): MemberPass => ({
+        id: r.id,
+        paidCents: intOrNull(r.paid_cents),
+        currency: typeof r.currency === 'string' && r.currency.trim() ? r.currency : null,
+        issuedOn: r.issued_on,
+        expiresOn: r.expires_on ?? null,
+        usesTotal: intOrNull(r.uses_total) ?? 0,
+        usesSpent: intOrNull(r.uses_spent) ?? 0,
+      })),
+    } };
+  } catch (e) {
+    return { ok: false, reason: (e as Error).message || 'The read failed.' };
+  }
+}
+
+/**
+ * Everything this member bought from a personal trainer through Repple.
+ *
+ * `client_purchases` is read by `cp_self`, `using (client_id = auth.uid())` —
+ * the buyer reads their own row and writes nothing (supabase/parts/2580). The
+ * amount is passed through GROSS with `refunded_cents` beside it rather than
+ * netted here: what was charged and what came back are two facts, and the
+ * subtraction belongs in one place (`keptCents`) where it can be shown as well
+ * as done.
+ */
+export async function fetchMyCoachSales(sb: Queryable, uid: string): Promise<Read<Page<MemberCoachSale>>> {
+  if (!uid) return { ok: false, reason: 'Not signed in.' };
+  try {
+    const { data, error } = await sb.from('client_purchases')
+      .select(SALE_COLUMNS)
+      .eq('client_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(capLimit());
+    if (error) return { ok: false, reason: error.message || 'The read was refused.' };
+    const page = capped((data as any[]) ?? []);
+    return { ok: true, value: {
+      truncated: page.truncated,
+      rows: page.rows.map((r): MemberCoachSale => ({
+        id: r.id,
+        amountCents: intOrNull(r.amount_cents),
+        currency: typeof r.currency === 'string' && r.currency.trim() ? r.currency : null,
+        status: typeof r.status === 'string' ? r.status : null,
+        refundedCents: r.refunded_cents ?? null,
+        sessionsTotal: intOrNull(r.sessions_total),
+        sessionsUsed: intOrNull(r.sessions_used) ?? 0,
+        createdAt: r.created_at,
+      })),
+    } };
+  } catch (e) {
+    return { ok: false, reason: (e as Error).message || 'The read failed.' };
+  }
+}
+
+/**
+ * Every renewal Stripe has taken for a coaching subscription of this member's.
+ *
+ * `client_sub_pay_read` admits `client_id = auth.uid()` (supabase/parts/132),
+ * and part 132's own comment on the index says what this function is: "the
+ * coach's screen reads trainer_id = me, newest first; the client's own receipts
+ * read the same shape from the other side".
+ *
+ * Ordered on `paid_at`, which is when the money moved, and NOT on `created_at`,
+ * which is when a webhook happened to write the row. A retry three days late
+ * must not reorder somebody's payment history.
+ */
+export async function fetchMyCoachRenewals(sb: Queryable, uid: string): Promise<Read<Page<MemberCoachRenewal>>> {
+  if (!uid) return { ok: false, reason: 'Not signed in.' };
+  try {
+    const { data, error } = await sb.from('client_subscription_payments')
+      .select(RENEWAL_COLUMNS)
+      .eq('client_id', uid)
+      .order('paid_at', { ascending: false })
+      .limit(capLimit());
+    if (error) return { ok: false, reason: error.message || 'The read was refused.' };
+    const page = capped((data as any[]) ?? []);
+    return { ok: true, value: {
+      truncated: page.truncated,
+      rows: page.rows.map((r): MemberCoachRenewal => ({
+        id: r.id,
+        amountCents: intOrNull(r.amount_cents),
+        currency: typeof r.currency === 'string' && r.currency.trim() ? r.currency : null,
+        refundedCents: r.refunded_cents ?? null,
+        paidAt: r.paid_at ?? null,
+        createdAt: r.created_at,
+        billingReason: typeof r.billing_reason === 'string' ? r.billing_reason : null,
+      })),
+    } };
+  } catch (e) {
+    return { ok: false, reason: (e as Error).message || 'The read failed.' };
+  }
+}
+
+/**
+ * Every invoice this member's gym has raised against them, newest first.
+ *
+ * `gym_invoices_own_r` has admitted the member since supabase/parts/29 —
+ * `using (member_id = auth.uid())` — and until now nothing read it from the
+ * member's side, which is why part 146's notification has no route. Drafts come
+ * back with everything else because the policy does not filter on status; what
+ * is done with them is `invoiceStanding`'s business, and it is argued in the
+ * header of src/lib/memberInvoices.ts.
+ *
+ * There is no equivalent for `coach_invoices` in this file and there must not
+ * be one written from the client's side: that table is the issuing coach's and
+ * nobody else's, by an argued decision in supabase/parts/138, which drops a
+ * client read policy by name so one cannot be added by accident.
+ */
+export async function fetchMyInvoices(sb: Queryable, uid: string): Promise<Read<Page<MemberInvoice>>> {
+  if (!uid) return { ok: false, reason: 'Not signed in.' };
+  try {
+    const { data, error } = await sb.from('gym_invoices')
+      .select(INVOICE_COLUMNS)
+      .eq('member_id', uid)
+      .order('issued_on', { ascending: false })
+      .limit(capLimit());
+    if (error) return { ok: false, reason: error.message || 'The read was refused.' };
+    const page = capped((data as any[]) ?? []);
+    return { ok: true, value: {
+      truncated: page.truncated,
+      rows: page.rows.map((r): MemberInvoice => ({
+        id: r.id,
+        number: intOrNull(r.number),
+        amountCents: intOrNull(r.amount_cents),
+        currency: typeof r.currency === 'string' && r.currency.trim() ? r.currency : null,
+        issuedOn: r.issued_on,
+        dueOn: r.due_on ?? null,
+        status: typeof r.status === 'string' ? r.status : null,
+        membershipId: r.membership_id ?? null,
+        note: typeof r.note === 'string' && r.note.trim() ? r.note : null,
       })),
     } };
   } catch (e) {

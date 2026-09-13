@@ -66,6 +66,10 @@ import {
   COST_IS_YOUR_WORD, COSTS_ARE_NEVER_NETTED, COSTS_ARE_NOT_TAX_ADVICE, COSTS_NOT_TWICE,
   type CoachCost, type CostDraft, type CostCategory,
 } from '../../src/lib/coachCosts';
+import {
+  linesByMonth, biggestLines,
+  MONTHS_ARE_WHAT_YOU_WROTE_DOWN, BIGGEST_IS_OF_WHAT_YOU_RECORDED, type BookLine,
+} from '../../src/lib/moneyBook';
 import { fetchMyCosts, recordCost, deleteCost } from '../../src/ui/coachCosts';
 import { fetchInvoiceCurrency, type InvoiceCurrency } from '../../src/ui/coachInvoices';
 import { isWhole, type LoadStatus } from '../../src/ui/loadStatus';
@@ -135,6 +139,31 @@ export default function Costs() {
 
   const taken = useMemo(() => costsTaken(rows), [rows]);
   const byCategory = useMemo(() => costsByCategory(rows), [rows]);
+
+  /* ── the two questions an expense list is actually opened for ───────────
+     "How much in September" and "what is the biggest thing in here". This
+     screen answered neither: pots, categories and a flat list, with `paid_on`
+     sitting unread on every row.
+
+     A month total is NOT a net and does not breach `COSTS_ARE_NEVER_NETTED` —
+     nothing is subtracted from anything here, on this screen or anywhere else,
+     and the rule is about the difference between two sides of a book rather
+     than about adding one side up. src/lib/moneyBook.ts does the folding so the
+     two currency rules — never merged, never ranked against each other — are
+     kept in one place for both books. */
+  const lines = useMemo((): BookLine[] => rows.map((c) => ({
+    id: c.id,
+    // The day the coach says the money WENT OUT. A quarter of receipts written
+    // up in one evening belongs in the months they were paid in, and this is
+    // the field that decides which month each one lands in.
+    day: c.paidOn,
+    amountCents: c.amountCents,
+    currency: c.currency,
+    label: c.description,
+  })), [rows]);
+
+  const byMonth = useMemo(() => linesByMonth(lines), [lines]);
+  const biggest = useMemo(() => biggestLines(lines), [lines]);
 
   const draft = (): CostDraft => ({
     description, amountText, currency: ccy.currency, category, paidOn,
@@ -299,6 +328,98 @@ export default function Costs() {
                   ))}
                 </View>
               ))}
+            </Section>
+          </>
+        ) : null}
+
+        {/* ── by month ────────────────────────────────────────────────────
+            Drawn only under `isWhole(status)`, like every other figure here: a
+            month total over a truncated read is a subtotal with a month's name
+            on it, and over a refused read it is a claim about somebody's
+            spending made out of our own failure.
+
+            A month is a slice of ONE side of the book. Nothing is taken off
+            anything — see `COSTS_ARE_NEVER_NETTED`, which is about the
+            difference between the two sides and is not touched by adding one
+            of them up by month. */}
+        {status === 'ready' && byMonth.months.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="By Month" note="Counted by the day you say you paid" />
+              {byMonth.months.map((m) => (
+                <View key={m.key} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                  <Text style={{ ...ty.label, color: t.ink2 }}>{m.label}</Text>
+                  {/* One figure per currency and never one per month. A coach
+                      paying rent in dirhams and an insurer in sterling has two
+                      amounts of money in September and not a sum. */}
+                  {m.taken.pots.map((p) => (
+                    <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+                      <Text style={{ ...ty.caption, color: t.ink3 }}>
+                        {p.count} {p.count === 1 ? 'line' : 'lines'} in {p.currency}
+                      </Text>
+                      <Text style={{ ...ty.label, ...numeric, color: t.ink }}>
+                        {minorMoney(p.minorUnits, p.currency) ?? DASH}
+                      </Text>
+                    </View>
+                  ))}
+                  {m.taken.unlabelled + m.taken.unpriced ? (
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+                      {m.taken.unlabelled + m.taken.unpriced} {m.taken.unlabelled + m.taken.unpriced === 1 ? 'line has' : 'lines have'} no readable amount and {m.taken.unlabelled + m.taken.unpriced === 1 ? 'is' : 'are'} in no figure here.
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+              {/* A day that will not read belongs to no month. Swept into this
+                  one it would make a month too big; dropped in silence it would
+                  make the months add up to less than the figure above them. */}
+              {byMonth.undated ? (
+                <Flag style={{ marginTop: sp.sm }}>
+                  {byMonth.undated} {byMonth.undated === 1 ? 'cost has' : 'costs have'} a day that could not be read, so {byMonth.undated === 1 ? 'it is' : 'they are'} in none of these months. {byMonth.undated === 1 ? 'It is' : 'They are'} still in the total above.
+                </Flag>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{MONTHS_ARE_WHAT_YOU_WROTE_DOWN}</Text>
+            </Section>
+          </>
+        ) : null}
+
+        {/* ── the biggest line ────────────────────────────────────────────
+            ONE PER CURRENCY, because "the largest cost" is not a question with
+            a single answer over a book in two moneys — 1,200 dirhams is a
+            smaller amount than 450 pounds and a larger integer, and this app
+            holds no rate that could say so. A coach with one currency, which is
+            all of them today, sees exactly one line. */}
+        {status === 'ready' && biggest.top.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title={biggest.top.length === 1 ? 'The Biggest Line' : 'The Biggest Line In Each Currency'} />
+              {biggest.top.map((b) => (
+                <View key={b.currency} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: sp.sm }}>
+                    <Text style={{ ...ty.body, color: t.ink, flex: 1 }} numberOfLines={1}>{b.line.label}</Text>
+                    <Text style={{ ...ty.body, fontWeight: '700', ...numeric, color: t.ink }}>
+                      {minorMoney(b.minorUnits, b.currency) ?? DASH}
+                    </Text>
+                  </View>
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>{invoiceDayLabel(b.line.day)}</Text>
+                </View>
+              ))}
+              {biggest.top.length > 1 ? (
+                <Flag tone={t.ink3} style={{ marginTop: sp.sm }}>
+                  One for each currency. These are separate amounts of money and are deliberately not ranked against one another — there is no rate in this app that could put them in an order.
+                </Flag>
+              ) : null}
+              {/* Counted out rather than quietly ignored. A line with no
+                  readable amount cannot be the biggest anything, and saying how
+                  many were left out stops the answer being read as "and there
+                  is nothing larger than this". */}
+              {biggest.skipped ? (
+                <Flag style={{ marginTop: sp.sm }}>
+                  {biggest.skipped} {biggest.skipped === 1 ? 'line has' : 'lines have'} no readable amount on {biggest.skipped === 1 ? 'it' : 'them'}, so {biggest.skipped === 1 ? 'it was' : 'they were'} not compared with anything.
+                </Flag>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{BIGGEST_IS_OF_WHAT_YOU_RECORDED}</Text>
             </Section>
           </>
         ) : null}

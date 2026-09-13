@@ -69,6 +69,36 @@ import { fetchGymZone, gymDay } from '@lib/gymZone';
 import { fetchMemberships, matchPayment, fetchOnlineOrders, type Membership, type OnlineOrder } from '@lib/gymRecord';
 import { onlineOrderProblem } from '@lib/gymOrderPayment';
 import { fetchGymCosts, gymCostsTaken, gymCostCategoryLabel, type GymCost } from '@lib/gymCosts';
+// The paper behind a cost. `gym_documents` could say a file was about a member
+// or about a machine and had no way to say it was about a COST, so the amount
+// and the supplier's invoice sat in one database unable to point at each other
+// — and `TAX_UNKNOWNS` prints that gap to the owner at a filing deadline.
+// Everything this module exports is careful about the size of the claim:
+// attaching a file does not check the figure, and the note below says so.
+import {
+  fetchCostReceipts, recordCostReceipt, openCostReceipt, byCost, costEvidence,
+  evidenceNote, receiptBlocker, receiptTitle, RECEIPT_KINDS, RECEIPT_KIND_LABEL,
+  RECEIPT_IS_NOT_A_CHECK_NOTE, type CostReceipt,
+} from '@lib/costReceipts';
+import { documentPath, discardUnfiledObject, type DocumentKind } from '@lib/gymDocs';
+// Why the gym decided not to collect an invoice. `owedOf` has always taken
+// 'void' and 'written_off' out of the receivables and the row said nothing
+// about who decided that, when, or on what grounds — see supabase/parts/2642.
+import {
+  dropInvoice, writeOffHistory, unexplainedDrops, isDropStatus,
+  DROP_STATUSES, DROP_MEANS, WRITE_OFF_PROMPT, writeOffBlocker, MAX_REASON_CHARS,
+  type DropStatus, type DropRecord,
+} from '@lib/invoiceWriteOff';
+// What this gym said about its tax registration DURING the month, which is not
+// the same question as what it says now. `tenants.tax_registered` is a
+// current-state boolean and /tax prints it above whichever period is on screen,
+// so a gym that registered in April reads "this gym is registered" over its
+// January figures. See supabase/parts/2641.
+import {
+  fetchTaxStandings, recordTaxStanding, endTaxStanding, registrationDuring,
+  standingLine, standingBlockers, STANDING_LABEL, CURRENT_FLAG_IS_NOT_A_PERIOD_NOTE,
+  type TaxStanding, type TaxStandingDraft, type TaxStandingStatus,
+} from '@lib/gymTaxHistory';
 import {
   createInvoice, setInvoiceStatus, settleInvoice, invoiceBlocker, parseAmount,
   dueAfter, isoDay, SETTABLE_INVOICE_STATUSES, INVOICE_STATUS_LABEL,
@@ -141,6 +171,15 @@ interface Invoice {
   note: string | null;
 }
 
+/**
+ * One invoice's decision not to collect, from supabase/parts/2642.
+ *
+ * Keyed by the invoice's own id, and only rows that HAVE a decision are read —
+ * a gym's dropped invoices are a small fraction of its register and there is
+ * nothing to say about the rest.
+ */
+interface DropRow extends DropRecord { id: string }
+
 /** A row of `payroll_settlements` — money that has actually left the account. */
 interface Settled {
   id: string;
@@ -178,6 +217,53 @@ interface Books {
    * queries was refused.
    */
   costs: Read<GymCost>;
+  /**
+   * The documents filed against this month's costs (supabase/parts/2640).
+   *
+   * Its own read and its own failure, like the costs above it. A refused one
+   * must never draw as "nothing attached": on this page that sentence is what
+   * sends an owner hunting for a receipt they filed in March, and it is the
+   * exact shape src/ui/loadStatus.ts was written about.
+   */
+  receipts: Read<CostReceipt>;
+  /**
+   * The decision behind every invoice this gym has taken off its receivables
+   * (supabase/parts/2642) — `dropped_at`, `drop_reason`, `dropped_by`.
+   *
+   * ── Why a SEPARATE read and not three more columns on the invoice one ─────
+   *
+   * Because `fetchInvoices` is the read this whole page is built on, and
+   * PostgREST answers a select naming a column that does not exist by refusing
+   * the WHOLE query. A gym whose database has not had part 2642 applied — which
+   * is every gym until somebody runs it — would open this screen to a month in
+   * which it billed nothing, has nothing to reconcile, and is owed nothing.
+   * That is the worst sentence this page can produce, and it would be produced
+   * by the feature meant to explain a bad debt.
+   *
+   * Read on its own, it fails on its own: the register still draws, and the
+   * reason column says the decision could not be read rather than that none was
+   * given.
+   */
+  drops: Read<DropRow>;
+  /**
+   * Whether that read was the WHOLE set.
+   *
+   * `false` is a prefix, and the receipts that fell off the end belong to costs
+   * this screen would otherwise print as bare. `costEvidence` turns it into
+   * 'unknown' rather than 'none'.
+   */
+  receiptsWhole: boolean;
+  /**
+   * What this gym has said about its own tax registration, as dated statements
+   * (supabase/parts/2641).
+   *
+   * Its own read and its own failure, for the same two reasons `drops` is: it
+   * is a table a gym's database may not have yet, and a period nobody has
+   * answered for must read as unanswered rather than as "not registered" —
+   * which is what a refusal folded into the register query would produce,
+   * silently, on the page an accountant files from.
+   */
+  standings: Read<TaxStanding>;
   /** The answers already given on this gym's reconciliation. Not scoped to the
    *  month: an exception raised in June is still an exception in September, and
    *  an answer keyed to a month would have to be given again each time. */
@@ -193,6 +279,7 @@ interface Books {
 
 const EMPTY: Books = {
   invoices: reading(), payments: reading(), settled: reading(), costs: reading(),
+  receipts: reading(), receiptsWhole: true, drops: reading(), standings: reading(),
   marks: new Map(), marksErr: null, online: reading(),
 };
 
@@ -332,7 +419,7 @@ export default function Accounting() {
     // empties the payments — and this screen would then report a month in which
     // the gym both billed nothing and took nothing, two wrong facts that agree
     // with each other and so look like a quiet month rather than a broken read.
-    const [iRes, pRes, sRes, mRes, oRes, cRes] = await Promise.allSettled([
+    const [iRes, pRes, sRes, mRes, oRes, cRes, dRes, tRes] = await Promise.allSettled([
       fetchInvoices(tenantId, mw.lastDay),
       fetchPayments(supabase, tenantId, since, until),
       fetchSettled(tenantId, mw.fromIso, mw.toIso),
@@ -347,7 +434,31 @@ export default function Accounting() {
       // day the money went out and nothing here reconciles it against anything,
       // so there is no invoice on the other side of a boundary to reach for.
       fetchGymCosts(supabase, tenantId, mw.firstDay, mw.lastDay),
+      // Why this gym has not collected on some of its invoices. Its own read
+      // and its own failure — see the field comment on `Books.drops`: naming
+      // three columns a gym's database may not have yet inside the invoice
+      // query would refuse the invoice query.
+      fetchDrops(tenantId),
+      // What this gym says it was registered as, with dates on it. Read here
+      // rather than only on /tax because this is the month an accountant files
+      // from, and "was this business registered in September" is a question
+      // that document has to be able to answer for itself.
+      fetchTaxStandings(supabase, tenantId),
     ]);
+
+    // The receipts, after the costs and only because of them: this read is
+    // keyed on the ids the costs read returned, so it cannot go in the batch
+    // above. It is skipped entirely when there are no costs to ask about —
+    // a second round trip to learn that nothing is attached to nothing.
+    //
+    // A failed COSTS read leaves this unasked, and the receipts slice then
+    // carries the costs' own failure rather than an empty success. Without
+    // that, a month whose costs would not load would report every cost it is
+    // not showing as having nothing behind it.
+    const costIds = cRes.status === 'fulfilled' ? cRes.value.map((c) => c.id) : null;
+    const recRes = costIds && costIds.length
+      ? (await Promise.allSettled([fetchCostReceipts(supabase, tenantId, costIds)]))[0]
+      : null;
 
     setLoaded({
       key: mw.key,
@@ -363,14 +474,27 @@ export default function Accounting() {
         marksErr: mRes.status === 'fulfilled' ? null : failure(mRes, 'the answers already given on this reconciliation'),
         online: landed(oRes, 'the online sales'),
         costs: landed(cRes, 'the recorded costs'),
+        receipts: recRes
+          ? (recRes.status === 'fulfilled'
+            ? { rows: recRes.value.receipts, state: null, why: null }
+            : landed(recRes as PromiseSettledResult<CostReceipt[]>, 'the documents filed against those costs'))
+          // No costs to ask about, or the costs themselves did not come back.
+          // The first is a real empty answer; the second is inherited, so the
+          // Receipt column says "unknown" beside a table that is not drawn.
+          : (cRes.status === 'fulfilled'
+            ? { rows: [], state: null, why: null }
+            : landed(cRes as PromiseSettledResult<CostReceipt[]>, 'the documents filed against those costs')),
+        receiptsWhole: recRes ? (recRes.status === 'fulfilled' && recRes.value.whole) : true,
+        drops: landed(dRes, 'why this gym has not collected on some of its invoices'),
+        standings: landed(tRes, 'what this gym has said about its tax registration'),
       },
     });
 
-    // Whole means all six came back. `useFetched` stamps only on a whole read,
+    // Whole means all eight came back. `useFetched` stamps only on a whole read,
     // so a month whose settlements would not load leaves the stamp where it was
     // rather than dating a reconciliation that is missing one of the two
     // records it reconciles.
-    return settledLanded([iRes, pRes, sRes, mRes, oRes, cRes]);
+    return settledLanded([iRes, pRes, sRes, mRes, oRes, cRes, dRes, tRes, ...(recRes ? [recRes] : [])]);
   }, []);
 
   useEffect(() => {
@@ -705,9 +829,14 @@ function Month({ at, zone, zoneErr, books, gymName, ccy, members, tenantId, me, 
       />
       <MoneyIn read={books.payments} rows={inMonthPayments} w={w} total={cashIn} />
       <MoneyOut read={books.settled} rows={settledRows} total={cashOut} zone={zone} />
-      <CostsOut read={books.costs} rows={costRows} w={w} total={costsOut} />
+      <CostsOut read={books.costs} rows={costRows} w={w} total={costsOut}
+                receipts={books.receipts} receiptsWhole={books.receiptsWhole}
+                tenantId={tenantId} me={me} onChange={onChange} />
+      <Registration read={books.standings} rows={books.standings.rows ?? []} w={w}
+                    tenantId={tenantId} me={me} onChange={onChange} />
       <NetCash net={net} w={w} costs={books.costs} />
       <Register
+        drops={books.drops} me={me}
         read={books.invoices} raised={raised} w={w} ccy={ccy} zone={zone}
         members={members} tenantId={tenantId} onChange={onChange}
       />
@@ -985,9 +1114,117 @@ function perSession(s: Settled): number | null {
  * that can fail independently do not make one "money out" figure, and the one
  * on the KPI strip above is each read's own.
  */
-function CostsOut({ read, rows, w, total }: {
+function CostsOut({ read, rows, w, total, receipts, receiptsWhole, tenantId, me, onChange }: {
   read: Read<GymCost>; rows: GymCost[]; w: MonthWindow; total: Sum;
+  /** The documents filed against these costs (supabase/parts/2640). */
+  receipts: Read<CostReceipt>;
+  receiptsWhole: boolean;
+  tenantId: string; me: Me; onChange: () => void;
 }) {
+  /** Which cost the attach form below is for, or null when it is closed.
+   *
+   *  One form at a time and off by default, for the reason `MatchPicker` on
+   *  this page is: a file input on every row of a forty-row table is forty
+   *  chances to file September's rent against August's electricity, and this
+   *  write is the one that puts a document under somebody's books. */
+  const [attachTo, setAttachTo] = useState<GymCost | null>(null);
+  const [kind, setKind] = useState<DocumentKind>('other');
+  const [title, setTitle] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  /**
+   * Which of the four states the receipts read is in, in the vocabulary
+   * src/ui/loadStatus.ts settled.
+   *
+   * 'partial' is not 'ready' and never has been. A truncated read of the
+   * documents table drops receipts belonging to real costs, and every one of
+   * those costs would then be printed as having nothing behind it — which on
+   * this page is the sentence an owner acts on.
+   */
+  const receiptStatus: 'loading' | 'ready' | 'partial' | 'error' =
+    receipts.state === 'loading' ? 'loading'
+      : receipts.state === 'failed' ? 'error'
+      : receiptsWhole ? 'ready' : 'partial';
+
+  const index = useMemo(
+    () => (receipts.rows ? byCost(receipts.rows) : null),
+    [receipts.rows],
+  );
+
+  const open = async (r: CostReceipt) => {
+    try {
+      const url = await openCostReceipt(supabase, r.storagePath);
+      setErr(null);
+      window.open(url, '_blank', 'noopener');
+    } catch (e: any) {
+      setErr(e?.message ?? 'That file could not be opened.');
+    }
+  };
+
+  const blocker = attachTo
+    ? receiptBlocker(attachTo.id, kind, file, title.trim() || receiptTitle(attachTo))
+    : null;
+
+  const startAttach = (c: GymCost) => {
+    setAttachTo(c);
+    setKind('other');
+    // Pre-filled from the cost rather than from the file, because the file is
+    // called scan0042.pdf and the cost is called "Rent". An owner may type over
+    // it; what they may not do is file an untitled document, which is what
+    // makes the cabinet a folder again (part 185).
+    setTitle(receiptTitle(c));
+    setFile(null);
+    setErr(null); setSaved(null);
+  };
+
+  const attach = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!attachTo || !file) { setErr(blocker ?? 'Choose the file.'); return; }
+    if (blocker) { setErr(blocker); return; }
+    setBusy(true); setErr(null); setSaved(null);
+    const path = documentPath(tenantId, file.name);
+    try {
+      // The OBJECT first, the row second — `recordDocument`'s ordering in
+      // src/lib/gymDocs.ts and its reasoning unchanged: a row pointing at a
+      // file that does not exist is a document the books say the gym holds and
+      // cannot produce, and that is the more expensive of the two orphans.
+      const up = await supabase.storage.from('gym-docs').upload(path, file, {
+        contentType: file.type || undefined,
+        upsert: false,
+      });
+      if (up.error) throw up.error;
+      try {
+        await recordCostReceipt(supabase, tenantId, {
+          costId: attachTo.id,
+          kind,
+          title: title.trim() || receiptTitle(attachTo),
+          storagePath: path,
+          mime: file.type || null,
+          sizeBytes: file.size,
+          uploadedBy: me.id,
+        });
+      } catch (rowErr) {
+        // The object landed and the row did not. Take it back out: an object
+        // with nothing indexing it is invisible to the only screen that could
+        // remove it. Best effort, and the sentence below is the same either way.
+        await discardUnfiledObject(supabase, path);
+        throw rowErr;
+      }
+      setSaved(`Filed against ${attachTo.description}. ${RECEIPT_IS_NOT_A_CHECK_NOTE}`);
+      setAttachTo(null); setFile(null); setTitle('');
+      onChange();
+    } catch (e: any) {
+      setErr(writeFailedText(e, {
+        what: 'That file',
+        unchanged: 'nothing is attached to that cost and the cost itself is untouched',
+        howToCheck: 'Reload this page and look at the Receipt column on that row before attaching it again.',
+      }));
+    } finally { setBusy(false); }
+  };
+
   const cols: Column<GymCost>[] = [
     { key: 'paid', header: 'Paid', value: (c) => c.paidOn },
     { key: 'what', header: 'What for', value: (c) => c.description },
@@ -999,6 +1236,36 @@ function CostsOut({ read, rows, w, total }: {
         ? <span className="dash">no amount recorded</span>
         : <>{money(c.amountCents, c.currency)}</>) },
     { key: 'note', header: 'Note', value: (c) => c.note },
+    // The paper. Three answers and never two: "nothing is filed" and "we could
+    // not ask" are different facts about a cost an accountant is about to be
+    // asked for evidence of.
+    { key: 'receipt', header: 'Receipt', align: 'right',
+      value: (c) => {
+        const e = costEvidence(c.id, index, receiptStatus);
+        return e.state === 'attached' ? e.count : e.state === 'none' ? 0 : null;
+      },
+      render: (c) => {
+        const e = costEvidence(c.id, index, receiptStatus);
+        if (e.state === 'unknown') return <span className="dash" title={e.why}>not known</span>;
+        const filed = index?.get(c.id) ?? [];
+        return (
+          <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {filed.map((r) => (
+              <button key={r.id} type="button" className="no-print" style={linkBtn}
+                      onClick={() => void open(r)}
+                      aria-label={`Open ${r.title}, filed against ${c.description}`}>
+                {r.title}
+              </button>
+            ))}
+            {e.state === 'none' ? <span className="dash">{evidenceNote(e)}</span> : null}
+            <button type="button" className="no-print" style={{ ...linkBtn, color: 'var(--ink3)' }}
+                    onClick={() => startAttach(c)}
+                    aria-label={`Attach a document to ${c.description}, paid ${c.paidOn}`}>
+              {e.state === 'none' ? 'Attach' : 'Add another'}
+            </button>
+          </span>
+        );
+      } },
   ];
 
   // Per currency, because a month holding two of them has two amounts of money
@@ -1025,6 +1292,54 @@ function CostsOut({ read, rows, w, total }: {
             rows={rows} columns={cols} rowKey={(c) => c.id}
             empty={`No cost is recorded in ${w.label}. That is a statement about the record, not about the gym — rent, power and everything else reach this app only when somebody enters them on the Costs screen.`}
           />
+          {receipts.why ? <Banner tone="crit">{receipts.why}</Banner> : null}
+          {err ? <Banner tone="crit">{err}</Banner> : null}
+          {saved ? <Banner>{saved}</Banner> : null}
+          {/* Open only when a row asked for it. The form is under the table
+              rather than inside a row so the file picker, the kind and the
+              title are one thought, and so the row being filed against is
+              named in the heading — a document filed against the wrong cost
+              reads as evidence, which is worse than none. */}
+          {attachTo ? (
+            <form onSubmit={attach} className="no-print"
+                  style={{ borderTop: '1px solid var(--ring)', padding: '12px 14px' }}>
+              <p style={{ margin: '0 0 9px', fontSize: 13, color: 'var(--ink2)', maxWidth: '80ch' }}>
+                <strong style={{ color: 'var(--ink)' }}>{attachTo.description}</strong>
+                {attachTo.supplier ? <>, paid to {attachTo.supplier}</> : null}
+                {' '}on {attachTo.paidOn}
+                {attachTo.amountCents == null ? null : <>, {money(attachTo.amountCents, attachTo.currency)}</>}.
+              </p>
+              <div style={formRow}>
+                <select value={kind} onChange={(e) => setKind(e.target.value as DocumentKind)}
+                        style={{ ...field, flex: 1, minWidth: 170 }} aria-label="What kind of document this is">
+                  {RECEIPT_KINDS.map((k) => (
+                    <option key={k} value={k}>{RECEIPT_KIND_LABEL[k]}</option>
+                  ))}
+                </select>
+                <input value={title} onChange={(e) => setTitle(e.target.value)}
+                       placeholder="What it is" style={{ ...field, flex: 2, minWidth: 200 }}
+                       aria-label="What this document is, as it will appear in the filing cabinet" />
+                <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp"
+                       onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                       style={{ ...field, flex: 2, minWidth: 200 }}
+                       aria-label="The file" />
+                <button type="submit" disabled={busy || !!blocker} style={primaryBtn}>
+                  {busy ? 'Filing…' : 'Attach'}
+                </button>
+                <button type="button" style={linkBtn} onClick={() => { setAttachTo(null); setErr(null); }}>
+                  Leave it
+                </button>
+              </div>
+              {blocker && file ? (
+                <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '74ch' }}>{blocker}</p>
+              ) : null}
+              <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '80ch' }}>
+                {RECEIPT_IS_NOT_A_CHECK_NOTE} Only the two kinds above are offered, because what
+                this gym pays in rent and to whom is the owner&rsquo;s record &mdash; the four kinds
+                a trainer may read are not on this list.
+              </p>
+            </form>
+          ) : null}
           <p className="no-print" style={{ margin: 0, padding: '10px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink3)' }}>
             Costs are entered on <a href="/costs" style={{ color: 'var(--brand)' }}>Costs</a>, and
             what this gym has said about its own tax registration is on{' '}
@@ -1033,6 +1348,200 @@ function CostsOut({ read, rows, w, total }: {
           </p>
         </>
       </Part>
+    </Section>
+  );
+}
+
+/* ── what the gym said about itself, in the month it said it about ─────────── */
+
+/**
+ * Whether this gym was registered for a tax on its sales DURING this month —
+ * which is not the same question as whether it is now.
+ *
+ * ── Why this is on the accountant's page and not only on /tax ─────────────
+ *
+ * /tax renders `tenants.tax_registered`, a CURRENT-STATE boolean with no date
+ * on it, above the figures for whichever period its picker is on. A gym that
+ * registered in April therefore reads "This gym says it is registered, under
+ * the number below" over its Q1 figures, under a number that did not exist in
+ * January; a gym that deregistered in June reads the denial over every quarter
+ * it was registered in. Neither is a tax figure, which is the only reason it is
+ * not worse, and both are statements about a business's legal standing made
+ * about a stretch of time the stored fact says nothing about.
+ *
+ * supabase/parts/2641 makes the statement DATED. This section is where an owner
+ * records one and where the month's own answer is printed — on the page the
+ * month leaves the building from, so the document can answer for itself.
+ *
+ * NO TAX FIGURE IS PRODUCED HERE, and none is anywhere in this product. The
+ * whole argument is in the header of src/lib/gymTax.ts; this section states one
+ * fact somebody typed and computes nothing from it.
+ */
+function Registration({ read, rows, w, tenantId, me, onChange }: {
+  read: Read<TaxStanding>; rows: TaxStanding[]; w: MonthWindow;
+  tenantId: string; me: Me; onChange: () => void;
+}) {
+  const [status, setStatus] = useState<TaxStandingStatus>('registered');
+  const [registration, setRegistration] = useState('');
+  const [fromOn, setFromOn] = useState('');
+  const [toOn, setToOn] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const during = registrationDuring(
+    read.rows, w.firstDay, w.lastDay,
+    read.state === 'loading' ? 'loading' : read.state === 'failed' ? 'error' : 'ready',
+  );
+
+  const draft: TaxStandingDraft = { status, registration, fromOn, toOn };
+  const blockers = standingBlockers(draft, rows);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (blockers.length) { setErr(blockers[0]); return; }
+    setBusy(true); setErr(null); setSaved(null);
+    try {
+      await recordTaxStanding(supabase, tenantId, { ...draft, createdBy: me.id });
+      setSaved('Recorded. Every period this covers now carries that answer, and the ones it does not are still unanswered rather than denied.');
+      setRegistration(''); setFromOn(''); setToOn(''); setOpen(false);
+      onChange();
+    } catch (e: any) {
+      setErr(writeFailedText(e, {
+        what: 'That registration',
+        unchanged: 'nothing has been recorded and every period reads exactly as it did',
+        howToCheck: 'Reload this page and read the list below before entering it again.',
+      }));
+    } finally { setBusy(false); }
+  };
+
+  /**
+   * Giving an open period an end.
+   *
+   * An inline date box rather than `window.prompt`, which appears nowhere else
+   * in this console: a browser prompt is unstyled, unlabelled for a screen
+   * reader, and returns a string nobody validated. The day is typed into a
+   * `type="date"` field the same way every other date on this page is.
+   *
+   * Seeded with the last day of the month being looked at, which is a
+   * SUGGESTION and not an assumption — an owner who deregistered on the 14th
+   * types the 14th, and `standingBlockers` is not consulted here because
+   * closing a period cannot overlap anything: it only shortens one.
+   */
+  const [ending, setEnding] = useState<{ st: TaxStanding; day: string } | null>(null);
+
+  const close = () => {
+    if (!ending?.day) return;
+    endTaxStanding(supabase, ending.st.id, ending.day)
+      .then(() => { setErr(null); setSaved(`That period now ends on ${ending.day}, inclusive.`); setEnding(null); onChange(); })
+      .catch((e: any) => setErr(writeFailedText(e, {
+        what: 'That registration period',
+        unchanged: 'it still has no end date on it',
+        howToCheck: 'Reload this page: the list carries whichever dates are actually stored.',
+      })));
+  };
+
+  const cols: Column<TaxStanding>[] = [
+    { key: 'from', header: 'From', value: (r) => r.fromOn },
+    { key: 'to', header: 'Until', value: (r) => r.toOn,
+      render: (r) => r.toOn ?? <span className="dash">and still</span> },
+    { key: 'status', header: 'Said to be', value: (r) => STANDING_LABEL[r.status] },
+    { key: 'number', header: 'Number', value: (r) => r.registration,
+      render: (r) => r.registration ?? <span className="dash">none stated</span> },
+    { key: 'note', header: 'Note', value: (r) => r.note },
+    { key: 'end', header: '', align: 'right',
+      value: () => null,
+      render: (r) => (r.toOn ? null : (
+        <button type="button" className="no-print" style={linkBtn}
+                onClick={() => { setEnding({ st: r, day: w.lastDay }); setErr(null); setSaved(null); }}
+                aria-label={`Set the last day the period from ${r.fromOn} was true`}>
+          Give it an end date
+        </button>
+      )) },
+  ];
+
+  return (
+    <Section
+      title="What this gym says it was registered as"
+      sub={`For ${w.label}, from the dated statements this gym has recorded. No tax figure is produced here or anywhere in Repple — this is one fact somebody typed, held against the days it was true of.`}
+    >
+      <Part read={read} what="what this gym has said about its tax registration"
+            cost="whether this business was registered during this month is unknown, which is not the same as it not having been">
+        <>
+          <p style={{ margin: 0, padding: '12px 14px', borderBottom: '1px solid var(--ring)', color: 'var(--ink2)', fontSize: 13, maxWidth: '86ch' }}>
+            {standingLine(during, w.label)}
+          </p>
+          <DataTable noun="registration statements"
+            rows={rows} columns={cols} rowKey={(r) => r.id}
+            empty="Nothing recorded. Until a statement is entered, every month on this screen reads as one nobody has answered for — which is what it is, and is deliberately not the same as a month this gym was not registered in."
+          />
+        </>
+      </Part>
+      {err ? <Banner tone="crit">{err}</Banner> : null}
+      {saved ? <Banner>{saved}</Banner> : null}
+      {ending ? (
+        <div className="no-print" style={{ ...formRow, borderTop: '1px solid var(--ring)', alignItems: 'baseline' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--ink2)', maxWidth: '52ch' }}>
+            The last day the period from {ending.st.fromOn} was true. Stored inclusive, so a
+            registration that ran to the 31st ends on the 31st.
+          </span>
+          <input type="date" value={ending.day}
+                 onChange={(e) => setEnding({ st: ending.st, day: e.target.value })}
+                 style={{ ...field, width: 148 }}
+                 aria-label={`The last day the period from ${ending.st.fromOn} was true`} />
+          <button type="button" style={primaryBtn} disabled={!ending.day} onClick={close}>End it</button>
+          <button type="button" style={linkBtn} onClick={() => setEnding(null)}>Leave it</button>
+        </div>
+      ) : null}
+      {open ? (
+        <form onSubmit={save} className="no-print" style={{ borderTop: '1px solid var(--ring)' }}>
+          <div style={formRow}>
+            <select value={status} onChange={(e) => setStatus(e.target.value as TaxStandingStatus)}
+                    style={{ ...field, flex: 1, minWidth: 180 }} aria-label="What this gym is saying about that stretch of time">
+              <option value="registered">{STANDING_LABEL.registered}</option>
+              <option value="not_registered">{STANDING_LABEL.not_registered}</option>
+            </select>
+            <input value={registration} onChange={(e) => setRegistration(e.target.value)}
+                   placeholder="Registration number" disabled={status === 'not_registered'}
+                   style={{ ...field, flex: 2, minWidth: 180 }}
+                   aria-label="The registration number, as it is written on the certificate" />
+            <label style={dateLabel}>
+              from
+              <input type="date" value={fromOn} onChange={(e) => setFromOn(e.target.value)}
+                     style={{ ...field, width: 148 }} aria-label="The first day this was true" />
+            </label>
+            <label style={dateLabel}>
+              until
+              <input type="date" value={toOn} onChange={(e) => setToOn(e.target.value)}
+                     style={{ ...field, width: 148 }} aria-label="The last day this was true, or empty if it still is" />
+            </label>
+            <button type="submit" disabled={busy || blockers.length > 0} style={primaryBtn}>
+              {busy ? 'Recording…' : 'Record it'}
+            </button>
+            <button type="button" style={linkBtn} onClick={() => { setOpen(false); setErr(null); }}>Leave it</button>
+          </div>
+          {/* Every reason at once rather than the first one, so somebody who
+              has left three fields wrong is not corrected three times. */}
+          {(fromOn || registration) && blockers.length ? (
+            <ul style={{ margin: '0 14px 12px', paddingLeft: 18, fontSize: 12.5, color: 'var(--warn)', maxWidth: '76ch' }}>
+              {blockers.map((b) => <li key={b} style={{ marginBottom: 4 }}>{b}</li>)}
+            </ul>
+          ) : null}
+          <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '82ch' }}>
+            Leaving the end date empty means &ldquo;and still&rdquo;. Repple has not checked this
+            against any register &mdash; there is none it could check &mdash; and has not inferred it
+            from a country, a currency or a price. {CURRENT_FLAG_IS_NOT_A_PERIOD_NOTE}
+          </p>
+        </form>
+      ) : (
+        <p className="no-print" style={{ margin: 0, padding: '10px 14px', borderTop: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '84ch' }}>
+          <button type="button" style={linkBtn} onClick={() => { setOpen(true); setSaved(null); }}>
+            Record a registration period
+          </button>
+          {' · '}A stretch of days and what was true of them. {CURRENT_FLAG_IS_NOT_A_PERIOD_NOTE}
+        </p>
+      )}
     </Section>
   );
 }
@@ -1228,12 +1737,16 @@ function Invoiced({ read, raised, w }: { read: Read<Invoice>; raised: Invoice[];
  * are the questions this page is built out of. Splitting them would mean
  * raising a bill on one screen and finding out what happened to it on another.
  */
-function Register({ read, raised, w, ccy, zone, members, tenantId, onChange }: {
+function Register({ read, raised, w, ccy, zone, members, tenantId, drops, me, onChange }: {
   read: Read<Invoice>; raised: Invoice[]; w: MonthWindow; ccy: TenantCurrency;
   /** `tenants.timezone`. An invoice's issue date is the gym's day, not the
    *  day it happens to be wherever the person raising it is sitting. */
   zone: string | null;
-  members: Membership[] | null; tenantId: string; onChange: () => void;
+  members: Membership[] | null; tenantId: string;
+  /** Why this gym decided not to collect, per invoice (supabase/parts/2642). */
+  drops: Read<DropRow>;
+  me: Me;
+  onChange: () => void;
 }) {
   // The GYM's day, seeding both date boxes below. It was `isoDate(new Date())`,
   // and lib/currency.ts names this exact failure in as many words: "a cost
@@ -1257,6 +1770,22 @@ function Register({ read, raised, w, ccy, zone, members, tenantId, onChange }: {
   const [busy, setBusy] = useState(false);
   const [writeErr, setWriteErr] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  /** The invoice somebody is about to take off the receivables, and which of
+   *  the two decisions it is. Null when nobody is. */
+  const [dropping, setDropping] = useState<{ inv: Invoice; status: DropStatus } | null>(null);
+  const [reason, setReason] = useState('');
+
+  /** The decision on each invoice, by invoice id. Null when that read did not
+   *  come back — which is NOT the same as no decision having been made, and is
+   *  why `writeOffHistory` is handed the read's state rather than a map with
+   *  holes in it. */
+  const dropIndex = useMemo(
+    () => (drops.rows ? new Map(drops.rows.map((d) => [d.id, d])) : null),
+    [drops.rows],
+  );
+  const dropStatus: 'loading' | 'ready' | 'error' =
+    drops.state === 'loading' ? 'loading' : drops.state === 'failed' ? 'error' : 'ready';
+  const NO_DROP: DropRecord = { droppedAt: null, dropReason: null, droppedBy: null, droppedByName: null };
 
   const draft: InvoiceDraft = { memberId, membershipId: membershipId || null, amount, issuedOn, dueOn, note };
   const blocker = invoiceBlocker(draft, ccy);
@@ -1301,7 +1830,23 @@ function Register({ read, raised, w, ccy, zone, members, tenantId, onChange }: {
     } finally { setBusy(false); }
   };
 
+  /**
+   * The status change that cannot be made from a dropdown.
+   *
+   * Everything else on this list is a state an invoice passes THROUGH. 'void'
+   * and 'written_off' are the two that take money off what the gym is owed —
+   * `owedOf` in src/lib/monthEnd.ts counts them into a bucket it calls
+   * `dropped` — and until supabase/parts/2642 that happened on one click with
+   * nothing anywhere recording why. So those two open the box below instead of
+   * writing, and nothing is written until a reason has been typed.
+   */
   const setStatus = (inv: Invoice, next: string) => {
+    if (isDropStatus(next)) {
+      setWriteErr(null); setSaved(null);
+      setDropping({ inv, status: next });
+      setReason('');
+      return;
+    }
     setInvoiceStatus(supabase, inv.id, next as any)
       .then(() => { setWriteErr(null); setSaved(null); onChange(); })
       .catch((err: any) => setWriteErr(writeFailedText(err, {
@@ -1309,6 +1854,25 @@ function Register({ read, raised, w, ccy, zone, members, tenantId, onChange }: {
         unchanged: `it is still ${inv.status ?? 'in whatever state it was'}`,
         howToCheck: 'Reload this page: the invoice list carries whichever state is actually stored.',
       })));
+  };
+
+  const dropIt = async () => {
+    if (!dropping) return;
+    setBusy(true); setWriteErr(null);
+    try {
+      await dropInvoice(supabase, dropping.inv.id, dropping.status, reason, me.id);
+      setSaved(dropping.status === 'void'
+        ? 'Voided, with your reason on the invoice. It is off what the gym is owed and the reason stays on the row.'
+        : 'Written off, with your reason on the invoice. It is off what the gym is owed and the reason stays on the row — including if it is ever put back.');
+      setDropping(null); setReason('');
+      onChange();
+    } catch (e: any) {
+      setWriteErr(writeFailedText(e, {
+        what: 'That invoice',
+        unchanged: `it is still ${dropping.inv.status ?? 'in whatever state it was'} and nothing has come off what the gym is owed`,
+        howToCheck: 'Reload this page and read the invoice’s status before doing it again.',
+      }));
+    } finally { setBusy(false); }
   };
 
   const cols: Column<Invoice>[] = [
@@ -1323,6 +1887,24 @@ function Register({ read, raised, w, ccy, zone, members, tenantId, onChange }: {
         ? <span className="dash">no amount recorded</span>
         : <>{money(i.amountCents, i.currency)}</> },
     { key: 'note', header: 'Note', value: (i) => i.note },
+    // Why the gym is not collecting it, where it is not. Blank on a live
+    // invoice by design: a column with a sentence in every row is one nobody
+    // reads, and the rows that matter here are the few.
+    { key: 'why', header: 'Not collected because',
+      value: (i) => {
+        const h = writeOffHistory(i.status, dropIndex?.get(i.id) ?? NO_DROP,
+          gymDateText(dropIndex?.get(i.id)?.droppedAt ?? null, zone), dropStatus);
+        return h.state === 'live' ? null : h.line;
+      },
+      render: (i) => {
+        const rec = dropIndex?.get(i.id) ?? NO_DROP;
+        const h = writeOffHistory(i.status, rec, gymDateText(rec.droppedAt, zone), dropStatus);
+        if (h.state === 'live') return null;
+        const tone = h.state === 'dropped' ? 'var(--ink2)'
+          : h.state === 'reopened' ? 'var(--ink3)'
+          : 'var(--warn)';
+        return <span style={{ color: tone }}>{h.line}</span>;
+      } },
     { key: 'status', header: 'Status', value: (i) => i.status, align: 'right',
       render: (i) => (
         <select
@@ -1346,6 +1928,19 @@ function Register({ read, raised, w, ccy, zone, members, tenantId, onChange }: {
         </select>
       ) },
   ];
+
+  /** This month's dropped invoices with nothing on the row saying why. Only
+   *  computed against a WHOLE read of both halves — a failed decision read
+   *  would otherwise report every one of them as unexplained. */
+  const unexplained = useMemo(
+    () => (drops.state !== null
+      ? []
+      : unexplainedDrops(raised.map((i) => ({
+        ...i, ...(dropIndex?.get(i.id) ?? NO_DROP),
+      })))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- NO_DROP is a constant shape rebuilt per render; including it would recompute this on every one
+    [raised, dropIndex, drops.state],
+  );
 
   const roster = [...new Map((members ?? []).filter((m) => m.memberName).map((m) => [m.memberId, m.memberName!])).entries()];
   const theirMemberships = (members ?? []).filter((m) => m.memberId === memberId);
@@ -1407,6 +2002,71 @@ function Register({ read, raised, w, ccy, zone, members, tenantId, onChange }: {
       ) : null}
       {writeErr ? <Banner tone="crit">{writeErr}</Banner> : null}
       {saved ? <Banner>{saved}</Banner> : null}
+      {/* The decision read failing takes nothing else down. Said once, here,
+          rather than as a sentence repeated down a column. */}
+      {drops.why ? <Banner tone="crit">{drops.why}</Banner> : null}
+
+      {/* Taking money off what the gym is owed, with the reason on the row.
+          Not a dropdown: 'void' and 'written_off' are the two statuses that
+          remove a receivable, `owedOf` counts them into a bucket it calls
+          `dropped`, and until supabase/parts/2642 both happened on one click
+          with nothing anywhere recording why. */}
+      {dropping ? (
+        <div className="no-print" style={{
+          margin: '0 14px 14px', padding: '12px 14px', background: 'var(--surface2)',
+          border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)',
+        }}>
+          <p style={{ margin: 0, fontSize: 13, color: 'var(--ink2)', maxWidth: '78ch' }}>
+            <strong style={{ color: 'var(--ink)' }}>
+              Invoice {dropping.inv.number ?? '(unnumbered)'} to {dropping.inv.memberName ?? 'somebody this console cannot name'}
+              {dropping.inv.amountCents == null ? null : <>, {money(dropping.inv.amountCents, dropping.inv.currency)}</>}.
+            </strong>{' '}
+            {DROP_MEANS[dropping.status]}
+          </p>
+          <p style={{ margin: '8px 0 9px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '78ch' }}>
+            This comes off what the gym is owed and lands in the month-end as money it decided not
+            to collect. What you type is written onto the invoice and stays there &mdash; including if
+            the invoice is ever put back, because a decision that was made and then changed is two
+            facts and erasing the first leaves neither.
+          </p>
+          <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap' }}>
+            <input
+              value={reason} onChange={(e) => setReason(e.target.value)}
+              maxLength={MAX_REASON_CHARS}
+              placeholder={WRITE_OFF_PROMPT[dropping.status]}
+              aria-label={WRITE_OFF_PROMPT[dropping.status]}
+              style={{ ...field, flex: 2, minWidth: 260 }}
+            />
+            <button type="button" disabled={busy || !!writeOffBlocker(dropping.status, reason)}
+                    onClick={() => void dropIt()}
+                    style={{ ...primaryBtn, opacity: writeOffBlocker(dropping.status, reason) ? 0.5 : 1 }}>
+              {busy ? 'Recording…' : dropping.status === 'void' ? 'Void it' : 'Write it off'}
+            </button>
+            <button type="button" style={linkBtn}
+                    onClick={() => { setDropping(null); setReason(''); }}>
+              Leave it
+            </button>
+          </div>
+          {reason.trim() && writeOffBlocker(dropping.status, reason) ? (
+            <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '74ch' }}>
+              {writeOffBlocker(dropping.status, reason)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* The rows an accountant will ask about first, named rather than
+          counted. They are the invoices dropped before this console could hold
+          a reason; nothing here knows why and nothing will invent one, so the
+          only repair is somebody who remembers writing it in the note. */}
+      {read.state === null && drops.state === null && unexplained.length > 0 ? (
+        <p className="no-print" style={{ margin: '0 14px 14px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '82ch' }}>
+          {unexplained.length === 1 ? 'One invoice' : `${unexplained.length} invoices`} dated in {w.label}
+          {' '}{unexplained.length === 1 ? 'was' : 'were'} taken off what the gym is owed with no reason
+          recorded &mdash; {unexplained.map((i) => `no. ${i.number ?? '(unnumbered)'}`).join(', ')}. That happened
+          before this console could hold one. Nothing here knows why and nothing will invent it.
+        </p>
+      ) : null}
       <Part read={read} what="the invoice register" cost="what the gym billed this month is unknown">
         <DataTable noun="invoices"
           rows={raised} columns={cols} rowKey={(i) => i.id}
@@ -1483,25 +2143,76 @@ function Handoff({ w, gymName, asAt, payments, settled, raised, outstanding, boo
           ]),
           false));
 
+    // What the gym said it was registered as DURING this month, not what it
+    // says today. `tenants.tax_registered` has no date on it and would be the
+    // wrong answer for every month before the gym registered — which is the
+    // whole of supabase/parts/2641, and it matters most in a file somebody
+    // keeps and files from.
+    parts.push(head('TAX REGISTRATION — as stated for this month'));
+    parts.push(toCsv(
+      ['Month', 'What this gym says it was'],
+      [[w.label, standingLine(
+        registrationDuring(
+          books.standings.rows, w.firstDay, w.lastDay,
+          books.standings.state === 'loading' ? 'loading' : books.standings.state === 'failed' ? 'error' : 'ready',
+        ),
+        w.label,
+      )]],
+    ));
+
     parts.push(head('MONEY OUT — costs recorded in the month'));
+    // The receipt column carries the same three answers the screen does, and
+    // the middle one is why it is a WORD rather than a count. A file somebody
+    // keeps must not encode "the documents query was refused" as 0, which in a
+    // spreadsheet sorts and sums exactly like "nothing was ever filed".
+    // Why an invoice is not being collected, for the file. A word rather than
+    // a blank in each of the three cases: "the decision could not be read" and
+    // "no reason was ever given" are different, and an empty cell in a
+    // spreadsheet somebody keeps is indistinguishable from either.
+    const droppedIx = books.drops.rows ? new Map(books.drops.rows.map((d) => [d.id, d])) : null;
+    const whyNotCollected = (id: string, status: string | null): string => {
+      const rec = droppedIx?.get(id) ?? { droppedAt: null, dropReason: null, droppedBy: null, droppedByName: null };
+      const h = writeOffHistory(
+        status, rec, rec.droppedAt,
+        books.drops.state === 'loading' ? 'loading' : books.drops.state === 'failed' ? 'error' : 'ready',
+      );
+      return h.state === 'live' ? '' : h.line;
+    };
+
+    const filed = books.receipts.rows ? byCost(books.receipts.rows) : null;
+    const receiptCell = (id: string): string => {
+      const e = costEvidence(
+        id, filed,
+        books.receipts.state === 'loading' ? 'loading'
+          : books.receipts.state === 'failed' ? 'error'
+          : books.receiptsWhole ? 'ready' : 'partial',
+      );
+      return e.state === 'attached' ? `${e.count} filed` : e.state === 'none' ? 'none' : 'not known';
+    };
     parts.push(books.costs.state !== null
       ? unreadable('the recorded costs', books.costs.state, books.costs.why)
       : toCsv(
-          ['Paid on', 'What for', 'Paid to', 'Category', 'Amount (minor units)', 'Currency', 'Note'],
+          ['Paid on', 'What for', 'Paid to', 'Category', 'Amount (minor units)', 'Currency', 'Note', 'Receipt on file'],
           (books.costs.rows ?? []).map((c) => [
             c.paidOn, c.description, c.supplier, gymCostCategoryLabel(c.category),
-            c.amountCents, c.currency, c.note,
+            c.amountCents, c.currency, c.note, receiptCell(c.id),
           ]),
           false));
+    parts.push(`\n${RECEIPT_IS_NOT_A_CHECK_NOTE}\n`);
 
     parts.push(head(`INVOICES RAISED IN ${w.label.toUpperCase()}`));
     parts.push(books.invoices.state !== null
       ? unreadable('the invoice register', books.invoices.state, books.invoices.why)
       : toCsv(
-          ['Number', 'Issued', 'Due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status', 'Note'],
+          // The reason travels with the status, because in this file they are
+          // one fact: a row reading `written_off` with an empty cell beside it
+          // is a figure an accountant has to come back and ask about, and the
+          // point of supabase/parts/2642 is that the answer is on the row.
+          ['Number', 'Issued', 'Due', 'Billed to', 'Amount (minor units)', 'Currency', 'Status', 'Note', 'Not collected because'],
           raised.map((i) => [
             i.number, i.issuedOn, i.dueOn, i.memberName,
             i.amountCents, i.currency, i.status, i.note,
+            whyNotCollected(i.id, i.status),
           ]),
           false));
 
@@ -2189,6 +2900,43 @@ async function fetchInvoices(tenantId: string, upToDay: string): Promise<Invoice
     dueOn: r.due_on ?? null,
     status: r.status ?? null,
     note: r.note ?? null,
+  }));
+}
+
+/**
+ * Every invoice this gym has decided not to collect, and why.
+ *
+ * `dropped_at is not null` is the filter, so this is the small table: a gym's
+ * bad debts and voided bills, not its register. It is unbounded in time on
+ * purpose — the Ageing section below reaches back over every invoice ever
+ * issued, so an invoice written off in June has to be explainable in September.
+ *
+ * Capped and REFUSING. A truncated read here would drop the oldest decisions,
+ * and `writeOffHistory` would then describe those invoices as having no reason
+ * recorded — which is the exact false sentence this read exists to make
+ * impossible. A gym with more than a thousand written-off invoices has a
+ * problem this screen cannot help with, and saying so is better than quietly
+ * explaining nine hundred of them.
+ */
+async function fetchDrops(tenantId: string): Promise<DropRow[]> {
+  const { data, error } = await supabase
+    .from('gym_invoices')
+    .select('id, dropped_at, drop_reason, dropped_by')
+    .eq('tenant_id', tenantId)
+    .not('dropped_at', 'is', null)
+    .order('dropped_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(capLimit());
+  if (error) throw error;
+  const rows = assertWhole(data, 'why this gym has not collected on some of its invoices');
+  if (!rows.length) return [];
+  const names = await namesFor(rows.map((r: any) => r.dropped_by));
+  return rows.map((r: any) => ({
+    id: r.id,
+    droppedAt: r.dropped_at ?? null,
+    dropReason: r.drop_reason ?? null,
+    droppedBy: r.dropped_by ?? null,
+    droppedByName: r.dropped_by ? names.get(r.dropped_by) ?? null : null,
   }));
 }
 

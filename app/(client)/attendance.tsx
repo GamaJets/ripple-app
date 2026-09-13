@@ -25,13 +25,13 @@
 // register nobody took, a gym with no door log at all — any of which breaks a
 // streak that never actually broke. The weekly strip below shows what was
 // recorded and marks the weeks it knows nothing about as exactly that.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/ui/components';
-import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, fig } from '../../src/ui/kit';
+import { Rule, Section, SectionHead, Ghost, Notice, PartialRead, Flag, fig } from '../../src/ui/kit';
 import { sp, layout, radius, hairline, type as ty, numeric } from '../../src/theme/scale';
 // `numUpTo`, because `perWeek` is a ONE-DECIMAL mean — `Math.round(x * 10) / 10`
 // in src/lib/attendance.ts — and a bare `${perWeek}` writes a full stop in every
@@ -44,6 +44,14 @@ import { dateParts } from '../../src/lib/localDate';
 import { useMyAttendance, RHYTHM_WEEKS } from '../../src/ui/attendance';
 import { dwellMinutes, rhythmWeekLabel, type AttendanceEvent, type ClassOutcome } from '../../src/lib/attendance';
 import { BACK_ICON } from '../../src/ui/direction';
+// `my_class_history()` — supabase/parts/136, written for this screen and until
+// now called by nothing. See src/lib/classHistory.ts for what it lets this
+// screen stop guessing about.
+import {
+  fetchMyClassHistory, classesNotShown, unopenedClassesLine, missingClassesLine,
+} from '../../src/lib/classHistory';
+import { supabase } from '../../src/lib/supabase';
+import { reportError } from '../../src/lib/reportError';
 
 // The weekday used to be this file's own English array — 'Sun' through 'Sat',
 // hand-written beside a date string that was hardcoded to en-GB. Both are the
@@ -109,10 +117,42 @@ export default function Attendance() {
   const { status, events, undated, days, rhythm, classesComplete, cachedNote, reload } = useMyAttendance();
   const [refreshing, setRefreshing] = useState(false);
 
+  // ── what the SERVER says is this member's class history ──────────────────
+  //
+  // `my_class_history()` (supabase/parts/136) was written for this screen and
+  // has been called by nothing since: it appears once, as the USING clause of
+  // `gym_classes_mine_r`. It is `security definer` over `class_bookings` and
+  // `gym_visits` for `auth.uid()`, so it answers for every gym the member has
+  // ever been in — including the ones they have left — without the tenant
+  // scoping that made the caption below true when it was written.
+  //
+  // Read SEPARATELY from `useMyAttendance` and deliberately so. This is a
+  // second opinion about the same record, and folding it into the hook that
+  // produces the first one would let a failure in either take out both. It
+  // returns ids and nothing else, so it can never add a row to the timeline —
+  // rule 3 in src/lib/attendance.ts forbids an event built from an id alone.
+  //
+  // Null means we could not ask, and `unopenedClassesLine` says something
+  // weaker rather than something invented when it is.
+  const [history, setHistory] = useState<{ ids: string[]; truncated: boolean } | null>(null);
+  const loadHistory = useCallback(async () => {
+    const res = await fetchMyClassHistory(supabase);
+    if (!res.ok) {
+      // Reported, and the caption falls back to the sentence that needs no
+      // second opinion. Not fatal: this screen's own three reads are what the
+      // list is made of, and they succeeded or failed on their own terms.
+      reportError('attendance.classHistory', new Error(res.reason));
+      setHistory(null);
+      return;
+    }
+    setHistory(res.value);
+  }, []);
+  useEffect(() => { void loadHistory(); }, [loadHistory]);
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    try { await reload(); } finally { setRefreshing(false); }
-  }, [reload]);
+    try { await Promise.all([reload(), loadHistory()]); } finally { setRefreshing(false); }
+  }, [reload, loadHistory]);
   // Was four hand-written lines of RefreshControl. The shared hook is the same
   // gesture with the thing those lines never had: a second pull arriving while
   // the first read is in flight is ignored rather than firing it again.
@@ -121,6 +161,49 @@ export default function Attendance() {
   // Only from a whole read. 'partial' is excluded for the same reason 'error'
   // is: the rows are real and a count over them is a subtotal shown as a total.
   const countable = status === 'ready';
+
+  /** The class id behind an event, whether or not the class row came back. A
+   *  class we could not open still has its id on the booking or the visit that
+   *  points at it, which is exactly what makes it checkable against the
+   *  server's own list. */
+  const classIdOf = (e: AttendanceEvent): string | null =>
+    e.klass?.id ?? e.booking?.classId ?? e.visit?.classId ?? null;
+
+  // Every class the timeline accounts for, INCLUDING the ones drawn as "a class
+  // we could not read" and the undated ones. An event with no title is still an
+  // event the member can see, and counting it as missing as well would report
+  // the same class twice.
+  const shownClassIds = useMemo(
+    () => [...events, ...undated].map(classIdOf).filter((x): x is string => !!x),
+    [events, undated],
+  );
+
+  // The events that hold no class row, and how many of them the server hands
+  // back as the member's own. That second figure is the whole point: it is the
+  // difference between "your gym deleted this class" and "this app is not
+  // allowed to open it", and the screen used to guess — with the guess that
+  // part 136 made wrong.
+  const unopenedIds = useMemo(
+    () => [...events, ...undated]
+      .filter((e) => e.source === 'class' && !e.klass)
+      .map(classIdOf)
+      .filter((x): x is string => !!x),
+    [events, undated],
+  );
+  const confirmedMine = useMemo(() => {
+    if (!history) return null;
+    const mine = new Set(history.ids);
+    return unopenedIds.filter((id) => mine.has(id)).length;
+  }, [history, unopenedIds]);
+
+  // Classes the server holds that are on this screen nowhere at all. Under a
+  // whole read this is empty; under a truncated one it is how much of the
+  // member's own record is missing from what they are looking at, which is a
+  // figure `status: 'partial'` gestures at and never states.
+  const notShown = useMemo(
+    () => (history ? classesNotShown(history.ids, shownClassIds) : []),
+    [history, shownClassIds],
+  );
 
   // Oldest week on the left, which is how a habit reads.
   const strip = useMemo(() => [...rhythm.weeks].reverse(), [rhythm.weeks]);
@@ -297,10 +380,35 @@ export default function Attendance() {
         <Section>
           <SectionHead title="Every visit" note={countable && events.length ? num(events.length) : undefined} />
 
-          {!classesComplete && events.length ? (
+          {/* Why a class would not open, CHECKED rather than guessed.
+              This said "usually because they were run by a gym you are no
+              longer with", which was true until supabase/parts/136 gave a
+              member the right to read any class they booked or visited
+              "whichever gym it belongs to". Since then it has been the wrong
+              reason, told to somebody about their own record — and the
+              function that can answer properly, `my_class_history()`, was
+              written in the same part and called by nothing. See
+              src/lib/classHistory.ts. */}
+          {!classesComplete && events.length && unopenedClassesLine(unopenedIds.length, confirmedMine) ? (
             <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.sm }}>
-              Some of these are classes this app could not open — usually because they were run by a gym you are no longer with. The attendance is still yours; only the class details are missing.
+              {unopenedClassesLine(unopenedIds.length, confirmedMine)}
             </Text>
+          ) : null}
+
+          {/* Classes the server holds that this list does not contain at all.
+              Never derived from a count on screen: it is the difference between
+              the member's own timeline and the set `my_class_history()` returns,
+              and it is a floor rather than a total when that read was itself
+              truncated. */}
+          {missingClassesLine(notShown.length, history?.truncated ?? false) ? (
+            // A <Flag>, not warn-coloured words. scripts/check-contrast.mjs:
+            // a status colour is tuned to the 3:1 a MARK needs and not to the
+            // 4.5:1 text needs, so the tone goes on the mark and the sentence
+            // stays in ink. The words already say it; colour is never the only
+            // channel.
+            <Flag tone={t.warn} style={{ marginBottom: sp.sm }}>
+              {missingClassesLine(notShown.length, history?.truncated ?? false)}
+            </Flag>
           ) : null}
 
           {status === 'loading' ? (

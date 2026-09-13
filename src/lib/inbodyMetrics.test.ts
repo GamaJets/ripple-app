@@ -20,6 +20,7 @@
 // are opposite facts that both want to print as a dash.
 import {
   metricTrends, compositionInsights, trendsByGroup, scansWithMetrics,
+  metricReadings, metricIsProgress,
   METRIC_GROUPS, METRIC_DEFS,
   type ScanLike, type ScanMetrics,
 } from './inbodyMetrics';
@@ -160,6 +161,67 @@ ok(oneSheetBalance.balance[0].includes('left'), 'and which side is behind');
 // pair is skipped rather than reported as the worst imbalance ever recorded.
 const zeroLimb = compositionInsights([scan('2026-08-01', { leanArmLKg: 0, leanArmRKg: 3.3 })]);
 eq(zeroLimb.balance.length, 0, 'a zero limb reading is dropped, not reported as 100% behind');
+
+// Every fragment names the unit it is in. The lines read "Fat Mass −1.3" with
+// nothing after them until this: a figure whose unit the reader has to guess is
+// the same defect as a figure in the wrong unit, one step quieter — and these
+// fragments are pasted into a coach's screen, a report and a member's Progress
+// screen, all three of which show converted figures elsewhere on the page.
+ok(read.improving.every((l) => /\s(kg|lb|lvl|pts|kcal|L)$/.test(l)),
+  'every improving line ends in the unit its figure is in');
+ok(wrongWay.watch.every((l) => /\s(lvl|pts)$/.test(l)),
+  'including the two that are not masses and never convert');
+
+// The member's own unit, and the conversion rules that go with it: a span
+// converted once, and a span too small to show in pounds said as words.
+const inLb = compositionInsights(two, 'lb');
+ok(inLb.improving.some((l) => l.startsWith('Fat Mass') && l.endsWith(' lb')),
+  'a pounds reader is told their fat mass in pounds');
+ok(inLb.improving.some((l) => l.startsWith('Visceral Fat') && l.endsWith(' lvl')),
+  'and a visceral fat LEVEL is still a level, because it was never a mass');
+
+const tiny = compositionInsights([
+  scan('2026-06-01', { fatMassKg: 20.0 }),
+  scan('2026-08-01', { fatMassKg: 19.8 }),
+], 'lb');
+eq(tiny.improving.length, 0, 'a 0.2 kg drop is not a pound, so it is not filed as improving');
+eq(tiny.watch.length, 0, 'and it is not filed as a worry either');
+// The same 0.2 kg IS a movement to a member reading in kilograms, and the
+// bucketing follows the figure each of them will actually see.
+eq(compositionInsights([
+  scan('2026-06-01', { fatMassKg: 20.0 }),
+  scan('2026-08-01', { fatMassKg: 19.8 }),
+], 'kg').improving.length, 1, 'while a kilogram reader sees it move and is told so');
+
+// ── one metric's readings, with their dates ────────────────────────────────
+
+const dated = metricReadings([
+  scan('2026-08-01', { proteinKg: 12.4 }),
+  scan('2026-06-01', { proteinKg: 12.1 }),
+  scan('2026-07-01', { visceralFat: 8 }),
+], 'proteinKg');
+eq(dated.length, 2, 'only the scans that carried this metric are readings of it');
+eq(dated[0].at, '2026-06-01', 'oldest first, whatever order the scans arrived in');
+eq(dated[1].value, 12.4, 'and the newest reading is last');
+eq(metricReadings([scan('2026-06-01')], 'proteinKg').length, 0,
+  'a scan with no breakdown contributes nothing — not a zero');
+eq(metricReadings([scan('2026-06-01', { proteinKg: 0 })], 'proteinKg').length, 1,
+  'but a genuine zero is a reading and is kept');
+
+// ── whose opinion decides a movement ───────────────────────────────────────
+
+const fatMass = METRIC_DEFS.find((d) => d.key === 'fatMassKg')!;
+const protein = METRIC_DEFS.find((d) => d.key === 'proteinKg')!;
+eq(metricIsProgress(fatMass, -1.2, 'fatloss', 1), true,
+  'fat mass falling is progress for somebody cutting');
+eq(metricIsProgress(fatMass, 1.2, 'muscle', 1), undefined,
+  'and fat gained during a deliberate bulk gets no verdict at all — not a bad one');
+eq(metricIsProgress(protein, 0.3, 'muscle', 1), true,
+  'a metric no goal disputes is read off its own direction');
+eq(metricIsProgress(protein, 0, 'muscle', 1), undefined, 'a movement of nothing is neither');
+eq(metricIsProgress(protein, 0.04, 'muscle', 1), undefined,
+  'and neither is a movement that rounds to nothing at the grain it is printed at');
+eq(metricIsProgress(protein, null, 'muscle', 1), undefined, 'no earlier reading is not a movement');
 
 // ── the definitions the two screens share ──────────────────────────────────
 

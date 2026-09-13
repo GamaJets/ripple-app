@@ -105,6 +105,15 @@ import {
 import { fetchMemberRecords, byMember, contactLine, type GymMemberRecord } from '@lib/gymMembers';
 import { buildRollCall, rollCallHtml, emergencyLine } from '@lib/rollCall';
 import { fetchMemberships, money, type Membership } from '@lib/gymRecord';
+// What the gym's record says the person at the desk owes. Read at the moment
+// they are selected, never summed across currencies, and deliberately not
+// wired into `admissionCheck` — the door decision is the gym's, and this
+// screen's job is to inform it. See the header of src/lib/doorBalance.ts.
+import {
+  fetchMemberDebt, doorBalance, doorBalanceLine, readStatus,
+  DOOR_BALANCE_IS_NOT_A_DECISION, DOOR_BALANCE_IS_THE_RECORD,
+  type DoorInvoice,
+} from '@lib/doorBalance';
 import { fetchClasses, type GymClass } from '@lib/gymSchedule';
 import { isoDate } from '@lib/format';
 import { num } from '@/lib/num';
@@ -703,6 +712,11 @@ export default function Door() {
       <CheckInBar
         members={members} passes={passes} classes={classes} visits={visits}
         records={records} tenantId={tenantId} desk={desk}
+        // The only role `gym_invoices` admits. See the prop's own comment: a
+        // trainer's read of that table is FILTERED to nothing rather than
+        // refused, so asking and believing the answer would tell the floor
+        // every member in the building is up to date.
+        ownsBilling={me.role === 'owner'}
         membersUnread={unread(members)} classesUnread={unread(classes)}
         recordsUnread={recordsUnread}
         today={today} zone={zone} queue={queue} gymName={gymName} onChange={refresh}
@@ -903,7 +917,7 @@ function useDoorQueue(tenantId: string, zone: string | null, onChange: () => voi
 
 /* ── check-in ──────────────────────────────────────────────────────────────── */
 
-function CheckInBar({ members, passes, classes, visits, records, tenantId, desk, membersUnread, classesUnread, recordsUnread, today, zone, queue, gymName, onChange }: {
+function CheckInBar({ members, passes, classes, visits, records, tenantId, desk, ownsBilling, membersUnread, classesUnread, recordsUnread, today, zone, queue, gymName, onChange }: {
   members: Membership[] | null; passes: GymPass[] | null; classes: GymClass[] | null;
   visits: Visit[] | null;
   records: Map<string, GymMemberRecord> | null;
@@ -922,6 +936,22 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, desk,
    * visit still counts toward the day.
    */
   desk: boolean;
+  /**
+   * True for an OWNER, the only role that may read `gym_invoices`.
+   *
+   * Part 29 gives that table exactly two read policies: `is_owner_of(tenant_id)`
+   * and the member's own row. A trainer on the desk matches neither, and
+   * row-level security FILTERS rather than raising — so the query would come
+   * back empty, with no error, and the balance line would tell the floor that
+   * every member in the building is up to date. That is the worst failure this
+   * feature has and it is the one that happens by default, so the read is not
+   * made at all and `doorBalance` is told why.
+   *
+   * Separate from `desk` because `desk` is a receptionist and a TRAINER is
+   * neither of the two: they may read the member list and may not read the
+   * billing.
+   */
+  ownsBilling: boolean;
   membersUnread: Unread; classesUnread: Unread; recordsUnread: Unread;
   /** `tenants.name`, for drawing a member's own number beside their name in
    *  the picker. Never used to match one. */
@@ -993,6 +1023,49 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, desk,
    * ring. On screen while they are being selected rather than hunted for
    * afterwards. */
   const theirRecord = memberId ? records?.get(memberId) ?? null : null;
+
+  /**
+   * What the gym's record says this person owes, read when they are selected.
+   *
+   * Read HERE, per member, rather than joining the page's thirty-second poll.
+   * Two reasons and both of them are about the person at the counter: a figure
+   * about somebody's money must be as fresh as the moment it is shown, and
+   * pulling every member's billing every half minute onto a tablet by the door
+   * would be dragging the gym's whole receivables across a gym's network all
+   * day to answer a question nobody has asked yet.
+   *
+   * `landed` starts false and is what keeps an empty list from reading as "up
+   * to date" before the read has happened. `failed` and `whole` are the other
+   * two, and `readStatus` turns the three into the one vocabulary — including
+   * 'partial', which is not 'ready' and which withholds the figure.
+   */
+  const [debt, setDebt] = useState<{ rows: DoorInvoice[]; whole: boolean } | null>(null);
+  const [debtLanded, setDebtLanded] = useState(false);
+  const [debtFailed, setDebtFailed] = useState(false);
+
+  useEffect(() => {
+    // Nothing selected, or a login that may not read the billing: no query is
+    // made at all, and `doorBalance` is handed the reason rather than an empty
+    // list it would have to interpret.
+    if (!memberId || !ownsBilling) { setDebt(null); setDebtLanded(false); setDebtFailed(false); return; }
+    let live = true;
+    setDebt(null); setDebtLanded(false); setDebtFailed(false);
+    fetchMemberDebt(supabase, tenantId, memberId)
+      .then((r) => { if (live) { setDebt({ rows: r.invoices, whole: r.whole }); setDebtLanded(true); } })
+      // `fetchMemberDebt` throws on a refusal — it never answers a broken query
+      // with an empty list — so this is the only place the failure can land,
+      // and it must not be swallowed into "they owe nothing".
+      .catch(() => { if (live) { setDebtFailed(true); setDebtLanded(true); } });
+    return () => { live = false; };
+  }, [memberId, ownsBilling, tenantId]);
+
+  const balance = doorBalance(
+    debt?.rows ?? null,
+    today,
+    readStatus(debtLanded, debtFailed, debt?.whole ?? false),
+    ownsBilling,
+  );
+  const balanceLine = memberId ? doorBalanceLine(balance) : null;
 
   // Soonest first, so the class about to start is the first thing in the list
   // rather than the one that finished an hour ago.
@@ -1204,6 +1277,38 @@ function CheckInBar({ members, passes, classes, visits, records, tenantId, desk,
             </>
           )}
         </p>
+      ) : null}
+
+      {/* What the gym's record says they owe, and nothing about what to do
+          about it.
+
+          Silent when they are up to date, which is the same judgement the
+          admission preview above makes and for the same reason: a line against
+          every member in good standing is a line the desk stops reading, and
+          then the one that matters is invisible too.
+
+          `--warn` and never `--crit`. The crit colour on this screen belongs to
+          the admission refusal, which is a thing the console actually did — and
+          a debt rendered in the same ink as a refusal reads as one, which is
+          exactly the implication this must not make. */}
+      {balanceLine ? (
+        <div style={{
+          margin: '0 14px 14px', padding: '11px 13px', background: 'var(--surface2)',
+          border: '1px solid var(--ring)', borderLeft: '3px solid var(--warn)',
+        }}>
+          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)', maxWidth: '80ch' }}>
+            {balanceLine}
+          </p>
+          {/* Both notes, and only beside a figure. Under "withheld" and
+              "unreadable" there is no amount on screen, so there is nothing for
+              them to qualify and they would be two more sentences between the
+              desk and the person in front of them. */}
+          {balance.state === 'owes' ? (
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--ink3)', maxWidth: '80ch' }}>
+              {DOOR_BALANCE_IS_THE_RECORD}{' '}{DOOR_BALANCE_IS_NOT_A_DECISION}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {/* Said rather than silently filtered. The member holds a PT block, the

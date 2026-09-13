@@ -62,6 +62,9 @@ import {
   RECEIPT_IS_YOUR_WORD, RECEIPT_IS_NOT_PAY, RECEIPT_MAY_DOUBLE_COUNT, RECEIPT_IS_NOT_A_DOCUMENT,
   type CoachReceipt, type ReceiptDraft, type ReceiptMethod,
 } from '../../src/lib/coachReceipts';
+import {
+  groupLines, linesByMonth, MONTHS_ARE_WHAT_YOU_WROTE_DOWN, type BookGroup, type BookLine,
+} from '../../src/lib/moneyBook';
 import { fetchMyReceipts, recordReceipt, deleteReceipt } from '../../src/ui/coachReceipts';
 import { fetchInvoiceCurrency, type InvoiceCurrency } from '../../src/ui/coachInvoices';
 import { supabase } from '../../src/lib/supabase';
@@ -144,6 +147,54 @@ export default function Receipts() {
 
   const taken = useMemo(() => receiptsTaken(rows), [rows]);
 
+  /* ── the cash book, broken down the way the costs book already is ───────
+     Every row here carries a method, a day and a payer, and none of the three
+     was on screen: one total per currency and a flat list was the whole of it,
+     while app/(trainer)/costs.tsx next door has answered "where did it go" per
+     category since it was written. The three questions a coach asks of a cash
+     book are how it reached them, which month it was in, and who it came from.
+
+     src/lib/moneyBook.ts does the folding, so the rule that currencies never
+     merge and never rank against each other is kept in one place rather than
+     re-derived per screen — which is how `receiptTakenRows` came to exist. */
+  const lines = useMemo((): BookLine[] => rows.map((r) => ({
+    id: r.id,
+    // The day the coach says the money ARRIVED, never the day the row was
+    // written. A month of cash written up in one evening belongs in the months
+    // it was taken in, and this is the field that decides that.
+    day: r.receivedOn,
+    amountCents: r.amountCents,
+    currency: r.currency,
+    label: r.paidBy,
+  })), [rows]);
+
+  const byMethod = useMemo(() => groupLines(lines, (l) => {
+    const r = rows.find((x) => x.id === l.id);
+    return String(r?.method ?? '');
+  }, (k) => methodLabel(k)), [lines, rows]);
+
+  const byMonth = useMemo(() => linesByMonth(lines), [lines]);
+
+  /* Grouped by the NAME on the line and not by `client_id`.
+     Most of the people who pay a coach in cash were never given an account —
+     the sheet says so where the roster shortcut is offered — so `clientId` is
+     null on the majority of these rows. Keying on it would put one person in
+     two groups depending on whether the coach happened to tap the roster chip
+     or type the name, and would leave everybody else in one enormous "no
+     account" pile. The name is what is on the row, what the list shows and what
+     the coach thinks in. Case and spacing are normalised for the key so "Jane
+     Smith" and "jane smith " are one person; the label keeps the spelling the
+     coach used. */
+  const byPayer = useMemo(() => {
+    const spelling = new Map<string, string>();
+    for (const l of lines) {
+      const key = l.label.trim().toLowerCase();
+      if (key && !spelling.has(key)) spelling.set(key, l.label.trim());
+    }
+    return groupLines(lines, (l) => l.label.trim().toLowerCase(),
+      (k) => spelling.get(k) ?? 'Not stated', 'not stated');
+  }, [lines]);
+
   const draft = (): ReceiptDraft => ({
     paidBy, amountText, currency: ccy.currency, method, receivedOn,
     note: note.trim() || null, clientId, coachId: me,
@@ -199,6 +250,40 @@ export default function Receipts() {
 
   const inp = { ...ty.body, color: t.ink, backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 11 };
   const G = layout.gutter;
+
+  /* One slice of the book, drawn the way "Where It Went" on the costs screen
+     draws a category: a name, then one figure PER CURRENCY underneath it. Never
+     one figure per slice — a coach paid in dirhams by one client and in
+     sterling by another has two amounts of money and not a sum.
+
+     A plain function rather than a component defined in the render body: a
+     component declared here is a new type on every render and React remounts
+     the whole subtree for it, which is a real cost on a list and buys nothing
+     for a presentational leaf. */
+  const slice = (g: BookGroup, unit: string) => (
+    <View key={g.key} style={{ paddingVertical: sp.sm, borderBottomWidth: 1, borderBottomColor: t.ring }}>
+      <Text style={{ ...ty.label, color: t.ink2 }}>{g.label}</Text>
+      {g.taken.pots.map((p) => (
+        <View key={p.currency} style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+          <Text style={{ ...ty.caption, color: t.ink3 }}>
+            {p.count} {p.count === 1 ? unit : `${unit}s`} in {p.currency}
+          </Text>
+          <Text style={{ ...ty.label, ...numeric, color: t.ink }}>
+            {minorMoney(p.minorUnits, p.currency) ?? DASH}
+          </Text>
+        </View>
+      ))}
+      {/* A row this app cannot put a unit or an amount on is counted out of the
+          figure above it and said so here, exactly as it is in the total. A
+          slice whose lines and whose figure disagree without saying why is the
+          thing that makes a coach stop trusting the screen. */}
+      {g.taken.unlabelled + g.taken.unpriced ? (
+        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
+          {g.taken.unlabelled + g.taken.unpriced} {g.taken.unlabelled + g.taken.unpriced === 1 ? 'line has' : 'lines have'} no readable amount and {g.taken.unlabelled + g.taken.unpriced === 1 ? 'is' : 'are'} in no figure here.
+        </Text>
+      ) : null}
+    </View>
+  );
 
   // The gate, said as a sentence a coach can act on and naming who sets it.
   // Four causes and not two: 'partial' and 'loading' are not settled facts
@@ -282,6 +367,59 @@ export default function Receipts() {
           )}
           <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RECEIPT_MAY_DOUBLE_COUNT}</Text>
         </Section>
+
+        {/* ── the three breakdowns ────────────────────────────────────────
+            Every one of them is a figure over a set, so every one of them is
+            drawn only under `isWhole(status)`. A breakdown of a truncated read
+            is a subtotal wearing a total's clothes, and a breakdown of a
+            refused one is an assertion about somebody's income made out of our
+            own failure. The sentence for each of those states is already on
+            screen above, once, from `receiptsEmptyLine`. */}
+        {isWhole(status) && byMethod.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="How It Reached You" note={`${byMethod.length} ${byMethod.length === 1 ? 'way' : 'ways'}`} />
+              {byMethod.map((g) => slice(g, 'payment'))}
+            </Section>
+          </>
+        ) : null}
+
+        {isWhole(status) && byMonth.months.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="By Month" note="Counted by the day you say you were paid" />
+              {byMonth.months.map((g) => slice(g, 'payment'))}
+              {/* A day that will not read is in NO month. Swept into this one it
+                  would make one month quietly too big; dropped in silence it
+                  would make the months add up to less than the book above, with
+                  nothing on screen to say why. */}
+              {byMonth.undated ? (
+                <Flag style={{ marginTop: sp.sm }}>
+                  {byMonth.undated} {byMonth.undated === 1 ? 'payment has' : 'payments have'} a day that could not be read, so {byMonth.undated === 1 ? 'it is' : 'they are'} in none of these months. {byMonth.undated === 1 ? 'It is' : 'They are'} still in the total above.
+                </Flag>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{MONTHS_ARE_WHAT_YOU_WROTE_DOWN}</Text>
+            </Section>
+          </>
+        ) : null}
+
+        {isWhole(status) && byPayer.length ? (
+          <>
+            <Rule />
+            <Section>
+              <SectionHead title="Who Paid You" note={`${byPayer.length} ${byPayer.length === 1 ? 'person' : 'people'}`} />
+              {byPayer.map((g) => slice(g, 'payment'))}
+              {/* Said out loud, because the grouping is by the name written on
+                  each line rather than by an account. Most people who pay a
+                  coach in cash were never given one. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                These are grouped by the name you wrote on each line, not by an account — most people who pay in cash have never been given one. Two spellings of the same person are two rows here.
+              </Text>
+            </Section>
+          </>
+        ) : null}
 
         <Rule />
 

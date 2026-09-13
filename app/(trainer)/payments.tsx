@@ -244,6 +244,8 @@ import { payoutStage, canOnboard } from '../../src/lib/payoutAccount';
 // Whether the money reaches the coach, which `payoutStage` does not ask —
 // supabase/parts/161's two payout columns, read here for the first time.
 import { payoutReach, transferState, payoutHeading, payoutNote, transferNote } from '../../src/lib/payoutReach';
+import { stripePulse, stripePulseLine, stripeEventsLine, STRIPE_PULSE_IS_NOT_YOUR_SALES, STRIPE_PULSE_IS_NOT_A_HEALTH_CHECK, type StripeHeard } from '../../src/lib/stripeHeartbeat';
+import { fetchStripeHeard } from '../../src/ui/stripeHeartbeat';
 import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, adjustPackCredit, fetchMyPromoCodes, createPromoCode, archivePromoCode, fetchMyDisputes, type ConnectStatus, type TrainerPackage, type CoachPurchase, type CoachDispute } from '../../src/lib/connect';
 // A chargeback is the one thing on this screen with a clock on it. See
 // src/lib/disputes.ts: the deadline is the content, a missing deadline is its
@@ -519,10 +521,21 @@ export default function TrainerPayments() {
   // amount and a fixed deadline goes past while nobody is told.
   const [disputes, setDisputes] = useState<CoachDispute[]>([]);
   const [disputesStatus, setDisputesStatus] = useState<LoadStatus>('loading');
+  // Whether this app has heard from Stripe at all, and when it last did.
+  //
+  // Every figure in "Taken Through Stripe" below is written by one thing, the
+  // stripe-webhook, so an empty screen has two causes with one appearance:
+  // nobody has bought anything, or the webhook has never been reached and
+  // clients are being charged while this app is never told. Until part 2630
+  // there was no way to tell those apart from inside the product, because
+  // `stripe_webhook_events` — the only evidence either way — was read by
+  // nothing in `app/` or `src/`.
+  const [heard, setHeard] = useState<StripeHeard | null>(null);
+  const [heardStatus, setHeardStatus] = useState<LoadStatus>('loading');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [c, p, s, cur, b, r, pr, dp] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), fetchMyCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes(), fetchMyDisputes()]);
+    const [c, p, s, cur, b, r, pr, dp, hb] = await Promise.all([fetchMyConnect(), fetchMyPackages(), fetchMySubscribers(), fetchMyCurrency(), fetchClientPurchases(), fetchMySubscriptionPayments(), fetchMyPromoCodes(), fetchMyDisputes(), fetchStripeHeard()]);
     setConn(c); setConnRead(c === null ? 'error' : 'ready'); setPkgs(p.rows); setPkgRead(p.status);
     setSubs(s.rows); setSubsStatus(s.status);
     setCurrency(cur.currency); setCurrencyGap(cur.gap); setCurrencyFrom(cur.from);
@@ -530,6 +543,7 @@ export default function TrainerPayments() {
     setPays(r.rows); setPaysStatus(r.status);
     setPromos(pr);
     setDisputes(dp.rows); setDisputesStatus(dp.status);
+    setHeard(hb.heard); setHeardStatus(hb.status);
     setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -1576,6 +1590,48 @@ export default function TrainerPayments() {
             {/* ── what has actually been taken ───────────────────────────── */}
             <Section>
               <SectionHead title="Taken Through Stripe" />
+              {/* ── when this app last heard from Stripe ───────────────────
+                  Everything below this line is written by the stripe-webhook
+                  and by nothing else, so an empty screen has two causes with
+                  one appearance: nobody has bought anything, or the webhook
+                  has never been reached and clients are being charged while
+                  this app is never told. `stripe_webhook_events` is the only
+                  evidence either way and nothing read it until part 2630.
+
+                  Drawn in all four states, including the failed read, because
+                  a heartbeat that disappears when it cannot be taken is worse
+                  than none: its absence reads as an all-clear. The age is
+                  computed at render from this phone's clock — it is a fact
+                  about the moment the screen was drawn and claims nothing
+                  more, which is why nothing here is refreshed on a timer.
+
+                  Never a diagnosis. Stripe calls only when something happens,
+                  so an old date is a quiet stretch; the state worth acting on
+                  is "never", and it says so in its own words. */}
+              {(() => {
+                const pulse = stripePulse(heard, heardStatus, Date.now());
+                const events = stripeEventsLine(pulse);
+                return (
+                  <View style={{ marginBottom: sp.md }}>
+                    <Text style={{ ...ty.caption, color: pulse.kind === 'silent' ? t.ink : t.ink3 }}>
+                      {stripePulseLine(pulse)}
+                    </Text>
+                    {events ? (
+                      <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{events}</Text>
+                    ) : null}
+                    {/* The two misreadings, said out loud rather than left to
+                        be made. Only where there is a heartbeat to misread —
+                        a failed read has nothing to be mistaken for, and the
+                        "never" sentence carries its own explanation. */}
+                    {pulse.kind === 'heard' || pulse.kind === 'unreadable' ? (
+                      <>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{STRIPE_PULSE_IS_NOT_YOUR_SALES}</Text>
+                        <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{STRIPE_PULSE_IS_NOT_A_HEALTH_CHECK}</Text>
+                      </>
+                    ) : null}
+                  </View>
+                );
+              })()}
               {earnedStatus === 'error' ? (
                 <Flag tone={t.crit}>
                   {buysStatus === 'error' && paysStatus === 'error'

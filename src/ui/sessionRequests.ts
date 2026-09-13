@@ -37,7 +37,13 @@ import { readByIds } from '../lib/idLookup';
 import type { LoadStatus } from './loadStatus';
 import { shapeRequests, type RawSessionRequest, type SessionRequest } from '../lib/sessionRequests';
 
-const COLS = 'id, client_id, trainer_id, starts_at, duration_min, note, state, session_id, decline_note, answered_at, created_at';
+// `answered_by` was written by all three paths in supabase/parts/740 — the
+// coach declining, the coach accepting, the member withdrawing — and selected by
+// nobody. A refusal that cannot say who made it reads, months later, as one made
+// this morning, and on an account that has changed coach it cannot say which of
+// two people said no. src/lib/requestAnswerer.ts is what turns the column into
+// the sentence; this is the select that makes it reachable.
+const COLS = 'id, client_id, trainer_id, starts_at, duration_min, note, state, session_id, decline_note, answered_at, answered_by, created_at';
 
 /** What every one of these calls answers with. `reason` is the server's own
  *  string and is never interpreted here. */
@@ -78,6 +84,47 @@ const asWrite = (d: unknown): RequestWrite => {
 };
 
 /**
+ * A request with the account that settled it.
+ *
+ * Carried alongside `SessionRequest` rather than added to it, because
+ * src/lib/sessionRequests.ts is the pure module three screens and a test share
+ * and the id is only ever wanted where a sentence is written about who answered.
+ * `answererOf` in src/lib/requestAnswerer.ts reads it against `clientId` and
+ * `trainerId`, which the row already carries — so nothing here has to be told
+ * who the coach is, and no stale profile read can tell it otherwise.
+ */
+export interface MySessionRequest extends SessionRequest {
+  /** `answered_by`, or null. Null is its own answer twice over: a row answered
+   *  before the column existed, and one whose answerer has deleted their
+   *  account (`on delete set null`). It is never read as "the coach". */
+  answeredBy: string | null;
+}
+
+/**
+ * Shape the rows, then put the answerer back on them.
+ *
+ * `shapeRequests` is the one parser for this table and it DROPS a row with no
+ * id or no readable hour, so the two lists are not the same length and a
+ * positional zip would attribute an answer to the wrong request. Matched on the
+ * id, which is the only thing that survives the drop.
+ */
+function withAnswerer(raw: readonly RawSessionRequest[]): MySessionRequest[] {
+  const by = new Map<string, string>();
+  for (const row of raw) {
+    // `RawSessionRequest` does not name this column. Widened here rather than
+    // there: that interface is the pure module's account of the row three
+    // screens parse, and only this caller selects `answered_by` or has any use
+    // for it. Every field on it is `unknown` anyway, so the read below is the
+    // same defensive check the rest of them get.
+    const r = row as RawSessionRequest & { answered_by?: unknown };
+    if (typeof r.id === 'string' && typeof r.answered_by === 'string' && r.answered_by.trim()) {
+      by.set(r.id, r.answered_by.trim());
+    }
+  }
+  return shapeRequests(raw).map((r) => ({ ...r, answeredBy: by.get(r.id) ?? null }));
+}
+
+/**
  * Every request this member has made, whatever became of it.
  *
  * No `.eq('client_id', uid)`. `session_requests_client_r` is `client_id =
@@ -88,7 +135,7 @@ const asWrite = (d: unknown): RequestWrite => {
  * Ordered on `created_at` AND `id`: two requests made in the same second tie
  * otherwise, and a tie is not an order a page boundary can be drawn on.
  */
-export async function fetchMyRequests(): Promise<{ rows: SessionRequest[]; status: LoadStatus }> {
+export async function fetchMyRequests(): Promise<{ rows: MySessionRequest[]; status: LoadStatus }> {
   if (!USE_SUPABASE) return { rows: [], status: 'ready' };
   try {
     const { data, error } = await supabase
@@ -99,7 +146,7 @@ export async function fetchMyRequests(): Promise<{ rows: SessionRequest[]; statu
       .limit(capLimit());
     if (error) { reportError('sessionRequests.mine', error); return { rows: [], status: 'error' }; }
     const page = capped((data ?? []) as RawSessionRequest[]);
-    return { rows: shapeRequests(page.rows), status: page.truncated ? 'partial' : 'ready' };
+    return { rows: withAnswerer(page.rows), status: page.truncated ? 'partial' : 'ready' };
   } catch (e) {
     reportError('sessionRequests.mine', e);
     return { rows: [], status: 'error' };

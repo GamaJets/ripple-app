@@ -55,6 +55,45 @@ const lower = (acts: KindActivity[]) => new Set(acts.map((a) => a.name.toLowerCa
 const HIIT_NAMES = lower(HIIT_ACTIVITIES);
 const MOBILITY_NAMES = lower(MOBILITY_ACTIVITIES);
 
+/** The picker's own METs, by the lower-cased name they travel under. Built from
+ *  the lists above so a renamed label cannot leave its MET behind — which is
+ *  the failure the KindActivity note records. */
+const ACTIVITY_MET = new Map<string, number>(
+  [...HIIT_ACTIVITIES, ...MOBILITY_ACTIVITIES].map((a) => [a.name.toLowerCase(), a.met]),
+);
+
+/**
+ * The MET for one of THESE activities, and null for anything else.
+ *
+ * The twelve figures above are the only METs the app had, and for a long time
+ * they were the only ones it could reach — so a calorie figure for any movement
+ * had to come from one of them or from a fallback. The fallbacks are gone
+ * (app/(client)/workouts.tsx: an unknown activity used to be MET 7, "roughly
+ * rowing"), and the catalogue's own per-movement figure now has a reader in
+ * src/lib/exerciseMet.ts. What is left is the risk that the two get crossed.
+ *
+ * They are about different questions. 'Yoga' here is a yoga CLASS a member
+ * chose in Train's picker; a Downward Dog in the catalogue is a movement, with
+ * its own row and its own `met`. Answering the second question with the first
+ * answer is the same class of invention as the MET 7 fallback was — a figure
+ * with a real provenance, attached to something it is not about.
+ *
+ * So this is deliberately a total refusal rather than a lookup with a default:
+ * a name that is not one of the picker's twelve gets null, and a caller holding
+ * null must go to the catalogue or print a dash. It is exact for the reason
+ * CARDIO_MOVEMENT_ALIASES below is exact — 'row' inside 'Barbell Row' is not a
+ * rowing machine, and 'stretching' inside 'Hamstring Stretching' is not the
+ * picker's Stretching session.
+ *
+ * Trimmed and lower-cased on the way in, because the name reaching it comes off
+ * a logged entry that a coach or an importer may have typed.
+ */
+export function activityMet(name: string | null | undefined): number | null {
+  const key = (name ?? '').trim().toLowerCase();
+  if (!key) return null;
+  return ACTIVITY_MET.get(key) ?? null;
+}
+
 /** The kinds in the order they should be drawn, so a legend and a row of dots agree. */
 export const WORKOUT_KINDS: readonly WorkoutKind[] = ['strength', 'cardio', 'hiit', 'mobility', 'recovery'];
 

@@ -66,12 +66,19 @@ import { useToday, useNow } from '../../src/ui/today';
 import { outboxNote } from '../../src/lib/outbox';
 import { keptOnPhoneNote, notKeptNote, sessionRequestExpiry } from '../../src/lib/recordQueue';
 import { sendPushChecked } from '../../src/ui/pushNotifications';
-import { fetchMyRequests, askForSession, withdrawRequest } from '../../src/ui/sessionRequests';
+import { fetchMyRequests, askForSession, withdrawRequest, type MySessionRequest } from '../../src/ui/sessionRequests';
 import {
   EXPIRY_RULE, NOT_A_BOOKING, NO_COACH_TO_ASK, OUTCOME_LABEL, REQUEST_NOTE_MAX,
   askBlocker, askRefusalNote, askedConfirmation, myRequests, outcomeLine, outcomeOf,
-  ownDiaryNote, isLive, type SessionRequest,
+  ownDiaryNote, isLive,
 } from '../../src/lib/sessionRequests';
+// Who settled this request, and when. `answered_by` has been written by all
+// three paths in supabase/parts/740 since the feature existed and read by
+// nobody, so "Your Coach Said No" stood on this screen with no name and no date
+// on it — indistinguishable at a glance whether it happened this morning or in
+// March, and on an account that has changed coach, silent about which of the two
+// people said it.
+import { answeredByLine, answererOf } from '../../src/lib/requestAnswerer';
 import { BACK_ICON } from '../../src/ui/direction';
 
 /** How far ahead the day strip offers. Four weeks is as far as anybody plans a
@@ -121,7 +128,7 @@ export default function RequestSessionScreen() {
   const head = peerHeading(peer, 'coach');
   const coachName = head.isName ? head.text : null;
 
-  const [rows, setRows] = useState<SessionRequest[]>([]);
+  const [rows, setRows] = useState<MySessionRequest[]>([]);
   const [status, setStatus] = useState<LoadStatus>(USE_SUPABASE ? 'loading' : 'ready');
   const [busy, setBusy] = useState(false);
 
@@ -185,6 +192,23 @@ export default function RequestSessionScreen() {
    *  a screen-reader user nothing about what they are choosing. */
   const timeLabel = (h: number, m: number) =>
     new Date(2000, 0, 1, h, m).toLocaleTimeString(appLocale(), { hour: 'numeric', minute: '2-digit' });
+  /**
+   * The day an answer was given, or null.
+   *
+   * A date rather than the full instant `whenLabel` writes: what the member
+   * needs from `answered_at` is how long ago somebody said no, and the minute
+   * they said it is noise beside that. Null for anything that will not parse,
+   * and `answeredByLine` then writes a sentence with no date in it rather than
+   * one built around a hole — see scripts/check-prose.mjs.
+   */
+  const answeredOn = (iso: string | null) => {
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms)
+      ? new Date(ms).toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' })
+      : null;
+  };
+
   /** The hour a sentence is about, written out. Never assembled around a value
    *  that might not be there — a caller with no readable instant does not draw
    *  the row at all. */
@@ -276,7 +300,7 @@ export default function RequestSessionScreen() {
     Alert.alert('Request sent', lines.join('\n\n'), [{ text: 'OK' }]);
   }
 
-  function takeBack(r: SessionRequest) {
+  function takeBack(r: MySessionRequest) {
     const when = whenLabel(r.startsAt);
     if (!when) return;
     Alert.alert(
@@ -579,6 +603,13 @@ export default function RequestSessionScreen() {
                     // dash is worse than a row that is not drawn.
                     if (!when) return null;
                     const o = outcomeOf(r);
+                    // Who settled it and when, off the two ids the row already
+                    // carries. Nothing here asks the server who the coach is:
+                    // `answered_by` is compared against this request's own
+                    // `trainer_id`, so a member who has since changed coach is
+                    // never told their CURRENT coach refused something an
+                    // earlier one refused.
+                    const byLine = answeredByLine(o, answererOf(r), coachName, answeredOn(r.answeredAt));
                     return (
                       <View key={r.id}>
                         {i ? <Rule /> : null}
@@ -586,6 +617,13 @@ export default function RequestSessionScreen() {
                           <Text style={{ ...ty.micro, color: t.ink3 }}>{OUTCOME_LABEL[o]}</Text>
                           <Text style={{ ...ty.body, fontWeight: '600', color: t.ink, marginTop: 2 }}>{when}</Text>
                           <Text style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>{outcomeLine(r, when)}</Text>
+                          {/* A refusal has to say who made it and when, and this
+                              record has both. Without it "Your Coach Said No"
+                              reads the same on the day it happened and six
+                              months later. */}
+                          {byLine ? (
+                            <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>{byLine}</Text>
+                          ) : null}
                           {r.note ? (
                             <Text style={{ ...ty.caption, color: t.ink3, marginTop: 4 }}>You said: {r.note}</Text>
                           ) : null}

@@ -44,6 +44,15 @@ import { awaitingNote, liveFootnote, permissionsNote } from '../../src/lib/weara
 // separately and contradict each other in front of the same client.
 import { forgetLink, linkFor, useLinkRevision } from '../../src/lib/wearableLinkLedger';
 import { formatSleepHours, recentNights, type SleepRead } from '../../src/lib/sleepMerge';
+// Unlinking a watch used to destroy every night it had measured. See
+// src/lib/retiredSleep.ts and supabase/parts/2650 — the nights are copied to a
+// shelf BEFORE `w.disconnect` runs its delete, and copied back on reconnect.
+import {
+  keepNightsBeforeDisconnect, restoreRetiredNights, discardKept,
+  disconnectNightsLine, keepFailedLine, restoredNightsLine,
+} from '../../src/lib/retiredSleep';
+import { supabase } from '../../src/lib/supabase';
+import { USE_SUPABASE } from '../../src/lib/config';
 import { fmtDay, fmtTime } from '../../src/lib/format';
 // Distance in the member's own unit. See src/lib/distance.ts for why it is
 // derived from the length unit rather than being a third pill in Settings.
@@ -311,7 +320,54 @@ export default function Devices() {
  await w.connect(p.meta.id);
  } catch (e: any) {
  Alert.alert(p.meta.name, e?.message || 'Could not connect.');
+ return;
  }
+ // Connected. Anything this device measured before it was last unlinked is
+ // sitting on the shelf supabase/parts/2650 describes, and this is the moment
+ // the screen promised it back: `disconnectNightsLine` told the member
+ // "reconnect and they go back", and a promise kept only on the next launch is
+ // a promise they cannot see being kept.
+ //
+ // Deliberately AFTER the connection is confirmed and never before it. A
+ // restore run against a connect that then failed would put a disconnected
+ // device's nights back into a week nothing is feeding.
+ //
+ // A failed restore is reported and not surfaced: the connection itself
+ // succeeded, the nights are still on the shelf, and the next reconnect — or
+ // the next time this runs — tries again. Telling somebody their watch did not
+ // connect because a second read failed would be false.
+ await restoreNights(p);
+ };
+
+ /** Put back what this device measured before it was unlinked. Separate from
+  *  `onConnect` only so the try/catch above cannot swallow it. */
+ const restoreNights = async (p: WearableProvider) => {
+  if (!USE_SUPABASE) return;
+  try {
+   const uid = await signedInUid();
+   if (!uid) return;
+   const res = await restoreRetiredNights(supabase, uid, p.meta.id);
+   if (!res.ok) { reportError('devices.restoreSleep', new Error(res.reason), { provider: p.meta.id }); return; }
+   const line = restoredNightsLine(res.nights, p.meta.name);
+   // Only when something actually came back. `restoredNightsLine` returns null
+   // for none, which is the ordinary answer for a first connection and is not
+   // worth an alert.
+   if (line) Alert.alert(p.meta.name, line);
+  } catch (e) {
+   reportError('devices.restoreSleep', e, { provider: p.meta.id });
+  }
+ };
+
+ /** Whose account this is, or null. `getSession` reads local storage rather
+  *  than the network and REJECTS for nobody signed in, which is a true answer
+  *  and not a failed read — the same reading src/ui/deviceSleep.tsx makes. */
+ const signedInUid = async (): Promise<string | null> => {
+  try {
+   const { data } = await supabase.auth.getSession();
+   return data?.session?.user?.id ?? null;
+  } catch {
+   return null;
+  }
  };
 
  // Disconnecting has to drop what the server proved about the token as well as
@@ -328,9 +384,44 @@ export default function Devices() {
  // `forgetLink` is deliberately inside the success path: forgetting the link
  // locally while the token survives is what makes the two disagree.
  const onDisconnect = async (p: WearableProvider) => {
+  // ── the nights are copied BEFORE anything is unlinked ───────────────────
+  //
+  // `w.disconnect` runs a `.delete()` against `device_sleep_nights` for this
+  // provider, and until now that was the end of them. The copy is
+  // non-destructive — the live rows are still there while it runs — so a copy
+  // that fails costs nothing and this returns without disconnecting, which is
+  // the only safe order: after the delete there is nothing left to save.
+  //
+  // Refusing rather than asking "disconnect anyway?" is deliberate. The second
+  // question is one a member taps through, and the thing behind it is
+  // permanent. The failure here is almost always a lost signal, and waiting a
+  // moment costs them nothing at all.
+  //
+  // See src/lib/retiredSleep.ts for the whole argument and supabase/parts/2650
+  // for the shelf itself.
+  let kept = false;
+  const uid = USE_SUPABASE ? await signedInUid() : null;
+  if (uid) {
+   const keep = await keepNightsBeforeDisconnect(supabase, uid, p.meta.id);
+   if (!keep.ok) {
+    reportError('devices.keepSleep', new Error(keep.reason), { provider: p.meta.id });
+    Alert.alert(p.meta.name, keepFailedLine(p.meta.name));
+    return;
+   }
+   kept = keep.nights > 0;
+  }
   try {
    await w.disconnect(p.meta.id);
   } catch (e: any) {
+   // The disconnect that the copy was made for did not happen, so the copy is
+   // rubbish. Cleared rather than left: every night on it is still live, so a
+   // later restore would skip them all anyway, but a shelf nobody asked for is
+   // a thing somebody has to reason about later. Its own failure is reported
+   // and not surfaced — the member's problem here is the watch, not the shelf.
+   if (kept && uid) {
+    const cleared = await discardKept(supabase, uid, p.meta.id);
+    if (!cleared.ok) reportError('devices.discardKeptSleep', new Error(cleared.reason), { provider: p.meta.id });
+   }
    Alert.alert(
     p.meta.name,
     e?.message || `${p.meta.name} could not be disconnected just now, so it is still connected. Try again in a moment.`,
@@ -341,7 +432,7 @@ export default function Devices() {
  };
 
  /**
-  * Ask first, because this deletes measurements.
+  * Ask first, because this changes what the member's record shows.
   *
   * The control that called `onDisconnect` was labelled "Connected". It read as
   * a status pill — that is what the word is, everywhere else on this screen and
@@ -353,20 +444,35 @@ export default function Devices() {
   * house rule: "Delete now has an <Alert> in front of it, like every other
   * destructive action in this app."
   *
-  * The alert names what goes, because "are you sure?" over a row of six devices
-  * does not say which one and does not say what is at stake. It is deliberately
+  * The alert names what happens, because "are you sure?" over a row of six
+  * devices does not say which one and does not say what is at stake. It stays
   * specific about the two different things that happen — the connection ends
-  * AND the nights are removed — since only the first is what the word
-  * "disconnect" promises.
+  * AND the sleep week loses those nights — since only the first is what the
+  * word "disconnect" promises.
   *
-  * `Alert` and not a toast: src/ui/toast.tsx is for a thing that can be undone
-  * by doing it again, and reconnecting the watch does not bring the nights
-  * back.
+  * ── what changed, and why the sentence had to ───────────────────────────
+  *
+  * This used to end "reconnecting starts a fresh record rather than bringing
+  * these nights back", and that was an accurate warning about a permanent
+  * deletion. It is no longer accurate: `onDisconnect` copies the nights to the
+  * shelf in supabase/parts/2650 before unlinking, and `onConnect` puts them
+  * back. An alert that still warned of a destruction the code does not perform
+  * would be its own defect — the one sentence on this screen most likely to
+  * stop somebody unplugging a watch they have every right to unplug.
+  *
+  * The wording lives in src/lib/retiredSleep.ts, beside the behaviour it
+  * describes, so the next change to one cannot leave the other standing. That
+  * is exactly how this sentence came to be false.
+  *
+  * Still an `Alert` and still not a toast: src/ui/toast.tsx is for a thing that
+  * can be undone by doing it again, and while reconnecting DOES now bring the
+  * nights back, it does not bring back the days of readings the device never
+  * took while it was unlinked.
   */
  const confirmDisconnect = (p: WearableProvider) => {
   Alert.alert(
    `Disconnect ${p.meta.name}?`,
-   `${BRAND.label} will stop reading from ${p.meta.name}, and the nights it measured are removed from your record here — your readiness will be built from whatever else you have. Nothing is deleted in the ${p.meta.name} app itself, and reconnecting starts a fresh record rather than bringing these nights back.`,
+   disconnectNightsLine(BRAND.label, p.meta.name),
    [
     { text: 'Keep It', style: 'cancel' },
     { text: 'Disconnect', style: 'destructive', onPress: () => { void onDisconnect(p); } },

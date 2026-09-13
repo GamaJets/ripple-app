@@ -54,10 +54,14 @@ import {
   coachInvoiceDoc, invoiceShareBlurb, invoiceBlockers, invoiceNumber, invoiceDayLabel,
   invoiceBook, money, kindLabel, ageingBook, invoiceAge, chaseBlocker, chaseHistoryLine,
   settleBlocker, settleDayBlocker, voidBlocker, chaseFromBlocker, chaseFromDayBlocker,
-  BUCKET_TITLE, AGEING_IS_YOUR_OWN_RECORD, INVOICE_DUE_NOT_A_TERM, CHASE_FROM_IS_NOT_A_DUE_DATE, plusDays,
+  BUCKET_TITLE, AGEING_IS_YOUR_OWN_RECORD, INVOICE_DUE_NOT_A_TERM, CHASE_FROM_IS_NOT_A_DUE_DATE,
   type AgeBucket,
   type CoachInvoice, type InvoiceDraft, type InvoiceKind,
 } from '../../src/lib/coachInvoice';
+import {
+  PAYMENT_TERMS, termDueOn, termOfDue, dueTermLine,
+  TERM_STARTS_THE_CHASING, NO_TERM_IS_OFFERED,
+} from '../../src/lib/invoiceTerms';
 import { minorMoney } from '../../src/lib/coachMoney';
 import {
   fetchMyInvoices, fetchInvoiceIssuer, fetchInvoiceCurrency, issueInvoice, voidInvoice, remindInvoice,
@@ -1149,7 +1153,7 @@ export default function Invoices() {
                   the coach's name that they did not choose — so the shortcuts
                   below preselect nothing and the field stays empty until one is
                   tapped or a date is typed. */}
-              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>When you expect to be paid (optional)</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>Payment terms (optional)</Text>
               {/* ── the chips stay, and the month joins them ──────────────
                   "In a week" and "In a month" answer the common cases in one
                   tap and a calendar does not replace them — a coach who means
@@ -1178,19 +1182,47 @@ export default function Invoices() {
                 </Pressable>
                 {dueText ? <Ghost label="Clear" a11yLabel="Clear the due date — the document then states none" onPress={() => setDueText('')} /> : null}
               </View>
+              {/* ── the terms, named as terms ──────────────────────────────
+                  Was an inline `[label, days]` array reading 'On the day', 'In
+                  a week', 'In two weeks', 'In a month'. The last of those
+                  computed THIRTY DAYS, so the phrase the coach used with a
+                  client and the date printed on the document were two
+                  different statements of the same thing — and on the 31st of
+                  January they are five days apart. src/lib/invoiceTerms.ts
+                  holds the set now, names each one by the number of days a
+                  client will argue about it in, and is asserted against.
+
+                  Still nothing preselected. `termOfDue` decides which chip is
+                  lit by reading the date in the box back, so a day picked on
+                  the calendar that happens to be a fortnight lights the
+                  fortnight — the chip is a view of the field rather than a
+                  second place the answer is kept. */}
               <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
-                {([['On the day', 0], ['In a week', 7], ['In two weeks', 14], ['In a month', 30]] as [string, number][]).map(([label, n]) => {
-                  const when = plusDays(today, n);
+                {PAYMENT_TERMS.map((term) => {
+                  const when = termDueOn(term.id, today);
+                  const on = termOfDue(today, dueText) === term.id;
                   return (
-                    <Pressable key={label} onPress={() => setDueText(dueText === when ? '' : when)}
-                      accessibilityRole="button" accessibilityLabel={label}
-                      accessibilityState={{ selected: dueText === when }}
-                      style={{ flex: 1, paddingVertical: 8, borderRadius: radius.sm, alignItems: 'center', backgroundColor: dueText === when ? t.brand : t.surface2 }}>
-                      <Text style={{ ...ty.micro, color: dueText === when ? '#fff' : t.ink2 }}>{label}</Text>
+                    <Pressable key={term.id} onPress={() => setDueText(on || !when ? '' : when)}
+                      accessibilityRole="button"
+                      accessibilityLabel={when ? `${term.name}. ${term.note}` : `${term.name}. Today’s date could not be read, so this cannot be worked out.`}
+                      accessibilityState={{ selected: on, disabled: !when }}
+                      disabled={!when}
+                      style={{ flex: 1, paddingVertical: 8, borderRadius: radius.sm, alignItems: 'center', backgroundColor: on ? t.brand : t.surface2 }}>
+                      <Text style={{ ...ty.micro, color: on ? '#fff' : t.ink2 }} numberOfLines={2}>{term.label}</Text>
                     </Pressable>
                   );
                 })}
               </View>
+              {/* What the box currently says, in days AND as a day. The
+                  calendar exists for "the Friday after their holiday", which is
+                  exactly the case where a coach cannot tell at a glance whether
+                  they have written twelve days or forty — and the empty state
+                  is the one that has to be right, because "no due date" is a
+                  document that never falls due rather than one that is not yet
+                  due. */}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{dueTermLine(today, dueText)}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{TERM_STARTS_THE_CHASING}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{NO_TERM_IS_OFFERED}</Text>
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: 6 }}>{INVOICE_DUE_NOT_A_TERM}</Text>
 
               <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.lg, marginBottom: 6 }}>A note, if you want one (optional)</Text>
