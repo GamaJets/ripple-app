@@ -783,7 +783,7 @@ export default function Overview() {
             rows={trainers}
             columns={cols}
             rowKey={(t) => t.id}
-            empty="No trainers in this gym yet. Invite one from the Repple Studio app."
+            empty="No trainers in this gym yet. Invite one from Staff and they appear here when they accept."
           />
         )}
       </section>

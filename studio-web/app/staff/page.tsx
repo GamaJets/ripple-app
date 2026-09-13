@@ -74,6 +74,7 @@ import { readAll } from '@lib/rowCap';
 import { readByIds } from '@lib/idLookup';
 import { searchRows, searchNote } from '@lib/consoleSearch';
 import { wrote, refused, sayText, sayTone, type Said } from '@lib/consoleSay';
+import { inviteBlocker, invitedLine, inviteStatusLine, readEmail } from '@lib/trainerInvite';
 import { fetchClientActivity, DRIFT_LABEL, DEFAULT_WINDOWS, type Drift } from '@lib/clientDrift';
 import { sliceLoading, sliceReady, sliceFailed, sliceNote, type Slice } from '@lib/memberView';
 // `week` and `day` below are `YYYY-MM-DD` CALENDAR DATES, not instants. Parsing
@@ -507,6 +508,14 @@ export default function Staff() {
 
       <Roster view={view} rec={rec} sel={sel} onPick={setSel} query={q} onQuery={setQ} />
 
+      {/* The console could not add a coach at all. Three screens told the owner
+          to go and use the phone app instead, and the rota simply said "Nobody
+          on the roster to put on a shift yet" — which for a new gym is every
+          day until somebody picks up a different device. Nothing in the schema
+          was missing: `trainer_invites` has been writable by the owner since
+          part 12 and the console never offered the form. */}
+      {me && me.tenantId ? <InviteTrainer tenantId={me.tenantId} ownerId={me.id} ownerName={me.fullName} /> : null}
+
       {chosen ? (
         <Person m={chosen} rec={rec} onClose={() => setSel(null)} zone={zone} />
       ) : (
@@ -537,6 +546,116 @@ export default function Staff() {
 }
 
 /* ── the roster ────────────────────────────────────────────────────────────── */
+
+/**
+ * Invite a coach to this gym.
+ *
+ * The row is all there is: `trainer_invites` is a record that this owner has
+ * asked for this address, and the coach becomes staff by signing in with it
+ * and accepting. Nothing here sends an email — this product has no
+ * transactional mail channel at any layer — so the confirmation says so
+ * outright. An owner who believes the app has written to somebody will wait
+ * for a coach who was never contacted, which is a worse failure than not
+ * having the feature.
+ */
+function InviteTrainer({ tenantId, ownerId, ownerName }: {
+  tenantId: string; ownerId: string; ownerName: string | null;
+}) {
+  // Null, never [], for the reason every read in this console is: an empty
+  // list under a failed read says this owner has invited nobody, and
+  // `inviteBlocker` refuses to send on a null rather than risking the
+  // duplicate it cannot see.
+  const [invites, setInvites] = useState<Array<{ id: string; email: string; status: string }> | null>(null);
+  const [readErr, setReadErr] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [msg, setMsg] = useState<Said>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('trainer_invites')
+      .select('id, email, status')
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) { setInvites(null); setReadErr(error.message ?? 'The invites already on file could not be read.'); return; }
+    setInvites((data ?? []) as Array<{ id: string; email: string; status: string }>);
+    setReadErr(null);
+  }, [ownerId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const blocker = inviteBlocker(email, invites);
+
+  const send = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (blocker) { setMsg(refused(blocker)); return; }
+    const addr = readEmail(email);
+    if (!addr) { setMsg(refused('That is not an email address this can send to.')); return; }
+    setBusy(true); setMsg(null);
+    try {
+      // `owner_name` is snapshotted the way the phone app does it: the invite
+      // has to name somebody months later, and a join that resolves the owner
+      // at read time shows a blank if that account is ever erased.
+      const { error } = await supabase.from('trainer_invites').insert({
+        owner_id: ownerId, owner_name: ownerName, tenant_id: tenantId, email: addr, status: 'pending',
+      });
+      if (error) throw new Error(error.message);
+      setMsg(wrote(invitedLine(addr)));
+      setEmail('');
+      await load();
+    } catch (x: any) {
+      setMsg(refused(x?.message, 'That invite was not written, so nothing has been sent.'));
+    } finally { setBusy(false); }
+  };
+
+  const pending = (invites ?? []).filter((i) => i.status === 'pending');
+
+  return (
+    <Section title="Invite a Coach" sub={invites == null ? undefined : `${pending.length} waiting to accept`}>
+      <p style={{ margin: 0, padding: '8px 14px 0', fontSize: 12.5, color: 'var(--ink3)' }}>
+        They sign in with this exact address and accept, and they are attached to this gym as a coach. Repple
+        does not email them — tell them yourself.
+      </p>
+      {readErr ? (
+        <p style={{ margin: 0, padding: '8px 14px 0', fontSize: 12.5, color: 'var(--ink2)' }}>
+          {readErr} This is not a statement that you have invited nobody, so nothing can be sent until it reads.
+        </p>
+      ) : null}
+      <form onSubmit={send} style={{ display: 'flex', gap: 8, padding: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          value={email}
+          onChange={(e) => { setEmail(e.target.value); if (msg) setMsg(null); }}
+          placeholder="their@email.com"
+          aria-label="The email address the coach will sign in with"
+          inputMode="email"
+          style={{ ...field, minWidth: 280, flex: 1 }}
+        />
+        <button type="submit" disabled={busy || !email.trim()} style={ghostBtn}>
+          {busy ? 'Inviting…' : 'Invite'}
+        </button>
+        {/* The refusal is shown BEFORE the press as well as after it, so an
+            owner is not told what is wrong only once they have tried. */}
+        {email.trim() && blocker ? (
+          <span style={{ fontSize: 12.5, color: 'var(--ink2)' }}>{blocker}</span>
+        ) : null}
+      </form>
+      {msg ? (
+        <p style={{ margin: 0, padding: '0 14px 14px', fontSize: 12.5, color: sayTone(msg) }}>{sayText(msg)}</p>
+      ) : null}
+      {pending.length ? (
+        <div style={{ padding: '0 14px 14px', display: 'grid', gap: 6 }}>
+          {pending.map((i) => (
+            <div key={i.id} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 12.5 }}>
+              <span style={{ color: 'var(--ink)' }}>{i.email}</span>
+              <span style={{ color: 'var(--ink3)' }}>{inviteStatusLine(i.status)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </Section>
+  );
+}
 
 function Roster({ view, rec, sel, onPick, query, onQuery }: {
   view: StaffView; rec: StaffRecord; sel: string | null; onPick: (id: string) => void;
@@ -658,7 +777,7 @@ function Roster({ view, rec, sel, onPick, query, onQuery }: {
         {view.members ? (
           <DataTable noun="coaches"
             rows={shown} columns={cols} rowKey={(m) => m.trainerId}
-            empty="No trainer is attached to this gym yet. Invite one from the Repple Studio app and this page fills in."
+            empty="No trainer is attached to this gym yet. Invite one below and this page fills in when they accept."
           />
         ) : null}
       </Part>

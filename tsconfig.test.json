@@ -584,6 +584,7 @@
     "src/lib/liftingImport.test.ts",
     "src/lib/warmupRamp.test.ts",
     "src/lib/membershipFreeze.test.ts",
+    "src/lib/trainerInvite.test.ts",
     "src/lib/llmGateway.test.ts"
   ]
 }

@@ -1466,7 +1466,7 @@ function AddOneToOne({ tenantId, members, membersErr, onChange }: {
           <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>Loading trainers…</span>
         ) : trainers.length === 0 ? (
           <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
-            No trainers on your roster yet — invite one first and they will appear here.
+            No trainers on your roster yet — invite one on the Staff page and they appear here when they accept.
           </span>
         ) : (
           <select aria-label="Which coach" value={trainerId} onChange={(e) => setTrainerId(e.target.value)} style={{ ...field, minWidth: 150 }}>
