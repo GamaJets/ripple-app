@@ -169,7 +169,11 @@ import { STRETCH_ROUTINES, routineSummary, type StretchRoutine } from '../../src
 import { buildRoutine, BUILD_MINUTES, STRETCH_FOCUS } from '../../src/lib/stretchBuilder';
 import { useStretchCatalogue } from '../../src/ui/stretchCatalogue';
 import { StretchRunner } from '../../src/ui/StretchRunner';
-import { attributionLine } from '../../src/lib/workoutAttribution';
+import { reviewFor, queryFor, type KnownCoach } from '../../src/lib/coachLogReview';
+import { canPairHere, pairInvite, pairInviteAction } from '../../src/lib/sessionPairing';
+import { PairMonitorSheet, usePairRows } from '../../src/ui/PairMonitorSheet';
+import { useCoachLogQueries } from '../../src/ui/coachLogQueries';
+import { CoachLogReviewStrip } from '../../src/ui/CoachLogReview';
 import { dayKeyOf, instantForDay, readWorkoutEdit, type WorkoutDraftSet } from '../../src/lib/entryEdit';
 import { useSettings } from '../../src/ui/settings';
 import { WeightUnitToggle } from '../../src/ui/WeightUnitToggle';
@@ -652,6 +656,53 @@ export default function Train() {
     })();
     return () => { live = false; };
   }, [cd.id]);
+
+  /* ── who wrote the sessions in this log that this member did not ──────────
+   *
+   * A coach can log a session into the member's own `workouts` rows. Until now
+   * the day sheet below rendered `attributionLine(l, null, true)` — the middle
+   * argument is the coach's NAME, hard-coded `null`, under a comment saying the
+   * client app has no coach-name lookup. It has one: `my_coach()`
+   * (supabase/parts/115) returns the linked coach's id AND name to their own
+   * client, and src/ui/messaging.ts has called it for the chat header since.
+   *
+   * Deliberately NOT the `coachId` above. That one is `clients.trainer_id`, one
+   * half of the link, kept as a video tie-break where being wrong costs a
+   * thumbnail. This name goes under a record made ABOUT somebody, so it uses
+   * the function that demands BOTH halves of the coach↔client link and returns
+   * the name in the same row — no second read to get out of step with the id.
+   *
+   * Null covers every way of not knowing, and `coachNameFor` turns all of them
+   * back into the generic caption. src/lib/threadPeer.ts is the file that
+   * argues why that is the only safe direction: a header that fell back to
+   * whichever name WAS readable showed a client their own name under the words
+   * "Your coach".
+   */
+  const [loggingCoach, setLoggingCoach] = useState<KnownCoach | null>(null);
+  useEffect(() => {
+    if (!USE_SUPABASE || !cd.id || cd.id === 'unknown') return;
+    let live = true;
+    (async () => {
+      try {
+        // no-error-ok: null and refused are the same answer here — the caption
+        // says "your coach", which is true of every coach-logged row.
+        const { data } = await supabase.rpc('my_coach');
+        if (!live) return;
+        // RETURNS TABLE, so supabase-js hands back an array.
+        const row: any = Array.isArray(data) ? data[0] : data;
+        const id = typeof row?.coach_id === 'string' ? row.coach_id : null;
+        setLoggingCoach(id ? { id, name: typeof row?.coach_name === 'string' ? row.coach_name : null } : null);
+      } catch { /* the generic caption, which is never wrong */ }
+    })();
+    return () => { live = false; };
+  }, [cd.id]);
+
+  /* Where each coach-logged row stands with the member: queried, or not, or not
+   * known. Its own read rather than a field on `WorkoutEntry` — see the header
+   * of src/ui/coachLogQueries.ts — and its `status` is what stops this screen
+   * saying "you have not queried this" off a read that never came back. */
+  const coachLogQueries = useCoachLogQueries(cd.id && cd.id !== 'unknown' ? cd.id : null);
+
   const [session, setSession] = useState(false);
   // What the runner should resume at, when there is a session to resume.
   // Null for a session started just now.
@@ -1733,7 +1784,24 @@ export default function Train() {
           // failure, so the sheet reopening on the old figures is the truth.
           onSave={async (patch) => {
             const saved = await updateWorkout(editEntry, patch);
-            if (saved) { setEditEntry(null); tapLight(); }
+            if (saved) {
+              setEditEntry(null); tapLight();
+              // ── why the log is re-read, and only here ──────────────────
+              //
+              // `amended_at` is stamped by the guard_workout_attribution
+              // trigger, server-side, on an UPDATE the member makes to a row
+              // their coach logged. `updateWorkout` applies the caller's own
+              // patch to the in-memory entry and never sees the stamp —
+              // `PERSISTED_FIELDS` deliberately excludes it — so the caption
+              // went on reading "Logged by Dave" with no mark on it until the
+              // next cold launch. The member was shown a correction the app was
+              // still presenting as the coach's untouched account.
+              //
+              // Only for a coach-logged row: everything else has nothing to
+              // fetch, and a re-read of the whole log on every pencil tap is a
+              // round trip and a re-render for nothing.
+              if (editEntry.loggedBy) { reloadLog(); coachLogQueries.reload(); }
+            }
             return saved;
           }}
         />
@@ -3085,19 +3153,34 @@ export default function Train() {
                               <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 5 }}>{[`${l.cardio.mins} min`, l.cardio.dist > 0 ? `${l.cardio.dist} ${l.cardio.unit}` : null, l.cardio.watts && l.cardio.watts > 0 ? `${l.cardio.watts} W` : null, l.cardio.hrAvg ? `♥ ${l.cardio.hrAvg} avg / ${l.cardio.hrHigh ?? l.cardio.hrAvg} hi` : null].filter(Boolean).join(' · ')}</Text>
                             ) : null}
                             {l.kcal ? <Text style={{ ...ty.caption, ...numeric, color: t.ink3, marginTop: 6 }}>{num(l.kcal)} kcal</Text> : null}
-                            {/* Who put this in the log. Absent when you did it
-                                yourself, which is almost always — so the line
-                                only appears when it is telling you something.
-                                `null` for the name on purpose: the client app has
-                                no coach-name lookup yet, and attributionLine
-                                renders "your coach" rather than a blank. Better a
-                                true generic than a name fetched wrong. */}
-                            {attributionLine(l, null, true) ? (
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                                <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: t.brand }} />
-                                <Text style={{ ...ty.caption, color: t.ink3, flex: 1 }}>{attributionLine(l, null, true)}</Text>
-                              </View>
-                            ) : null}
+                            {/* Who put this in the log, and what the member is
+                                allowed to say about it. Absent when they logged
+                                it themselves, which is almost always — so the
+                                strip only appears when it is telling them
+                                something.
+
+                                This WAS the caption alone, with the coach's name
+                                hard-coded `null` and nothing beside it to press:
+                                six identical words under a record made about
+                                somebody, with no way to disagree with it. The
+                                whole argument, including why a query is a third
+                                verb rather than a delete or an edit, is in
+                                src/ui/CoachLogReview.tsx and the module under it.
+
+                                `queryFor` returns null for a row the read never
+                                saw, which is NOT the same as a row it saw with no
+                                query on it — `reviewFor` takes the status and
+                                decides which sentence that earns. */}
+                            <CoachLogReviewStrip
+                              t={t}
+                              entry={l}
+                              movement={movement(l.exercise)}
+                              review={reviewFor(l, queryFor(coachLogQueries.byId, l.id), coachLogQueries.status, loggingCoach)}
+                              query={queryFor(coachLogQueries.byId, l.id)}
+                              onQuery={(note) => coachLogQueries.query(l.id ?? '', note)}
+                              onWithdraw={() => coachLogQueries.withdraw(l.id ?? '')}
+                              onAmend={() => { tapLight(); setEditEntry(l); }}
+                            />
                             <Pressable onPress={() => { tapLight(); setHrEntry(l); }} accessibilityRole="button" accessibilityLabel={'Heart rate for ' + movement(l.exercise)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md, alignSelf: 'flex-start', backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
                               <Icon name="heart" size={13} color={t.brand} />
                               <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>Heart Rate</Text>
@@ -3449,7 +3532,7 @@ function useLiveVitals(age: number | null, restingKcalPerMin: number | null, pau
  * Deliberately not a link to the settings: leaving mid-session to go and pair a
  * device would abandon the workout being logged.
  */
-function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed, reach }: {
+function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed, reach, onPair }: {
   t: Theme; liveZone: ZoneNo | null; liveSample: number | null;
   /** Whether a watch can reach this panel at all, and why not. Decided by
    *  src/lib/watchReach.ts — the panel used to assume 'none' and tell a member
@@ -3461,8 +3544,26 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed, reach }: {
   /** The session clock. Passed through so the board can say how much of the
    *  session these five rows do not account for. */
   elapsed?: number | null;
+  /**
+   * Open the in-session pairing sheet.
+   *
+   * The comment on this component used to end at "Deliberately not a link to
+   * the settings: leaving mid-session to go and pair a device would abandon the
+   * workout being logged" — a correct refusal with nothing on the other side of
+   * it, so a member with no heart rate finished without one and the samples for
+   * that hour were never asked for and cannot be recovered. This is the third
+   * option the refusal implied: a sheet OVER the runner. Optional, because a
+   * caller that has nowhere to put one is better off with the settings sentence
+   * than with a button that goes nowhere.
+   */
+  onPair?: () => void;
 }) {
   const hasZones = zoneSecondsTotal(zoneSecs) > 0;
+  // Whether pairing here could lead anywhere: a build with no native health
+  // module has nothing to offer, and `pairInvite` returns null for it so the
+  // panel falls back to `zonesNote`, which is still true.
+  const canPair = canPairHere(usePairRows());
+  const invite = onPair ? pairInvite(reach ?? 'none', canPair) : null;
   // Whose scale this is. Every band on this panel is a percentage of 220 − age,
   // and with no date of birth on the profile that age is thirty — so a member
   // of fifty-five was being shown a zone 5 that starts 23 bpm above the top of
@@ -3481,10 +3582,27 @@ function ZonePanel({ t, liveZone, liveSample, zoneSecs, age, elapsed, reach }: {
             the sentence, not to the layout: dropping FORWARD_CHAR into it would
             put a mirrored chevron in the middle of an unmirrored English clause,
             which is worse than leaving it. When the catalogue is translated the
-            whole sentence moves and the separator goes with it. */}
+            whole sentence moves and the separator goes with it.
+
+            `zonesNote` only when there is no sheet to open. Its 'none' sentence
+            names the settings screen, which is the trip that loses the session
+            — true advice for every screen that cannot pair in place, and the
+            wrong thing to print directly above a button that can. */}
         <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3 }}>
-          {zonesNote(reach ?? 'none') ?? ''}
+          {invite ?? zonesNote(reach ?? 'none') ?? ''}
         </Text>
+        {invite && onPair ? (
+          <Pressable
+            onPress={() => { tapLight(); onPair(); }}
+            accessibilityRole="button"
+            accessibilityLabel={pairInviteAction(reach ?? 'none') + ' without leaving your session'}
+            hitSlop={8}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: sp.md, alignSelf: 'flex-start', backgroundColor: t.surface, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 8 }}
+          >
+            <Icon name="heart" size={13} color={t.brand} />
+            <Text style={{ ...ty.label, fontWeight: '500', color: t.ink }}>{pairInviteAction(reach ?? 'none')}</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -3539,6 +3657,11 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
   const insets = useSafeAreaInsets();
   const topPad = Math.max(insets.top, 44);
   const { w, reach, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch, sessionAvgBpm } = useLiveVitals(age, restingKcalPerMin, false, resumeAt?.startedAt ?? null, resumeAt?.pausedMs ?? 0);
+
+  /* The in-session pairing sheet. State rather than a route, because a route
+   * is what the ZonePanel comment refuses: `router.push` unmounts this runner,
+   * and the sets in it exist nowhere else until the finish writes them. */
+  const [pairing, setPairing] = useState(false);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [finished, setFinished] = useState(false);
   const [confetti, setConfetti] = useState(false);
@@ -3798,7 +3921,14 @@ function TimedSessionRunner({ t, kind, activity, age, restingKcalPerMin, default
           </Text>
         ) : null}
 
-        <ZonePanel t={t} reach={reach} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
+        <ZonePanel t={t} reach={reach} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} onPair={() => setPairing(true)} />
+        {/* Over the runner, never instead of it. `onPaired` rebuilds the
+            zones from whatever the watch already holds for this window, so a
+            member who pairs ten minutes in gets the ten minutes the watch
+            recorded before the app was allowed to read them — and no more
+            than that, which is what MID_SESSION_GAP_NOTE says out loud. */}
+        <PairMonitorSheet t={t} visible={pairing} onClose={() => setPairing(false)} reach={reach}
+          hasSample={freshSample != null} onPaired={() => { void rebuildZonesFromWatch(); }} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account
@@ -3975,6 +4105,11 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
   // not a second idea about the same problem.
   const [paused, setPaused] = useState(false);
   const { w, reach, elapsed, liveSample, freshSample, hrFresh, liveHr, hrPeak, sessionKcal, zoneSecs, liveZone, rebuildZonesFromWatch } = useLiveVitals(age, restingKcalPerMin, paused, resumeAt?.startedAt ?? null, resumeAt?.pausedMs ?? 0);
+
+  /* The in-session pairing sheet. State rather than a route, because a route
+   * is what the ZonePanel comment refuses: `router.push` unmounts this runner,
+   * and the sets in it exist nowhere else until the finish writes them. */
+  const [pairing, setPairing] = useState(false);
   const [finalElapsed, setFinalElapsed] = useState(0);
   const [idx, setIdx] = useState(0);
   // `bw` marks a set the member did with their own body; `kg` is then what
@@ -5118,7 +5253,14 @@ function SessionRunner({ t, unit, distanceUnit, exercises, focus, nameOf, onSwap
 
         {/* Live effort, and the same empty state as a timed session when there
             is no watch feeding it — see ZonePanel. */}
-        <ZonePanel t={t} reach={reach} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} />
+        <ZonePanel t={t} reach={reach} liveZone={liveZone} liveSample={freshSample ?? null} zoneSecs={zoneSecs} age={age} elapsed={elapsed} onPair={() => setPairing(true)} />
+        {/* Over the runner, never instead of it. `onPaired` rebuilds the
+            zones from whatever the watch already holds for this window, so a
+            member who pairs ten minutes in gets the ten minutes the watch
+            recorded before the app was allowed to read them — and no more
+            than that, which is what MID_SESSION_GAP_NOTE says out loud. */}
+        <PairMonitorSheet t={t} visible={pairing} onClose={() => setPairing(false)} reach={reach}
+          hasSample={freshSample != null} onPaired={() => { void rebuildZonesFromWatch(); }} />
 
         {/* TF-36 — reachable without leaving the session. It renders nothing
             but an honest line when Spotify is not connected or the account

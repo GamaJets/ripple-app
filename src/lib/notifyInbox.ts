@@ -190,6 +190,16 @@ const ICON_BY_ROUTE: ReadonlyArray<readonly [string, InboxIcon]> = [
   // A notice from a coach or a gym. Not the bell either: the bell is the
   // fallback, and a noticeboard is a specific thing.
   ['/(client)/notices', 'info'],
+  // An invoice from the gym, now that it has a screen to open.
+  //
+  // 'info' rather than a money glyph because there is no money glyph: `IconName`
+  // in src/ui/Icon.tsx has no note, coin, card or receipt, and inventing one is
+  // a design change rather than a routing one. 'info' is the nearest honest
+  // reading — a document the gym is telling you about — and it shares that
+  // reading with /(client)/notices, which is a real cost and a smaller one than
+  // the alternative: the bell here is the icon this table uses to mean "we have
+  // no idea what this is", worn by a row that is asking somebody for money.
+  ['/(client)/invoices', 'info'],
   ['/(client)/explore', 'sparkle'],
   ['/(client)/offers', 'sparkle'],
   ['/(client)/calendar', 'calendar'],
@@ -595,9 +605,18 @@ export const SERVER_WRITTEN: ReadonlyArray<ServerWritten> = [
   {
     where: 'supabase/parts/146 · gym_invoices_notify_member',
     when: 'a gym invoice leaves draft',
-    // Routeless on purpose: there is no member screen for `gym_invoices` yet,
-    // and the bell is what a row with nowhere to go is drawn with.
-    to: 'client', title: 'An invoice from your gym', route: null, icon: 'bell',
+    // It now has somewhere to go. This was routeless "on purpose: there is no
+    // member screen for `gym_invoices` yet" — which was a UI gap and was never a
+    // permission one. `gym_invoices_own_r` has admitted the member on
+    // `member_id = auth.uid()` since part 29, so the row the notification is
+    // about has always been theirs to read; nobody had drawn it.
+    //
+    // The COACH's invoice is the opposite case and stays routeless below: part
+    // 138 does not merely omit a client policy, it names and DROPS
+    // `coach_invoices_client_read` so a rebuild cannot leave one standing,
+    // because reading that ledger exposes the per-coach gapless `seq` of every
+    // other document. A screen for it needs a schema decision, not a route.
+    to: 'client', title: 'An invoice from your gym', route: '/(client)/invoices', icon: 'info',
   },
   // ── the coach's three (part 158) ─────────────────────────────────────────
   //

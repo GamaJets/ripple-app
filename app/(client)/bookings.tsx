@@ -40,6 +40,7 @@ import { bookableCredits, ledgerStateOf,
 import type { PackBalance } from '../../src/lib/packDraw';
 import { withDeadline } from '../../src/lib/readDeadline';
 import { packDeadline, drawsBy } from '../../src/lib/packDeadline';
+import { closingPack, otherWindowsNote } from '../../src/lib/closingPack';
 // Whether a booking is still ahead of the member, and the hour of grace on the
 // answer. One copy of a comparison this file held three of, all three of them
 // against a clock that had stopped at mount — see the header of that file.
@@ -301,11 +302,17 @@ export default function Bookings() {
   // `bookedByThen` is null unless exactly ONE pack has a window — an upcoming
   // session is not attributed to a pack until it draws, so with two windows in
   // play no honest attribution exists. See src/lib/packDeadline.ts.
+  //
+  // What this screen did with that was return null and say NOTHING, which is a
+  // different rule and a worse one: the member holding two closing packs has
+  // the most at stake and the least chance of working it out unaided, and
+  // `packDeadline` was written for them — "the caller passes null there, and
+  // this says the deadline without claiming anything about coverage". Nothing
+  // was passing null, so the sentence that branch exists for had no caller.
+  // `closingPack` picks the pack that closes FIRST and says whether the diary
+  // may be counted against it; the early return is gone.
   const payingEntitlements = book.lines;
-  const soleWindow = useMemo(() => {
-    const w = (payingEntitlements ?? []).filter((l) => l.expiresOn);
-    return w.length === 1 ? w[0] : null;
-  }, [payingEntitlements]);
+  const closing = useMemo(() => closingPack(payingEntitlements, todayISO), [payingEntitlements, todayISO]);
   // Declared BEFORE the deadline below, which reads it. A `useMemo` body runs
   // where it is written, so the deadline reaching backwards for this would have
   // been a temporal-dead-zone crash on first render rather than a stale value.
@@ -315,7 +322,7 @@ export default function Bookings() {
     return m;
   }, [credits]);
   const deadline = useMemo(() => {
-    if (!soleWindow) return null;
+    if (!closing) return null;
     // Only the member's own PT bookings, and only when BOTH reads that make
     // this list landed. A short diary counted as a whole one would report
     // coverage that is not there — `bookingsWhole` is the same gate the empty
@@ -333,7 +340,7 @@ export default function Bookings() {
     // ── and the bookings that have already been paid for are not counted ──
     //
     // The list alone is the wrong count, and it was costing the member money.
-    // `soleWindow.left` is `sessions_total - sessions_used`, and a one-off the
+    // `closing.pack.left` is `sessions_total - sessions_used`, and a one-off the
     // member booked THEMSELVES has already come off `sessions_used`:
     // `book_session` stamps `sessions.booking_drew_credit_at` and the app then
     // calls `redeem_pack_session`, which does `sessions_used = sessions_used + 1`
@@ -356,7 +363,16 @@ export default function Bookings() {
     // The gym-pass route is untouched by any of this: a pass only ever draws at
     // delivery, so `ledgerStateOf` never returns 'reserved' under it and every
     // upcoming booking still counts, exactly as before.
-    const booked = bookingsWhole
+    //
+    // ── and only when a booking can be attributed to this pack at all ─────
+    //
+    // `closing.attributable` is false when the member holds a second pack with
+    // a window on it. An upcoming booking is not tied to a pack until it draws,
+    // so nothing on this phone can say which of the two a Thursday session is
+    // going to spend — and the count that would be produced anyway is the one
+    // that reads "nothing here is going to be lost", which is the single
+    // sentence on this screen that could talk somebody out of acting.
+    const booked = bookingsWhole && closing.attributable
       ? drawsBy(
           sessions
             .filter((x) => x.clientId === cd.id && x.status === 'booked' && isUpcoming(x.startsAt, nowMs))
@@ -369,10 +385,10 @@ export default function Bookings() {
               // 'expected' is still to come off this one.
               return { startsAt: x.startsAt, willDraw: st === 'unknown' ? null : st === 'expected' };
             }),
-          soleWindow.expiresOn)
+          closing.pack.expiresOn)
       : null;
-    return packDeadline({ left: soleWindow.left, expiresOn: soleWindow.expiresOn, today: todayISO, bookedByThen: booked });
-  }, [soleWindow, sessions, cd.id, bookingsWhole, todayISO, nowMs, creditById, creditRoute]);
+    return packDeadline({ left: closing.pack.left, expiresOn: closing.pack.expiresOn, today: todayISO, bookedByThen: booked });
+  }, [closing, sessions, cd.id, bookingsWhole, todayISO, nowMs, creditById, creditRoute]);
   /**
    * The one sentence under a PT row saying what pays for it.
    *
@@ -776,11 +792,21 @@ export default function Bookings() {
               Under the balance rather than over it, because the balance is what
               the sentence is about. A 'covered' answer is drawn quietly — it is
               reassurance, not a warning. */}
-          {deadline && deadline.text ? (
-            deadline.urgent
+          {deadline && deadline.text ? (<>
+            {deadline.urgent
               ? <Flag tone={t.warn} style={{ marginBottom: sp.md }}>{deadline.text}</Flag>
-              : <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{deadline.text}</Text>
-          ) : null}
+              : <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>{deadline.text}</Text>}
+            {/* Which pack that sentence is about. "3 sessions left on this
+                pack" reads, to somebody holding two, as everything they have —
+                and the pack named here is deliberately only the one that closes
+                first. Null in the ordinary case, so a member with one pack is
+                not told there are no others. */}
+            {closing && otherWindowsNote(closing.otherWindows) ? (
+              <Text style={{ ...ty.caption, color: t.ink3, marginBottom: sp.md }}>
+                {otherWindowsNote(closing.otherWindows)}
+              </Text>
+            ) : null}
+          </>) : null}
           {/* One of the two lists came off this phone rather than off the
               server. Said above the rows for the same reason the gap notice is:
               a member who reads a cached booking as a confirmed one turns up to

@@ -39,7 +39,7 @@
 //
 // ── Where the dashes come from ─────────────────────────────────────────────
 //
-// Eight independent reads feed this, and each carries its own LoadStatus,
+// Nine independent reads feed this, and each carries its own LoadStatus,
 // because they fail independently and mean different things when they do. A
 // refused read is never rendered as an empty answer, and a truncated one is
 // never counted — see src/lib/rowCap.ts and src/ui/loadStatus.ts. Where a
@@ -51,6 +51,15 @@
 // for anything but a timestamp, so the app could say WHEN somebody trained and
 // never WHAT they did — see the row it feeds, and app/(trainer)/client-training.tsx
 // behind it.
+//
+// The ninth is the one record on this screen that neither the client nor the
+// coach wrote: what the GYM recorded about them coming in. It was readable by a
+// coach on a screen of its own and by nothing here, so the page that answers
+// "how is this person doing" could say when they last opened the app and not
+// whether they had been through a door. It is read as STAFF rather than as
+// their coach — see the section — and it is the one read on this screen whose
+// EMPTY answer can mean "your account cannot see a register", which is why it
+// says so before it shows a figure.
 //
 // The eighth is the client's intake — the form a coach takes before they train
 // somebody, which until now this product did not have anywhere. It reads one
@@ -102,7 +111,7 @@ import { useClientPaperwork } from '../../src/ui/clientPaperwork';
 import { useNow, useToday } from '../../src/ui/today';
 import { paperworkLine, paperworkItemLine, paperworkOutstanding } from '../../src/lib/clientPaperwork';
 import { fmtDay, num1 } from '../../src/lib/format';
-import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
+import { worstStatus, isWhole, type LoadStatus } from '../../src/ui/loadStatus';
 import { useAuthRevision } from '../../src/ui/authRevision';
 import { useAuth } from '../../src/ui/auth';
 import {
@@ -112,6 +121,11 @@ import {
 import { appLocale } from '../../src/lib/locale';
 import { nextUp, nextUpLine, nextUpUrgent } from '../../src/lib/nextUp';
 import { clientIsQueryable } from '../../src/lib/clientRecord';
+// The register and the door log, folded into one record by src/lib/attendance.ts
+// and asked the two questions a coach actually has — see the section below.
+import { useClientAttendance } from '../../src/ui/clientAttendance';
+import { staffScopeNote } from '../../src/lib/attendance';
+import { longestGap, currentGap, classMix, averageDwell } from '../../src/lib/attendanceGaps';
 // The credit rule, shared with the client's own ledger and with the booking
 // screen, so a coach and their client can never be shown different answers
 // about which pack paid for the same hour. See supabase/parts/370.
@@ -753,11 +767,15 @@ export default function ClientScreen() {
   // pass that expired at midnight as live, pulled to refresh — which re-reads
   // the passes and never recomputed the date they are judged against — and
   // trained a session nothing is paying for. See src/ui/today.ts.
-  const creditToday = useToday();
+  //
+  // One read of the day for the whole screen, not one per feature: the gym pass
+  // and the attendance gap below are both judged against it, and two `useToday`
+  // subscriptions would be two midnight timers answering the same question.
+  const today = useToday();
   const coachPacks: Entitlement[] | null = useMemo(
     () => (packRows === undefined ? null : coachPackLines(packBalance(packRows ?? null).lines)), [packRows]);
   const gymPtPasses: Entitlement[] | null = useMemo(
-    () => (passRows === undefined ? null : gymPtLines(passRows, creditToday)), [passRows, creditToday]);
+    () => (passRows === undefined ? null : gymPtLines(passRows, today)), [passRows, today]);
   const creditRoute: CreditRoute = useMemo(
     () => chooseRoute(packRows === undefined || packRows === null ? null : (coachPacks?.length ?? 0) > 0,
                       passRows === undefined || passRows === null ? null : (gymPtPasses?.length ?? 0) > 0),
@@ -1298,6 +1316,45 @@ export default function ClientScreen() {
   const ci = useClientIntake(canRead ? id : null);
   const intakeNudge = intakePrompt(ci.state, ci.progress, who);
 
+  /* ── the ninth read: whether they have actually been coming in ───────────
+   *
+   * Everything else on this screen is what the client said or what the coach
+   * wrote. This is what the GYM recorded — `class_bookings.attended_at`, the
+   * register, and `gym_visits`, the door log — folded into one timeline by
+   * src/lib/attendance.ts so one hour of somebody's life is one row.
+   *
+   * It is read as STAFF, not as their coach: both policies behind it are scoped
+   * to `my_tenant()`, so a coach with no gym is handed zero rows and no error.
+   * That is indistinguishable from a client who has never been recorded, which
+   * is why `staffScopeNote` is on screen before any of it is read — the rule
+   * lives in the module rather than in a sentence here.
+   *
+   * `att.reload` and not `att` in the refresh dependencies below: the hook
+   * returns a fresh object every render and the reload it exposes is stable, so
+   * depending on the object would rebuild the whole refresh callback on every
+   * paint and re-arm the focus listener with it. */
+  const att = useClientAttendance(canRead ? id : null);
+  const attReload = att.reload;
+  /** Only from a whole read. The cap falls at the OLD end of a newest-first
+   *  page, which is exactly where a longer gap would be — see the header of
+   *  src/lib/attendanceGaps.ts for why one of these two figures survives a
+   *  truncated record and the other cannot. */
+  const attWhole = att.status === 'ready';
+  const attLongest = longestGap(att.days, attWhole);
+  const attSince = currentGap(att.days, today, attLongest);
+  const attMix = classMix(att.events);
+  const attDwell = attWhole ? averageDwell(att.events) : null;
+  /** Three states, never two: `useTenant` still loading is "not known yet" and
+   *  must not be worded as a coach with no gym. */
+  // `isWhole`, not `!== 'error'` and not a hand-written enumeration: only
+  // 'ready' settles this. Under anything else whether this coach can reach a
+  // register is UNKNOWN, and null is the answer the note is written for.
+  const attHasGym: boolean | null = isWhole(tenantStatus) ? tenant != null : null;
+  // Nothing is said while the first read is in flight: "we could not tell which
+  // gym you belong to" is false of a read that has not finished, and it would
+  // be on screen for the whole of every normal open.
+  const attScope = tenantStatus === 'loading' ? null : staffScopeNote(attHasGym);
+
   /* ── pull to refresh ───────────────────────────────────────────────────
    *
    * This is the screen a coach opens before a session to find out what has
@@ -1306,8 +1363,8 @@ export default function ClientScreen() {
    * training day. None of it arrives here by itself.
    *
    * `readNonce` carries the thirteen effect reads; the roster, the programme
-   * assignments, the gym, the glucose series and the intake come from
-   * providers and are asked for beside them. All of them together, because
+   * assignments, the gym, the glucose series, the intake and the attendance
+   * record come from providers and are asked for beside them. All of them together, because
    * the briefing at the top of this screen is composed ACROSS them — a
    * sentence about somebody's silence built from a fresh contact log and a
    * stale activity read is a sentence about nobody. */
@@ -1316,8 +1373,9 @@ export default function ClientScreen() {
     return Promise.all([
       r.refresh(), Promise.resolve(ap.reload()), Promise.resolve(refreshTenant()),
       gl.refresh(), Promise.resolve(ci.reload()), Promise.resolve(paperwork.reload()),
+      attReload(),
     ]);
-  }, [r, ap, refreshTenant, gl, ci, paperwork]);
+  }, [r, ap, refreshTenant, gl, ci, paperwork, attReload]);
   const pull = usePullToRefresh(reloadEverything);
 
   /* ── and the same set when the coach comes back ─────────────────────────
@@ -1985,6 +2043,131 @@ export default function ClientScreen() {
               ? 'Their ticks could not be read, so the days they were in the app are unknown rather than none.'
               : `Days out of the last ${seen.windowDays} they ticked something — evidence they stood in front of their list, not a score.`}
           </Text>
+        </Section>
+
+        <Rule />
+
+        {/* ── whether they have actually been coming in ────────────────────
+            The two numbers a coach opens an attendance record to find, and
+            until now the only coach-side reader of that record was a separate
+            screen nothing on this one linked to. Both are decided in
+            src/lib/attendanceGaps.ts, which also holds the reason only one of
+            them survives a truncated read.
+
+            There is no attendance percentage here and there is not going to be
+            one, for the reason app/(trainer)/client-attendance.tsx sets out at
+            length: a percentage needs a count of the classes somebody was
+            EXPECTED at, and a register nobody ticked is not evidence they were
+            expected or that they did not come. */}
+        <Section>
+          <SectionHead title="Coming In" />
+          {unasked ? (
+            <Text style={{ ...ty.label, color: t.ink3 }}>{unasked}</Text>
+          ) : (
+            <>
+              {/* Said BEFORE any of it is read. A coach whose account is not
+                  attached to a gym matches neither policy and is handed an
+                  empty record with no error — which reads exactly like a client
+                  who has never been through a door. */}
+              {attScope ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <Notice tone={t.warn} kicker="Scope"
+                    title={attHasGym === null ? 'We could not tell which gym you belong to' : 'Your account is not attached to a gym'}
+                    note={attScope} />
+                </View>
+              ) : null}
+
+              {att.status === 'error' ? (
+                <View style={{ marginBottom: sp.md }}>
+                  <Notice tone={t.crit} kicker="Not read" title="Their attendance could not be read"
+                    note="The figures below are dashes because the record did not come back. It is NOT a record of them never coming in." />
+                </View>
+              ) : null}
+
+              <KpiRow items={[
+                {
+                  label: 'Since Last In',
+                  value: fig(attSince ? attSince.days : null),
+                  unit: attSince ? (attSince.days === 1 ? 'day' : 'days') : undefined,
+                },
+                {
+                  label: 'Longest Gap',
+                  value: fig(attLongest ? attLongest.days : null),
+                  unit: attLongest ? 'days' : undefined,
+                },
+              ]} />
+
+              {att.status === 'loading' ? (
+                <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.md }}>Reading their attendance…</Text>
+              ) : (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {attSince
+                    ? `Last recorded at a gym on ${fmtDay(attSince.since)}. `
+                    : att.status === 'ready' && attHasGym === true
+                      ? `Your gym has nothing on record for ${who} — which for plenty of gyms means it does not scan the door and its registers are not marked, rather than that they have stayed away. `
+                      : `How long it has been since ${who} was in could not be established, which is not the same as them not coming. `}
+                  {attLongest
+                    ? `The longest they have gone between visits is ${attLongest.days} days, from ${fmtDay(attLongest.from)} to ${fmtDay(attLongest.to)}.`
+                    : attWhole
+                      ? 'There are not yet two days on record to measure a gap between, so there is nothing to compare this against.'
+                      : 'No longest gap while the record is incomplete: the part that did not come back is the OLD end, which is exactly where a longer one would be.'}
+                </Text>
+              )}
+
+              {/* The comparison that turns a number into a decision. Only ever
+                  drawn from `aRecord` true — the field is null when there is no
+                  completed gap to beat, and rendering that as "normal for them"
+                  would be reassurance invented out of nothing. */}
+              {attSince?.aRecord ? (
+                <View style={{ marginTop: sp.md }}>
+                  <Flag tone={t.warn}>
+                    That is already longer than {who} has ever gone between visits in the record you
+                    can see. It is the gap, not a verdict — the record starts where it starts.
+                  </Flag>
+                </View>
+              ) : null}
+
+              {/* What the attendance is MADE of, which is the third thing a
+                  coach wants and the one the gaps above cannot say: somebody
+                  who has only ever been marked off at Pilates is a different
+                  conversation from somebody who does four things. Counted from
+                  what was actually marked — a booking is an intention and a
+                  waitlist place is not even that. */}
+              {attMix.rows.length || attMix.floor ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  {attMix.rows.length
+                    ? `What they turn up to: ${attMix.rows.map((m) => `${m.label} ${m.times}`).join(' · ')}${attMix.floor ? ` · on the floor ${attMix.floor}` : ''}.`
+                    : `No class of theirs has been marked off, and the door has them in ${attMix.floor} times.`}
+                  {' '}Counted from what was marked at the time, never from what they booked.
+                </Text>
+              ) : null}
+
+              {/* Never folded into a named row above: a coach reading "8
+                  Pilates" when four of the eight are classes nobody could open
+                  is being told something this app does not know. */}
+              {attMix.unreadable ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  {attMix.unreadable} more {attMix.unreadable === 1 ? 'attendance was' : 'attendances were'} at a class
+                  this app could not open — usually a gym they are no longer with. The attendance is real; only the
+                  class is missing, so it is counted here rather than under a name we would be guessing at.
+                </Text>
+              ) : null}
+
+              {attDwell ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  They stay about {attDwell.minutes} minutes, averaged over the {attDwell.over} visit
+                  {attDwell.over === 1 ? '' : 's'} that recorded both an entry and an exit
+                  {attDwell.without ? `. ${attDwell.without} more had no exit on the door, and are not in that average` : ''}.
+                </Text>
+              ) : null}
+
+              <View style={{ alignSelf: 'flex-start', marginTop: sp.lg }}>
+                <Ghost label="Their Attendance"
+                  a11yLabel={`Every visit your gym has on record for ${who}`}
+                  onPress={() => router.push({ pathname: '/(trainer)/client-attendance', params: { clientId: id as string } })} />
+              </View>
+            </>
+          )}
         </Section>
 
         <Rule />

@@ -147,6 +147,7 @@ export default function ClientLayout() {
       <Tabs.Screen name="notifications" options={{ href: null, title: 'Notifications' }} />
       <Tabs.Screen name="account" options={{ href: null, title: 'Account & Security' }} />
       <Tabs.Screen name="receipts" options={{ href: null, title: 'Payments & Receipts' }} />
+      <Tabs.Screen name="invoices" options={{ href: null, title: 'Invoices' }} />
       <Tabs.Screen name="intake" options={{ href: null, title: 'Your Intake' }} />
       <Tabs.Screen name="my-coach" options={{ href: null, title: 'Your Coach' }} />
       <Tabs.Screen name="coach-documents" options={{ href: null, title: 'Paperwork' }} />

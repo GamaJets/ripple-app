@@ -60,8 +60,15 @@
 // to keep them apart:
 //
 //   Coming in   is recorded money a client was charged through Stripe. Gross,
-//               and incomplete — Repple never sees cash, a bank transfer, or
-//               work paid for through a gym.
+//               and incomplete — Repple never sees cash or a bank transfer.
+//
+// A THIRD kind now has its own section and is in neither ledger: what an
+// employed coach's GYM says it settled for them, from `payroll_settlements`.
+// See src/ui/PaidRuns.tsx. It is not a strand of Coming In and never becomes
+// one: a gym recording that it handed money over is a different sort of fact
+// from Stripe watching a card be charged, and a figure adding the two would be
+// neither of them. For the coaches on this product today it draws a single
+// sentence saying there is no gym attached to the account.
 //   Going out   is the coach's own Repple bill and what they told us their ads
 //               cost. The second is self-reported and the first is Stripe's.
 //
@@ -132,6 +139,8 @@ import {
   againstLine, channelEmptyLine, channelReachLine, channelSum, spendAgainstReturn,
 } from '../../src/lib/coachChannels';
 import { useLateCancelCharges } from '../../src/ui/sessions';
+import { useMySettlements } from '../../src/ui/coachSettlements';
+import { PaidRuns } from '../../src/ui/PaidRuns';
 import { fetchMyInvoices } from '../../src/ui/coachInvoices';
 import { fetchMyReceipts } from '../../src/ui/coachReceipts';
 import { fetchMyPayouts } from '../../src/ui/coachPayouts';
@@ -195,6 +204,22 @@ export default function CoachMoney() {
   // the callback inside it is stable.
   const reloadFees = fees.reload;
 
+  // ── what a GYM has paid this coach ──────────────────────────────────────
+  //
+  // The twelfth read, and deliberately not inside `load`'s `Promise.all`. It is
+  // four reads of its own with four independent statuses, and — unlike every
+  // strand above — it is NOT a ledger figure: `ledger()` must never be handed a
+  // settlement, because a gym saying it settled a run is a different kind of
+  // fact from Stripe watching a client pay, and adding them would produce a
+  // number that is neither.
+  //
+  // Its refresh is fired from the same pull as the rest of the screen, though.
+  // A section that quietly kept a stale copy through a pull-to-refresh is worse
+  // than one that cannot be refreshed: the gesture reports success and the
+  // figures under it are from before it.
+  const paid = useMySettlements();
+  const refreshPaid = paid.refresh;
+
   const load = useCallback(async () => {
     const [p, r, sub, inv, cr, ca, docs, rec, pay, cost] = await Promise.all([
       fetchClientPurchases(),
@@ -235,8 +260,15 @@ export default function CoachMoney() {
   // would produce a total whose parts came from different minutes, which is
   // worse than a stale one because nothing about it looks wrong.
   const pull = usePullToRefresh(useCallback(
-    () => Promise.all([load(), reloadFees()]),
-    [load, reloadFees],
+    () => {
+      // Fired, not awaited: `refreshPaid` bumps a counter that re-runs the
+      // payroll reads inside their own provider, and there is no promise to
+      // track. The spinner follows the twelve reads it CAN see rather than
+      // pretending to know about four it cannot.
+      refreshPaid();
+      return Promise.all([load(), reloadFees()]);
+    },
+    [load, reloadFees, refreshPaid],
   ));
 
   /* ── coming in ─────────────────────────────────────────────────────────── */
@@ -560,6 +592,22 @@ export default function CoachMoney() {
             note="Record a payment that did not go through this app"
             onPress={() => router.push('/(trainer)/receipts')} />
         </Section>
+
+        {/* ── WHAT A GYM HAS PAID THEM ───────────────────────────────────
+            The third kind of money that reaches a coach, and the only one this
+            app had never shown them. It sits here, beside the half Stripe never
+            saw, because both answer "money that came in that Repple did not
+            take" — and it is a SECTION rather than a strand for the reason in
+            src/ui/PaidRuns.tsx: a settlement is a gym's word that it handed
+            money over, and the ledger above is Stripe's record of a card being
+            charged. Nothing adds the two.
+
+            For a coach with no gym this draws one sentence saying so. That is
+            the common case today — every payroll table in this database is
+            empty and all seven live coaches are alone in their own tenant — and
+            an empty list under this heading would read as a gym that has paid
+            them nothing. */}
+        <PaidRuns paid={paid} />
 
         <Section>
           <ListRow icon="grid" title="Payments & Packages"
@@ -1128,7 +1176,7 @@ export default function CoachMoney() {
         <Section>
           <SectionHead title="What Is Not Here" />
           <Text style={{ ...ty.caption, color: t.ink3 }}>
-            Cash, bank transfers and work paid for through a gym never reach Repple on their own. What you have recorded yourself is in the figures above and the rest is not, so they are a floor and only you know by how much. Nothing on this page is a projection or a forecast — it is what has been recorded, over the period each heading names.
+            Cash and bank transfers never reach Repple on their own. What you have recorded yourself is in the figures above and the rest is not, so they are a floor and only you know by how much. Work paid for through a gym is now here — but only as the runs your gym has closed, which is their word for what they handed over and not a record of anything arriving. Nothing on this page is a projection or a forecast: it is what has been recorded, over the period each heading names.
           </Text>
         </Section>
       </ScrollView>

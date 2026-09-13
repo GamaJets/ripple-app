@@ -60,6 +60,24 @@ import { USE_SUPABASE } from '../../src/lib/config';
 import { reportError } from '../../src/lib/reportError';
 import type { LoadStatus } from '../../src/ui/loadStatus';
 import { useReadDeadline } from '../../src/ui/readDeadline';
+// The reader's locale, resolved once with a fallback — never a literal tag.
+import { appLocale } from '../../src/lib/locale';
+// Who this member is, for the one read on this screen that is keyed on THEM
+// rather than on their coach.
+import { useClientData } from '../../src/ui/clientData';
+// ── What the coach can see of the plan the member rewrote ─────────────────
+//
+// `client_plan_edits` (supabase/parts/204) had one reference in the whole repo
+// — the upsert in src/ui/planEdits.tsx — and the blob it writes was read back by
+// nobody, in any of the three apps. The member's own phone shows them their
+// edits out of its own storage; what nothing could tell them is whether the
+// copy their COACH reads ever arrived, which is the only reason the row exists.
+// `usePlanEdits.shared` cannot answer that: it is a flag about the last write
+// this session made on this handset, so a reinstall or a second phone left a
+// month of corrections unaccounted for.
+import { fetchSharedPlanEdits, type SharedPlanEdits } from '../../src/ui/planEditsShared';
+import { coachSeesPlanNote, planEditItemLine, planEditItems } from '../../src/lib/planEditsReadBack';
+import { editCount } from '../../src/lib/planEdits';
 import {
   fetchCoachCredentials, fetchMyReview, canReview, writeReview, withdrawReview,
 } from '../../src/ui/reviews';
@@ -103,6 +121,7 @@ function monogram(name: string | null): string {
 export default function MyCoach() {
   const t = useTheme();
   const router = useRouter();
+  const cd = useClientData();
   const [coach, setCoach] = useState<CoachProfile | null>(null);
   // Under a ceiling — see src/lib/readDeadline.ts. Nothing here can leave
   // 'loading' without a request settling, and a captive portal settles none.
@@ -217,6 +236,27 @@ export default function MyCoach() {
     return () => { cancelled = true; };
   }, [coachId, tick]);
 
+  // ── the copy of the member's plan changes that their coach reads ─────────
+  //
+  // Keyed on the MEMBER, not the coach: the row is theirs and exists whether or
+  // not anybody is currently coaching them, and folding this into the effect
+  // above would make it wait on a coach id it does not need. `tick` so one pull
+  // brings it back with everything else.
+  const [planEdits, setPlanEdits] = useState<SharedPlanEdits | null>(null);
+  const [planEditStatus, setPlanEditStatus] = useState<LoadStatus>('loading');
+  const myId = cd.id;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setPlanEditStatus('loading');
+      const out = await fetchSharedPlanEdits(myId);
+      if (cancelled) return;
+      setPlanEdits(out.shared);
+      setPlanEditStatus(out.status);
+    })();
+    return () => { cancelled = true; };
+  }, [myId, tick]);
+
   // The four reads behind this screen: the coach's profile, their branding,
   // their credentials, and this member's own review and whether they may leave
   // one. `tick` runs the last three; `load` is the first.
@@ -263,6 +303,30 @@ export default function MyCoach() {
   };
 
   const go = (route: string) => router.push(route as never);
+
+  /**
+   * The day the member's plan changes last reached their coach, or null.
+   *
+   * Null and never a dash: `coachSeesPlanNote` writes a sentence with no date
+   * in it rather than one built around a hole — see scripts/check-prose.mjs.
+   * The locale is the READER's, and the parse is `Date.parse` on a timestamptz,
+   * which is a full instant rather than a bare `YYYY-MM-DD` compared as a
+   * string.
+   */
+  const sentOn = (iso: string | null): string | null => {
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms)
+      ? new Date(ms).toLocaleDateString(appLocale(), { day: 'numeric', month: 'long', year: 'numeric' })
+      : null;
+  };
+
+  /** The changes themselves, listed only where the row was actually read and
+   *  actually parsed. An empty list under anything else is a silence, not an
+   *  answer — see src/ui/loadStatus.ts. */
+  const planEditRows = planEditStatus === 'ready' && planEdits?.readable
+    ? planEditItems(planEdits.edits)
+    : [];
 
   /**
    * Leave, and say why if you want to.
@@ -696,6 +760,48 @@ export default function MyCoach() {
                 disclosed. Not the document behind an injury — only what was read out of it. Not your blood
                 sugar, unless you turn sharing on yourself.
               </Text>
+
+              {/* ── and the plan you rewrote ──────────────────────────────
+                  The one thing in that list the member MADE, and the only one
+                  they had no way to check. Every swap, removal, addition and
+                  corrected set goes up to `client_plan_edits` the moment it is
+                  made (src/ui/planEdits.tsx) and nothing in any of the three
+                  apps has ever read the row back — so a member who reinstalled,
+                  or picked up a second handset, could not find out whether a
+                  month of corrections had arrived. This is the server's copy,
+                  not the phone's, which is what makes it an answer.
+
+                  Read-only on purpose. The plan screen owns the writing and
+                  holds its own copy in memory; an undo from here would be
+                  overwritten by that screen's next tap, silently, after the
+                  member had been told it was done. */}
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+                {coachSeesPlanNote(
+                  planEditStatus,
+                  planEdits ? editCount(planEdits.edits) : 0,
+                  planEdits ? planEdits.readable : true,
+                  sentOn(planEdits?.updatedAt ?? null),
+                )}
+              </Text>
+
+              {planEditRows.length > 0 ? (
+                <View style={{ marginTop: sp.md }}>
+                  {planEditRows.map((it) => (
+                    <Text key={it.id} style={{ ...ty.caption, color: t.ink2, marginTop: 4 }}>
+                      {planEditItemLine(it)}
+                    </Text>
+                  ))}
+                  {/* Where the change was actually made, and the only place it
+                      can be undone. Said rather than implied: the list above
+                      names a day and a kind of change and deliberately does not
+                      name the movement, because the stored key is a slug and
+                      the programme that would turn it into a name is on that
+                      screen and not on this one. */}
+                  <View style={{ flexDirection: 'row', marginTop: sp.md }}>
+                    <Ghost label="Open My Plan" onPress={() => go('/(client)/workouts')} />
+                  </View>
+                </View>
+              ) : null}
             </Section>
           </>
         )}

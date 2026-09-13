@@ -636,6 +636,19 @@ export async function fetchMyPasses(sb: Queryable, uid: string): Promise<Read<Pa
  * netted here: what was charged and what came back are two facts, and the
  * subtraction belongs in one place (`keptCents`) where it can be shown as well
  * as done.
+ *
+ * ── Why this is not `fetchMyPurchases` in src/lib/connect.ts ──────────────
+ *
+ * That function reads the same table for the same person and is right for what
+ * it does, which is feed a session BALANCE. It answers `null` for a truncated
+ * read as well as for a refused one, and says why: to the caller of a balance
+ * the two facts are the same fact, and every caller renders that null with one
+ * written sentence. They are not the same fact here. A money total withheld
+ * because a read failed and a money total withheld because there are more rows
+ * than arrived send the member to two different places — one is pull-to-refresh
+ * and the other is ask the gym for a statement — and `memberPaid` names which
+ * to their face. Hence a second read, with named columns rather than `*`, that
+ * keeps the two apart.
  */
 export async function fetchMyCoachSales(sb: Queryable, uid: string): Promise<Read<Page<MemberCoachSale>>> {
   if (!uid) return { ok: false, reason: 'Not signed in.' };

@@ -53,7 +53,8 @@ import { useTheme } from '../../src/ui/components';
 import { isWhole } from '../../src/ui/loadStatus';
 import { usePullToRefresh } from '../../src/ui/pullToRefresh';
 import { Rule, Section, SectionHead, Cta, Ghost, Flag, Notice, PartialRead } from '../../src/ui/kit';
-import { sp, layout, radius, elevation, type as ty, numeric } from '../../src/theme/scale';
+import { sp, layout, radius, elevation, hairline, type as ty, numeric } from '../../src/theme/scale';
+import { MIN_TARGET, hitSlopFor } from '../../src/lib/a11y';
 import { useRecurringSeries, deviceTimeZone } from '../../src/ui/availability';
 import {
   // `memberSeriesLabel`, not `seriesLabel`. The second is English and 12-hour
@@ -80,8 +81,18 @@ import { peerHeading } from '../../src/lib/threadPeer';
 import { useThreadPeerName } from '../../src/ui/messaging';
 import type { TrainingSession } from '../../src/lib/types';
 import type { CancellationPolicy } from '../../src/lib/booking';
-import { fmtRelativeDay, fmtTime } from '../../src/lib/format';
+import { fmtRelativeDay, fmtTime, fmtClock, weekdayName, weekdayNameShort } from '../../src/lib/format';
 import { BACK_ICON } from '../../src/ui/direction';
+// Asking for one. The member cannot CREATE a standing appointment — see the
+// header of src/lib/standingAsk.ts and the 42501 in `create_session_series` —
+// so the half of the feature that was missing is the request, and it goes down
+// the rail this app already has for an hour a coach has not opened.
+import {
+  STANDING_ASK_RULE, NO_COACH_FOR_STANDING, standingAskNote, firstStandingDay, standingAskBlocker,
+} from '../../src/lib/standingAsk';
+import { askForSession } from '../../src/ui/sessionRequests';
+import { askBlocker, askRefusalNote, askedConfirmation, ownDiaryNote, NOT_A_BOOKING } from '../../src/lib/sessionRequests';
+import { sendPushChecked } from '../../src/ui/pushNotifications';
 // Whether this phone can reach us. It decides the second half of the sentence
 // printed when a cancellation does not land — see `cancelOne`.
 import { useReachability } from '../../src/ui/reachability';
@@ -99,6 +110,31 @@ import { retryLine } from '../../src/lib/reachability';
 // `fmtRelativeDay` and `fmtClock` in src/lib/format.ts.
 const timeLabel = (iso: string) => fmtTime(iso);
 const dayLabel = (iso: string) => fmtRelativeDay(iso);
+
+/** The hours a coach might be asked for, and the quarters inside one. The same
+ *  grids app/(client)/request-session.tsx offers, because this is the same
+ *  request going to the same person: a member who can ask for 07:15 on one
+ *  screen and only 07:00 on the other has been given two different products. */
+const ASK_HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+const ASK_MINUTES = [0, 15, 30, 45];
+/** Sixty first, because it is what almost every one-to-one in this app is. */
+const ASK_LENGTHS = [30, 45, 60, 90];
+
+/**
+ * A local instant from a local day and a local hour.
+ *
+ * Built from the PARTS with `new Date(y, m, d, h, min)` and never from a string
+ * — `new Date('2026-09-15T18:00:00Z')` is UTC and would move a six o'clock
+ * appointment by hours for most of the world, and `new Date('2026-09-15')` is
+ * the bare-literal trap scripts/check-utc-day.mjs exists for. Null for a day
+ * that will not read, so no caller can build an instant out of a hole.
+ */
+const instantOn = (day: string | null, hour: number, minute: number): string | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day ?? ''));
+  if (!m) return null;
+  const at = new Date(+m[1], +m[2] - 1, +m[3], hour, minute, 0, 0);
+  return Number.isFinite(at.getTime()) ? at.toISOString() : null;
+};
 
 export default function StandingAppointments() {
   const t = useTheme();
@@ -174,6 +210,23 @@ export default function StandingAppointments() {
 
   const [endFor, setEndFor] = useState<RecurringSeries | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // ── asking for one ───────────────────────────────────────────────────────
+  //
+  // The empty state of this screen said "Ask your coach to set one up" and gave
+  // nobody a way to do it. This is that way, and it is a REQUEST rather than a
+  // create: `create_session_series` refuses a member with 42501 and is right to
+  // — a series writes eight weeks of real sessions into a coach's diary the
+  // moment it is agreed, against hours they may never have opened, and each of
+  // those draws a credit as it is delivered. src/lib/standingAsk.ts is the long
+  // version of that argument.
+  const [asking, setAsking] = useState(false);
+  /** -1 until the member picks one. No default day, deliberately: a weekday
+   *  chosen for somebody is a weekday they may send without reading. */
+  const [askDow, setAskDow] = useState(-1);
+  const [askHour, setAskHour] = useState(18);
+  const [askMinute, setAskMinute] = useState(0);
+  const [askLength, setAskLength] = useState(60);
 
   // A series ended, or an occurrence cancelled, on the coach's phone changes
   // what is true here. BOTH reads are refreshed on focus, not just the
@@ -422,6 +475,115 @@ export default function StandingAppointments() {
     ]);
   };
 
+  /**
+   * The first date this weekly slot would fall on, and the instant it starts.
+   *
+   * `now` is passed in so the preview and the send are the same arithmetic: the
+   * caller reads the clock once, at the moment it is acting. A member who picks
+   * their own weekday at five to six, for six o'clock, is asking about TODAY —
+   * and the same member picking it five minutes later is asking about next
+   * week. `firstStandingDay` is told which of those it is rather than guessing,
+   * because "the next one after now" and "the next one of that weekday" are
+   * different dates exactly once every seven days.
+   */
+  const askSlotOn = (now: number): { day: string | null; startsAt: string } => {
+    if (askDow < 0) return { day: null, startsAt: '' };
+    const [ay, am, ad] = todayParts();
+    const todayISO = isoFromParts(ay, am, ad);
+    const soonest = firstStandingDay(todayISO, askDow, false);
+    const at = instantOn(soonest, askHour, askMinute);
+    if (at && Date.parse(at) > now) return { day: soonest, startsAt: at };
+    const week = firstStandingDay(todayISO, askDow, true);
+    return { day: week, startsAt: instantOn(week, askHour, askMinute) ?? '' };
+  };
+
+  /** The hour a sentence is about, written out, or null. Never assembled around
+   *  a value that might not be there — a caller with no readable instant does
+   *  not draw the sentence at all. */
+  const askWhenLabel = (iso: string): string | null => {
+    if (!iso) return null;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms) ? `${dayLabel(iso)} at ${timeLabel(iso)}` : null;
+  };
+
+  /**
+   * Ask for it.
+   *
+   * Three refusals before the write, and each is a different question:
+   *
+   *   · `standingAskBlocker` — they already train at that hour every week. The
+   *     request rail cannot see `session_series` at all, so without this a
+   *     member is free to ask their coach, in writing, to arrange something
+   *     that has been running for a year.
+   *   · `askBlocker` — the ordinary rules for asking anybody for anything: a
+   *     time that has gone, one past the horizon, one they are already booked
+   *     for. `myBusy` is the member's OWN diary, which the server does not
+   *     check (part 740 checks the COACH's), and `ownDiaryNote` is printed on
+   *     the sheet when that read did not land rather than the clash check
+   *     silently becoming "no clash".
+   *   · the server, which is the only authority on the live-request cap and on
+   *     whether they have a coach at all. Its refusals arrive as reasons and
+   *     `askRefusalNote` is the one place they become sentences. This screen
+   *     deliberately does not read the request list to pre-empt those two: a
+   *     fifth read here would be a second copy of a rule the server already
+   *     enforces, and a copy that disagrees is worse than a refusal that
+   *     explains itself.
+   *
+   * Nothing is queued for later. A standing appointment is a conversation, and
+   * a question that surfaces on the coach's phone a day after the member forgot
+   * they asked it is not the same question — so a write that does not land says
+   * so and leaves the sheet as it was, ready to send again.
+   */
+  const doAsk = async () => {
+    if (busy) return;
+    const now = Date.now();
+    const { startsAt } = askSlotOn(now);
+    const mine = standingAskBlocker(
+      standing.map((x) => ({ dow: x.dow, hour: x.hour, minute: x.minute, active: x.active })),
+      { dow: askDow, hour: askHour, minute: askMinute },
+      // `isWhole`, not `seriesStatus === 'ready'`: a short read and a failed one
+      // are both lists this screen may not reason from.
+      isWhole(seriesStatus),
+    );
+    if (mine) { Alert.alert('Not sent', mine); return; }
+    const myBusy = sessions
+      .filter((x) => x.status === 'booked' && x.clientId === cd.id)
+      .map((x) => ({ startsAt: x.startsAt, durationMin: x.durationMin }));
+    const stop = askBlocker(startsAt, askLength, now, { myBusy });
+    if (stop) { Alert.alert('Not sent', stop); return; }
+    const when = askWhenLabel(startsAt);
+    if (!when) { Alert.alert('Not sent', 'That time could not be read. Pick the day and the time again.'); return; }
+
+    setBusy(true);
+    // The note is what makes this a request for a STANDING appointment rather
+    // than for one Tuesday. Written in the member's own language and clock, and
+    // never longer than the column part 740 checks — see `standingAskNote`.
+    const res = await askForSession(startsAt, askLength, standingAskNote(weekdayName(askDow), fmtClock(askHour, askMinute)));
+    setBusy(false);
+
+    if (!res.ok) {
+      Alert.alert('Not sent', res.reason
+        ? askRefusalNote(res.reason)
+        : 'That did not send, so your coach has not been asked and nothing has been arranged. Try again when you have signal.');
+      return;
+    }
+    setAsking(false);
+    // The coach the SERVER says was asked, never one this screen worked out. A
+    // phone that guessed could page somebody who was never asked anything.
+    // `sendPushChecked` rather than `sendPush`, because a screen built on the
+    // latter can only ever claim success.
+    const push = res.trainerId
+      ? await sendPushChecked([res.trainerId], 'A standing appointment',
+        `A client asked about ${when}, every week.`, { route: '/(trainer)/sessions' }, 'bookings')
+      : { ok: false };
+    Alert.alert(
+      'Asked',
+      `${askedConfirmation(when, coachName)}\n\nThey have been told you would like that time every week. If they agree, the standing appointment appears on this screen and the sessions appear on your calendar.`
+      + (push.ok ? '' : '\n\nWe couldn’t send them a notification, so they may not see it until they open the app. Message them if it’s soon.'),
+      [{ text: 'OK' }],
+    );
+  };
+
   const cancelOne = (one: TrainingSession) => {
     // Captured before the alert and passed through, so the rule the member is
     // warned under is the rule that decides whether their credit comes back.
@@ -528,7 +690,7 @@ export default function StandingAppointments() {
                 ? 'Nothing came back, but only part of the list loaded — so this is not a statement that you have none. Pull down to refresh.'
                 : endedCount
                   ? `Nothing is standing right now. The ${endedCount === 1 ? 'one that has ended is' : `${endedCount} that have ended are`} not listed here.`
-                  : 'You have no standing appointment. Ask your coach to set one up and the same hour is booked for you every week — neither of you has to book it again.'}
+                  : 'You have no standing appointment. Ask your coach for one below and, if they agree, the same hour is booked for you every week — neither of you has to book it again.'}
             </Text>
           ) : (<>
             {/* The rows are real; there are more of them than came back. They
@@ -600,6 +762,40 @@ export default function StandingAppointments() {
                   ) : null}
               </View>
             ))}
+          </>)}
+        </Section>
+
+        <Rule />
+
+        {/* ── asking for one ───────────────────────────────────────────────
+            The other half of this screen. Everything above it acts on an
+            arrangement that already exists; nothing here could start one, and
+            the empty state's own advice — "ask your coach" — was a sentence
+            telling somebody to go and have a conversation the app could have
+            started for them.
+
+            It ASKS. `create_session_series` refuses a member with 42501, and
+            that refusal is right rather than an obstacle: agreeing a series
+            writes eight weeks of real sessions into a coach's diary against
+            hours they may never have opened, and every one of them draws a
+            credit as it is delivered. src/lib/standingAsk.ts carries the whole
+            argument. */}
+        <Section>
+          <SectionHead title="Ask For A Weekly Time" />
+          {cd.coachLinked === false ? (
+            /* A KNOWN absence, not an unread one. `coachLinked` is
+               `boolean | null` and null means the read did not land — under
+               which the ask is still offered, because withdrawing the only
+               route to a coach on the strength of a failed read costs the
+               member more than the wasted tap it would save. */
+            <Notice kicker="BEFORE YOU CAN ASK" title="You don’t have a coach yet" note={NO_COACH_FOR_STANDING} />
+          ) : (<>
+            <Text style={{ ...ty.label, color: t.ink2 }}>{STANDING_ASK_RULE}</Text>
+            <View style={{ marginTop: sp.lg, alignSelf: 'flex-start' }}>
+              <Ghost icon="calendar" label="Ask For A Standing Appointment"
+                a11yLabel="Ask your coach for the same time every week"
+                onPress={() => setAsking(true)} />
+            </View>
           </>)}
         </Section>
 
@@ -826,6 +1022,164 @@ export default function StandingAppointments() {
               <Cta label="Change Nothing" wide onPress={() => setPauseFor(null)} />
             </ScrollView>
           </>) : null}
+        </View>
+      </Modal>
+
+      {/* ── ask for a weekly time ───────────────────────────────────────────
+          A sibling of the two sheets above, never nested inside one: a Modal
+          inside a Modal is the one arrangement iOS will not reliably present.
+
+          The grids are app/(client)/request-session.tsx's — the same hours, the
+          same quarters, the same lengths — because this is the same request
+          going to the same person, and a member who can ask for 07:15 on one
+          screen and only 07:00 on the other has been handed two products. What
+          differs is the first control: a WEEKDAY rather than a date, because
+          the thing being asked for is every week. */}
+      <Modal visible={asking} animationType="slide" transparent onRequestClose={() => setAsking(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setAsking(false)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, maxHeight: '86%', ...elevation.e2 }}>
+          <Text style={{ ...ty.head, color: t.ink }}>Ask For A Standing Appointment</Text>
+          <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+            {withWhom}. Pick the time you would like every week.
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {/* Said first and in the app's own words for a one-off ask, because
+                it is the half somebody is most likely to misread: they are
+                asking, and until their coach answers nothing is held. */}
+            <Notice kicker="WHAT THIS DOES" title="It asks — it doesn’t book" note={NOT_A_BOOKING} />
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>DAY OF THE WEEK</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+              {[0, 1, 2, 3, 4, 5, 6].map((d) => {
+                const on = d === askDow;
+                return (
+                  <Pressable key={d} onPress={() => setAskDow(d)} hitSlop={hitSlopFor(MIN_TARGET)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    /* The whole weekday spoken, never the three letters drawn:
+                       "Tue" is read aloud as a word nobody says. */
+                    accessibilityLabel={`Every ${weekdayName(d)}`}
+                    style={{
+                      minWidth: MIN_TARGET, minHeight: MIN_TARGET,
+                      alignItems: 'center', justifyContent: 'center',
+                      paddingHorizontal: sp.md, borderRadius: radius.sm,
+                      backgroundColor: on ? t.brand : t.surface2,
+                      borderWidth: on ? 0 : hairline, borderColor: t.ring,
+                    }}>
+                    <Text style={{ ...ty.body, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>
+                      {weekdayNameShort(d)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>TIME</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.sm }}>
+              {ASK_HOURS.map((h) => {
+                const on = h === askHour;
+                return (
+                  <Pressable key={h} onPress={() => setAskHour(h)} hitSlop={hitSlopFor(MIN_TARGET)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    accessibilityLabel={fmtClock(h, askMinute)}
+                    style={{
+                      minWidth: MIN_TARGET + 24, minHeight: MIN_TARGET,
+                      alignItems: 'center', justifyContent: 'center',
+                      paddingHorizontal: sp.sm, borderRadius: radius.sm,
+                      backgroundColor: on ? t.brand : t.surface2,
+                      borderWidth: on ? 0 : hairline, borderColor: t.ring,
+                    }}>
+                    <Text style={{ ...ty.body, ...numeric, fontWeight: on ? '600' : '500', color: on ? t.brandInk : t.ink }}>
+                      {fmtClock(h, 0)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.md }}>
+              {ASK_MINUTES.map((m) => {
+                const on = m === askMinute;
+                return (
+                  <Pressable key={m} onPress={() => setAskMinute(m)} hitSlop={hitSlopFor(MIN_TARGET)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    /* The WHOLE time, not ":15" — four pills each announced as a
+                       fraction tell a screen-reader user nothing about what they
+                       are choosing. */
+                    accessibilityLabel={fmtClock(askHour, m)}
+                    style={{
+                      flex: 1, minHeight: MIN_TARGET, alignItems: 'center', justifyContent: 'center',
+                      borderRadius: radius.sm,
+                      backgroundColor: on ? t.brand : t.surface2,
+                      borderWidth: on ? 0 : hairline, borderColor: t.ring,
+                    }}>
+                    <Text style={{ ...ty.label, ...numeric, color: on ? t.brandInk : t.ink }}>:{String(m).padStart(2, '0')}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Text style={{ ...ty.micro, color: t.ink3, marginTop: sp.lg }}>HOW LONG</Text>
+            <View style={{ flexDirection: 'row', gap: sp.sm, marginTop: sp.sm }}>
+              {ASK_LENGTHS.map((n) => {
+                const on = n === askLength;
+                return (
+                  <Pressable key={n} onPress={() => setAskLength(n)} hitSlop={hitSlopFor(MIN_TARGET)}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    accessibilityLabel={`${n} minutes`}
+                    style={{
+                      flex: 1, minHeight: MIN_TARGET, alignItems: 'center', justifyContent: 'center',
+                      borderRadius: radius.sm,
+                      backgroundColor: on ? t.brand : t.surface2,
+                      borderWidth: on ? 0 : hairline, borderColor: t.ring,
+                    }}>
+                    <Text style={{ ...ty.label, ...numeric, color: on ? t.brandInk : t.ink }}>{n} min</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {/* What is actually being sent, in the reader's own clock and
+                language, before they send it. Drawn only once a weekday has
+                been chosen: there is no default day, so until then there is no
+                date to preview and a sentence here would be about nothing. */}
+            {askDow >= 0 ? (
+              <Text style={{ ...ty.label, color: t.ink2, marginTop: sp.lg }}>
+                {`You are asking for every ${weekdayName(askDow)} at ${fmtClock(askHour, askMinute)}, for ${askLength} minutes. `}
+                {askWhenLabel(askSlotOn(Date.now()).startsAt)
+                  ? `The first one would be ${askWhenLabel(askSlotOn(Date.now()).startsAt)}.`
+                  : 'The first date could not be worked out on this phone — pick the day again.'}
+              </Text>
+            ) : (
+              <Text style={{ ...ty.label, color: t.ink3, marginTop: sp.lg }}>
+                Pick a day of the week to see when the first one would be.
+              </Text>
+            )}
+
+            {/* The member's own diary is the ONLY calendar checked on this side
+                — part 740 checks the coach's and deliberately says nothing
+                about the client's — so a sessions read that did not land makes
+                that check silently become "no clash", and the sentence for each
+                way it can fail is `ownDiaryNote`. */}
+            {ownDiaryNote(sessionsStatus) ? (
+              <Flag tone={t.warn} style={{ marginTop: sp.md }}>{ownDiaryNote(sessionsStatus)}</Flag>
+            ) : null}
+            {/* Not a warning about the ask — it books nothing — but the thing a
+                member wants to know before they commit a weekly hour. */}
+            <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>{RECURRING_CREDIT_NOTE}</Text>
+
+            <View style={{ height: sp.lg }} />
+            <Cta label={busy ? 'Asking…' : 'Ask My Coach'} wide
+              a11yLabel="Send this request to your coach"
+              onPress={() => { void doAsk(); }} />
+            <View style={{ height: sp.md }} />
+            {/* Where the answer will appear, and where it can be taken back.
+                `askedConfirmation` promises "you will see the answer here", and
+                here is that screen rather than this one. */}
+            <Ghost label="See Requests I Have Sent"
+              onPress={() => { setAsking(false); router.push('/(client)/request-session'); }} />
+            <View style={{ height: sp.md }} />
+            <Ghost label="Change Nothing" onPress={() => setAsking(false)} />
+          </ScrollView>
         </View>
       </Modal>
 
