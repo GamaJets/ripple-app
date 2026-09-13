@@ -80,6 +80,10 @@ import {
   agreementBlocker, signatureBlocker, nextVersion, outstandingFor,
   fetchDocuments, recordDocument, deleteDocument, documentBlocker, documentPath, expiring,
   openDocument, discardUnfiledObject, documentAudience, AUDIENCE_LABEL,
+  // The other half of `recordDocumentRead`: the gate has been writing this
+  // table since part 390 and nothing has ever opened it. See `DocumentReads`.
+  fetchDocumentReads, readsFor, readSummary, readerLine,
+  type DocumentRead, type DocumentReadLog,
   AGREEMENT_KINDS, AGREEMENT_LABEL, AGREEMENT_NOTE, DOCUMENT_KINDS, DOCUMENT_LABEL,
   type Agreement, type AgreementKind, type Signature, type GymDocument, type DocumentKind,
 } from '@lib/gymDocs';
@@ -164,30 +168,48 @@ export default function Compliance() {
   const [documents, setDocuments] = useState<Read<GymDocument>>(reading);
   const [members, setMembers] = useState<Read<Membership>>(reading);
   const [feed, setFeed] = useState<Read<Activity>>(reading);
+  /**
+   * Who has been handed a link to a member's file.
+   *
+   * Its own state rather than a `Read<DocumentRead>`, because the two things a
+   * screen has to know before it says "never opened" — whether the page reaches
+   * the beginning, and whether the readers' NAMES came back — are not facts
+   * about rows and have nowhere to live in that shape. Null with no error is
+   * still in flight.
+   */
+  const [docReads, setDocReads] = useState<DocumentReadLog | null>(null);
+  const [docReadsErr, setDocReadsErr] = useState<string | null>(null);
 
   const load = useCallback(async (tenantId: string): Promise<boolean> => {
     // allSettled, never all. A refused documents read must not empty the
     // signatures beside it — a gym would then be shown as having nobody signed
     // up to anything because a different table failed, which on this screen is
     // an instruction to stop letting people train.
-    const [aRes, sRes, dRes, mRes, fRes] = await Promise.allSettled([
+    const [aRes, sRes, dRes, mRes, fRes, rRes] = await Promise.allSettled([
       fetchAgreements(supabase, tenantId),
       fetchSignatures(supabase, tenantId),
       fetchDocuments(supabase, tenantId),
       fetchMemberships(supabase, tenantId),
       fetchActivity(tenantId),
+      fetchDocumentReads(supabase, tenantId),
     ]);
     setAgreements(landed(aRes, 'the agreements this gym publishes'));
     setSignatures(landed(sRes, 'the signatures it holds'));
     setDocuments(landed(dRes, 'the documents on file'));
     setMembers(landed(mRes, 'the member roster'));
     setFeed(landed(fRes, 'the activity log'));
+    // Null and a sentence, never an empty log. "Nobody has opened this member's
+    // file" over a refused read is the exact claim this screen exists to be
+    // able to make truthfully.
+    setDocReads(rRes.status === 'fulfilled' ? rRes.value : null);
+    setDocReadsErr(rRes.status === 'fulfilled' ? null
+      : ((rRes.reason as any)?.message ?? 'the read was refused'));
 
     // Whole means all five came back. `useFetched` stamps only on a whole read
     // — and on the one screen in this console whose subject is what the gym can
     // PRODUCE when an insurer asks, a figure with no date on it is not evidence
     // of anything.
-    return settledLanded([aRes, sRes, dRes, mRes, fRes]);
+    return settledLanded([aRes, sRes, dRes, mRes, fRes, rRes]);
   }, []);
 
   /**
@@ -315,7 +337,10 @@ export default function Compliance() {
       <Documents
         documents={documents} members={members} ccy={ccy} zone={zone}
         tenantId={tenantId} me={me} onChange={refresh}
+        docReads={docReads} docReadsErr={docReadsErr}
       />
+
+      <DocumentReads log={docReads} why={docReadsErr} zone={zone} me={me} />
 
       <Feed feed={feed} zone={zone} />
     </Shell>
@@ -853,11 +878,15 @@ function SignHere({ agreement, roster, tenantId, me, onDone, onCancel, onErr }: 
 
 /* ── the filing cabinet ────────────────────────────────────────────────────── */
 
-function Documents({ documents, members, ccy, zone, tenantId, me, onChange }: {
+function Documents({ documents, members, ccy, zone, tenantId, me, onChange, docReads, docReadsErr }: {
   documents: Read<GymDocument>; members: Read<Membership>; ccy: TenantCurrency;
   /** `tenants.timezone` — a filing date is a fact about the gym's day. */
   zone: string | null;
   tenantId: string; me: Me; onChange: () => void;
+  /** Null while it is in flight or when `docReadsErr` says it was refused. The
+   *  Opened column below never reads a null as "nobody". */
+  docReads: DocumentReadLog | null;
+  docReadsErr: string | null;
 }) {
   const [kind, setKind] = useState<DocumentKind>('insurance');
   const [title, setTitle] = useState('');
@@ -974,6 +1003,22 @@ function Documents({ documents, members, ccy, zone, tenantId, me, onChange }: {
       render: (d) => documentAudience(d) === 'owner'
         ? <span style={{ color: 'var(--ink2)' }}>Owner only</span>
         : <span style={{ color: 'var(--ink3)' }}>Staff</span> },
+    // Who has been given a key to this file, from the table that gates the
+    // opening rather than from the best-effort event feed below. A document
+    // nobody may open through this console — the building's certificates — has
+    // no access log to show, and says so rather than showing an empty one.
+    { key: 'opened', header: 'Opened', value: (d) => (d.memberAttached ? readsFor(docReads, d).length : -1),
+      render: (d) => {
+        if (!d.memberAttached) return <span className="dash">not logged — not about a member</span>;
+        const summary = readSummary(docReads, readsFor(docReads, d));
+        // The whole reason this is not a count. A refused read has to render as
+        // unknown: "Never opened" over a failed query is the sentence that
+        // stops an owner asking who has seen somebody's medical note.
+        if (summary == null) {
+          return <span style={{ color: 'var(--warn)' }}>not read</span>;
+        }
+        return <span style={{ color: summary.startsWith('Never') ? 'var(--ink3)' : 'var(--ink2)' }}>{summary}</span>;
+      } },
     { key: 'who', header: 'Filed by', value: (d) => d.uploadedByName },
     { key: 'when', header: 'Filed', value: (d) => d.uploadedAt,
       render: (d) => gymDateText(d.uploadedAt, zone) ?? <span className="dash">not stated</span> },
@@ -1094,6 +1139,14 @@ function Documents({ documents, members, ccy, zone, tenantId, me, onChange }: {
         <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '74ch' }}>{blocker}</p>
       ) : null}
 
+      {docReadsErr ? (
+        <Banner tone="crit">
+          The record of who has opened these documents could not be read: {docReadsErr}. The Opened
+          column is <strong style={{ color: 'var(--ink)' }}>unknown</strong> rather than empty — do
+          not read it as nobody having opened anything.
+        </Banner>
+      ) : null}
+
       {documents.state === 'loading' ? <Loading />
         : documents.state === 'failed' ? (
           <Unread
@@ -1106,6 +1159,92 @@ function Documents({ documents, members, ccy, zone, tenantId, me, onChange }: {
             empty="Nothing is on file. Until this wave there was nowhere in the product to put a document at all, so an empty list here is expected rather than alarming — the first insurance certificate is the one worth adding."
           />
         )}
+    </Section>
+  );
+}
+
+/* ── who was handed a key ──────────────────────────────────────────────────── */
+
+/**
+ * Every link this gym has cut to a member's file, most recent first.
+ *
+ * ── Why this is not the activity feed below ───────────────────────────────
+ *
+ * Part 390 files a `document-opened` event on every insert into
+ * `gym_document_reads`, so the feed looks like it already answers this. It does
+ * not, for two reasons that both matter here.
+ *
+ * `log_gym_event` swallows its own failures on purpose — part 187: a log that
+ * can fail a payment is worse than a gap in the log — so `gym_events` is
+ * best-effort, while the row this table holds is the GATE: the link is not
+ * minted unless it writes. A link issued while the event write failed is in
+ * this table and in no feed. When the question is who has been given access to
+ * somebody's medical note, the record that cannot be missing rows is the one to
+ * answer from.
+ *
+ * And the feed is one stream of nineteen event kinds ninety days deep. This is
+ * bounded by ROWS instead, and says so: `readSummary` in src/lib/gymDocs.ts
+ * refuses to say "never opened" about a page that does not reach the beginning.
+ */
+function DocumentReads({ log, why, zone, me }: {
+  log: DocumentReadLog | null; why: string | null; zone: string | null; me: Me;
+}) {
+  const cols: Column<DocumentRead>[] = [
+    { key: 'at', header: 'When', value: (r) => r.linkIssuedAt,
+      render: (r) => gymDateTimeText(r.linkIssuedAt, zone) ?? <span className="dash">not stated</span> },
+    { key: 'doc', header: 'Document', value: (r) => r.docTitle,
+      // The title as it was AT THE TIME, denormalised onto the row by part 390
+      // so the entry stays legible after the document is deleted. A renamed or
+      // removed document does not rewrite what this log says was opened.
+      render: (r) => <>
+        {r.docTitle}
+        {r.documentId ? null : (
+          <span style={{ color: 'var(--ink3)' }}> · no longer on file</span>
+        )}
+      </> },
+    { key: 'kind', header: 'Kind', value: (r) => r.docKind.replace(/_/g, ' ') },
+    { key: 'by', header: 'Opened by', value: (r) => r.readByName ?? r.readBy ?? '',
+      render: (r) => {
+        const who = readerLine(r, { meId: me.id, namesError: log?.namesError ?? null });
+        // Three silences, three inks. A removed account and a name that could
+        // not be looked up are different facts, and the second is the one a
+        // person should reload the page over.
+        const tone = !r.readBy ? 'var(--ink3)' : log?.namesError ? 'var(--warn)' : 'var(--ink)';
+        return <span style={{ color: tone }}>{who}</span>;
+      } },
+  ];
+
+  return (
+    <Section
+      title="Who opened a member’s file"
+      sub="One row per link cut for a document filed against a member. Written before the link is issued, so a read that could not be recorded never happened — and nothing here can be edited or removed. The building’s own certificates are not logged: a trainer opening the fire certificate is not an event."
+    >
+      {why ? (
+        <Banner tone="crit">
+          This log could not be read: {why}. That is not an empty log — whether anybody has been
+          given a link to a member&rsquo;s file is{' '}
+          <strong style={{ color: 'var(--ink)' }}>unknown</strong> while this line is showing.
+          Reload the page.
+        </Banner>
+      ) : null}
+      {log?.namesError ? (
+        <Banner>
+          The names of the people who opened these documents could not be looked up:{' '}
+          {log.namesError}. Every row still records WHO, by account; only the name is missing, which
+          is a different thing from an account that has been removed.
+        </Banner>
+      ) : null}
+      {log?.truncated ? (
+        <Banner>
+          The {log.rows.length} most recent openings. There are older ones, and they are not on this
+          screen — so a document showing nothing here has not necessarily never been opened.
+        </Banner>
+      ) : null}
+
+      {why ? null : log === null ? <Loading /> : (
+        <DataTable noun="openings" rows={log.rows} columns={cols} rowKey={(r) => r.id}
+          empty="No link has been cut for a member’s document. Nothing has been opened, rather than nothing having been recorded — this table is the gate, so an opening that could not be written down did not happen." />
+      )}
     </Section>
   );
 }

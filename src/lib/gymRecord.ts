@@ -822,6 +822,59 @@ export async function recordPayment(
 }
 
 /**
+ * Put a payment — and every correction against it — against the right member.
+ *
+ * The whole argument for doing this rather than reversing and re-recording is
+ * in src/lib/reattribute.ts, which also holds the refusals. This is only the
+ * write, and it is deliberately narrow: `member_id` and `membership_id`, on the
+ * ids the caller was handed by `reattributeRows`, and nothing else. The amount,
+ * the currency, the method and `taken_at` are not in the update at all, so the
+ * closed-month trigger (supabase/parts/182, `before insert or update of
+ * taken_at, amount_cents`) does not fire and a mistake found in September can
+ * be corrected in a filed August without reopening it. Nothing a close signed
+ * for has moved: the month's total is the same money on the same day.
+ *
+ * ── why the count is compared and not merely checked ──────────────────────
+ *
+ * `assertWrote` asks whether the write landed on ANY row, which is the right
+ * question for a single-row update and the wrong one here. A payment with a
+ * refund against it is two rows, and a partial success — the payment moved, the
+ * correction did not — is exactly the split this feature exists to prevent, and
+ * it comes back as `count: 1` with a null error. So the number is compared
+ * against the number of ids asked for, and anything else throws with both
+ * figures in the sentence.
+ *
+ * The throw is honest about not knowing which rows landed, because it does not:
+ * PostgREST returns a count and not a manifest. "Some of these moved and some
+ * did not, go and look" is the true sentence and it is the one the owner gets.
+ */
+export async function reattributePayment(
+  sb: Queryable,
+  tenantId: string,
+  /** From `reattributeRows` — the payment first, then its corrections. */
+  ids: string[],
+  to: { memberId: string | null; membershipId: string | null },
+): Promise<number> {
+  // A guard against a caller that filtered its way to nothing: an empty `in`
+  // list matches no rows, which is indistinguishable on the wire from an RLS
+  // refusal, and the sentence the owner would read would be about permissions.
+  if (ids.length === 0) throw new Error('There is no payment to re-attribute.');
+  const r = await sb.from('gym_payments')
+    .update({ member_id: to.memberId, membership_id: to.membershipId }, { count: 'exact' })
+    .eq('tenant_id', tenantId)
+    .in('id', ids);
+  if (r.error) throw r.error;
+  assertWrote('That payment', r);
+  const changed = r.count ?? 0;
+  if (changed !== ids.length) {
+    throw new Error(
+      `${changed} of ${ids.length} rows were re-attributed. A payment and the corrections against it have to move together, and this one did not — the register now has them filed against different people. Reload this screen and check the payment and every correction under it before doing anything else.`,
+    );
+  }
+  return changed;
+}
+
+/**
  * Match a payment to the invoice it settled, or unmatch it.
  *
  * Nothing infers this and nothing may. /accounting's 45-day rule is explicitly

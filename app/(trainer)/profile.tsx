@@ -29,6 +29,14 @@ import { useDeliveryFact } from '../../src/ui/coachDelivery';
 import { DeliveryModeChoice } from '../../src/ui/DeliveryModeChoice';
 import { deliveryAskLine, deliveryNote, HIDDEN_NOT_GONE } from '../../src/lib/coachDelivery';
 import { useMyCancellationPolicy } from '../../src/ui/sessions';
+// The gym's side of this coach's money. Read-only by construction — see the
+// section it draws, and supabase/parts/183.
+import { useMyPayTerms } from '../../src/ui/coachPayTerms';
+import {
+  sessionRateLabel, classRateLabel, classPayLabel, standingNote, policyDetail,
+  NO_GYM_PAY_NOTE, PAY_TERMS_UNREAD_NOTE, RATE_UNSTATED_NOTE, NO_AGREED_RATE_NOTE,
+} from '../../src/lib/coachPayTerms';
+import { fmtFullDay } from '../../src/lib/format';
 import { feeAmountLine, noticeLabel } from '../../src/lib/booking';
 import { readNumber } from '../../src/lib/units';
 // Whether the autosave landed. This screen has no Save button and had no
@@ -130,10 +138,19 @@ export default function CoachProfile() {
   // (`trainers_late_cancel_fee_stated`) that a debounced write of five other
   // fields would trip on the coach's behalf, taking their bio down with it.
   const lc = useMyCancellationPolicy();
+  // What the coach's GYM pays them — the other side of the Session Rate field
+  // below, and read separately for the same reason `lc` is: it is not the
+  // coach's public identity and it is not theirs to write. The only write
+  // policy on `gym_trainer_pay` is the owner's.
+  const payTerms = useMyPayTerms();
   /* ── pull to refresh ───────────────────────────────────────────────────
    *
-   * Two reads: the profile provider (`profiles` and `trainers`) and the
-   * cancellation policy, which is deliberately not part of it.
+   * Three reads: the profile provider (`profiles` and `trainers`), the
+   * cancellation policy, which is deliberately not part of it, and the pay
+   * terms their gym set. The third is here because it is the one on this
+   * screen a coach has a reason to pull on: a rate their gym has just changed
+   * lands on the next read and nowhere else, and its own failure sentence
+   * offers the same retry.
    *
    * `p.reload` flushes a pending edit BEFORE re-reading — see its docstring
    * in src/ui/coachProfile.tsx. That ordering is what makes this gesture safe
@@ -141,8 +158,8 @@ export default function CoachProfile() {
    * lands on top of the coach's own values rather than on top of a debounced
    * edit that had not gone out yet. */
   const pull = usePullToRefresh(useCallback(
-    () => Promise.all([p.reload(), Promise.resolve(lc.reload())]),
-    [p, lc],
+    () => Promise.all([p.reload(), Promise.resolve(lc.reload()), Promise.resolve(payTerms.refresh())]),
+    [p, lc, payTerms],
   ));
   const [newOffer, setNewOffer] = useState('');
   const [newSpec, setNewSpec] = useState('');
@@ -536,6 +553,125 @@ export default function CoachProfile() {
               ? 'Leave this empty and nothing quotes a rate for you — your figures show a dash rather than a zero.'
               : 'Clients see this in the currency you charge in wherever Repple has been told what that is, and as a bare figure where it has not — never with a symbol nobody chose. If yours is showing bare, the currency is set once, for the gym or in Settings, and every amount in the app picks it up.'}
           </Text>
+        </Section>
+
+        <Rule />
+
+        {/* ── what the GYM pays this coach, which is the other number ─────
+          *
+          * Directly under the Session Rate field on purpose. The two figures
+          * an inch apart are the two this product has always been at risk of
+          * confusing — `trainers.session_fee` is what the coach CHARGES a
+          * client, `gym_trainer_pay.session_rate_cents` is what their employer
+          * pays them — and supabase/parts/183 opens by saying reading one as
+          * the other "would take a coach's own price list and hand it to their
+          * employer's payroll run".
+          *
+          * Until now only one of them was on this screen. The gym's side has
+          * been readable by the coach since that part shipped —
+          * `gym_trainer_pay_self_r` is `trainer_id = (select auth.uid())` —
+          * and the table's only appearance anywhere in the coach app was a
+          * sentence of prose in my-register.tsx saying the money lives
+          * elsewhere. The coach could see what a session turned out to be
+          * worth, after it happened, and never the standing figure behind it.
+          *
+          * Nothing here is editable and there is no control: the only write
+          * policy on that table is `gym_trainer_pay_owner`. A coach cannot set
+          * their own pay and this screen does not pretend otherwise. */}
+        <Section>
+          <SectionHead title="What Your Gym Pays You" />
+          {payTerms.status === 'loading' ? (
+            <Text style={{ ...ty.caption, color: t.ink3 }}>Reading your pay terms…</Text>
+          ) : payTerms.card.kind === 'unread' ? (
+            <Notice tone={t.warn} kicker="Pay" title="Your pay terms could not be read"
+              note={PAY_TERMS_UNREAD_NOTE}>
+              <View style={{ marginTop: sp.md }}><Ghost label="Try Again" onPress={payTerms.refresh} /></View>
+            </Notice>
+          ) : payTerms.card.kind === 'no_gym' ? (
+            /* The answer this product is mostly sold into, and it is SAID.
+               An empty card here would read as a gym that agreed to pay
+               nothing, to a coach who has no gym at all. */
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{NO_GYM_PAY_NOTE}</Text>
+          ) : payTerms.card.kind === 'unstated' ? (
+            <Text style={{ ...ty.caption, color: t.ink3 }}>{RATE_UNSTATED_NOTE}</Text>
+          ) : payTerms.card.kind === 'unset' ? (
+            <>
+              <Text style={{ ...ty.body, color: t.ink }}>{NO_AGREED_RATE_NOTE}</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                {standingNote(payTerms.card.standing)}
+              </Text>
+            </>
+          ) : (
+            <>
+              {/* Each amount is drawn only where there IS one. A rate that
+                  names no figure renders nothing rather than a dash beside a
+                  currency code, because the fallback sentence underneath is
+                  the real answer for that half and a dash would be read as the
+                  gym paying nought. */}
+              {sessionRateLabel(payTerms.card) ? (
+                <View accessible accessibilityRole="text"
+                  accessibilityLabel={`Your gym pays you ${sessionRateLabel(payTerms.card)} for a one-to-one session.`}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Per one-to-one session</Text>
+                  <Text style={{ ...value(20), color: t.ink, marginTop: 2 }}>{sessionRateLabel(payTerms.card)}</Text>
+                </View>
+              ) : null}
+              {classRateLabel(payTerms.card) ? (
+                <View style={{ marginTop: sp.md }} accessible accessibilityRole="text"
+                  accessibilityLabel={`Your gym pays you ${classRateLabel(payTerms.card)} for a class. ${classPayLabel(payTerms.card) ?? ''}`}>
+                  <Text style={{ ...ty.micro, color: t.ink3 }}>Per class taught</Text>
+                  <Text style={{ ...value(20), color: t.ink, marginTop: 2 }}>{classRateLabel(payTerms.card)}</Text>
+                  {/* The counting rule, never dropped. "80 per class" and "8
+                      per head" are the same digits and completely different
+                      money — part 183 keeps the two columns for that reason
+                      and an amount shown without its kind undoes it. */}
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{classPayLabel(payTerms.card)}</Text>
+                </View>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                {standingNote(payTerms.card.standing)}
+              </Text>
+              {/* When the gym last wrote it. A rate with no date on it is one
+                  the coach cannot tell from the figure they were quoted two
+                  years ago, which is the whole of what this section is for. */}
+              {payTerms.card.setOn ? (
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.sm }}>
+                  {`Set by your gym on ${fmtFullDay(payTerms.card.setOn)}. You cannot change it here — this is what they agreed, shown to you.`}
+                </Text>
+              ) : null}
+            </>
+          )}
+
+          {/* ── which outcomes carry a rate at all ────────────────────────
+            *
+            * `tenants.session_pay_policy` (supabase/parts/166) appeared
+            * NOWHERE a coach's build could reach. app/(trainer)/sessions.tsx
+            * tells them the four outcomes are "different commercially … per
+            * the gym's PayPolicy" and has never said which one their gym is
+            * on, so a coach marking a late cancellation had no way to know
+            * whether they had just been paid for that hour.
+            *
+            * Withheld under a failed read, and never resolved to
+            * `delivered_only` — `payPolicyOf` refuses that substitution for
+            * the owner's screens and the person being paid gets the same
+            * refusal.
+            *
+            * Drawn only where there IS a gym and the read landed. The other
+            * two branches have already said their piece in one sentence each,
+            * and `policyDetail` would repeat the same opening clause directly
+            * underneath — two sentences beginning "There is no gym attached to
+            * this account" reads as a screen that has lost its place. */}
+          {payTerms.status !== 'loading'
+            && payTerms.card.kind !== 'unread' && payTerms.card.kind !== 'no_gym' ? (
+            <View style={{ marginTop: sp.lg }}>
+              <Text style={{ ...ty.micro, color: t.ink3 }}>What they pay for</Text>
+              {payTerms.policy.kind === 'stated' ? (
+                <Text style={{ ...ty.body, color: t.ink, marginTop: 2 }}>{payTerms.policy.label}</Text>
+              ) : null}
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.xs }}>
+                {policyDetail(payTerms.policy)}
+              </Text>
+            </View>
+          ) : null}
         </Section>
 
         <Rule />

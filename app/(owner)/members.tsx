@@ -34,7 +34,7 @@ import { readState, hasRows, canSayEmpty, staleNote, failedNote } from '../../sr
 import { readMinorAmount } from '../../src/lib/coachMoney';
 import {
   fetchPlans, fetchMemberships, fetchPayments, createMembership,
-  setMembershipStatus, setMembershipFreeze, recordPayment, summarise, money,
+  setMembershipStatus, setMembershipFreeze, setMembershipDates, recordPayment, summarise, money,
   type Membership, type MembershipPlan, type GymPayment, type MembershipStatus, type PaymentMethod,
 } from '../../src/lib/gymRecord';
 import { BACK_ICON } from '../../src/ui/direction';
@@ -49,6 +49,13 @@ import { DateSheet } from '../../src/ui/DateSheet';
 import {
   freezeState, frozenDays, thawedEndsOn, freezeLine, freezeRefusal,
 } from '../../src/lib/membershipFreeze';
+// What a correction to the two dates may say and what it must say first. The
+// console has had this since it grew the field; see the header of
+// src/lib/membershipDates.ts for what a phone that cannot do it costs a gym
+// that types its existing members in.
+import {
+  datesRefusal, datesPatch, datesNotes, termLine,
+} from '../../src/lib/membershipDates';
 
 /**
  * The day a membership starts is the GYM's day.
@@ -188,6 +195,17 @@ export default function OwnerMembers() {
   const [fzTo, setFzTo] = useState('');
   const [fzPicking, setFzPicking] = useState<'from' | 'to' | null>(null);
   const [fzBusy, setFzBusy] = useState(false);
+  /* ── correcting the two dates the membership runs between ────────────────
+     Kept apart from the pause above, and from the status flip beside it, for
+     the reason src/lib/membershipDates.ts opens with: this is the write a gym
+     needs on the day it types in the members it already has, and the only
+     surface for it was the web console. Everybody the owner opened on the
+     phone was filed as having joined that afternoon. */
+  const [datesFor, setDatesFor] = useState<Membership | null>(null);
+  const [dtFrom, setDtFrom] = useState('');
+  const [dtTo, setDtTo] = useState('');
+  const [dtPicking, setDtPicking] = useState<'from' | 'to' | null>(null);
+  const [dtBusy, setDtBusy] = useState(false);
   /** Whose calendar the start date will be written on, where that needs saying.
    *  Two silences, two sentences — a failed zone read is not an unset zone. */
   const clockNote = zoneUnread
@@ -403,6 +421,43 @@ export default function OwnerMembers() {
         }
       } },
     ]);
+  };
+
+  /**
+   * Write the corrected dates, or say why nothing was written.
+   *
+   * `setMembershipDates` takes a present-or-absent patch and RETURNS on an
+   * empty one — without writing, and without throwing. So the patch is built
+   * first and a null one never reaches it: a sheet that closed on "it did not
+   * throw" would show the owner the same wrong start date back, with a
+   * successful save behind it. The Save control is disabled on the same value,
+   * so in normal running this guard is unreachable; it is here because the one
+   * thing that must not happen is this call site reporting a write it did not
+   * make.
+   */
+  const saveDates = async () => {
+    const m = datesFor;
+    if (!m) return;
+    const next = { startedOn: dtFrom, endsOn: dtTo || null };
+    const refusal = datesRefusal(next);
+    if (refusal) { Alert.alert('Those dates will not work', refusal); return; }
+    const patch = datesPatch({ startedOn: m.startedOn, endsOn: m.endsOn }, next);
+    if (!patch) { Alert.alert('Nothing to save', 'These are the dates this membership already has.'); return; }
+    setDtBusy(true);
+    try {
+      await setMembershipDates(supabase, m.id, patch);
+      await load();
+      setDatesFor(null);
+      setDtFrom(''); setDtTo('');
+    } catch (e) {
+      // The row count is checked one layer down, so a refusal by
+      // `memberships_owner` arrives here as a thrown error rather than as a
+      // silent 204 that leaves the typed dates on screen looking saved.
+      reportError('members.dates', e);
+      Alert.alert('Dates not saved',
+        (e instanceof Error && e.message)
+        || `Nothing was changed — this membership still starts ${m.startedOn}. Check your connection and try again.`);
+    } finally { setDtBusy(false); }
   };
 
   const changeStatus = (m: Membership, next: MembershipStatus) => {
@@ -704,6 +759,22 @@ export default function OwnerMembers() {
                         {m.frozenFrom ? 'Pause dates' : 'Pause dates…'}
                       </Text>
                     </Pressable>
+                    {/* The dates the membership RUNS between, which is a
+                        different question from the days it is paused for and a
+                        different one again from what the door reads today. A
+                        migrated roster is corrected here. */}
+                    <Pressable
+                      onPress={() => {
+                        setDatesFor(m);
+                        setDtFrom(m.startedOn ?? '');
+                        setDtTo(m.endsOn ?? '');
+                      }}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Correct the dates on ${m.memberName ?? 'this'} membership`}
+                      style={{ backgroundColor: t.surface2, borderRadius: radius.sm, paddingHorizontal: sp.md, paddingVertical: 7 }}>
+                      <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>Correct dates</Text>
+                    </Pressable>
                     {m.status === 'frozen' ? (
                       <Pressable onPress={() => changeStatus(m, 'active')} hitSlop={6}
                         accessibilityRole="button" accessibilityLabel="Reactivate membership"
@@ -951,6 +1022,108 @@ export default function OwnerMembers() {
             if (fzTo && fzTo < iso) setFzTo('');
           }
           setFzPicking(null);
+        }}
+      />
+
+      {/* ── the dates a membership runs between ───────────────────────────── */}
+      <Modal visible={!!datesFor} transparent animationType="slide" onRequestClose={() => setDatesFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} onPress={() => setDatesFor(null)}
+          accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={{ backgroundColor: t.surface, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md, padding: layout.gutter, paddingBottom: 30, ...elevation.e2 }}>
+          {datesFor ? (() => {
+            const term = {
+              startedOn: datesFor.startedOn, endsOn: datesFor.endsOn,
+              frozenFrom: datesFor.frozenFrom, frozenTo: datesFor.frozenTo,
+              status: datesFor.status,
+            };
+            const next = { startedOn: dtFrom, endsOn: dtTo || null };
+            const refusal = datesRefusal(next);
+            const patch = datesPatch({ startedOn: datesFor.startedOn, endsOn: datesFor.endsOn }, next);
+            const notes = datesNotes(term, next, dayWindow.day);
+            const stored = termLine(term);
+            return (<>
+              <Text style={{ ...ty.head, color: t.ink }}>Correct these dates</Text>
+              <Text style={{ ...ty.caption, color: t.ink3, marginTop: 3, marginBottom: sp.lg }}>
+                {datesFor.memberName ?? 'This member'} · {datesFor.planName ?? 'no plan'}.
+                {/* What is stored right now, said before it is replaced. The
+                    fields below are already seeded with it, and a field is a
+                    poor record of what it used to hold. */}
+                {stored ? ` Recorded as ${stored}.` : ' The start date on this membership cannot be read.'}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: sp.md }}>
+                {([['from', 'STARTED', dtFrom], ['to', 'ENDS', dtTo]] as const).map(([which, label, val]) => (
+                  <Pressable key={which} onPress={() => setDtPicking(which)} disabled={dtBusy}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${label === 'STARTED' ? 'The day this membership began' : 'The day it ends, if it does'}${val ? `, ${val}` : ', not set'}`}
+                    accessibilityState={{ disabled: dtBusy }}
+                    style={{ flex: 1, paddingVertical: sp.md, paddingHorizontal: sp.md, borderRadius: radius.sm, backgroundColor: t.surface2, opacity: dtBusy ? 0.5 : 1 }}>
+                    <Text style={{ ...ty.micro, color: t.ink3 }}>{label}</Text>
+                    <Text style={{ ...ty.body, color: val ? t.ink : t.ink3, marginTop: 2 }}>
+                      {val || (which === 'to' ? 'Open-ended' : 'Choose')}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              {/* Clearing the end date is the only way to say "this runs until
+                  somebody stops it", and a calendar grid has no cell for that.
+                  It is a state the schema has always had and is not the same as
+                  expired. */}
+              {dtTo ? (
+                <Pressable onPress={() => setDtTo('')} disabled={dtBusy} hitSlop={6}
+                  accessibilityRole="button" accessibilityLabel="Clear the end date, so this membership runs until somebody stops it"
+                  accessibilityState={{ disabled: dtBusy }}
+                  style={{ alignSelf: 'flex-start', marginTop: sp.sm }}>
+                  <Text style={{ ...ty.label, fontWeight: '600', color: t.ink2 }}>No end date</Text>
+                </Pressable>
+              ) : null}
+
+              {/* Said before the save, because afterwards there is nothing left
+                  to notice. Each of these is a consequence neither field can
+                  show. */}
+              {notes.map((n) => (
+                <Text key={n} style={{ ...ty.caption, color: t.ink2, marginTop: sp.md }}>{n}</Text>
+              ))}
+              {refusal ? (
+                <View style={{ marginTop: sp.md }}><Flag tone={t.warn}>{refusal}</Flag></View>
+              ) : !patch ? (
+                /* Not an error, and not silence either. `setMembershipDates`
+                   answers an empty patch by returning, so a Save that ran here
+                   would look exactly like a successful one. */
+                <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                  These are the dates this membership already has.
+                </Text>
+              ) : null}
+
+              <View style={{ marginTop: sp.lg }}>
+                <Cta wide label={dtBusy ? 'Saving…' : 'Save Dates'} disabled={dtBusy || !!refusal || !patch}
+                  onPress={() => { void saveDates(); }} />
+              </View>
+            </>);
+          })() : null}
+        </View>
+      </Modal>
+
+      {/* Outside the modal above, for the reason the pause picker is: iOS will
+          not reliably present a Modal inside a Modal. */}
+      <DateSheet
+        visible={dtPicking != null}
+        value={dtPicking === 'to' ? dtTo : dtFrom}
+        fallback={dtPicking === 'to' ? (dtFrom || null) : null}
+        heading={dtPicking === 'to' ? 'The day this membership ends' : 'The day this membership began'}
+        note={dtPicking === 'to'
+          ? 'The last day it runs. Leave it unset for a membership that runs until somebody stops it.'
+          : 'Tenure, cohort retention and the billing anniversary are all measured from this day.'}
+        onCancel={() => setDtPicking(null)}
+        onPick={(iso) => {
+          if (dtPicking === 'to') setDtTo(iso);
+          else {
+            setDtFrom(iso);
+            // A start moved past the end leaves a backwards term in two
+            // filled-looking fields, and the owner would meet a refusal about a
+            // mistake the app watched them make.
+            if (dtTo && dtTo < iso) setDtTo('');
+          }
+          setDtPicking(null);
         }}
       />
 

@@ -241,6 +241,9 @@ import { worstStatus, type LoadStatus } from '../../src/ui/loadStatus';
 import { reportError } from '../../src/lib/reportError';
 import { isoDate } from '../../src/lib/format';
 import { payoutStage, canOnboard } from '../../src/lib/payoutAccount';
+// Whether the money reaches the coach, which `payoutStage` does not ask —
+// supabase/parts/161's two payout columns, read here for the first time.
+import { payoutReach, transferState, payoutHeading, payoutNote, transferNote } from '../../src/lib/payoutReach';
 import { startTrainerOnboarding, fetchMyConnect, fetchMyPackages, createPackage, deactivatePackage, updatePackage, countActiveSubscribers, fetchClientPurchases, refundPurchase, refundRenewal, adjustPackCredit, fetchMyPromoCodes, createPromoCode, archivePromoCode, fetchMyDisputes, type ConnectStatus, type TrainerPackage, type CoachPurchase, type CoachDispute } from '../../src/lib/connect';
 // A chargeback is the one thing on this screen with a clock on it. See
 // src/lib/disputes.ts: the deadline is the content, a missing deadline is its
@@ -1183,6 +1186,22 @@ export default function TrainerPayments() {
   const active = stage === 'active';
 
   /**
+   * Whether the money actually reaches them, which `stage` does not ask.
+   *
+   * `payoutStage` is about `charges_enabled`. These two are about the two hops
+   * after it — the account to their bank, and Repple to the account — and
+   * neither had ever been read here. Both resolve to 'unrecorded' rather than
+   * to a No when Stripe has not said, which is the state every row written
+   * before supabase/parts/161 is in. See src/lib/payoutReach.ts.
+   *
+   * Computed unconditionally and rendered only inside the 'active' arm: the
+   * other stages have their own sentence about onboarding, and a coach with no
+   * account at all is not owed a paragraph about payouts from one.
+   */
+  const reach = payoutReach(conn);
+  const transfers = transferState(conn);
+
+  /**
    * Whose money this is, in one word, read off Stripe rather than assumed.
    *
    * Two arrangements exist and they say opposite things to a coach. On a
@@ -1486,15 +1505,46 @@ export default function TrainerPayments() {
             ) : (
               <Section>
                 <SectionHead title="Payouts" />
+                {/* ── the tick is about CHARGES, and the heading said payouts ──
+                  *
+                  * `payoutStage` answers 'active' off `charges_enabled`, which
+                  * is whether a client's card can be taken. Whether the money
+                  * then reaches the coach is `connect_accounts.payouts_enabled`
+                  * (supabase/parts/161), and this screen had never read it —
+                  * nor `transfers_status`. Stripe routinely enables charges
+                  * before payouts, so a coach with identity or bank details
+                  * outstanding was taking money all week under a green tick and
+                  * the words "Payouts active", with nothing anywhere telling
+                  * them what was left to finish.
+                  *
+                  * Three renders now, and the mark is chosen by the payout
+                  * answer rather than by the charge one. Null is its own state
+                  * and draws neither a tick nor a warning: part 161 records that
+                  * these columns are filled in by `account.updated`, so a null
+                  * is a webhook that has not fired and claiming either way from
+                  * it would be a claim about somebody's wages. */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: sp.md }}>
                   <View style={{ width: 34, height: 34, borderRadius: radius.sm, backgroundColor: t.surface2, alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name="check" size={17} color={t.brand} />
+                    <Icon name={reach === 'reaching' ? 'check' : 'info'} size={17}
+                      color={reach === 'held' ? t.warn : reach === 'reaching' ? t.brand : t.ink3} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>Payouts active</Text>
-                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>You can accept client payments.</Text>
+                    <Text style={{ ...ty.body, fontWeight: '500', color: t.ink }}>{payoutHeading(reach)}</Text>
+                    <Text style={{ ...ty.caption, color: t.ink3, marginTop: 2 }}>{payoutNote(reach)}</Text>
                   </View>
                 </View>
+
+                {/* The other hop, on its own line, because it has its own
+                    remedy: `transfers_status` is what lets Repple move a
+                    destination charge onto the account at all, and a coach can
+                    have it without payouts or payouts without it. Null renders
+                    nothing — `transferNote` returns null for the two states
+                    there is nothing to report about. */}
+                {transferNote(transfers, conn?.transfers_status ?? null) ? (
+                  <Text style={{ ...ty.caption, color: t.ink3, marginTop: sp.md }}>
+                    {transferNote(transfers, conn?.transfers_status ?? null)}
+                  </Text>
+                ) : null}
 
                 {/* The three things that changed when coaches moved onto their
                     own Stripe accounts, and that nothing in this app said until

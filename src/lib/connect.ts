@@ -35,7 +35,24 @@ import type { LoadStatus } from '../ui/loadStatus';
  * screen says nothing about fees or dashboards in that case rather than
  * guessing, which is the same rule the rest of it follows about money.
  */
-export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean; account_type: string | null }
+/**
+ * ── Why the two payout columns are on this type ───────────────────────────
+ *
+ * `charges_enabled` answers whether a client's card can be taken. It does NOT
+ * answer whether the money then reaches the coach, and supabase/parts/161 added
+ * the two columns that do: `payouts_enabled` (account → their bank) and
+ * `transfers_status` (Repple → the account, for a destination charge). The
+ * select below has always been `*`, so both values were arriving and being
+ * dropped by a type that did not name them — and app/(trainer)/payments.tsx
+ * drew "Payouts active" off the charges column alone.
+ *
+ * Both are NULLABLE and null means NOT RECORDED YET, never "no". Part 161 says
+ * so on the columns themselves: `account.updated` fills them in, and a null
+ * read as false would tell every coach whose webhook has not fired that Stripe
+ * will not pay them. The rules live in src/lib/payoutReach.ts, which keeps the
+ * three answers apart rather than letting a `!` in JSX decide.
+ */
+export interface ConnectStatus { stripe_account_id: string | null; charges_enabled: boolean; details_submitted: boolean; account_type: string | null; payouts_enabled: boolean | null; transfers_status: string | null }
 /**
  * A thing a trainer sells.
  *
@@ -210,7 +227,12 @@ export async function fetchMyConnect(): Promise<ConnectStatus | null> {
     // not. null means "could not read"; the caller renders that differently.
     const { data, error } = await supabase.from('connect_accounts').select('*').eq('trainer_id', uid).maybeSingle();
     if (error) { reportError('connect.fetchMyConnect', error); return null; }
-    return (data as ConnectStatus) ?? { stripe_account_id: null, charges_enabled: false, details_submitted: false, account_type: null };
+    // The zeroed row a coach with NO account gets. The two payout fields are
+    // null rather than false here on purpose: there is no account, so Stripe has
+    // said nothing about paying one out, and 'unrecorded' is the honest reading
+    // of that. `payoutStage` answers 'none' for this row and the payout
+    // sentences are never reached.
+    return (data as ConnectStatus) ?? { stripe_account_id: null, charges_enabled: false, details_submitted: false, account_type: null, payouts_enabled: null, transfers_status: null };
   } catch { return null; }
 }
 

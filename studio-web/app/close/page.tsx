@@ -85,6 +85,14 @@ import {
   closeBlocker, reopenBlocker, driftSince,
   type MonthCloseRow,
 } from '@lib/gymClose';
+// The same history `fetchCloses` already returns, read a year at a time instead
+// of one month at a time. Nothing on this console could say which months of a
+// year were never closed, or which were reopened and why, and both facts are
+// stored on every row.
+import {
+  closeYear, closeYears, closeYearNote, CLOSE_YEAR_UNREAD_NOTE,
+  type YearMonth,
+} from '@lib/closeYear';
 // `tenants.session_fee` is stored in WHOLE units and every `*_cents` column is
 // in minor units, and the factor between them is not a hundred — it is a
 // hundred in most of the world, one in Japan and Korea, and a thousand in
@@ -753,7 +761,137 @@ export default function Close() {
           onChange={refresh}
         />
       )}
+
+      {/* Outside the month block on purpose. It is about the YEAR, and it is
+          the one thing on this page still worth reading when `key` is not a
+          month this console can open — which is exactly the state somebody
+          lands in after typing a URL, and the state in which "which months are
+          outstanding" is the question they are trying to answer. */}
+      <CloseYearView closes={closes} closesErr={closesErr} zone={zone} nowMs={nowMs} monthKey={key} />
     </Shell>
+  );
+}
+
+/* ── the year, as one statement ────────────────────────────────────────────── */
+
+/**
+ * Twelve months of sign-offs side by side, with the reopens and their reasons.
+ *
+ * `fetchCloses` has always returned every close and reopen this gym has
+ * recorded — its header says the history "is the half an auditor wants" — and
+ * everything that read it threw the year away. `liveCloseFor` picks one month
+ * out of the set, the block inside `Signoff` filters to that same month, and so
+ * the only answerable question was "is THIS month closed", asked by somebody
+ * who already knew which month to ask about. "Which months of last year did we
+ * never close" took twelve page loads and a piece of paper.
+ *
+ * The judgement is `closeYear` in src/lib/closeYear.ts and every hazard in it
+ * is argued there. The one worth repeating here is the one this component could
+ * have reintroduced by itself: a grid has a cell per month whether or not
+ * anything was read, and twelve empty cells over a failed read is a confident
+ * statement that the gym closed nothing all year. `read` is false in that case
+ * and there are no months to draw, so the grid is not rendered at all.
+ */
+function CloseYearView({ closes, closesErr, zone, nowMs, monthKey }: {
+  closes: MonthCloseRow[] | null;
+  closesErr: string | null;
+  zone: string | null;
+  nowMs: number;
+  /** The month the rest of the page is on, so its row can be marked. */
+  monthKey: string;
+}) {
+  const years = closeYears(closes, nowMs);
+  // Seeded from the month on screen rather than from today: somebody who has
+  // navigated to last August wants last year's statement under it, not this
+  // year's. `closeYears` always contains the current year, so a key from a year
+  // with no history at all still lands on something real.
+  const from = Number(monthKey.slice(0, 4));
+  const [year, setYear] = useState(Number.isInteger(from) && years.includes(from) ? from : years[0]);
+  const y = closeYear(year, closes, nowMs);
+  const note = closeYearNote(y);
+
+  return (
+    <Section
+      title="The year in closes"
+      sub="Every month of one year, whether it was signed off, whether it was reopened, and what was in the way when it was not."
+    >
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--ring)', fontSize: 12.5, color: 'var(--ink2)' }}>
+        <label htmlFor="close-year">Year</label>
+        <select id="close-year" value={String(year)} onChange={(e) => setYear(Number(e.target.value))} style={field}>
+          {years.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </div>
+
+      {/* A failed read and a gym that has closed nothing are two different
+          documents, and only one of them is a document. */}
+      {!y.read ? (
+        <Banner tone="crit">
+          {CLOSE_YEAR_UNREAD_NOTE}{closesErr ? ` The database said: ${closesErr}` : ''}
+        </Banner>
+      ) : (
+        <>
+          {note ? (
+            <p style={{ margin: '12px 14px', fontSize: 12.5, color: 'var(--ink2)', maxWidth: '84ch' }}>{note}</p>
+          ) : null}
+          <div style={{ padding: '0 14px 14px' }}>
+            {y.months.map((m) => (
+              <CloseYearRow key={m.key} m={m} zone={zone} here={m.key === monthKey} />
+            ))}
+          </div>
+        </>
+      )}
+    </Section>
+  );
+}
+
+/** The four states, in the colours this console already uses for them. A
+ *  reopened month is not the critical colour: nothing is wrong with it, it was
+ *  deliberately taken apart with a reason written down, and painting it red
+ *  would tell an owner to undo the thing they meant to do. */
+const YEAR_STATE: Record<YearMonth['state'], { word: string; ink: string }> = {
+  closed: { word: 'Closed', ink: 'var(--good)' },
+  reopened: { word: 'Reopened', ink: 'var(--warn)' },
+  open: { word: 'Not closed', ink: 'var(--crit)' },
+  running: { word: 'Still running', ink: 'var(--ink3)' },
+};
+
+function CloseYearRow({ m, zone, here }: { m: YearMonth; zone: string | null; here: boolean }) {
+  const s = YEAR_STATE[m.state];
+  return (
+    <div style={{
+      display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap',
+      padding: '8px 0', borderBottom: '1px solid var(--ring)',
+      // The month the rest of the page is about, marked rather than hidden: a
+      // statement with a row missing from it is not a statement.
+      background: here ? 'var(--surface2)' : undefined,
+    }}>
+      <span style={{ minWidth: 132, fontWeight: here ? 600 : undefined }}>{m.label}</span>
+      <span style={{ minWidth: 104, color: s.ink, fontSize: 12.5 }}>{s.word}</span>
+      <span style={{ flex: 1, minWidth: 260, fontSize: 12.5, color: 'var(--ink3)' }}>
+        {m.live ? (
+          <>
+            Signed off {gymDateText(m.live.closedAt, zone) ?? 'on a date that could not be read'}
+            {' '}by {m.live.closedByName ?? 'somebody'}.
+          </>
+        ) : null}
+        {/* Every reopen, not only the latest. A month taken apart twice is two
+            decisions and two reasons, and the record keeps both. */}
+        {m.reopens.map((r) => (
+          <span key={r.id} style={{ display: 'block' }}>
+            Reopened {gymDateText(r.reopenedAt, zone) ?? 'on a date that could not be read'}
+            {' '}by {r.reopenedByName ?? 'somebody'} &mdash; &ldquo;{r.reopenReason ?? 'no reason recorded'}&rdquo;
+          </span>
+        ))}
+        {/* The whole argument for letting a month be closed over a blocker is
+            that the blocker is RECORDED. This is the first view that reads it
+            back. */}
+        {m.blockersAtClose ? (
+          <span style={{ display: 'block', color: 'var(--warn)' }}>
+            Signed off with this in the way: {m.blockersAtClose}
+          </span>
+        ) : null}
+      </span>
+    </div>
   );
 }
 

@@ -20,6 +20,7 @@ import {
   fetchMemberships, createMembership, setMembershipStatus,
   setMembershipDates, setMembershipPlan,
   fetchPayments, recordPayment, reversePayment, reversalBlocker, reversedAgainst,
+  reattributePayment,
   summarise, money, PAYMENT_KIND_LABEL,
   type MembershipPlan, type Membership, type GymPayment,
   type PlanInterval, type PaymentMethod, type CorrectionKind,
@@ -37,6 +38,15 @@ import {
 } from '@lib/gymPasses';
 
 import { gymLink, noGymNote } from '@lib/gymLink';
+// A code on a payment row that this gym has no record of using. The mixed-
+// currency machinery downstream can already see that such a row exists — it
+// withholds the month's total and blocks the close over it — and could not say
+// WHICH row, on a screen where somebody could put it right.
+import { strayCurrencies, strayLines, STRAY_UNCHECKED_NOTE } from '@lib/strayCurrency';
+// Putting a payment against the right person without inventing a refund. The
+// only remedy this console had was `reversePayment`, which writes money going
+// back out of a till it never left.
+import { reattributeBlocker, reattributeRows, reattributedNote } from '@lib/reattribute';
 
 const DAY = 86400000;
 
@@ -290,6 +300,25 @@ export default function Money() {
   ].filter((s): s is string => s !== null);
   const unread = failed.length ? `could not read ${failed.join(', ')}` : undefined;
 
+  /**
+   * What money this gym is established to use — its own setting, plus every
+   * plan and pass it has ever priced.
+   *
+   * NULL, and never a short list, when any of the three reads behind it is
+   * missing. A book assembled from a failed price-book read would be `[GBP]` at
+   * a gym that also sells in dirhams, and every dirham payment in the ledger
+   * would be reported to its owner as an unknown currency — the null-is-zero
+   * mistake pointed at somebody's takings. `strayCurrencies` declines to judge
+   * a null rather than judging it empty.
+   *
+   * The rows on screen are deliberately NOT in here. A payment cannot be
+   * evidence that its own currency is one the gym uses; an import that went in
+   * wrong is a thousand rows vouching for each other.
+   */
+  const currencyBook = gymNameErr || plans === null || passTypes === null
+    ? null
+    : [ccy, ...plans.map((p) => p.currency), ...passTypes.map((t) => t.currency)];
+
   return (
     <Shell me={me} gymName={gymName} gymNameUnread={!!gymNameErr} current="/money">
       <h1>Money</h1>
@@ -358,7 +387,7 @@ export default function Money() {
       <Payments
         payments={payments} readErr={paymentsErr} members={members} tenantId={tenantId}
         me={me} ccy={ccy} zone={zone} onChange={refresh}
-        windowDays={windowDays} onWindow={setWindowDays}
+        windowDays={windowDays} onWindow={setWindowDays} currencyBook={currencyBook}
       />
     </Shell>
   );
@@ -975,9 +1004,13 @@ function MembershipDates({ m, onDone, onErr }: {
 
 /* ── payments ──────────────────────────────────────────────────────────────── */
 
-function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChange, windowDays, onWindow }: {
+function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChange, windowDays, onWindow, currencyBook }: {
   payments: GymPayment[] | null; readErr: string | null; members: Membership[] | null;
   tenantId: string; me: Me; ccy: TenantCurrency;
+  /** Every currency this gym is on record as using, or null when that could not
+   *  be established. See the note where it is built — null is the answer that
+   *  stops an unread price book accusing a whole ledger. */
+  currencyBook: Array<string | null> | null;
   /** `tenants.timezone`. When a payment was taken is the gym's day, not the
    *  reader's — and this table is what a correction is entered against. */
   zone: string | null;
@@ -1020,6 +1053,21 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
   const [unsure, setUnsure] = useState(false);
   /** The payment being corrected, or null. One at a time, deliberately. */
   const [correcting, setCorrecting] = useState<GymPayment | null>(null);
+  /** The payment being moved to a different member, or null. Also one at a
+   *  time, and never at the same time as a correction: they are two different
+   *  remedies for two different mistakes, and the whole point of this one is
+   *  that it is NOT the other. */
+  const [moving, setMoving] = useState<GymPayment | null>(null);
+  /**
+   * What the last write actually did, in the owner's words.
+   *
+   * Separate from `writeErr` and not folded into it: a re-attribution that
+   * moved a refund along with its payment changed two rows of somebody's money,
+   * and a screen that says nothing about the second one has under-reported what
+   * it did. It is set from the count the SERVER returned, never from the
+   * absence of an exception.
+   */
+  const [said, setSaid] = useState<string | null>(null);
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1124,10 +1172,19 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
           );
         }
         const done = reversedAgainst(p.id, rows);
-        if (done >= p.amountCents) {
-          return <span style={{ color: 'var(--ink3)', fontSize: 12 }}>reversed in full</span>;
-        }
-        return <button style={linkBtn} onClick={() => { setWriteErr(null); setCorrecting(p); }}>Refund or correct</button>;
+        // Re-attribution stays offered on a payment that has been reversed in
+        // full, and that is deliberate: the reversal copied the wrong member
+        // onto the correction too, so a fully-undone mis-key is TWO rows
+        // against somebody who never paid. It is the case that most needs
+        // putting right and the one a `return` here used to hide.
+        return (
+          <span style={{ display: 'inline-flex', gap: 12, justifyContent: 'flex-end', alignItems: 'baseline' }}>
+            {done >= p.amountCents
+              ? <span style={{ color: 'var(--ink3)', fontSize: 12 }}>reversed in full</span>
+              : <button style={linkBtn} onClick={() => { setWriteErr(null); setSaid(null); setMoving(null); setCorrecting(p); }}>Refund or correct</button>}
+            <button style={linkBtn} onClick={() => { setWriteErr(null); setSaid(null); setCorrecting(null); setMoving(p); }}>Re-attribute</button>
+          </span>
+        );
       } },
   ];
 
@@ -1162,8 +1219,12 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
       {/* Mounted from the first render so a later `writeErr` is a CHANGE to an
           existing region rather than an inserted one — see components/Banner.tsx.
           The banner below carries the same text with `live={false}` so it is not
-          read out twice. */}
-      <Announce say={writeErr} tone="crit" />
+          read out twice.
+          `said` shares the region rather than adding a second one, because two
+          live regions on one screen race and a reader hears whichever wins. The
+          error wins here, which is the right way round: a refusal is the more
+          urgent of the two and the confirmation is never set in the same tick. */}
+      <Announce say={writeErr ?? said} tone={writeErr ? 'crit' : undefined} />
       <form onSubmit={add} style={formRow}>
         {/* Names the currency this figure is STORED in, not the one the reader
             assumes. The Members screen's twin of this form had its label
@@ -1214,6 +1275,7 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
       </p>
       {ccy ? null : <Banner>Payments cannot be recorded until this gym sets its currency &mdash; {NO_CURRENCY_NOTE}. A recorded amount is permanent, and it is only a number until it says what money it is.</Banner>}
       {writeErr ? <Banner tone="crit" live={false}>{writeErr}</Banner> : null}
+      {said && !writeErr ? <Banner live={false}>{said}</Banner> : null}
       {unsure ? (
         <p style={{ margin: '0 14px 12px', fontSize: 12.5, color: 'var(--warn)', maxWidth: '80ch' }}>
           Record is closed until the amount is retyped. That is deliberate: the last attempt may
@@ -1232,6 +1294,17 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
           onErr={setWriteErr}
         />
       ) : null}
+      {moving ? (
+        <Reattribute
+          p={moving}
+          all={payments}
+          members={members}
+          tenantId={tenantId}
+          onDone={(note) => { setMoving(null); setSaid(note); onChange(); }}
+          onCancel={() => setMoving(null)}
+          onErr={setWriteErr}
+        />
+      ) : null}
       {payments === null ? (
         readErr ? (
           <Banner tone="crit">
@@ -1241,10 +1314,172 @@ function Payments({ payments, readErr, members, tenantId, me, ccy, zone, onChang
           </Banner>
         ) : <Loading />
       ) : (
-        <DataTable noun="payments" rows={payments} columns={cols} rowKey={(p) => p.id}
-          empty="No payments recorded in the last 30 days." />
+        <>
+          <StrayPayments rows={payments} book={currencyBook} />
+          <DataTable noun="payments" rows={payments} columns={cols} rowKey={(p) => p.id}
+            empty="No payments recorded in the last 30 days." />
+        </>
       )}
     </Section>
+  );
+}
+
+/**
+ * The payments in this window whose currency this gym has no record of using.
+ *
+ * Above the table rather than below it, because it is the reason to read the
+ * table. It is a warning and changes nothing: `gym_payments.currency` is what
+ * somebody recorded about money that actually moved, and a euro walk-in at a
+ * London gym is exactly as likely as a slip of the keyboard. Normalising it
+ * here would erase a real second currency from a register that gets reconciled
+ * against a bank statement.
+ *
+ * Nothing is rendered for a clean window. The one thing that IS rendered with
+ * no finding behind it is the sentence for a null book — "nothing was compared"
+ * is not "everything is fine", and a silent screen would say the second.
+ */
+function StrayPayments({ rows, book }: { rows: GymPayment[]; book: Array<string | null> | null }) {
+  if (!rows.length) return null;
+  if (book === null) {
+    return (
+      <div style={{ padding: '0 14px' }}>
+        <SharedBanner tone="warn">{STRAY_UNCHECKED_NOTE}</SharedBanner>
+      </div>
+    );
+  }
+  const lines = strayLines(strayCurrencies(rows, book), 'payment');
+  if (!lines.length) return null;
+  return (
+    <div style={{ padding: '0 14px' }}>
+      <SharedBanner tone="warn">
+        {lines.map((l, i) => (
+          <p key={l} style={{ margin: i === lines.length - 1 ? 0 : '0 0 8px', maxWidth: '80ch' }}>{l}</p>
+        ))}
+      </SharedBanner>
+    </div>
+  );
+}
+
+/* ── putting a payment against the right person ────────────────────────────── */
+
+/**
+ * Move a payment to the member it was actually from.
+ *
+ * The remedy that did not exist. A payment keyed against the wrong person — or
+ * against nobody, which /close reports on its own line as "Not attributed to
+ * anybody" — could only be reversed and re-entered, and `Correction` below is
+ * explicit that a reversal is dated TODAY: a name mistyped in August was put
+ * right by taking money out of August and putting it into September, in a
+ * register an accountant reads by month. If August had been closed there was no
+ * remedy at all, because supabase/parts/182 refuses the reversal.
+ *
+ * This changes two columns on the rows that are already there. `taken_at` and
+ * `amount_cents` are not in the update, which is exactly why the closed-month
+ * trigger does not fire on it — the month's total is the same money on the same
+ * day, and nothing a close signed for has moved.
+ *
+ * The corrections against the payment move WITH it. `reversePayment` copies the
+ * member onto every correction it writes, so a partly-refunded payment is two
+ * rows against one person, and moving the positive one alone would leave a
+ * negative filed against somebody who never paid. `reattributeRows` is that
+ * list and `reattributePayment` refuses to report success unless the server
+ * says it changed every one of them.
+ */
+function Reattribute({ p, all, members, tenantId, onDone, onCancel, onErr }: {
+  p: GymPayment;
+  /** The payments as READ — nullable on purpose. The corrections against this
+   *  row are found in here, so a failed read is a refusal rather than a payment
+   *  that happens to have none. */
+  all: GymPayment[] | null;
+  members: Membership[] | null;
+  tenantId: string;
+  onDone: (said: string) => void; onCancel: () => void; onErr: (s: string | null) => void;
+}) {
+  const [memberId, setMemberId] = useState(p.memberId ?? '');
+  const [membershipId, setMembershipId] = useState(p.membershipId ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const to = { memberId: memberId || null, membershipId: membershipId || null };
+  const blocker = reattributeBlocker(p, to, all, members);
+
+  // Distinct members, by the same rule the capture form above uses: a member
+  // with three memberships is one person in this list.
+  const options = [...new Map((members ?? [])
+    .filter((m) => m.memberName)
+    .map((m) => [m.memberId, m.memberName!])).entries()];
+  // Only the chosen member's memberships. The blocker refuses a mismatched pair
+  // anyway, but a dropdown that offers somebody else's membership is a dropdown
+  // that invites the refusal.
+  const theirs = (members ?? []).filter((m) => memberId && m.memberId === memberId);
+  const name = options.find(([id]) => id === memberId)?.[1] ?? null;
+
+  const go = async () => {
+    if (blocker) { onErr(blocker); return; }
+    // Unreachable behind the blocker, which refuses a null list first. Written
+    // as a return rather than a `!` so that reordering the chain later cannot
+    // turn it into a write over rows nobody read.
+    if (all == null) { onErr('The payments could not be read.'); return; }
+    const ids = reattributeRows(p, all);
+    setBusy(true);
+    try {
+      // The count comes back from the server and is what the sentence is built
+      // from. Nothing here infers that the write landed from the absence of an
+      // exception: an UPDATE filtered away by RLS is a 204 with a null error.
+      const changed = await reattributePayment(supabase, tenantId, ids, to);
+      onErr(null);
+      onDone(reattributedNote(changed, name));
+    } catch (e: any) {
+      onErr(writeFailedText(e, {
+        what: 'That re-attribution',
+        unchanged: 'the payment is still filed against whoever it was filed against before, and so is every correction under it',
+        howToCheck: 'Reload this page and read the Member column on the payment and on any correction beneath it. Nothing here has been written twice — this changes rows rather than adding them.',
+      }));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{
+      margin: '0 14px 14px', padding: '12px 14px', background: 'var(--surface2)',
+      border: '1px solid var(--ring)', borderLeft: '3px solid var(--brand)',
+    }}>
+      <div className="micro">Re-attributing {money(p.amountCents, p.currency)} from {p.memberName ?? 'nobody named'}</div>
+      <p style={{ margin: '7px 0 10px', fontSize: 12.5, color: 'var(--ink3)', maxWidth: '72ch' }}>
+        This changes who the payment is against. It does not write a refund, it does not move the
+        money to another day, and the amount is untouched &mdash; so a month that has already been
+        closed does not refuse it, because nothing it was signed off on has changed. Any refund or
+        correction recorded against this payment moves with it; leaving one behind would file a
+        negative amount against somebody who never paid.
+      </p>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={memberId} aria-label="The member this payment is from"
+                onChange={(e) => {
+                  // The membership is cleared with the member on purpose. Keeping
+                  // it would leave the box showing a membership the new person
+                  // does not hold, which the blocker then refuses — a refusal the
+                  // screen caused and the reader did not.
+                  setMemberId(e.target.value); setMembershipId('');
+                }}
+                style={{ ...field, flex: 2, minWidth: 240 }}>
+          <option value="">{members === null ? 'Unattributed — the member list could not be read' : 'Unattributed — against nobody'}</option>
+          {options.map(([id, who]) => <option key={id} value={id}>{who}</option>)}
+        </select>
+        <select value={membershipId} onChange={(e) => setMembershipId(e.target.value)}
+                style={{ ...field, flex: 2, minWidth: 240 }}
+                aria-label="The membership this payment settles">
+          <option value="">Not against a membership</option>
+          {theirs.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.planName ?? 'no plan'} (from {m.startedOn})
+            </option>
+          ))}
+        </select>
+        <button onClick={go} disabled={busy || !!blocker} style={primaryBtn}>
+          {busy ? 'Moving…' : 'Move it'}
+        </button>
+        <button onClick={onCancel} style={{ ...linkBtn, color: 'var(--ink3)' }}>Cancel</button>
+      </div>
+      {blocker ? <p style={{ margin: '9px 0 0', fontSize: 12.5, color: 'var(--warn)', maxWidth: '68ch' }}>{blocker}</p> : null}
+    </div>
   );
 }
 

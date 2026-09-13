@@ -56,13 +56,19 @@ import { isoDate } from '@lib/format';
 // payment, a door visit, a booking, an invite — was drawn on whichever laptop
 // was open, so the same member's last visit read as two different days at two
 // desks in two countries.
-import { gymDateText, gymDateTimeText } from '@lib/gymWhen';
+import { gymDateText, gymDateTimeText, whoseClockNote } from '@lib/gymWhen';
 import { gymDay, parseGymZone } from '@lib/gymZone';
 import {
   fetchMemberNotes, addMemberNote, noteBlocker, withLegacy, noteAttribution, MAX_NOTE,
   type MemberNote,
 } from '@lib/memberNotes';
-import { logBroadcast, loggingNote } from '@lib/gymBroadcastLog';
+import {
+  logBroadcast, loggingNote,
+  // The half that was written and never read. See `SentNotices` below for what
+  // an audit table nothing can open is worth.
+  fetchBroadcasts, senderLine, deliveredLine, logCaption, splitRecipients, recipientLine,
+  type BroadcastLog,
+} from '@lib/gymBroadcastLog';
 import {
   buildSegments, segmentCsv, postToSegment, reachBlocker, deliveryNote,
   willTruncateInbox, MAX_BODY, INBOX_BODY,
@@ -139,6 +145,10 @@ export default function Members() {
   // One search box over the roster. There was none anywhere in this console,
   // and this is the screen the six-hundred-member roster lives on.
   const [q, setQ] = useState('');
+  /** Bumped when a notice is posted, so the record of what was sent re-reads
+   *  without a page reload. Not the notice itself — the list below reads the
+   *  row back from the database, which is the only copy that answers for it. */
+  const [sentAt, setSentAt] = useState(0);
 
   const load = useCallback(async (tenantId: string): Promise<boolean> => {
     setRec(EMPTY);
@@ -517,7 +527,13 @@ export default function Members() {
       <Reach
         dossiers={dossiers} doorLogLive={doorLive} me={me} tenantId={tenantId}
         gymName={gymName} gymRecs={gymRecs}
+        onSent={() => setSentAt(Date.now())}
       />
+
+      {/* Directly under the form that writes it, because the form's own failure
+          copy sends a sender here to check whether their notice went out before
+          they send it a second time. */}
+      <SentNotices tenantId={tenantId} me={me} zone={zone} reloadKey={sentAt} />
 
       <Roster
         rec={rec} dossiers={dossiers} reads={reads} sel={sel} onPick={pick} ccy={ccy}
@@ -1557,13 +1573,17 @@ const ghostBtn = {
  * list model, an unsubscribe path and consent tracking, none of which exist, so
  * the export hands the list to whatever the gym already uses.
  */
-function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
+function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs, onSent }: {
   dossiers: MemberDossier[] | null;
   doorLogLive: boolean;
   me: Me;
   tenantId: string;
   gymName: string | null;
   gymRecs: Map<string, GymMemberRecord> | null;
+  /** Told after a post lands, so the record of it below re-reads. Called on the
+   *  send and not on the log write: the notice is what happened, and a failed
+   *  log entry is exactly what the list below has to be able to show missing. */
+  onSent: () => void;
 }) {
   const [segId, setSegId] = useState<SegmentId>('unseen');
   const [body, setBody] = useState('');
@@ -1627,6 +1647,7 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
       // they were written once, and a cleared field after a failed send is how
       // a notice is lost between the owner and the server.
       setBody('');
+      onSent();
     } catch (e: any) {
       // A notice sent twice is two notifications to every member of a segment,
       // which is the one failure this form can produce that reaches people
@@ -1782,6 +1803,191 @@ function Reach({ dossiers, doorLogLive, me, tenantId, gymName, gymRecs }: {
         </div>
       )}
     </Section>
+  );
+}
+
+/* ── the notices already sent ──────────────────────────────────────────────── */
+
+/**
+ * Every message this gym has posted to a group, and who it went to.
+ *
+ * ── Why this had to exist ─────────────────────────────────────────────────
+ *
+ * `gym_broadcast_sends` has recorded the recipient list since part 691 and
+ * nothing has ever read it. The table, the policy, the index and the trigger
+ * were all paid for; the answer they were bought to give was unavailable to
+ * everybody, including the owner who inherits the gym and has to say what the
+ * members were told. The form above even tells a sender, on a failed post, to
+ * "read the list of sent notices below before posting it again" — and there was
+ * no list below to read.
+ *
+ * ── Why it is not a table ─────────────────────────────────────────────────
+ *
+ * The body is the point. A `DataTable` cell truncates it, and an abridged copy
+ * of what forty people were told reads as complete, which is the one thing this
+ * record must not be. So each notice is a block with its words in full.
+ *
+ * ── Three silences kept apart ─────────────────────────────────────────────
+ *
+ * A read that failed is not an empty log, a sender whose name could not be
+ * looked up is not a deleted account, and an unrecorded delivery count is not
+ * zero. src/lib/gymBroadcastLog.ts owns all three sentences so that this screen
+ * cannot quietly pick the confident one.
+ */
+function SentNotices({ tenantId, me, zone, reloadKey }: {
+  tenantId: string; me: Me; zone: string | null; reloadKey: number;
+}) {
+  const [log, setLog] = useState<BroadcastLog | null>(null);
+  const [readErr, setReadErr] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setLog(await fetchBroadcasts(supabase, tenantId));
+      setReadErr(null);
+    } catch (e: any) {
+      // NOT an empty log. "No notice has ever been posted from this console" is
+      // a claim about a gym's history, and a refused read saying it would be
+      // read as evidence that nothing was sent — which is precisely the
+      // conclusion the absence of this table used to force.
+      setLog(null);
+      setReadErr(e?.message ?? 'the read was refused');
+    }
+  }, [tenantId]);
+
+  // `reloadKey` changes when the form above posts something, so the notice a
+  // sender has just written appears without a page reload — and, more to the
+  // point, so the failure copy that sends them down here is true.
+  useEffect(() => { void load(); }, [load, reloadKey]);
+
+  const clockNote = whoseClockNote(zone);
+
+  return (
+    <Section
+      title="Notices already sent"
+      sub="Who was written to, when, by whom, and the words they were sent. Insert-only — nothing here can be edited or removed, by anybody."
+    >
+      {readErr ? (
+        <Banner tone="crit">
+          The record of sent notices could not be read: {readErr}. This is not an empty log —
+          whether anything has been posted to a group from this console is{' '}
+          <strong style={{ color: 'var(--ink)' }}>unknown</strong> while this line is showing.
+          Reload the page.
+        </Banner>
+      ) : log === null ? (
+        <Loading />
+      ) : log.rows.length === 0 ? (
+        <p style={{ margin: 0, padding: '22px 14px', color: 'var(--ink3)', fontSize: 13 }}>
+          Nothing has been posted to a group from this console yet. The two older broadcast tools —
+          the phone’s Ops screen and Promotions — go to everybody and are not recorded here.
+        </p>
+      ) : (
+        <div style={{ display: 'grid' }}>
+          <p style={{ margin: 0, padding: '10px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>
+            {logCaption(log)}
+            {clockNote ? ` Times are on the gym’s clock — ${clockNote}.` : ''}
+          </p>
+          {log.namesError ? (
+            <p style={{ margin: 0, padding: '0 14px 10px', fontSize: 12.5, color: 'var(--warn)' }}>
+              The senders’ names could not be looked up: {log.namesError}. Each notice below still
+              records who sent it; only the name is missing, which is not the same as an account
+              that has been removed.
+            </p>
+          ) : null}
+          {log.rows.map((b) => (
+            <article key={b.id} style={{ borderTop: '1px solid var(--ring)', padding: '12px 14px' }}>
+              <div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', alignItems: 'baseline' }}>
+                <strong style={{ fontSize: 13.5, color: 'var(--ink)' }}>{b.segmentLabel}</strong>
+                <span style={{ fontSize: 12.5, color: 'var(--ink3)' }}>
+                  {/* A timestamp that cannot be read is said, not blanked: the
+                      row is real and only its stamp is unreadable. */}
+                  {gymDateTimeText(b.sentAt, zone) ?? 'on a date that could not be read'}
+                </span>
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--ink3)' }}>
+                {senderLine(b, { meId: me.id, namesError: log.namesError })}{' '}
+                {deliveredLine(b)}
+              </p>
+              {/* The words, whole. Pre-wrapped so the line breaks the sender
+                  typed are the line breaks the members read. */}
+              <p style={{ margin: '8px 0 0', fontSize: 13.5, color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>
+                {b.body}
+              </p>
+              <div style={{ marginTop: 8 }}>
+                <button
+                  style={linkBtn}
+                  aria-expanded={openId === b.id}
+                  onClick={() => setOpenId(openId === b.id ? null : b.id)}
+                >
+                  {openId === b.id ? 'Hide who got it' : `Who got it · ${b.memberIds.length}`}
+                </button>
+              </div>
+              {openId === b.id ? <WhoGotIt ids={b.memberIds} /> : null}
+            </article>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * The names behind one notice's recipient list, read on demand.
+ *
+ * On demand because fifty notices to a hundred people each is five thousand ids
+ * nobody asked for, and the question "who exactly" is asked about one message at
+ * a time.
+ *
+ * An id with no profile behind it is NOT dropped. Part 691 keeps no foreign key
+ * on `member_ids` on purpose — the list is a statement about who was addressed
+ * at the time, and it stays true after somebody leaves the gym and their profile
+ * goes — so a departed member is counted and named as departed. Silently
+ * shortening the list would make a notice look like it went to fewer people
+ * than it did.
+ */
+function WhoGotIt({ ids }: { ids: string[] }) {
+  const [line, setLine] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    setDone(false); setErr(null); setLine(null);
+    (async () => {
+      try {
+        const rows = await readByIds<any>(
+          ids,
+          (chunk, from, to) => supabase.from('profiles').select('id, full_name').in('id', chunk)
+            .order('id', { ascending: true }).range(from, to),
+          'the members this notice was sent to',
+        );
+        if (!live) return;
+        const byId = new Map<string, string>();
+        for (const r of rows) if (r?.id) byId.set(String(r.id), String(r.full_name ?? '').trim());
+        setLine(recipientLine(splitRecipients(ids, byId)));
+        setDone(true);
+      } catch (e: any) {
+        if (!live) return;
+        setErr(e?.message ?? 'the lookup was refused');
+        setDone(true);
+      }
+    })();
+    return () => { live = false; };
+  }, [ids]);
+
+  if (err) {
+    return (
+      <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--warn)' }}>
+        The {ids.length} {ids.length === 1 ? 'person' : 'people'} this went to are recorded, and
+        their names could not be read: {err}. That is a failed lookup, not an empty list.
+      </p>
+    );
+  }
+  if (!done) return <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--ink3)' }}>Reading the names…</p>;
+  return (
+    <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--ink2)' }}>
+      {line ?? 'This notice records no recipients at all — it was addressed to nobody.'}
+    </p>
   );
 }
 
